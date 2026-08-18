@@ -1,0 +1,63 @@
+                                                                                                      Table "public.Students"
+       Column       |              Type              | Collation | Nullable |                                                                       Default                                                                        
+--------------------+--------------------------------+-----------+----------+------------------------------------------------------------------------------------------------------------------------------------------------------
+ id                 | uuid                           |           | not null | 
+ admissionNumber    | character varying(255)         |           | not null | 
+ idType             | "enum_Students_idType"         |           |          | 
+ idNumber           | character varying(255)         |           |          | 
+ firstName          | character varying(255)         |           | not null | 
+ lastName           | character varying(255)         |           | not null | 
+ middleName         | character varying(255)         |           |          | 
+ email              | character varying(255)         |           |          | 
+ phone              | character varying(255)         |           |          | 
+ address            | text                           |           |          | 
+ dateOfBirth        | date                           |           |          | 
+ gender             | "enum_Students_gender"         |           |          | 
+ nationality        | character varying(255)         |           |          | 
+ religion           | character varying(255)         |           |          | 
+ birthCertificate   | character varying(255)         |           |          | 
+ passportPhoto      | character varying(255)         |           |          | 
+ classId            | uuid                           |           |          | 
+ schoolId           | uuid                           |           | not null | 
+ enrollmentDate     | date                           |           |          | 
+ boardingStatus     | "enum_Students_boardingStatus" |           |          | 
+ transportRouteId   | uuid                           |           |          | 
+ courseId           | uuid                           |           |          | 
+ programId          | uuid                           |           |          | 
+ currentYear        | integer                        |           |          | 
+ currentSemester    | integer                        |           |          | 
+ currentModule      | character varying(255)         |           |          | 
+ admissionDate      | date                           |           |          | 
+ expectedGraduation | date                           |           |          | 
+ supervisor         | character varying(255)         |           |          | 
+ thesisTitle        | text                           |           |          | 
+ medicalInfo        | jsonb                          |           |          | '{"allergies": "", "bloodGroup": "", "doctorName": "", "doctorPhone": "", "disabilities": "", "emergencyNotes": "", "chronicConditions": ""}'::jsonb
+ parentId           | uuid                           |           |          | 
+ isActive           | boolean                        |           |          | true
+ userId             | uuid                           |           |          | 
+ createdAt          | timestamp with time zone       |           | not null | 
+ updatedAt          | timestamp with time zone       |           | not null | 
+ hostelId           | uuid                           |           |          | 
+Indexes:
+    "Students_pkey" PRIMARY KEY, btree (id)
+    "Students_admissionNumber_key" UNIQUE CONSTRAINT, btree ("admissionNumber")
+    "Students_admissionNumber_key1" UNIQUE CONSTRAINT, btree ("admissionNumber")
+Foreign-key constraints:
+    "Students_classId_fkey" FOREIGN KEY ("classId") REFERENCES "Classes"(id) ON UPDATE CASCADE ON DELETE CASCADE
+    "Students_courseId_fkey" FOREIGN KEY ("courseId") REFERENCES "Courses"(id) ON UPDATE CASCADE ON DELETE SET NULL
+    "Students_hostelId_fkey" FOREIGN KEY ("hostelId") REFERENCES "Hostels"(id) ON UPDATE CASCADE ON DELETE SET NULL
+    "Students_programId_fkey" FOREIGN KEY ("programId") REFERENCES "Programs"(id) ON UPDATE CASCADE ON DELETE SET NULL
+    "Students_schoolId_fkey" FOREIGN KEY ("schoolId") REFERENCES "Schools"(id) ON UPDATE CASCADE ON DELETE CASCADE
+    "Students_transportRouteId_fkey" FOREIGN KEY ("transportRouteId") REFERENCES "TransportRoutes"(id) ON UPDATE CASCADE ON DELETE SET NULL
+    "Students_userId_fkey" FOREIGN KEY ("userId") REFERENCES "Users"(id) ON UPDATE CASCADE ON DELETE SET NULL
+Referenced by:
+    TABLE ""Attendances"" CONSTRAINT "Attendances_studentId_fkey" FOREIGN KEY ("studentId") REFERENCES "Students"(id) ON UPDATE CASCADE ON DELETE CASCADE
+    TABLE ""Borrows"" CONSTRAINT "Borrows_studentId_fkey" FOREIGN KEY ("studentId") REFERENCES "Students"(id) ON UPDATE CASCADE
+    TABLE ""CourseEnrollments"" CONSTRAINT "CourseEnrollments_studentId_fkey" FOREIGN KEY ("studentId") REFERENCES "Students"(id) ON UPDATE CASCADE
+    TABLE ""HealthRecords"" CONSTRAINT "HealthRecords_studentId_fkey" FOREIGN KEY ("studentId") REFERENCES "Students"(id) ON UPDATE CASCADE
+    TABLE ""Parents"" CONSTRAINT "Parents_studentId_fkey" FOREIGN KEY ("studentId") REFERENCES "Students"(id) ON UPDATE CASCADE ON DELETE CASCADE
+    TABLE ""Payments"" CONSTRAINT "Payments_studentId_fkey" FOREIGN KEY ("studentId") REFERENCES "Students"(id) ON UPDATE CASCADE ON DELETE SET NULL
+    TABLE ""Results"" CONSTRAINT "Results_studentId_fkey" FOREIGN KEY ("studentId") REFERENCES "Students"(id) ON UPDATE CASCADE ON DELETE CASCADE
+    TABLE ""StudentSponsors"" CONSTRAINT "StudentSponsors_studentId_fkey" FOREIGN KEY ("studentId") REFERENCES "Students"(id) ON UPDATE CASCADE ON DELETE CASCADE
+    TABLE ""UnitRegistrations"" CONSTRAINT "UnitRegistrations_studentId_fkey" FOREIGN KEY ("studentId") REFERENCES "Students"(id) ON UPDATE CASCADE
+
