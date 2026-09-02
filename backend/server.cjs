@@ -16,12 +16,15 @@ const smsService = require('./smsService');
 
 // ==================== CONFIGURATION ====================
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000'],
+  origin: [
+    'http://localhost:5173', 
+    'http://localhost:3000',
+    'https://schoolaid.zyphra.co.ke'  // ← ADD THIS LINE
+  ],
   credentials: true
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
 // Create uploads directory
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
