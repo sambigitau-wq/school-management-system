@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: 'http://localhost:5000/api',
+  baseURL: 'https://school-management-system-hna5.onrender.com/api',
   headers: { 'Content-Type': 'application/json' }
 });
 
@@ -584,7 +584,7 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
 
   // ==================== API INSTANCE ====================
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -2077,7 +2077,7 @@ const DashboardModule = ({
               if (admission) {
                 try {
                   const api = axios.create({
-                    baseURL: 'http://localhost:5000/api',
+                    baseURL: 'https://school-management-system-hna5.onrender.com/api',
                     headers: { 'Content-Type': 'application/json' }
                   });
                   api.interceptors.request.use(config => {
@@ -3979,7 +3979,7 @@ const [selectedCourseToEnroll, setSelectedCourseToEnroll] = useState('');
 
   // ==================== API INSTANCE ====================
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -6866,7 +6866,7 @@ const CourseUnitsModule = ({
 
   // ==================== API HELPER ====================
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -7757,7 +7757,7 @@ const ExamModule = ({
 
   // ==================== API INSTANCE ====================
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -9872,7 +9872,7 @@ const ResultsModule = ({
   
   // ==================== API INSTANCE ====================
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -14398,7 +14398,7 @@ const StaffAttendanceReportsModule = ({ staff, currentSchool, user }) => {
 
   // API helper with school filtering
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -14805,7 +14805,7 @@ const StaffModule = ({
 
   // ==================== API INSTANCE ====================
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -15838,7 +15838,7 @@ const LibraryModule = ({
 
   // API helper
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -16022,7 +16022,7 @@ const LibraryModule = ({
       };
 
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:5000/api/books/${editingBook.id}`, {
+      const response = await fetch(`https://school-management-system-hna5.onrender.com/api/books/${editingBook.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -17085,7 +17085,7 @@ const HostelModule = ({
 
   // ==================== API HELPER ====================
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -18749,7 +18749,7 @@ const AnnouncementModule = ({
 
   // API helper
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -18818,7 +18818,7 @@ const handleUpdateAnnouncement = async (e) => {
     
     // Make the API call directly instead of relying on props
     const token = localStorage.getItem('token');
-    const response = await fetch(`http://localhost:5000/api/announcements/${editingAnnouncement.id}`, {
+    const response = await fetch(`https://school-management-system-hna5.onrender.com/api/announcements/${editingAnnouncement.id}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -18934,7 +18934,7 @@ const handleUpdateEvent = async (e) => {
     
     // Make the API call directly
     const token = localStorage.getItem('token');
-    const response = await fetch(`http://localhost:5000/api/events/${editingEvent.id}`, {
+    const response = await fetch(`https://school-management-system-hna5.onrender.com/api/events/${editingEvent.id}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -21489,7 +21489,7 @@ const ProgramsModule = ({
 
   // API instance
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -23432,7 +23432,7 @@ const FeesModule = ({
 
   // ==================== API INSTANCE ====================
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -24342,7 +24342,7 @@ const FeeAllocationModule = ({
   const [loading, setLoading] = useState(false);
 
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -24891,7 +24891,7 @@ const FeeRemindersModule = ({
 
   // API instance
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -25813,7 +25813,7 @@ const PromotionModule = ({
 
   // ==================== API INSTANCE ====================
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -26886,7 +26886,7 @@ const ExamCardsModule = ({
   console.log('📚 Units available:', units?.length);
 
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -28163,7 +28163,7 @@ const SettingsModule = ({
 
   // ==================== API INSTANCE ====================
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -28296,7 +28296,7 @@ const SettingsModule = ({
     
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:5000/api/auth/change-password', {
+      const response = await fetch('https://school-management-system-hna5.onrender.com/api/auth/change-password', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -29616,7 +29616,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
 
   // ==================== API SETUP ====================
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -30985,7 +30985,7 @@ const AttendanceModule = ({
 
   // ==================== API INSTANCE ====================
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -31955,7 +31955,7 @@ const AttendanceModule = ({
       
       if (creates.length > 0) {
         const token = localStorage.getItem('token');
-        const response = await fetch('http://localhost:5000/api/attendance', {
+        const response = await fetch('https://school-management-system-hna5.onrender.com/api/attendance', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -32010,7 +32010,7 @@ const AttendanceModule = ({
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:5000/api/attendance/${editingAttendance.id}`, {
+      const response = await fetch(`https://school-management-system-hna5.onrender.com/api/attendance/${editingAttendance.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -32054,7 +32054,7 @@ const AttendanceModule = ({
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:5000/api/attendance/${id}`, {
+      const response = await fetch(`https://school-management-system-hna5.onrender.com/api/attendance/${id}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -33646,7 +33646,7 @@ const FeeStatementModule = ({
 
   // ==================== API INSTANCE ====================
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -34572,7 +34572,7 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
   });
 
   const api = axios.create({
-    baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000/api',
+    baseURL: process.env.REACT_APP_API_URL || 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -34646,7 +34646,7 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
         occupied: currentStudents.length
       };
       
-      const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5000/api'}/hostels/${hostel.id}`, {
+      const response = await fetch(`${process.env.REACT_APP_API_URL || 'https://school-management-system-hna5.onrender.com/api'}/hostels/${hostel.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -35680,7 +35680,7 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
 
   // ==================== API SETUP ====================
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -36632,7 +36632,7 @@ const SchemesOfWorkModule = ({
   
   // ==================== API INSTANCE ====================
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
   
@@ -38159,7 +38159,7 @@ const CourseEnrollmentModule = ({
 
   // ==================== API INSTANCE ====================
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -39105,7 +39105,7 @@ const UnitRegistrationModule = ({
   // ==================== API INSTANCE ====================
   const api = React.useMemo(() => {
     const axiosInstance = axios.create({
-      baseURL: 'http://localhost:5000/api',
+      baseURL: 'https://school-management-system-hna5.onrender.com/api',
       headers: { 'Content-Type': 'application/json' }
     });
 
@@ -40359,7 +40359,7 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
   });
 
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -40775,7 +40775,7 @@ const FeeCollectionModule = ({ students, fees, payments, setPayments, classes, c
   const [searchTerm, setSearchTerm] = useState('');
 
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -40926,7 +40926,7 @@ const FeeCollectionModule = ({ students, fees, payments, setPayments, classes, c
       console.log('📤 Submitting payment:', paymentData);
       
       const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:5000/api/payments', {
+      const response = await fetch('https://school-management-system-hna5.onrender.com/api/payments', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -41263,7 +41263,7 @@ const StudentArrivalModule = ({
   });
 
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -42023,7 +42023,7 @@ const ReceptionistModule = ({
 
   // ==================== API INSTANCE ====================
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -45059,7 +45059,7 @@ const CardManagementModule = ({
 
   // ==================== API INSTANCE ====================
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -47178,7 +47178,7 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
   });
 
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -47827,7 +47827,7 @@ const AlumniModule = ({ students, currentSchool, user, parents }) => {
 
   // ==================== API INSTANCE ====================
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -49929,7 +49929,7 @@ const LiveClassroomModule = ({ currentSchool, user, students = [], staff = [], u
 
   // ==================== API INSTANCE ====================
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -51310,7 +51310,7 @@ const OnlineExamsModule = ({
 
   // ==================== API INSTANCE ====================
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: 'https://school-management-system-hna5.onrender.com/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -55905,7 +55905,7 @@ const handleChangePassword = async (e) => {
   
   try {
     const token = localStorage.getItem('token');
-    const response = await fetch('http://localhost:5000/api/auth/change-password', {
+    const response = await fetch('https://school-management-system-hna5.onrender.com/api/auth/change-password', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
