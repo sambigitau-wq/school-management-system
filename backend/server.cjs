@@ -11,6 +11,8 @@ const fs = require('fs');
 require('dotenv').config();
 
 const app = express();
+const emailService = require('./emailService');
+const smsService = require('./smsService');
 
 // ==================== CONFIGURATION ====================
 app.use(cors({
@@ -543,9 +545,21 @@ const User = sequelize.define('User', {
   resetToken: { type: DataTypes.STRING, allowNull: true }
 });
 const School = sequelize.define('School', {
-  id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-  name: { type: DataTypes.STRING, allowNull: false },
-  code: { type: DataTypes.STRING, unique: true },
+  id: { 
+    type: DataTypes.UUID, 
+    defaultValue: DataTypes.UUIDV4, 
+    primaryKey: true 
+  },
+  
+  // ==================== BASIC INFORMATION ====================
+  name: { 
+    type: DataTypes.STRING, 
+    allowNull: false 
+  },
+  code: { 
+    type: DataTypes.STRING, 
+    unique: true 
+  },
   category: {
     type: DataTypes.ENUM(
       'ECDE_PRIMARY_JSS',
@@ -560,26 +574,64 @@ const School = sequelize.define('School', {
     allowNull: false,
     defaultValue: 'CBC'
   },
-   startTime: { type: DataTypes.STRING, defaultValue: '08:00' },
-  endTime: { type: DataTypes.STRING, defaultValue: '17:00' },
-  lateThreshold: { type: DataTypes.INTEGER, defaultValue: 30 },
-  earlyDepartureThreshold: { type: DataTypes.INTEGER, defaultValue: 30 },
   
+  // ==================== ATTENDANCE SETTINGS ====================
+  startTime: { 
+    type: DataTypes.STRING, 
+    defaultValue: '08:00' 
+  },
+  endTime: { 
+    type: DataTypes.STRING, 
+    defaultValue: '17:00' 
+  },
+  lateThreshold: { 
+    type: DataTypes.INTEGER, 
+    defaultValue: 30 
+  },
+  earlyDepartureThreshold: { 
+    type: DataTypes.INTEGER, 
+    defaultValue: 30 
+  },
+  
+  // ==================== SUBSCRIPTION ====================
   subscription: {
     type: DataTypes.JSONB,
     defaultValue: {
       plan: 'BASIC',
-      status: 'ACTIVE'
+      status: 'ACTIVE',
+      trialEnds: null,
+      features: {
+        sms: false,
+        email: false,
+        advancedReports: false,
+        apiAccess: false,
+        bulkSMS: false,
+        whatsapp: false,
+        biometrics: false
+      }
     }
   },
+  
+  // ==================== SCHOOL SETTINGS ====================
   settings: {
     type: DataTypes.JSONB,
     defaultValue: {
       academicYear: new Date().getFullYear().toString(),
       terms: ['Term 1', 'Term 2', 'Term 3'],
-      gradingSystem: {}
+      gradingSystem: {},
+      currency: 'KES',
+      timezone: 'Africa/Nairobi',
+      dateFormat: 'DD/MM/YYYY',
+      notifications: {
+        feeReminders: true,
+        examResults: true,
+        attendanceAlerts: false,
+        paymentReceipts: true
+      }
     }
   },
+  
+  // ==================== CONTACT INFORMATION ====================
   contact: {
     type: DataTypes.JSONB,
     defaultValue: {
@@ -589,36 +641,332 @@ const School = sequelize.define('School', {
       logo: '',
       county: '',
       constituency: '',
-      ward: ''
+      ward: '',
+      postalAddress: '',
+      website: ''
     }
   },
+  
   motto: DataTypes.STRING,
   established: DataTypes.STRING,
   registrationNumber: DataTypes.STRING,
-  smsConfig: {
-    type: DataTypes.JSONB,
-    defaultValue: {
-      provider: '',
-      apiKey: '',
-      senderId: '',
-      enabled: false
-    }
+  
+  // ==================== EMAIL CONFIGURATION ====================
+  emailProvider: {
+    type: DataTypes.ENUM('SMTP', 'SENDGRID', 'RESEND', 'MAILGUN', 'AWS_SES'),
+    defaultValue: 'SMTP'
   },
+  
   emailConfig: {
     type: DataTypes.JSONB,
     defaultValue: {
-      host: '',
-      port: '',
-      username: '',
-      password: '',
-      fromEmail: '',
-      enabled: false
+      smtp: {
+        host: '',
+        port: 587,
+        secure: false,
+        username: '',
+        password: '',
+        fromEmail: '',
+        replyTo: ''
+      },
+      sendgrid: {
+        apiKey: '',
+        fromEmail: '',
+        replyTo: ''
+      },
+      resend: {
+        apiKey: '',
+        fromEmail: '',
+        replyTo: ''
+      },
+      mailgun: {
+        apiKey: '',
+        domain: '',
+        fromEmail: '',
+        replyTo: '',
+        apiUrl: 'https://api.mailgun.net'
+      },
+      ses: {
+        accessKeyId: '',
+        secretAccessKey: '',
+        region: 'us-east-1',
+        fromEmail: '',
+        replyTo: ''
+      },
+      enabled: false,
+      testMode: false,
+      testEmail: '',
+      sendLimit: 1000,
+      sendLimitPerHour: 100,
+      batchSize: 50,
+      delayBetweenBatches: 1000,
+      retryAttempts: 3,
+      retryDelay: 5000
     }
   },
-  createdBy: DataTypes.UUID,
-  isActive: { type: DataTypes.BOOLEAN, defaultValue: true }
+  
+  // ==================== SMS CONFIGURATION (ENHANCED) ====================
+  smsProvider: {
+    type: DataTypes.ENUM(
+      'AFRICASTALKING', 
+      'CELCOM',           // ← Added: Celcom Africa
+      'SMSLEOPARD',       // ← Added: SMSLeopard
+      'ADVANTA',          // ← Added: Advanta Africa
+      'TWILIO', 
+      'BULKSMS', 
+      'SMSCOUNTRY', 
+      'PAWATALK',         // ← Added: PawaTalk
+      'NONE'
+    ),
+    defaultValue: 'NONE'
+  },
+  
+  smsConfig: {
+    type: DataTypes.JSONB,
+    defaultValue: {
+      // ===== Africa's Talking =====
+      africastalking: {
+        apiKey: '',
+        username: '',
+        senderId: '',
+        shortCode: ''
+      },
+      
+      // ===== Celcom Africa (KES 0.25/SMS) =====
+      celcom: {
+        apiKey: '',
+        senderId: '',
+        route: 'direct', // direct, economy, promotional
+        callbackUrl: ''
+      },
+      
+      // ===== SMSLeopard (KES 0.3-0.9/SMS) =====
+      smsleopard: {
+        apiKey: '',
+        senderId: '',
+        route: 'safaricom', // safaricom, airtel, telkom, all
+        userId: ''
+      },
+      
+      // ===== Advanta Africa (KES 0.30-0.80/SMS) =====
+      advanta: {
+        apiKey: '',
+        senderId: '',
+        username: '',
+        partnerId: ''
+      },
+      
+      // ===== PawaTalk (Payment + SMS) =====
+      pawatalk: {
+        apiKey: '',
+        senderId: '',
+        merchantId: '',
+        callbackUrl: ''
+      },
+      
+      // ===== Twilio =====
+      twilio: {
+        accountSid: '',
+        authToken: '',
+        fromNumber: '',
+        messagingServiceSid: ''
+      },
+      
+      // ===== BulkSMS =====
+      bulksms: {
+        username: '',
+        password: '',
+        from: ''
+      },
+      
+      // ===== SMS Country =====
+      smscountry: {
+        username: '',
+        password: '',
+        senderId: '',
+        route: 'default'
+      },
+      
+      // ===== General SMS Settings =====
+      enabled: false,
+      testMode: false,
+      testPhone: '',
+      sendLimit: 500,          // Max SMS per day
+      sendLimitPerHour: 50,    // Max SMS per hour
+      batchSize: 100,          // SMS per batch
+      delayBetweenBatches: 2000, // Milliseconds between batches
+      defaultCountryCode: '254',
+      maxRetries: 3,
+      retryDelay: 5000,
+      
+      // ===== Price Tracking =====
+      pricing: {
+        costPerSMS: 0,        // Current cost per SMS (KES)
+        currency: 'KES',
+        monthlyVolume: 0,
+        estimatedMonthlyCost: 0
+      }
+    }
+  },
+  
+  // ==================== NOTIFICATION SETTINGS ====================
+  notificationConfig: {
+    type: DataTypes.JSONB,
+    defaultValue: {
+      // Email Notifications
+      email: {
+        feeReminders: true,
+        examResults: true,
+        attendanceAlerts: false,
+        paymentReceipts: true,
+        announcements: true,
+        events: true,
+        systemAlerts: true,
+        parentRegistration: true,
+        studentRegistration: true,
+        arrivalAlerts: false,
+        departureAlerts: false
+      },
+      
+      // SMS Notifications
+      sms: {
+        feeReminders: false,
+        examResults: false,
+        attendanceAlerts: true,
+        paymentReceipts: false,
+        announcements: false,
+        events: false,
+        systemAlerts: true,
+        parentRegistration: true,
+        studentRegistration: false,
+        arrivalAlerts: true,
+        departureAlerts: true,
+        emergencyAlerts: true,
+        dailySummary: false
+      },
+      
+      // Push Notifications
+      push: {
+        enabled: false,
+        feeReminders: false,
+        examResults: false,
+        attendanceAlerts: false,
+        announcements: true,
+        events: true
+      }
+    }
+  },
+  
+  // ==================== FEATURE FLAGS ====================
+  features: {
+    type: DataTypes.JSONB,
+    defaultValue: {
+      // Core Features
+      sms: false,
+      email: false,
+      examPortal: false,
+      parentPortal: true,
+      studentPortal: true,
+      library: true,
+      transport: false,
+      hostel: true,
+      inventory: true,
+      
+      // Advanced Features
+      biometrics: false,
+      whatsapp: false,
+      onlinePayments: false,
+      advancedReports: false,
+      apiAccess: false,
+      customBranding: false,
+      
+      // Communication
+      bulkSMS: false,
+      bulkEmail: false,
+      emailTemplates: false,
+      smsTemplates: false,
+      
+      // SMS Features
+      arrivalAlerts: true,
+      departureAlerts: true,
+      emergencyAlerts: false,
+      dailySummary: false,
+      feeReminders: false,
+      examResults: false
+    }
+  },
+  
+  // ==================== SMS USAGE & ANALYTICS ====================
+  smsUsage: {
+    type: DataTypes.JSONB,
+    defaultValue: {
+      totalSent: 0,
+      totalCost: 0,
+      monthlyUsage: {},
+      dailyUsage: {},
+      deliveryRate: 100,
+      failedCount: 0,
+      lastReset: new Date(),
+      monthlyLimit: 5000
+    }
+  },
+  
+  // ==================== BRANDING & CUSTOMIZATION ====================
+  branding: {
+    type: DataTypes.JSONB,
+    defaultValue: {
+      primaryColor: '#4f46e5',
+      secondaryColor: '#818cf8',
+      accentColor: '#f59e0b',
+      fontFamily: 'Inter, sans-serif',
+      logo: '',
+      favicon: '',
+      customCSS: '',
+      customHeader: '',
+      customFooter: '',
+      theme: 'light'
+    }
+  },
+  
+  // ==================== SYSTEM SETTINGS ====================
+  systemConfig: {
+    type: DataTypes.JSONB,
+    defaultValue: {
+      twoFactorAuth: false,
+      passwordExpiry: 90,
+      maxLoginAttempts: 5,
+      sessionTimeout: 480,
+      retentionPeriod: 365,
+      autoBackup: true,
+      backupFrequency: 'daily',
+      cacheEnabled: true,
+      cacheDuration: 3600,
+      apiRateLimit: 100,
+      apiVersion: '1.0.0'
+    }
+  },
+  
+  // ==================== AUDIT & METADATA ====================
+  createdBy: { 
+    type: DataTypes.UUID, 
+    allowNull: true 
+  },
+  
+  isActive: { 
+    type: DataTypes.BOOLEAN, 
+    defaultValue: true 
+  }
+}, {
+  timestamps: true,
+  indexes: [
+    { fields: ['name'] },
+    { fields: ['code'] },
+    { fields: ['category'] },
+    { fields: ['isActive'] },
+    { fields: ['smsProvider'] },
+    { fields: ['emailProvider'] }
+  ]
 });
-
 const Class = sequelize.define('Class', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
   name: { type: DataTypes.STRING, allowNull: false },
@@ -2077,40 +2425,94 @@ const ClassAttendance = sequelize.define('ClassAttendance', {
   remarks: DataTypes.TEXT
 }, { timestamps: true });
 
-// ==================== ONLINE EXAM MODELS ====================
+// backend/models/OnlineExam.js - UPDATED MODEL
 
-// OnlineExam Model
 const OnlineExam = sequelize.define('OnlineExam', {
-  id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-  schoolId: { type: DataTypes.UUID, allowNull: false },
-  title: { type: DataTypes.STRING, allowNull: false },
-  description: DataTypes.TEXT,
-  
-  // Regular School fields
-  subjectId: { type: DataTypes.UUID, allowNull: true },
-  classId: { type: DataTypes.UUID, allowNull: true },
-  
-  // University fields
-  courseId: { type: DataTypes.UUID, allowNull: true },
-  unitId: { type: DataTypes.UUID, allowNull: true },
-  semester: { type: DataTypes.INTEGER, allowNull: true },
-  year: { type: DataTypes.INTEGER, allowNull: true },
-  
-  // TVET fields
-  programId: { type: DataTypes.UUID, allowNull: true },
-  module: { type: DataTypes.INTEGER, allowNull: true },
-  
-  // Exam scheduling
-  date: { type: DataTypes.DATEONLY, allowNull: false },
-  startTime: DataTypes.TIME,
-  endTime: DataTypes.TIME,
-  duration: { type: DataTypes.INTEGER, defaultValue: 60 },
-  
-  // Grading
-  totalMarks: { type: DataTypes.INTEGER, defaultValue: 100 },
-  passingMarks: { type: DataTypes.INTEGER, defaultValue: 40 },
-  
-  // Exam type
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true
+  },
+  schoolId: {
+    type: DataTypes.UUID,
+    allowNull: false
+  },
+  title: {
+    type: DataTypes.STRING,
+    allowNull: false
+  },
+  description: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+
+  // ===== REGULAR SCHOOL FIELDS =====
+  subjectId: {
+    type: DataTypes.UUID,
+    allowNull: true  // ← This should be TRUE
+  },
+  classId: {
+    type: DataTypes.UUID,
+    allowNull: true  // ← This should be TRUE
+  },
+
+  // ===== UNIVERSITY FIELDS =====
+  courseId: {
+    type: DataTypes.UUID,
+    allowNull: true
+  },
+  unitId: {
+    type: DataTypes.UUID,
+    allowNull: true
+  },
+  semester: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  year: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+
+  // ===== TVET FIELDS =====
+  programId: {
+    type: DataTypes.UUID,
+    allowNull: true
+  },
+  module: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+
+  // ===== EXAM SCHEDULING =====
+  date: {
+    type: DataTypes.DATEONLY,
+    allowNull: false
+  },
+  startTime: {
+    type: DataTypes.TIME,
+    allowNull: true
+  },
+  endTime: {
+    type: DataTypes.TIME,
+    allowNull: true
+  },
+  duration: {
+    type: DataTypes.INTEGER,
+    defaultValue: 60
+  },
+
+  // ===== GRADING =====
+  totalMarks: {
+    type: DataTypes.INTEGER,
+    defaultValue: 100
+  },
+  passingMarks: {
+    type: DataTypes.INTEGER,
+    defaultValue: 40
+  },
+
+  // ===== EXAM TYPE =====
   examType: {
     type: DataTypes.ENUM(
       'OPENER', 'MIDTERM', 'ENDTERM', 'CAT', 'MOCK', 'PRE_MOCK',
@@ -2119,31 +2521,57 @@ const OnlineExam = sequelize.define('OnlineExam', {
     ),
     defaultValue: 'MAIN_EXAM'
   },
-  
-  // Term/Academic period
-  term: { type: DataTypes.STRING, allowNull: true },
-  academicYear: { type: DataTypes.STRING, allowNull: true },
-  
-  // Student selection
-  selectedStudents: { type: DataTypes.JSONB, defaultValue: [] },
-  
-  // Attempt settings
-  allowMultipleAttempts: { type: DataTypes.BOOLEAN, defaultValue: false },
-  maxAttempts: { type: DataTypes.INTEGER, defaultValue: 1 },
-  showAnswersAfterSubmission: { type: DataTypes.BOOLEAN, defaultValue: false },
-  allowRetake: { type: DataTypes.BOOLEAN, defaultValue: false },
-  
-  // Status
+
+  // ===== TERM/ACADEMIC PERIOD =====
+  term: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  academicYear: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+
+  // ===== STUDENT SELECTION =====
+  selectedStudents: {
+    type: DataTypes.JSONB,
+    defaultValue: []
+  },
+
+  // ===== ATTEMPT SETTINGS =====
+  allowMultipleAttempts: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  maxAttempts: {
+    type: DataTypes.INTEGER,
+    defaultValue: 1
+  },
+  showAnswersAfterSubmission: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  allowRetake: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+
+  // ===== STATUS =====
   status: {
     type: DataTypes.ENUM('DRAFT', 'PUBLISHED', 'ONGOING', 'COMPLETED', 'CLOSED'),
     defaultValue: 'DRAFT'
   },
-  
-  createdBy: DataTypes.UUID,
-  publishedAt: DataTypes.DATE,
-  
-}, { timestamps: true });
 
+  createdBy: {
+    type: DataTypes.UUID,
+    allowNull: true
+  },
+  publishedAt: {
+    type: DataTypes.DATE,
+    allowNull: true
+  }
+
+}, { timestamps: true });
 // ExamQuestion Model
 const ExamQuestion = sequelize.define('ExamQuestion', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
@@ -2176,6 +2604,37 @@ const ExamResult = sequelize.define('ExamResult', {
   attemptNumber: { type: DataTypes.INTEGER, defaultValue: 1 },
   submittedAt: { type: DataTypes.DATE, defaultValue: DataTypes.NOW }
 }, { timestamps: true });
+
+
+
+const FeeAllocation = sequelize.define('FeeAllocation', {
+  id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+  studentId: { type: DataTypes.UUID, allowNull: false },
+  feeId: { type: DataTypes.UUID, allowNull: false },
+  amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+  allocatedDate: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+  allocatedBy: { type: DataTypes.UUID, allowNull: false },
+  schoolId: { type: DataTypes.UUID, allowNull: false },
+  allocationType: { 
+    type: DataTypes.ENUM('AUTO', 'MANUAL'),
+    defaultValue: 'MANUAL'
+  },
+  notes: DataTypes.TEXT,
+  isActive: { type: DataTypes.BOOLEAN, defaultValue: true }
+}, {
+  timestamps: true,
+  indexes: [
+    { fields: ['studentId'] },
+    { fields: ['feeId'] },
+    { fields: ['schoolId'] }
+  ]
+});
+
+// ==================== FEE ALLOCATION ASSOCIATIONS ====================
+FeeAllocation.belongsTo(Student, { foreignKey: 'studentId' });
+FeeAllocation.belongsTo(Fee, { foreignKey: 'feeId' });
+Student.hasMany(FeeAllocation, { foreignKey: 'studentId' });
+Fee.hasMany(FeeAllocation, { foreignKey: 'feeId' });
 
 // ============================================================
 // ==================== MODEL ASSOCIATIONS ====================
@@ -9620,7 +10079,7 @@ app.delete('/api/attendance/:id', authenticate, async (req, res) => {
 // ==================== GET ALL FEES ====================
 app.get('/api/fees', authenticate, async (req, res) => {
   try {
-    const { classId, courseId, programId, year, term } = req.query;
+    const { classId, courseId, programId, year, term, module } = req.query;
     const where = { schoolId: req.user.schoolId };
     
     const school = await School.findByPk(req.user.schoolId);
@@ -9628,14 +10087,16 @@ app.get('/api/fees', authenticate, async (req, res) => {
     // Build where clause based on school type
     if (school.category === 'UNIVERSITY') {
       if (courseId) where.courseId = courseId;
-      if (year) where.year = year;
+      if (year) where.year = parseInt(year);
+      if (term) where.semester = parseInt(term);
     } else if (school.category === 'COLLEGE_TVET') {
       if (programId) where.programId = programId;
+      if (module) where.module = parseInt(module);
+      if (year) where.year = parseInt(year);
     } else {
       if (classId) where.classId = classId;
+      if (term) where.term = term;
     }
-    
-    if (term) where.term = term;
 
     const fees = await Fee.findAll({
       where,
@@ -9720,7 +10181,63 @@ app.post('/api/fees', authenticate, requireSchoolAdmin, async (req, res) => {
       ]
     });
     
-    res.status(201).json({ success: true, fee: createdFee });
+    // If allocationType is 'AUTO', auto-allocate to all eligible students
+    if (feeData.allocationType === 'AUTO') {
+      try {
+        const school = await School.findByPk(req.user.schoolId);
+        let where = { schoolId: req.user.schoolId, isActive: true };
+        
+        if (school.category === 'UNIVERSITY') {
+          if (feeData.courseId) where.courseId = feeData.courseId;
+          if (feeData.year) where.currentYear = feeData.year;
+        } else if (school.category === 'COLLEGE_TVET') {
+          if (feeData.programId) where.programId = feeData.programId;
+          if (feeData.module) where.currentModule = `Module ${feeData.module}`;
+        } else {
+          if (feeData.classId) where.classId = feeData.classId;
+        }
+
+        const students = await Student.findAll({ where });
+        
+        let autoAllocated = 0;
+        for (const student of students) {
+          // Check if already allocated
+          const existing = await FeeAllocation.findOne({
+            where: { 
+              studentId: student.id, 
+              feeId: fee.id,
+              isActive: true
+            }
+          });
+          
+          if (!existing) {
+            await FeeAllocation.create({
+              studentId: student.id,
+              feeId: fee.id,
+              amount: feeData.amount,
+              allocatedBy: req.user.id,
+              schoolId: req.user.schoolId,
+              allocationType: 'AUTO',
+              notes: `Auto-allocated on creation`
+            });
+            autoAllocated++;
+          }
+        }
+        
+        console.log(`✅ Auto-allocated fee to ${autoAllocated} students`);
+      } catch (autoError) {
+        console.error('Auto-allocation failed:', autoError);
+        // Don't fail the fee creation if auto-allocation fails
+      }
+    }
+    
+    res.status(201).json({ 
+      success: true, 
+      fee: createdFee,
+      message: feeData.allocationType === 'AUTO' 
+        ? 'Fee created and auto-allocated to eligible students' 
+        : 'Fee created successfully (manual allocation required)'
+    });
   } catch (error) {
     console.error('Create fee error:', error);
     res.status(500).json({ 
@@ -9810,15 +10327,24 @@ app.delete('/api/fees/:id', authenticate, requireSchoolAdmin, async (req, res) =
       where: { feeId: fee.id }
     });
 
+    // Check if there are any allocations
+    const allocationsCount = await FeeAllocation.count({
+      where: { feeId: fee.id }
+    });
+
     if (paymentsCount > 0) {
-      // Option 1: Prevent deletion if payments exist
-      // return res.status(400).json({ 
-      //   success: false, 
-      //   message: `Cannot delete fee with ${paymentsCount} payment(s) associated. Delete payments first.` 
-      // });
-      
-      // Option 2: Allow deletion and log warning
-      console.log(`⚠️ Deleting fee with ${paymentsCount} associated payments`);
+      return res.status(400).json({ 
+        success: false, 
+        message: `Cannot delete fee with ${paymentsCount} payment(s) associated. Delete payments first.` 
+      });
+    }
+
+    // Delete allocations first
+    if (allocationsCount > 0) {
+      await FeeAllocation.destroy({
+        where: { feeId: fee.id }
+      });
+      console.log(`✅ Deleted ${allocationsCount} fee allocations`);
     }
 
     await fee.destroy();
@@ -9826,13 +10352,15 @@ app.delete('/api/fees/:id', authenticate, requireSchoolAdmin, async (req, res) =
     // Create audit log
     await createAuditLog(req, 'DELETE', 'FEE', req.params.id, null, { 
       hadPayments: paymentsCount > 0,
-      paymentsCount 
+      paymentsCount,
+      allocationsDeleted: allocationsCount
     });
 
     res.json({ 
       success: true, 
       message: 'Fee deleted successfully',
-      paymentsAffected: paymentsCount
+      paymentsAffected: paymentsCount,
+      allocationsDeleted: allocationsCount
     });
   } catch (error) {
     console.error('Delete fee error:', error);
@@ -9844,7 +10372,7 @@ app.delete('/api/fees/:id', authenticate, requireSchoolAdmin, async (req, res) =
   }
 });
 
-// ==================== AUTO-ALLOCATE FEE ====================
+// ==================== AUTO-ALLOCATE FEE (FOR EXISTING FEES) ====================
 app.post('/api/fees/:id/auto-allocate', authenticate, requireSchoolAdmin, async (req, res) => {
   try {
     const fee = await Fee.findByPk(req.params.id);
@@ -9875,29 +10403,33 @@ app.post('/api/fees/:id/auto-allocate', authenticate, requireSchoolAdmin, async 
     
     let allocated = 0;
     let skipped = 0;
+    const results = [];
     
     for (const student of students) {
-      // Check if student already has this fee
-      const existing = await Payment.findOne({
+      // Check if already allocated
+      const existing = await FeeAllocation.findOne({
         where: { 
           studentId: student.id, 
-          feeId: fee.id 
+          feeId: fee.id,
+          isActive: true
         }
       });
       
       if (!existing) {
-        // Create a pending payment record (amount 0 means allocated but not paid)
-        await Payment.create({
+        await FeeAllocation.create({
           studentId: student.id,
           feeId: fee.id,
-          amount: 0,
-          status: 'PENDING',
+          amount: fee.amount,
+          allocatedBy: req.user.id,
           schoolId: req.user.schoolId,
+          allocationType: 'AUTO',
           notes: `Auto-allocated on ${new Date().toLocaleDateString()}`
         });
         allocated++;
+        results.push({ studentId: student.id, status: 'allocated' });
       } else {
         skipped++;
+        results.push({ studentId: student.id, status: 'already_allocated' });
       }
     }
 
@@ -9912,7 +10444,8 @@ app.post('/api/fees/:id/auto-allocate', authenticate, requireSchoolAdmin, async 
       success: true, 
       message: `Fee auto-allocated to ${allocated} students (${skipped} already had it)`,
       allocated,
-      skipped
+      skipped,
+      results
     });
   } catch (error) {
     console.error('Auto-allocate error:', error);
@@ -9924,8 +10457,275 @@ app.post('/api/fees/:id/auto-allocate', authenticate, requireSchoolAdmin, async 
   }
 });
 
-// In your backend server.cjs - Update the POST /api/payments route
+// ==================== MANUAL ALLOCATE FEE ====================
+app.post('/api/fees/:id/manual-allocate', authenticate, requireSchoolAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { studentIds } = req.body;
+    
+    if (!studentIds || studentIds.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Please select at least one student' 
+      });
+    }
+    
+    const fee = await Fee.findByPk(id);
+    if (!fee) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Fee not found' 
+      });
+    }
+    
+    let allocated = 0;
+    let skipped = 0;
+    const results = [];
+    
+    for (const studentId of studentIds) {
+      // Check if student exists
+      const student = await Student.findOne({
+        where: { id: studentId, schoolId: req.user.schoolId }
+      });
+      
+      if (!student) {
+        results.push({ studentId, error: 'Student not found' });
+        continue;
+      }
+      
+      // Check if already allocated
+      const existing = await FeeAllocation.findOne({
+        where: { 
+          studentId: student.id, 
+          feeId: fee.id,
+          isActive: true
+        }
+      });
+      
+      if (existing) {
+        results.push({ studentId, status: 'already_allocated' });
+        skipped++;
+        continue;
+      }
+      
+      // Create manual allocation record
+      await FeeAllocation.create({
+        studentId: student.id,
+        feeId: fee.id,
+        amount: fee.amount,
+        allocatedBy: req.user.id,
+        schoolId: req.user.schoolId,
+        allocationType: 'MANUAL',
+        notes: `Manually allocated on ${new Date().toLocaleDateString()}`
+      });
+      
+      allocated++;
+      results.push({ studentId, status: 'allocated' });
+    }
+    
+    // Create audit log
+    await createAuditLog(req, 'MANUAL_ALLOCATE', 'FEE', id, null, { 
+      allocated, 
+      skipped,
+      totalStudents: studentIds.length 
+    });
+    
+    res.json({ 
+      success: true, 
+      message: `Fee manually allocated to ${allocated} students (${skipped} already had it)`,
+      allocated,
+      skipped,
+      results
+    });
+    
+  } catch (error) {
+    console.error('Manual allocate error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error', 
+      error: error.message 
+    });
+  }
+});
 
+// ==================== GET ALLOCATIONS FOR A STUDENT ====================
+app.get('/api/students/:studentId/fee-allocations', authenticate, async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    
+    // Check access
+    if (req.user.role === 'STUDENT') {
+      const student = await Student.findOne({ where: { userId: req.user.id } });
+      if (!student || student.id !== studentId) {
+        return res.status(403).json({ 
+          success: false, 
+          message: 'Access denied' 
+        });
+      }
+    }
+    
+    const allocations = await FeeAllocation.findAll({
+      where: { 
+        studentId, 
+        schoolId: req.user.schoolId,
+        isActive: true
+      },
+      include: [
+        { model: Fee, attributes: ['id', 'name', 'amount', 'category'] }
+      ],
+      order: [['allocatedDate', 'DESC']]
+    });
+    
+    res.json({ success: true, allocations });
+  } catch (error) {
+    console.error('Get allocations error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error', 
+      error: error.message 
+    });
+  }
+});
+
+// ==================== GET FEE ALLOCATIONS FOR A FEE ====================
+app.get('/api/fees/:feeId/allocations', authenticate, async (req, res) => {
+  try {
+    const { feeId } = req.params;
+    
+    const fee = await Fee.findOne({
+      where: { id: feeId, schoolId: req.user.schoolId }
+    });
+    
+    if (!fee) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Fee not found' 
+      });
+    }
+    
+    const allocations = await FeeAllocation.findAll({
+      where: { 
+        feeId, 
+        schoolId: req.user.schoolId,
+        isActive: true
+      },
+      include: [
+        { 
+          model: Student, 
+          attributes: ['id', 'firstName', 'lastName', 'admissionNumber'] 
+        }
+      ],
+      order: [['allocatedDate', 'DESC']]
+    });
+    
+    res.json({ 
+      success: true, 
+      allocations,
+      count: allocations.length,
+      fee: { id: fee.id, name: fee.name, amount: fee.amount }
+    });
+  } catch (error) {
+    console.error('Get fee allocations error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error', 
+      error: error.message 
+    });
+  }
+});
+
+// ==================== REMOVE FEE ALLOCATION ====================
+app.delete('/api/fee-allocations/:id', authenticate, requireSchoolAdmin, async (req, res) => {
+  try {
+    const allocation = await FeeAllocation.findOne({
+      where: { 
+        id: req.params.id,
+        schoolId: req.user.schoolId
+      }
+    });
+    
+    if (!allocation) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Allocation not found' 
+      });
+    }
+    
+    // Soft delete - just mark as inactive
+    await allocation.update({ isActive: false });
+    
+    // Create audit log
+    await createAuditLog(req, 'REMOVE_ALLOCATION', 'FEE_ALLOCATION', allocation.id, null, { 
+      studentId: allocation.studentId,
+      feeId: allocation.feeId
+    });
+    
+    res.json({ 
+      success: true, 
+      message: 'Fee allocation removed successfully' 
+    });
+  } catch (error) {
+    console.error('Remove allocation error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error', 
+      error: error.message 
+    });
+  }
+});
+
+// ==================== GET FEE SUMMARY FOR A STUDENT ====================
+app.get('/api/students/:studentId/fee-summary', authenticate, async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    
+    // Get all allocations for this student
+    const allocations = await FeeAllocation.findAll({
+      where: { 
+        studentId, 
+        schoolId: req.user.schoolId,
+        isActive: true
+      },
+      include: [
+        { model: Fee, attributes: ['id', 'name', 'amount', 'category'] }
+      ]
+    });
+    
+    // Get all payments for this student
+    const payments = await Payment.findAll({
+      where: { 
+        studentId, 
+        schoolId: req.user.schoolId,
+        isOtherIncome: false
+      }
+    });
+    
+    const totalAllocated = allocations.reduce((sum, a) => sum + parseFloat(a.amount || 0), 0);
+    const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+    const balance = totalAllocated - totalPaid;
+    
+    res.json({
+      success: true,
+      summary: {
+        totalAllocated,
+        totalPaid,
+        balance,
+        isCleared: balance <= 0
+      },
+      allocations,
+      payments
+    });
+  } catch (error) {
+    console.error('Get fee summary error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error', 
+      error: error.message 
+    });
+  }
+});
+
+// ==================== PAYMENT ROUTE (FIXED) ====================
 app.post('/api/payments', authenticate, async (req, res) => {
   try {
     const { 
@@ -9933,7 +10733,6 @@ app.post('/api/payments', authenticate, async (req, res) => {
       mpesaCode, mpesaPhone, bankReference, bankMessage,
       cardLast4, cardApprovalCode, chequeNumber, chequeBank,
       isOtherIncome, incomeCategory, description, payer,
-      // NEW FIELDS
       studentName, admissionNumber, courseName, className, feeName
     } = req.body;
 
@@ -9972,7 +10771,7 @@ app.post('/api/payments', authenticate, async (req, res) => {
       }
     }
 
-    // Create the payment with ALL fields
+    // Create the payment
     const payment = await Payment.create({
       studentId: isOtherIncome ? null : studentId,
       feeId: feeId || null,
@@ -10000,13 +10799,31 @@ app.post('/api/payments', authenticate, async (req, res) => {
       description: description || null,
       payer: payer || null,
       
-      // NEW FIELDS for receipt history
       studentName: studentName || null,
       admissionNumber: admissionNumber || null,
       courseName: courseName || null,
       className: className || null,
       feeName: feeName || null
     });
+
+    // If this payment is for a specific fee, update the allocation status
+    if (feeId && studentId) {
+      // Find and update allocations
+      const allocations = await FeeAllocation.findAll({
+        where: { 
+          studentId, 
+          feeId,
+          isActive: true
+        }
+      });
+      
+      // Mark allocations as paid (or partially paid)
+      for (const allocation of allocations) {
+        // You could track paid amount per allocation here
+        // For now, we just log it
+        console.log(`✅ Payment recorded for allocation ${allocation.id}`);
+      }
+    }
 
     await createAuditLog(req, 'RECORD', 'PAYMENT', payment.id, null, payment);
 
@@ -10041,6 +10858,7 @@ app.post('/api/payments', authenticate, async (req, res) => {
   }
 });
 
+// ==================== GET PAYMENTS ====================
 app.get('/api/payments', authenticate, async (req, res) => {
   try {
     const { studentId, startDate, endDate, isOtherIncome } = req.query;
@@ -10144,6 +10962,7 @@ app.get('/api/payments', authenticate, async (req, res) => {
   }
 });
 
+// ==================== GET SINGLE PAYMENT ====================
 app.get('/api/payments/:id', authenticate, async (req, res) => {
   try {
     const payment = await Payment.findOne({
@@ -13289,31 +14108,624 @@ app.get('/api/reports/financial', authenticate, async (req, res) => {
   }
 });
 
-// ==================== MESSAGE ROUTES ====================
 
+// ==================== MESSAGE ROUTE WITH EMAIL SUPPORT ====================
+/**
+ * POST /api/messages
+ * Send messages (Email, SMS, or Notifications)
+ * Supports school-specific email/SMS configurations
+ */
 app.post('/api/messages', authenticate, async (req, res) => {
   try {
-    const { type, subject, content, recipients, sendNow } = req.body;
+    const { 
+      type, 
+      subject, 
+      content, 
+      recipients, 
+      sendNow, 
+      recipientType, 
+      schoolId 
+    } = req.body;
+
+    // Log the request
+    console.log('📥 Received message request:', {
+      type,
+      recipientCount: recipients?.length || 0,
+      recipientType,
+      contentLength: content?.length || 0
+    });
+
+    // Validate recipients
+    if (!recipients || recipients.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No recipients specified. Please select at least one recipient.' 
+      });
+    }
+
+    // Validate content
+    if (!content || content.trim() === '') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Message content is required' 
+      });
+    }
+
+    // Validate subject for emails
+    if (type === 'EMAIL' && (!subject || subject.trim() === '')) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Email subject is required' 
+      });
+    }
+
+    // Get school with email configuration
+    const school = await School.findByPk(schoolId || req.user.schoolId);
     
+    if (!school) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'School not found. Please select a valid school.' 
+      });
+    }
+
+    // Create message record
     const message = await Message.create({
       type,
-      subject,
+      subject: subject || null,
       content,
       to: recipients,
       from: req.user.id,
-      schoolId: req.user.schoolId,
-      status: sendNow ? 'SENT' : 'DRAFT',
+      schoolId: school.id,
+      status: sendNow ? 'SENDING' : 'DRAFT',
       sentAt: sendNow ? new Date() : null
     });
 
-    console.log('Message created:', message.id);
-    res.status(201).json({ success: true, message });
+    console.log(`✅ Message record created: ${message.id}`);
+
+    // If not sending now, return early
+    if (!sendNow) {
+      return res.json({ 
+        success: true, 
+        message: 'Message saved as draft',
+        messageId: message.id,
+        recipientCount: recipients.length
+      });
+    }
+
+    // ==================== SEND EMAILS ====================
+    if (type === 'EMAIL') {
+      // Prepare recipients with email addresses
+      const emailRecipients = [];
+      const failedRecipients = [];
+
+      for (const recipient of recipients) {
+        let emailAddress = recipient.email;
+        let recipientName = recipient.name || 'User';
+        
+        // If no email in recipient object, try to find it
+        if (!emailAddress && recipient.id) {
+          // Try to find user
+          const user = await User.findByPk(recipient.id);
+          if (user && user.email) {
+            emailAddress = user.email;
+            recipientName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'User';
+          }
+          
+          // Try student
+          if (!emailAddress) {
+            const student = await Student.findOne({ 
+              where: { userId: recipient.id } 
+            });
+            if (student && student.email) {
+              emailAddress = student.email;
+              recipientName = `${student.firstName || ''} ${student.lastName || ''}`.trim() || 'User';
+            }
+          }
+        }
+
+        if (emailAddress) {
+          emailRecipients.push({
+            id: recipient.id,
+            name: recipientName,
+            email: emailAddress
+          });
+        } else {
+          failedRecipients.push({
+            id: recipient.id,
+            name: recipientName,
+            reason: 'No email address found'
+          });
+        }
+      }
+
+      // Check if we have any valid recipients
+      if (emailRecipients.length === 0) {
+        await message.update({ status: 'FAILED' });
+        return res.status(400).json({
+          success: false,
+          message: 'No valid email addresses found. Please ensure recipients have email addresses.',
+          failedRecipients
+        });
+      }
+
+      console.log(`📧 Sending ${emailRecipients.length} emails via school: ${school.name}`);
+      console.log(`📧 Email provider: ${school.emailProvider || 'SMTP'}`);
+
+      // Check if email is enabled for this school
+      if (!school.emailConfig?.enabled) {
+        console.log('⚠️ School email is disabled. Using default configuration.');
+      }
+
+      // Send emails using school's configuration
+      const emailResult = await emailService.sendBulkEmails(
+        school,
+        emailRecipients,
+        subject || 'Message from School',
+        content,
+        {
+          batchSize: school.emailConfig?.batchSize || 50,
+          delayBetweenBatches: school.emailConfig?.delayBetweenBatches || 1000,
+          retryAttempts: school.emailConfig?.retryAttempts || 3,
+          retryDelay: school.emailConfig?.retryDelay || 5000
+        }
+      );
+
+      // Update message status
+      await message.update({
+        status: emailResult.failed === 0 ? 'SENT' : 'PARTIAL',
+        sentAt: new Date()
+      });
+
+      // Return response with details
+      return res.json({
+        success: true,
+        message: `Email sent to ${emailResult.sent} recipients${emailResult.failed > 0 ? ` (${emailResult.failed} failed)` : ''}`,
+        messageId: message.id,
+        sentCount: emailResult.sent,
+        failedCount: emailResult.failed,
+        totalRecipients: emailRecipients.length,
+        failedRecipients: emailResult.failed > 0 ? emailResult.results.filter(r => !r.success).map(r => r.recipient) : undefined,
+        details: emailResult.results
+      });
+
+    } 
+    
+    // ==================== SEND SMS ====================
+    else if (type === 'SMS') {
+      // Prepare recipients with phone numbers
+      const smsRecipients = [];
+      const failedRecipients = [];
+
+      for (const recipient of recipients) {
+        let phoneNumber = recipient.phone;
+        let recipientName = recipient.name || 'User';
+        
+        if (!phoneNumber && recipient.id) {
+          const user = await User.findByPk(recipient.id);
+          if (user && user.phone) {
+            phoneNumber = user.phone;
+            recipientName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'User';
+          }
+        }
+
+        if (phoneNumber) {
+          // Clean phone number
+          const defaultCountryCode = school.smsConfig?.defaultCountryCode || '254';
+          let cleanedNumber = phoneNumber.replace(/\s/g, '');
+          
+          if (!cleanedNumber.startsWith('+')) {
+            // Remove leading 0 if present
+            if (cleanedNumber.startsWith('0')) {
+              cleanedNumber = cleanedNumber.substring(1);
+            }
+            cleanedNumber = `+${defaultCountryCode}${cleanedNumber}`;
+          }
+
+          smsRecipients.push({
+            id: recipient.id,
+            name: recipientName,
+            phone: cleanedNumber
+          });
+        } else {
+          failedRecipients.push({
+            id: recipient.id,
+            name: recipientName,
+            reason: 'No phone number found'
+          });
+        }
+      }
+
+      if (smsRecipients.length === 0) {
+        await message.update({ status: 'FAILED' });
+        return res.status(400).json({
+          success: false,
+          message: 'No valid phone numbers found. Please ensure recipients have phone numbers.',
+          failedRecipients
+        });
+      }
+
+      console.log(`📱 Sending ${smsRecipients.length} SMS messages via school: ${school.name}`);
+
+      // Check if SMS is enabled for this school
+      if (!school.smsConfig?.enabled) {
+        console.log('⚠️ School SMS is disabled. Cannot send SMS.');
+        await message.update({ status: 'FAILED' });
+        return res.status(400).json({
+          success: false,
+          message: 'SMS is not enabled for this school. Please enable SMS in school settings.'
+        });
+      }
+
+      // Send SMS using school's configuration
+      const smsResult = await smsService.sendBulkSMS(
+        school,
+        smsRecipients,
+        content,
+        {
+          batchSize: school.smsConfig?.batchSize || 100,
+          delayBetweenBatches: school.smsConfig?.delayBetweenBatches || 2000,
+          retryAttempts: 2,
+          retryDelay: 3000
+        }
+      );
+
+      // Update message status
+      await message.update({
+        status: smsResult.failed === 0 ? 'SENT' : 'PARTIAL',
+        sentAt: new Date()
+      });
+
+      return res.json({
+        success: true,
+        message: `SMS sent to ${smsResult.sent} recipients${smsResult.failed > 0 ? ` (${smsResult.failed} failed)` : ''}`,
+        messageId: message.id,
+        sentCount: smsResult.sent,
+        failedCount: smsResult.failed,
+        totalRecipients: smsRecipients.length,
+        failedRecipients: smsResult.failed > 0 ? smsResult.results.filter(r => !r.success).map(r => r.recipient) : undefined,
+        details: smsResult.results
+      });
+    }
+
+    // ==================== NOTIFICATIONS (Push/In-App) ====================
+    else if (type === 'NOTIFICATION') {
+      // Create notifications for each recipient
+      const notificationPromises = recipients.map(async (recipient) => {
+        // Create a notification record (you would have a Notification model)
+        // For now, just log it
+        console.log(`🔔 Notification to ${recipient.name || recipient.id}: ${content}`);
+        return { recipient: recipient.id, success: true };
+      });
+
+      const notificationResults = await Promise.all(notificationPromises);
+      const sentCount = notificationResults.filter(r => r.success).length;
+
+      await message.update({
+        status: 'SENT',
+        sentAt: new Date()
+      });
+
+      return res.json({
+        success: true,
+        message: `Notification sent to ${sentCount} recipients`,
+        messageId: message.id,
+        sentCount
+      });
+    }
+
+    // ==================== UNSUPPORTED TYPE ====================
+    else {
+      await message.update({ status: 'FAILED' });
+      return res.status(400).json({
+        success: false,
+        message: `Unsupported message type: ${type}. Supported types: EMAIL, SMS, NOTIFICATION`
+      });
+    }
+
   } catch (error) {
-    console.error('Create message error:', error);
-    res.status(500).json({ message: 'Server error' });
+    console.error('❌ Message error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to send message. Please try again.',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
+// ==================== TEST EMAIL CONFIGURATION ====================
+/**
+ * POST /api/schools/:schoolId/test-email
+ * Test the email configuration for a school
+ */
+// ==================== TEST EMAIL CONFIGURATION (FIXED) ====================
+// ==================== TEST EMAIL CONFIGURATION (FIXED) ====================
+app.post('/api/schools/:schoolId/test-email', authenticate, async (req, res) => {
+  try {
+    const { schoolId } = req.params;
+    const { testEmail } = req.body;
+
+    console.log('📧 Test email request for school:', schoolId);
+
+    // Find the school with all necessary fields
+    const school = await School.findByPk(schoolId, {
+      attributes: ['id', 'name', 'emailProvider', 'emailConfig', 'contact']
+    });
+    
+    if (!school) {
+      console.log('❌ School not found:', schoolId);
+      return res.status(404).json({ 
+        success: false, 
+        message: 'School not found' 
+      });
+    }
+
+    // Log the school details
+    console.log('📧 School found:', school.name);
+    console.log('📧 Provider:', school.emailProvider || 'SMTP');
+    console.log('📧 Email enabled:', school.emailConfig?.enabled ? 'Yes' : 'No');
+
+    // Ensure the school object has all needed fields
+    const schoolData = {
+      id: school.id,
+      name: school.name || 'School',
+      emailProvider: school.emailProvider || 'SMTP',
+      emailConfig: {
+        ...school.emailConfig,
+        fromEmail: school.emailConfig?.fromEmail || 
+                   school.emailConfig?.smtp?.fromEmail || 
+                   process.env.EMAIL_USER,
+        smtp: school.emailConfig?.smtp || {
+          host: school.emailConfig?.host || process.env.EMAIL_HOST,
+          port: school.emailConfig?.port || process.env.EMAIL_PORT,
+          username: school.emailConfig?.username || process.env.EMAIL_USER,
+          password: school.emailConfig?.password || process.env.EMAIL_PASS,
+          fromEmail: school.emailConfig?.fromEmail || process.env.EMAIL_USER
+        },
+        enabled: school.emailConfig?.enabled || true
+      }
+    };
+
+    console.log('📧 School data prepared:', {
+      name: schoolData.name,
+      provider: schoolData.emailProvider,
+      fromEmail: schoolData.emailConfig.fromEmail
+    });
+
+    // Determine test email
+    const testEmailAddress = testEmail || req.user?.email || school.contact?.email || process.env.EMAIL_USER;
+    
+    if (!testEmailAddress) {
+      return res.status(400).json({
+        success: false,
+        message: 'No test email address available'
+      });
+    }
+
+    console.log(`📧 Sending test email to: ${testEmailAddress}`);
+    console.log(`📧 From: ${schoolData.emailConfig.fromEmail}`);
+
+    // Test the configuration with the full school data
+    const result = await emailService.testConfiguration(schoolData, testEmailAddress);
+
+    if (result.success) {
+      return res.json({
+        success: true,
+        message: `✅ Test email sent successfully to ${testEmailAddress}`,
+        provider: school.emailProvider || 'SMTP',
+        details: {
+          school: school.name,
+          fromEmail: schoolData.emailConfig.fromEmail,
+          testEmail: testEmailAddress,
+          timestamp: new Date().toISOString()
+        }
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: `❌ Test email failed: ${result.error || 'Unknown error'}`,
+        provider: school.emailProvider || 'SMTP',
+        details: {
+          error: result.error,
+          school: school.name,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Test email error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to test email configuration',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+// ==================== GET EMAIL PROVIDERS ====================
+/**
+ * GET /api/email/providers
+ * Get list of available email providers
+ */
+app.get('/api/email/providers', authenticate, async (req, res) => {
+  try {
+    const providers = [
+      { 
+        value: 'SMTP', 
+        label: '📧 SMTP (Gmail, Outlook, etc.)', 
+        description: 'Standard email protocol using SMTP server',
+        fields: ['host', 'port', 'username', 'password', 'fromEmail']
+      },
+      { 
+        value: 'SENDGRID', 
+        label: '🚀 SendGrid', 
+        description: 'Twilio SendGrid API - Reliable email delivery',
+        fields: ['apiKey', 'fromEmail']
+      },
+      { 
+        value: 'RESEND', 
+        label: '📨 Resend', 
+        description: 'Modern email API for developers',
+        fields: ['apiKey', 'fromEmail']
+      },
+      { 
+        value: 'MAILGUN', 
+        label: '📬 Mailgun', 
+        description: 'Mailgun API for transactional emails',
+        fields: ['apiKey', 'domain', 'fromEmail']
+      },
+      { 
+        value: 'AWS_SES', 
+        label: '☁️ AWS SES', 
+        description: 'Amazon Simple Email Service - Scalable email sending',
+        fields: ['accessKeyId', 'secretAccessKey', 'region', 'fromEmail']
+      }
+    ];
+    
+    // Get current school's provider if available
+    let currentProvider = 'SMTP';
+    if (req.user?.schoolId) {
+      const school = await School.findByPk(req.user.schoolId, {
+        attributes: ['emailProvider']
+      });
+      if (school) {
+        currentProvider = school.emailProvider || 'SMTP';
+      }
+    }
+    
+    res.json({ 
+      success: true, 
+      providers,
+      currentProvider
+    });
+  } catch (error) {
+    console.error('❌ Get providers error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch email providers',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// ==================== GET SMS PROVIDERS ====================
+/**
+ * GET /api/sms/providers
+ * Get list of available SMS providers
+ */
+app.get('/api/sms/providers', authenticate, async (req, res) => {
+  try {
+    const providers = [
+      { 
+        value: 'NONE', 
+        label: '⛔ None', 
+        description: 'SMS disabled'
+      },
+      { 
+        value: 'AFRICASTALKING', 
+        label: '🌍 Africa\'s Talking', 
+        description: 'Africa\'s Talking SMS API - Popular in Kenya',
+        fields: ['apiKey', 'username', 'senderId', 'shortCode']
+      },
+      { 
+        value: 'TWILIO', 
+        label: '📞 Twilio', 
+        description: 'Twilio Programmable SMS - Global coverage',
+        fields: ['accountSid', 'authToken', 'fromNumber', 'messagingServiceSid']
+      },
+      { 
+        value: 'BULKSMS', 
+        label: '📨 BulkSMS', 
+        description: 'BulkSMS API - Reliable SMS delivery',
+        fields: ['username', 'password', 'from']
+      },
+      { 
+        value: 'SMSCOUNTRY', 
+        label: '📱 SMS Country', 
+        description: 'SMS Country API - Affordable SMS',
+        fields: ['username', 'password', 'senderId', 'route']
+      }
+    ];
+    
+    // Get current school's provider if available
+    let currentProvider = 'NONE';
+    if (req.user?.schoolId) {
+      const school = await School.findByPk(req.user.schoolId, {
+        attributes: ['smsProvider']
+      });
+      if (school) {
+        currentProvider = school.smsProvider || 'NONE';
+      }
+    }
+    
+    res.json({ 
+      success: true, 
+      providers,
+      currentProvider
+    });
+  } catch (error) {
+    console.error('❌ Get SMS providers error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch SMS providers',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// ==================== GET EMAIL CONFIGURATION STATUS ====================
+/**
+ * GET /api/email/status
+ * Get the email configuration status for the current school
+ */
+app.get('/api/email/status', authenticate, async (req, res) => {
+  try {
+    const school = await School.findByPk(req.user.schoolId, {
+      attributes: ['id', 'name', 'emailProvider', 'emailConfig']
+    });
+    
+    if (!school) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'School not found' 
+      });
+    }
+
+    const isConfigured = school.emailConfig?.enabled === true;
+    const hasCredentials = !!(school.emailConfig?.smtp?.host || 
+                             school.emailConfig?.sendgrid?.apiKey ||
+                             school.emailConfig?.resend?.apiKey ||
+                             school.emailConfig?.mailgun?.apiKey ||
+                             school.emailConfig?.ses?.accessKeyId);
+
+    res.json({
+      success: true,
+      status: {
+        schoolId: school.id,
+        schoolName: school.name,
+        provider: school.emailProvider || 'SMTP',
+        enabled: isConfigured,
+        configured: isConfigured && hasCredentials,
+        fromEmail: school.emailConfig?.smtp?.fromEmail || 
+                   school.emailConfig?.sendgrid?.fromEmail ||
+                   school.emailConfig?.resend?.fromEmail ||
+                   school.emailConfig?.mailgun?.fromEmail ||
+                   school.emailConfig?.ses?.fromEmail ||
+                   school.contact?.email ||
+                   null,
+        testMode: school.emailConfig?.testMode || false,
+        sendLimit: school.emailConfig?.sendLimit || 1000
+      }
+    });
+  } catch (error) {
+    console.error('❌ Get email status error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to get email status',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
 // ==================== DASHBOARD ROUTES ====================
 
 app.get('/api/dashboard/stats', authenticate, async (req, res) => {
@@ -13653,6 +15065,131 @@ app.post('/api/departments', authenticate, requireSchoolAdmin, async (req, res) 
   } catch (error) {
     console.error('Create department error:', error);
     res.status(500).json({ message: error.message });
+  }
+});
+
+// ==================== UPDATE DEPARTMENT ====================
+app.put('/api/departments/:id', authenticate, requireSchoolAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, facultyId, head, email, phone } = req.body;
+
+    // Find the department
+    const department = await Department.findOne({
+      where: { 
+        id: id,
+        schoolId: req.user.schoolId 
+      }
+    });
+
+    if (!department) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Department not found' 
+      });
+    }
+
+    // If facultyId is being changed, verify the new faculty exists
+    if (facultyId && facultyId !== department.facultyId) {
+      const faculty = await Faculty.findOne({
+        where: { 
+          id: facultyId,
+          schoolId: req.user.schoolId 
+        }
+      });
+
+      if (!faculty) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Faculty not found or does not belong to your school' 
+        });
+      }
+    }
+
+    // Update the department
+    await department.update({
+      name: name || department.name,
+      facultyId: facultyId || department.facultyId,
+      head: head || department.head,
+      email: email || department.email,
+      phone: phone || department.phone
+    });
+
+    // Fetch the updated department with faculty info
+    const updatedDepartment = await Department.findByPk(department.id, {
+      include: [{ model: Faculty, attributes: ['id', 'name'] }]
+    });
+
+    res.json({ 
+      success: true, 
+      department: updatedDepartment 
+    });
+  } catch (error) {
+    console.error('❌ Update department error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error', 
+      error: error.message 
+    });
+  }
+});
+
+// ==================== DELETE DEPARTMENT ====================
+app.delete('/api/departments/:id', authenticate, requireSchoolAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const department = await Department.findOne({
+      where: { 
+        id: id,
+        schoolId: req.user.schoolId 
+      }
+    });
+
+    if (!department) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Department not found' 
+      });
+    }
+
+    // Check if there are courses linked to this department
+    const coursesCount = await Course.count({
+      where: { departmentId: id }
+    });
+
+    if (coursesCount > 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `Cannot delete department with ${coursesCount} linked courses. Please reassign courses first.` 
+      });
+    }
+
+    // Check if there are programs linked to this department
+    const programsCount = await Program.count({
+      where: { departmentId: id }
+    });
+
+    if (programsCount > 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `Cannot delete department with ${programsCount} linked programs. Please reassign programs first.` 
+      });
+    }
+
+    await department.destroy();
+    
+    res.json({ 
+      success: true, 
+      message: 'Department deleted successfully' 
+    });
+  } catch (error) {
+    console.error('❌ Delete department error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error', 
+      error: error.message 
+    });
   }
 });
 
@@ -20392,7 +21929,6 @@ const resolveStudentIds = async (studentIds, schoolId) => {
   console.log(`✅ Resolved ${resolvedIds.length} IDs, ${notFoundIds.length} not found`);
   return { resolvedIds, notFoundIds };
 };
-
 // ============================================================
 // ==================== GET ALL EXAMS ====================
 // ============================================================
@@ -20496,6 +22032,7 @@ app.post('/api/online-exams', authenticate, async (req, res) => {
 
     const school = await School.findByPk(req.user.schoolId);
     
+    // ===== SCHOOL TYPE VALIDATION =====
     if (school.category === 'UNIVERSITY') {
       if (!courseId) {
         return res.status(400).json({ success: false, message: 'Course is required for university exams' });
@@ -20511,6 +22048,7 @@ app.post('/api/online-exams', authenticate, async (req, res) => {
         return res.status(400).json({ success: false, message: 'Module is required for TVET exams' });
       }
     } else {
+      // Primary/Secondary
       if (!classId) {
         return res.status(400).json({ success: false, message: 'Class is required' });
       }
@@ -20644,7 +22182,93 @@ app.delete('/api/online-exams/:id', authenticate, async (req, res) => {
 });
 
 // ============================================================
-// ==================== EXAM QUESTIONS ====================
+// ==================== HELPER: GET KENYAN TIME ====================
+// ============================================================
+const getKenyaTime = () => {
+  const now = new Date();
+  const kenyaTimeStr = now.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' });
+  return new Date(kenyaTimeStr);
+};
+
+const getKenyaDateStr = () => {
+  const now = new Date();
+  return now.toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' });
+};
+
+const getKenyaTimeMinutes = () => {
+  const kenyaTime = getKenyaTime();
+  return kenyaTime.getHours() * 60 + kenyaTime.getMinutes();
+};
+
+// ============================================================
+// ==================== CHECK EXAM AVAILABILITY ====================
+// ============================================================
+const isExamAvailable = (exam) => {
+  if (!exam) return { available: false, message: 'Exam not found' };
+  
+  const kenyaDateStr = getKenyaDateStr();
+  const examDateStr = exam.date;
+  const currentTimeMinutes = getKenyaTimeMinutes();
+  
+  // Parse exam times
+  let startTimeMinutes = null;
+  let endTimeMinutes = null;
+  
+  if (exam.startTime) {
+    const [startHours, startMinutes] = exam.startTime.split(':').map(Number);
+    startTimeMinutes = startHours * 60 + startMinutes;
+  }
+  
+  if (exam.endTime) {
+    const [endHours, endMinutes] = exam.endTime.split(':').map(Number);
+    endTimeMinutes = endHours * 60 + endMinutes;
+  }
+  
+  const examDateNum = parseInt(examDateStr.replace(/-/g, ''));
+  const currentDateNum = parseInt(kenyaDateStr.replace(/-/g, ''));
+  
+  // Check if exam is published or ongoing
+  if (!['PUBLISHED', 'ONGOING'].includes(exam.status)) {
+    return { available: false, message: 'Exam is not available' };
+  }
+  
+  // Future date
+  if (examDateNum > currentDateNum) {
+    return { available: false, message: 'Exam has not started yet' };
+  }
+  
+  // Past date - check if overnight exam
+  if (examDateNum < currentDateNum) {
+    // Check if this is an overnight exam (end time before 6 AM)
+    if (endTimeMinutes !== null && endTimeMinutes < 360) {
+      // Overnight exam - check if current time is before end time
+      if (currentTimeMinutes <= endTimeMinutes) {
+        return { available: true, message: 'Available' };
+      } else {
+        return { available: false, message: 'Exam has already ended' };
+      }
+    } else {
+      return { available: false, message: 'Exam has already ended' };
+    }
+  }
+  
+  // Today
+  // Check start time
+  if (startTimeMinutes !== null && currentTimeMinutes < startTimeMinutes) {
+    const minsUntil = startTimeMinutes - currentTimeMinutes;
+    return { available: false, message: `Starts in ${minsUntil} minutes` };
+  }
+  
+  // Check end time
+  if (endTimeMinutes !== null && currentTimeMinutes > endTimeMinutes) {
+    return { available: false, message: 'Exam has already ended' };
+  }
+  
+  return { available: true, message: 'Available' };
+};
+
+// ============================================================
+// ==================== EXAM QUESTIONS - FIXED ====================
 // ============================================================
 app.get('/api/online-exams/:id/questions', authenticate, async (req, res) => {
   try {
@@ -20657,36 +22281,14 @@ app.get('/api/online-exams/:id/questions', authenticate, async (req, res) => {
     }
     
     if (req.user.role === 'STUDENT') {
-      if (!['PUBLISHED', 'ONGOING'].includes(exam.status)) {
-        return res.status(403).json({ success: false, message: 'Exam is not available' });
-      }
+      // Check if exam is available (supports overnight exams)
+      const availability = isExamAvailable(exam);
       
-      const now = new Date();
-      if (exam.startTime) {
-        const examDate = new Date(exam.date);
-        const [startHours, startMinutes] = exam.startTime.split(':').map(Number);
-        examDate.setHours(startHours, startMinutes, 0, 0);
-        
-        if (now < examDate) {
-          const timeUntil = Math.ceil((examDate - now) / 60000);
-          return res.status(403).json({ 
-            success: false, 
-            message: `Exam starts in ${timeUntil} minutes. Please wait until the scheduled time.` 
-          });
-        }
-      }
-      
-      if (exam.endTime) {
-        const examDate = new Date(exam.date);
-        const [endHours, endMinutes] = exam.endTime.split(':').map(Number);
-        examDate.setHours(endHours, endMinutes, 0, 0);
-        
-        if (now > examDate) {
-          return res.status(403).json({ 
-            success: false, 
-            message: 'Exam has already ended.' 
-          });
-        }
+      if (!availability.available) {
+        return res.status(403).json({ 
+          success: false, 
+          message: availability.message 
+        });
       }
       
       const student = await Student.findOne({
@@ -20814,7 +22416,7 @@ app.patch('/api/online-exams/questions/:id', authenticate, async (req, res) => {
 });
 
 // ============================================================
-// ==================== EXAM SUBMISSION ====================
+// ==================== EXAM SUBMISSION - FIXED ====================
 // ============================================================
 app.post('/api/online-exams/:id/submit', authenticate, async (req, res) => {
   try {
@@ -20839,34 +22441,17 @@ app.post('/api/online-exams/:id/submit', authenticate, async (req, res) => {
       return res.status(404).json({ success: false, message: 'Student record not found' });
     }
     
-    const now = new Date();
+    // Check if exam is available (supports overnight exams)
+    const availability = isExamAvailable(exam);
     
-    if (exam.startTime) {
-      const examDate = new Date(exam.date);
-      const [startHours, startMinutes] = exam.startTime.split(':').map(Number);
-      examDate.setHours(startHours, startMinutes, 0, 0);
-      
-      if (now < examDate) {
-        return res.status(400).json({ 
-          success: false, 
-          message: 'Exam has not started yet. Please wait.' 
-        });
-      }
+    if (!availability.available) {
+      return res.status(400).json({ 
+        success: false, 
+        message: availability.message 
+      });
     }
     
-    if (exam.endTime) {
-      const examDate = new Date(exam.date);
-      const [endHours, endMinutes] = exam.endTime.split(':').map(Number);
-      examDate.setHours(endHours, endMinutes, 0, 0);
-      
-      if (now > examDate) {
-        return res.status(400).json({ 
-          success: false, 
-          message: 'Exam has already ended.' 
-        });
-      }
-    }
-    
+    // Check attempts
     const existingResults = await ExamResult.findAll({
       where: { examId: exam.id, studentId: student.id }
     });
@@ -20919,40 +22504,7 @@ app.post('/api/online-exams/:id/submit', authenticate, async (req, res) => {
     const school = await School.findByPk(req.user.schoolId);
     const gradingSystem = school?.gradingSystem || 'CBC';
     
-    let gradeInfo = { grade: 'N/A', points: 0 };
-    
-    if (gradingSystem === 'CBC') {
-      if (percentage >= 80) { gradeInfo = { grade: 'Exceeding Expectations', points: 4 }; }
-      else if (percentage >= 65) { gradeInfo = { grade: 'Meeting Expectations', points: 3 }; }
-      else if (percentage >= 50) { gradeInfo = { grade: 'Approaching Expectations', points: 2 }; }
-      else if (percentage >= 30) { gradeInfo = { grade: 'Below Expectations', points: 1 }; }
-      else { gradeInfo = { grade: 'Needs Improvement', points: 0 }; }
-    } else if (gradingSystem === '844' || gradingSystem === 'KENYA_844') {
-      if (percentage >= 80) { gradeInfo = { grade: 'A', points: 12 }; }
-      else if (percentage >= 75) { gradeInfo = { grade: 'A-', points: 11 }; }
-      else if (percentage >= 70) { gradeInfo = { grade: 'B+', points: 10 }; }
-      else if (percentage >= 65) { gradeInfo = { grade: 'B', points: 9 }; }
-      else if (percentage >= 60) { gradeInfo = { grade: 'B-', points: 8 }; }
-      else if (percentage >= 55) { gradeInfo = { grade: 'C+', points: 7 }; }
-      else if (percentage >= 50) { gradeInfo = { grade: 'C', points: 6 }; }
-      else if (percentage >= 45) { gradeInfo = { grade: 'C-', points: 5 }; }
-      else if (percentage >= 40) { gradeInfo = { grade: 'D+', points: 4 }; }
-      else if (percentage >= 35) { gradeInfo = { grade: 'D', points: 3 }; }
-      else if (percentage >= 30) { gradeInfo = { grade: 'D-', points: 2 }; }
-      else { gradeInfo = { grade: 'E', points: 1 }; }
-    } else if (gradingSystem === 'UNIVERSITY' || gradingSystem === 'UNI') {
-      if (percentage >= 70) { gradeInfo = { grade: 'A', points: 5.0 }; }
-      else if (percentage >= 60) { gradeInfo = { grade: 'B', points: 4.0 }; }
-      else if (percentage >= 50) { gradeInfo = { grade: 'C', points: 3.0 }; }
-      else if (percentage >= 40) { gradeInfo = { grade: 'D', points: 2.0 }; }
-      else { gradeInfo = { grade: 'E', points: 1.0 }; }
-    } else if (gradingSystem === 'TVET') {
-      if (percentage >= 80) { gradeInfo = { grade: 'DISTINCTION', points: 5 }; }
-      else if (percentage >= 65) { gradeInfo = { grade: 'CREDIT', points: 4 }; }
-      else if (percentage >= 50) { gradeInfo = { grade: 'MERIT', points: 3 }; }
-      else if (percentage >= 40) { gradeInfo = { grade: 'PASS', points: 2 }; }
-      else { gradeInfo = { grade: 'FAIL', points: 1 }; }
-    }
+    let gradeInfo = getGradeForSystem(percentage, gradingSystem);
     
     const result = await ExamResult.create({
       examId: exam.id,
@@ -21122,40 +22674,7 @@ app.post('/api/online-exams/:id/results/manual', authenticate, async (req, res) 
     const school = await School.findByPk(req.user.schoolId);
     const gradingSystem = school?.gradingSystem || 'CBC';
     
-    let gradeInfo = { grade: 'N/A', points: 0 };
-    
-    if (gradingSystem === 'CBC') {
-      if (percentage >= 80) { gradeInfo = { grade: 'Exceeding Expectations', points: 4 }; }
-      else if (percentage >= 65) { gradeInfo = { grade: 'Meeting Expectations', points: 3 }; }
-      else if (percentage >= 50) { gradeInfo = { grade: 'Approaching Expectations', points: 2 }; }
-      else if (percentage >= 30) { gradeInfo = { grade: 'Below Expectations', points: 1 }; }
-      else { gradeInfo = { grade: 'Needs Improvement', points: 0 }; }
-    } else if (gradingSystem === '844' || gradingSystem === 'KENYA_844') {
-      if (percentage >= 80) { gradeInfo = { grade: 'A', points: 12 }; }
-      else if (percentage >= 75) { gradeInfo = { grade: 'A-', points: 11 }; }
-      else if (percentage >= 70) { gradeInfo = { grade: 'B+', points: 10 }; }
-      else if (percentage >= 65) { gradeInfo = { grade: 'B', points: 9 }; }
-      else if (percentage >= 60) { gradeInfo = { grade: 'B-', points: 8 }; }
-      else if (percentage >= 55) { gradeInfo = { grade: 'C+', points: 7 }; }
-      else if (percentage >= 50) { gradeInfo = { grade: 'C', points: 6 }; }
-      else if (percentage >= 45) { gradeInfo = { grade: 'C-', points: 5 }; }
-      else if (percentage >= 40) { gradeInfo = { grade: 'D+', points: 4 }; }
-      else if (percentage >= 35) { gradeInfo = { grade: 'D', points: 3 }; }
-      else if (percentage >= 30) { gradeInfo = { grade: 'D-', points: 2 }; }
-      else { gradeInfo = { grade: 'E', points: 1 }; }
-    } else if (gradingSystem === 'UNIVERSITY' || gradingSystem === 'UNI') {
-      if (percentage >= 70) { gradeInfo = { grade: 'A', points: 5.0 }; }
-      else if (percentage >= 60) { gradeInfo = { grade: 'B', points: 4.0 }; }
-      else if (percentage >= 50) { gradeInfo = { grade: 'C', points: 3.0 }; }
-      else if (percentage >= 40) { gradeInfo = { grade: 'D', points: 2.0 }; }
-      else { gradeInfo = { grade: 'E', points: 1.0 }; }
-    } else if (gradingSystem === 'TVET') {
-      if (percentage >= 80) { gradeInfo = { grade: 'DISTINCTION', points: 5 }; }
-      else if (percentage >= 65) { gradeInfo = { grade: 'CREDIT', points: 4 }; }
-      else if (percentage >= 50) { gradeInfo = { grade: 'MERIT', points: 3 }; }
-      else if (percentage >= 40) { gradeInfo = { grade: 'PASS', points: 2 }; }
-      else { gradeInfo = { grade: 'FAIL', points: 1 }; }
-    }
+    let gradeInfo = getGradeForSystem(percentage, gradingSystem);
     
     const result = await ExamResult.create({
       examId: exam.id,
@@ -21363,6 +22882,54 @@ app.get('/api/online-exams/:id/stats', authenticate, async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 });
+
+// ============================================================
+// ==================== GRADE HELPER FUNCTION ====================
+// ============================================================
+function getGradeForSystem(percentage, gradingSystem) {
+  // CBC / Primary / JSS
+  if (gradingSystem === 'CBC' || gradingSystem === 'ECDE_PRIMARY_JSS') {
+    if (percentage >= 80) return { grade: 'Exceeding Expectations', points: 4 };
+    if (percentage >= 65) return { grade: 'Meeting Expectations', points: 3 };
+    if (percentage >= 50) return { grade: 'Approaching Expectations', points: 2 };
+    if (percentage >= 30) return { grade: 'Below Expectations', points: 1 };
+    return { grade: 'Needs Improvement', points: 0 };
+  } 
+  // 8-4-4 / Secondary
+  else if (gradingSystem === '844' || gradingSystem === 'KENYA_844' || gradingSystem === 'SENIOR_SECONDARY') {
+    if (percentage >= 80) return { grade: 'A', points: 12 };
+    if (percentage >= 75) return { grade: 'A-', points: 11 };
+    if (percentage >= 70) return { grade: 'B+', points: 10 };
+    if (percentage >= 65) return { grade: 'B', points: 9 };
+    if (percentage >= 60) return { grade: 'B-', points: 8 };
+    if (percentage >= 55) return { grade: 'C+', points: 7 };
+    if (percentage >= 50) return { grade: 'C', points: 6 };
+    if (percentage >= 45) return { grade: 'C-', points: 5 };
+    if (percentage >= 40) return { grade: 'D+', points: 4 };
+    if (percentage >= 35) return { grade: 'D', points: 3 };
+    if (percentage >= 30) return { grade: 'D-', points: 2 };
+    return { grade: 'E', points: 1 };
+  } 
+  // University
+  else if (gradingSystem === 'UNIVERSITY' || gradingSystem === 'UNI') {
+    if (percentage >= 70) return { grade: 'A', points: 5.0 };
+    if (percentage >= 60) return { grade: 'B', points: 4.0 };
+    if (percentage >= 50) return { grade: 'C', points: 3.0 };
+    if (percentage >= 40) return { grade: 'D', points: 2.0 };
+    return { grade: 'E', points: 1.0 };
+  } 
+  // TVET
+  else if (gradingSystem === 'TVET' || gradingSystem === 'COLLEGE_TVET') {
+    if (percentage >= 80) return { grade: 'DISTINCTION', points: 5 };
+    if (percentage >= 65) return { grade: 'CREDIT', points: 4 };
+    if (percentage >= 50) return { grade: 'MERIT', points: 3 };
+    if (percentage >= 40) return { grade: 'PASS', points: 2 };
+    return { grade: 'FAIL', points: 1 };
+  }
+  
+  // Default fallback
+  return { grade: 'N/A', points: 0 };
+}
 // ==================== SEED FEATURES FOR ALL SCHOOLS ====================
 app.post('/api/seed-features/all-schools', authenticate, requireSuperAdmin, async (req, res) => {
   try {

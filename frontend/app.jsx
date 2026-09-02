@@ -7662,6 +7662,9 @@ const CourseUnitsModule = ({
     </div>
   );
 };
+
+
+
 const ExamModule = ({ 
   exams, setExams, 
   classes, subjects, students, 
@@ -7793,7 +7796,6 @@ const ExamModule = ({
     try {
       setLoadingStaff(true);
       const res = await api.get('/staff');
-      // Filter to get only teaching staff
       const teachers = res.data.staff?.filter(s => s.staffType === 'TEACHING') || [];
       setTeachingStaff(teachers);
       console.log('👨‍🏫 Teaching staff loaded:', teachers.length);
@@ -7804,7 +7806,6 @@ const ExamModule = ({
     }
   };
 
-  // Call this when component mounts
   useEffect(() => {
     fetchTeachingStaff();
   }, []);
@@ -7814,39 +7815,24 @@ const ExamModule = ({
     if (!invigilatorId || !date || !startTime || !endTime) return [];
     
     try {
-      // Get all exams on the same date
       const allExams = exams || [];
       
-      // Filter exams that might conflict
       const conflicts = allExams.filter(exam => {
-        // Skip the current exam if we're editing
         if (currentExamId && exam.id === currentExamId) return false;
-        
-        // Check if same invigilator
         if (exam.invigilatorId !== invigilatorId) return false;
-        
-        // Check if same date
         if (exam.date !== date) return false;
         
-        // Check time overlap
         const examStart = exam.startTime;
         const examEnd = exam.endTime;
         
         if (!examStart || !examEnd) return false;
         
-        // Check for time overlap
-        const newStart = startTime;
-        const newEnd = endTime;
-        
-        // Convert times to comparable numbers
-        const newStartNum = parseInt(newStart.replace(':', ''));
-        const newEndNum = parseInt(newEnd.replace(':', ''));
+        const newStartNum = parseInt(startTime.replace(':', ''));
+        const newEndNum = parseInt(endTime.replace(':', ''));
         const examStartNum = parseInt(examStart.replace(':', ''));
         const examEndNum = parseInt(examEnd.replace(':', ''));
         
-        // Check if times overlap
         const overlaps = (newStartNum < examEndNum && newEndNum > examStartNum);
-        
         return overlaps;
       });
       
@@ -7858,7 +7844,6 @@ const ExamModule = ({
     }
   };
 
-  // Update conflicts when form changes
   useEffect(() => {
     if (examForm.invigilatorId && examForm.date && examForm.startTime && examForm.endTime) {
       checkInvigilatorConflicts(
@@ -7941,21 +7926,11 @@ const ExamModule = ({
 
   // ==================== FILTER UNITS FOR TABLE FILTERS ====================
   useEffect(() => {
-    console.log('🔍 Filtering units for filters:', {
-      isUniversity,
-      isTVET,
-      selectedCourse,
-      selectedProgram,
-      unitsCount: units?.length
-    });
-    
     if (isUniversity && selectedCourse && units && units.length > 0) {
       const filtered = units.filter(u => u.courseId === selectedCourse);
-      console.log(`📚 Found ${filtered.length} units for course ${selectedCourse}`);
       setFilteredUnitsForFilters(filtered);
     } else if (isTVET && selectedProgram && units && units.length > 0) {
       const filtered = units.filter(u => u.programId === selectedProgram);
-      console.log(`🔧 Found ${filtered.length} units for program ${selectedProgram}`);
       setFilteredUnitsForFilters(filtered);
     } else {
       setFilteredUnitsForFilters([]);
@@ -7964,21 +7939,11 @@ const ExamModule = ({
 
   // ==================== FILTER UNITS FOR CREATE/EDIT FORM ====================
   useEffect(() => {
-    console.log('🔍 Filtering units for form:', {
-      isUniversity,
-      isTVET,
-      examFormCourseId: examForm.courseId,
-      examFormProgramId: examForm.programId,
-      unitsCount: units?.length
-    });
-    
     if (isUniversity && examForm.courseId && units && units.length > 0) {
       const filtered = units.filter(u => u.courseId === examForm.courseId);
-      console.log(`📚 Found ${filtered.length} units for course ${examForm.courseId}`);
       setFilteredUnitsForForm(filtered);
     } else if (isTVET && examForm.programId && units && units.length > 0) {
       const filtered = units.filter(u => u.programId === examForm.programId);
-      console.log(`🔧 Found ${filtered.length} units for program ${examForm.programId}`);
       setFilteredUnitsForForm(filtered);
     } else {
       setFilteredUnitsForForm([]);
@@ -8241,14 +8206,23 @@ const ExamModule = ({
       return 'bg-red-100 text-red-800';
     return 'bg-gray-100 text-gray-800';
   };
-  // Add this after your grade calculation functions
-const formatCurrency = (amount) => {
-  return new Intl.NumberFormat('en-KE', {
-    style: 'currency',
-    currency: 'KES',
-    minimumFractionDigits: 0
-  }).format(amount || 0);
-};
+
+  // ==================== REFRESH EXAMS ====================
+  const refreshExams = async () => {
+    try {
+      setLoading(true);
+      setApiError('');
+      const res = await api.get('/exams');
+      if (res.data.exams) {
+        setExams(res.data.exams);
+      }
+    } catch (error) {
+      console.error('Error refreshing exams:', error);
+      setApiError('Failed to load exams. Please check your connection.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // ==================== HANDLE EXAM SUBMIT ====================
   const handleExamSubmit = async (e) => {
@@ -8324,7 +8298,6 @@ const formatCurrency = (amount) => {
     // Prepare exam data based on school type
     let examData;
     
-    // Get invigilator name from selected staff
     const selectedInvigilator = teachingStaff.find(s => s.id === examForm.invigilatorId);
     const invigilatorName = selectedInvigilator?.User 
       ? `${selectedInvigilator.User.firstName} ${selectedInvigilator.User.lastName}` 
@@ -8390,23 +8363,28 @@ const formatCurrency = (amount) => {
     console.log('📤 Submitting exam data:', examData);
     
     try {
+      let response;
       if (selectedExam) {
         if (!canEditExams) {
           alert('You do not have permission to edit exams');
           return;
         }
-        await handleUpdate('/exams', selectedExam.id, examData, setExams, exams);
-        alert('✅ Exam updated successfully!');
+        response = await api.put(`/exams/${selectedExam.id}`, examData);
       } else {
-        await handleCreate('/exams', examData, setExams, exams);
-        alert('✅ Exam created successfully!');
+        response = await api.post('/exams', examData);
       }
       
-      setShowExamForm(false);
-      setSelectedExam(null);
-      setCustomExamName('');
-      setExamNameOption('select');
-      setInvigilatorConflicts([]);
+      if (response.data.success) {
+        alert('✅ Exam saved successfully!');
+        setShowExamForm(false);
+        setSelectedExam(null);
+        setCustomExamName('');
+        setExamNameOption('select');
+        setInvigilatorConflicts([]);
+        refreshExams();
+      } else {
+        alert('❌ Failed to save exam: ' + (response.data.message || 'Unknown error'));
+      }
       
     } catch (error) {
       console.error('Error saving exam:', error);
@@ -8414,7 +8392,7 @@ const formatCurrency = (amount) => {
     }
   };
 
-  // ==================== SINGLE RESULT HANDLER ====================
+  // ==================== SINGLE RESULT HANDLER - FIXED ====================
   const handleSingleResultSubmit = async (e) => {
     e.preventDefault();
     
@@ -8429,25 +8407,75 @@ const formatCurrency = (amount) => {
     }
 
     setSavingResults(true);
+    setApiError('');
     
     try {
+      // Get the exam details
       const exam = exams.find(e => e.id === resultForm.examId);
+      if (!exam) {
+        throw new Error('Exam not found. Please refresh and try again.');
+      }
+      
+      // Calculate marks
       const marks = resultForm.isAbsent ? 0 : parseFloat(resultForm.marks) || 0;
       
-      const { grade, points } = calculateGrade(marks, exam?.maxMarks, exam?.schoolCategory);
-
+      // Validate marks
+      if (!resultForm.isAbsent && (marks < 0 || marks > exam.maxMarks)) {
+        alert(`Marks must be between 0 and ${exam.maxMarks}`);
+        setSavingResults(false);
+        return;
+      }
+      
+      // Calculate grade
+      const { grade, points } = calculateGrade(marks, exam.maxMarks, exam.schoolCategory);
+      
+      // Prepare result data
       const resultData = {
         studentId: resultForm.studentId,
         examId: resultForm.examId,
         ...(isUniversity || isTVET ? { unitId: exam.unitId } : { subjectId: exam.subjectId }),
-        marks,
-        grade,
-        points,
+        marks: marks,
+        grade: grade,
+        points: points,
         isAbsent: resultForm.isAbsent || false,
         remarks: resultForm.remarks || ''
       };
-
-      await handleCreate('/results', resultData, setResults, results);
+      
+      console.log('📤 Submitting result:', resultData);
+      
+      // Check if result already exists
+      let existingResult = null;
+      try {
+        const existingResults = await api.get(`/results?examId=${resultForm.examId}&studentId=${resultForm.studentId}`);
+        if (existingResults.data.results && existingResults.data.results.length > 0) {
+          existingResult = existingResults.data.results[0];
+        }
+      } catch (err) {
+        console.log('No existing result found, creating new one');
+      }
+      
+      let response;
+      if (existingResult) {
+        // Update existing result
+        console.log('🔄 Updating existing result:', existingResult.id);
+        response = await api.put(`/results/${existingResult.id}`, resultData);
+      } else {
+        // Create new result
+        console.log('📝 Creating new result');
+        response = await api.post('/results', resultData);
+      }
+      
+      console.log('✅ Result saved:', response.data);
+      
+      // Update local state
+      if (setResults && response.data.result) {
+        const newResult = response.data.result;
+        if (existingResult) {
+          setResults(results.map(r => r.id === existingResult.id ? newResult : r));
+        } else {
+          setResults([...results, newResult]);
+        }
+      }
       
       alert('✅ Result saved successfully!');
       setShowResultForm(false);
@@ -8458,10 +8486,13 @@ const formatCurrency = (amount) => {
         isAbsent: false,
         remarks: ''
       });
+      refreshExams();
       
     } catch (error) {
-      console.error('Error saving result:', error);
-      alert('❌ Failed to save result');
+      console.error('❌ Error saving result:', error);
+      console.error('Error details:', error.response?.data);
+      alert('❌ Failed to save result: ' + (error.response?.data?.message || error.message || 'Unknown error'));
+      setApiError(error.response?.data?.message || error.message);
     } finally {
       setSavingResults(false);
     }
@@ -8610,43 +8641,95 @@ const formatCurrency = (amount) => {
       return;
     }
     
+    // Check if we have results to save
+    const hasResults = bulkResults.some(e => e.marks !== '' || e.isAbsent);
+    if (!hasResults) {
+      alert('No results to save. Please enter marks or mark students as absent.');
+      return;
+    }
+    
     setLoading(true);
+    let savedCount = 0;
+    let errorCount = 0;
+    const errors = [];
+    
     try {
       const exam = exams.find(e => e.id === selectedExamForResults);
-      let savedCount = 0;
+      if (!exam) {
+        alert('Exam not found. Please refresh and try again.');
+        setLoading(false);
+        return;
+      }
+      
+      console.log('📝 Saving bulk results for exam:', exam.name);
+      console.log('📊 Results to save:', bulkResults.length);
       
       for (const entry of bulkResults) {
-        if (entry.marks || entry.isAbsent) {
-          const marks = entry.isAbsent ? 0 : parseFloat(entry.marks) || 0;
-          
-          const { grade, points } = calculateGrade(marks, exam?.maxMarks, exam?.schoolCategory);
-          
-          const resultData = {
-            studentId: entry.studentId,
-            examId: selectedExamForResults,
-            ...(isUniversity || isTVET ? { unitId: exam.unitId } : { subjectId: exam.subjectId }),
-            marks,
-            grade,
-            points,
-            isAbsent: entry.isAbsent
-          };
-          
+        // Skip entries with no marks and not absent
+        if (entry.marks === '' && !entry.isAbsent) {
+          continue;
+        }
+        
+        const marks = entry.isAbsent ? 0 : parseFloat(entry.marks) || 0;
+        
+        // Validate marks are within range
+        if (!entry.isAbsent && (marks < 0 || marks > exam.maxMarks)) {
+          errors.push(`${entry.studentName}: Marks must be between 0 and ${exam.maxMarks}`);
+          errorCount++;
+          continue;
+        }
+        
+        const { grade, points } = calculateGrade(marks, exam.maxMarks, exam.schoolCategory);
+        
+        const resultData = {
+          studentId: entry.studentId,
+          examId: selectedExamForResults,
+          ...(isUniversity || isTVET ? { unitId: exam.unitId } : { subjectId: exam.subjectId }),
+          marks: marks,
+          grade: grade,
+          points: points,
+          isAbsent: entry.isAbsent || false,
+          remarks: entry.isAbsent ? 'Absent' : ''
+        };
+        
+        try {
           if (entry.resultId) {
+            // Update existing result
             await api.put(`/results/${entry.resultId}`, resultData);
+            console.log(`✅ Updated result for ${entry.studentName}`);
           } else {
+            // Create new result
             await api.post('/results', resultData);
+            console.log(`✅ Created result for ${entry.studentName}`);
           }
           savedCount++;
+        } catch (err) {
+          console.error(`❌ Error saving for ${entry.studentName}:`, err.response?.data || err.message);
+          errors.push(`${entry.studentName}: ${err.response?.data?.message || err.message}`);
+          errorCount++;
         }
       }
       
-      alert(`✅ ${savedCount} results saved successfully!`);
-      setShowBulkResultForm(false);
-      setBulkResults([]);
+      // Show summary
+      let message = `✅ ${savedCount} results saved successfully.`;
+      if (errorCount > 0) {
+        message += `\n❌ ${errorCount} errors occurred:\n${errors.join('\n')}`;
+      }
+      alert(message);
+      
+      if (savedCount > 0) {
+        // Refresh the exam list to show updated results
+        await refreshExams();
+        setShowBulkResultForm(false);
+        setBulkResults([]);
+        setSelectedExamForResults(null);
+        setResultSearch('');
+        setFilterGrade('');
+      }
       
     } catch (error) {
-      console.error('Error saving bulk results:', error);
-      alert('❌ Error saving results');
+      console.error('❌ Error saving bulk results:', error);
+      alert('❌ Failed to save results: ' + (error.response?.data?.message || error.message));
     } finally {
       setLoading(false);
     }
@@ -8680,23 +8763,6 @@ const formatCurrency = (amount) => {
     
     if (window.confirm('Delete this exam?')) {
       handleDelete('/exams', examId, setExams, exams);
-    }
-  };
-
-  // ==================== REFRESH EXAMS ====================
-  const refreshExams = async () => {
-    try {
-      setLoading(true);
-      setApiError('');
-      const res = await api.get('/exams');
-      if (res.data.exams) {
-        setExams(res.data.exams);
-      }
-    } catch (error) {
-      console.error('Error refreshing exams:', error);
-      setApiError('Failed to load exams. Please check your connection.');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -9313,18 +9379,25 @@ const formatCurrency = (amount) => {
         </div>
       )}
 
-      {/* Single Result Modal */}
+      {/* Single Result Modal - FIXED */}
       {showResultForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-xl shadow-sm max-w-md w-full">
             <h3 className="text-xl font-bold mb-4">➕ Add Single Result</h3>
+            
+            {apiError && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                <i className="fas fa-exclamation-circle mr-2"></i>
+                {apiError}
+              </div>
+            )}
             
             <form onSubmit={handleSingleResultSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Exam</label>
                 <input
                   type="text"
-                  value={exams.find(e => e.id === resultForm.examId)?.name || ''}
+                  value={exams.find(e => e.id === resultForm.examId)?.name || 'Select an exam first'}
                   className="w-full px-3 py-2 bg-gray-100 border rounded-lg"
                   disabled
                 />
@@ -9357,7 +9430,11 @@ const formatCurrency = (amount) => {
                   min="0"
                   max={exams.find(e => e.id === resultForm.examId)?.maxMarks || 100}
                   disabled={resultForm.isAbsent}
+                  step="0.5"
                 />
+                <p className="text-xs text-gray-500 mt-1">
+                  Max: {exams.find(e => e.id === resultForm.examId)?.maxMarks || 100} marks
+                </p>
               </div>
 
               <div className="flex items-center space-x-2">
@@ -9368,7 +9445,7 @@ const formatCurrency = (amount) => {
                   onChange={(e) => setResultForm({...resultForm, isAbsent: e.target.checked, marks: ''})}
                   className="rounded"
                 />
-                <label htmlFor="isAbsent">Student was absent</label>
+                <label htmlFor="isAbsent" className="text-sm">Student was absent</label>
               </div>
 
               <div>
@@ -9382,7 +9459,7 @@ const formatCurrency = (amount) => {
                 />
               </div>
 
-              <div className="flex justify-end space-x-2 pt-4">
+              <div className="flex justify-end space-x-2 pt-4 border-t">
                 <button
                   type="button"
                   onClick={() => {
@@ -9394,6 +9471,7 @@ const formatCurrency = (amount) => {
                       isAbsent: false,
                       remarks: ''
                     });
+                    setApiError('');
                   }}
                   className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
                 >
@@ -9402,9 +9480,19 @@ const formatCurrency = (amount) => {
                 <button
                   type="submit"
                   disabled={savingResults}
-                  className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                  className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
                 >
-                  {savingResults ? 'Saving...' : 'Save Result'}
+                  {savingResults ? (
+                    <>
+                      <i className="fas fa-spinner fa-spin mr-2"></i>
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <i className="fas fa-save mr-2"></i>
+                      Save Result
+                    </>
+                  )}
                 </button>
               </div>
             </form>
@@ -9770,7 +9858,6 @@ const formatCurrency = (amount) => {
     </div>
   );
 };
-
 // ==================== COMPLETE FIXED RESULTS MODULE - NO INFINITE LOOP ====================
 const ResultsModule = ({ 
   exams, setExams, results, students, subjects, classes, courses, programs,
@@ -14685,165 +14772,646 @@ const StaffAttendanceReportsModule = ({ staff, currentSchool, user }) => {
     </div>
   );
 };
-// ==================== FIX: StaffModule with loading state defined ====================
-const StaffModule = ({ staff, setStaff, users, payroll, setPayroll, form, setForm, onCreate, onUpdate, onDelete, currentSchool, user }) => {
+// ==================== FIXED STAFF MODULE - COMPLETE REWRITE ====================
+const StaffModule = ({ 
+  staff = [], 
+  setStaff, 
+  users = [], 
+  payroll = [], 
+  setPayroll, 
+  form, 
+  setForm, 
+  onCreate, 
+  onUpdate, 
+  onDelete, 
+  currentSchool, 
+  user,
+  departments = [] 
+}) => {
+  // ==================== STATE ====================
   const [editingId, setEditingId] = useState(null);
   const [showPayrollForm, setShowPayrollForm] = useState(false);
-  const [loading, setLoading] = useState(false); // ← THIS WAS MISSING!
-  const [payrollForm, setPayrollForm] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear() });
+  const [loading, setLoading] = useState(false);
+  const [payrollForm, setPayrollForm] = useState({ 
+    month: new Date().getMonth() + 1, 
+    year: new Date().getFullYear() 
+  });
+  const [searchTerm, setSearchTerm] = useState('');
+  const [departmentFilter, setDepartmentFilter] = useState('');
+  const [staffTypeFilter, setStaffTypeFilter] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
 
-  // Determine user permissions
+  // ==================== API INSTANCE ====================
+  const api = axios.create({
+    baseURL: 'http://localhost:5000/api',
+    headers: { 'Content-Type': 'application/json' }
+  });
+
+  api.interceptors.request.use(config => {
+    const token = localStorage.getItem('token');
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+    return config;
+  });
+
+  // ==================== PERMISSIONS ====================
   const canEdit = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
   const canDelete = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL'].includes(user?.role);
   const canProcessPayroll = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
+  const canViewAll = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'HR_MANAGER', 'HR'].includes(user?.role);
 
+  // ==================== SCHOOL TYPE DETECTION ====================
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
   const isUniversity = schoolCategory === 'UNIVERSITY';
   const isTVET = schoolCategory === 'COLLEGE_TVET';
+  const isRegularSchool = !isUniversity && !isTVET;
 
-  const showSubjects = !isUniversity && !isTVET;
+  const showSubjects = isRegularSchool;
 
-  const handleSubmit = (e) => {
+  // ==================== HELPER FUNCTIONS ====================
+  const getUserDisplayName = (member) => {
+    if (!member) return 'Unknown Staff';
+    const userData = member.User || {};
+    return `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || member.employeeId || 'Unknown Staff';
+  };
+
+  const getUserInitials = (member) => {
+    if (!member) return '?';
+    const userData = member.User || {};
+    const firstName = userData.firstName || '';
+    const lastName = userData.lastName || '';
+    return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase() || '?';
+  };
+
+  const getTotalSalary = (member) => {
+    if (!member || !member.salary) return 0;
+    return (parseFloat(member.salary.basic) || 0) + 
+           (parseFloat(member.salary.house) || 0) + 
+           (parseFloat(member.salary.transport) || 0);
+  };
+
+  const getDepartmentName = (departmentId) => {
+    if (!departmentId) return 'N/A';
+    const dept = departments?.find(d => d.id === departmentId);
+    return dept?.name || 'N/A';
+  };
+
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-KE', {
+      style: 'currency',
+      currency: 'KES',
+      minimumFractionDigits: 0
+    }).format(amount || 0);
+  };
+
+  // ==================== FILTER STAFF ====================
+  const filteredStaff = React.useMemo(() => {
+    let filtered = [...staff];
+
+    // Filter by search term
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(member => {
+        const userData = member.User || {};
+        const name = `${userData.firstName || ''} ${userData.lastName || ''}`.toLowerCase();
+        const employeeId = (member.employeeId || '').toLowerCase();
+        const jobTitle = (member.jobTitle || '').toLowerCase();
+        const department = (member.department || '').toLowerCase();
+        const email = (userData.email || '').toLowerCase();
+        return name.includes(term) || 
+               employeeId.includes(term) || 
+               jobTitle.includes(term) || 
+               department.includes(term) ||
+               email.includes(term);
+      });
+    }
+
+    // Filter by department
+    if (departmentFilter) {
+      filtered = filtered.filter(member => 
+        member.departmentId === departmentFilter || 
+        member.department === departmentFilter
+      );
+    }
+
+    // Filter by staff type
+    if (staffTypeFilter) {
+      filtered = filtered.filter(member => member.staffType === staffTypeFilter);
+    }
+
+    return filtered;
+  }, [staff, searchTerm, departmentFilter, staffTypeFilter]);
+
+  // ==================== UNIQUE DEPARTMENTS FOR FILTER ====================
+  const uniqueDepartments = React.useMemo(() => {
+    const deptMap = new Map();
+    staff.forEach(member => {
+      if (member.departmentId) {
+        const dept = departments?.find(d => d.id === member.departmentId);
+        if (dept && !deptMap.has(member.departmentId)) {
+          deptMap.set(member.departmentId, dept);
+        }
+      }
+      if (member.department && !deptMap.has(member.department)) {
+        deptMap.set(member.department, { id: member.department, name: member.department });
+      }
+    });
+    return Array.from(deptMap.values());
+  }, [staff, departments]);
+
+  // ==================== HANDLE FORM SUBMIT ====================
+  const handleSubmit = async (e) => {
     e.preventDefault();
     
     if (!canEdit) {
-      alert('You do not have permission to add/edit staff');
+      setErrorMessage('You do not have permission to add/edit staff');
+      setTimeout(() => setErrorMessage(''), 3000);
+      return;
+    }
+
+    // Validate required fields
+    if (!form.userId) {
+      setErrorMessage('Please select a user account');
+      setTimeout(() => setErrorMessage(''), 3000);
       return;
     }
 
     if (!form.employmentDate) {
-      alert('Please select employment date');
+      setErrorMessage('Please select employment date');
+      setTimeout(() => setErrorMessage(''), 3000);
+      return;
+    }
+
+    if (!form.jobTitle) {
+      setErrorMessage('Please enter a job title');
+      setTimeout(() => setErrorMessage(''), 3000);
       return;
     }
 
     const employmentDate = new Date(form.employmentDate);
     if (isNaN(employmentDate.getTime())) {
-      alert('Invalid employment date');
+      setErrorMessage('Invalid employment date');
+      setTimeout(() => setErrorMessage(''), 3000);
       return;
     }
 
-    const formattedDate = employmentDate.toISOString().split('T')[0];
-
-    const formData = {
-      ...form,
-      employmentDate: formattedDate,
-      salary: {
-        basic: parseFloat(form.salary?.basic) || 0,
-        house: parseFloat(form.salary?.house) || 0,
-        transport: parseFloat(form.salary?.transport) || 0
-      }
-    };
-    
-    if (isUniversity || isTVET) {
-      delete formData.subjects;
-    }
-    
-    if (editingId) {
-      onUpdate(editingId, formData);
-    } else {
-      onCreate(formData);
-    }
-    setEditingId(null);
-  };
-
-  const processPayroll = async () => {
-    if (!canProcessPayroll) {
-      alert('You do not have permission to process payroll');
-      return;
-    }
     setLoading(true);
+    setErrorMessage('');
+    setSuccessMessage('');
+
     try {
-      const res = await api.post('/payroll/process', payrollForm);
-      setPayroll(res.data.payrolls);
-      setShowPayrollForm(false);
-      alert('Payroll processed successfully!');
+      const formattedDate = employmentDate.toISOString().split('T')[0];
+
+      const formData = {
+        ...form,
+        employmentDate: formattedDate,
+        schoolId: currentSchool?.id || user?.schoolId,
+        salary: {
+          basic: parseFloat(form.salary?.basic) || 0,
+          house: parseFloat(form.salary?.house) || 0,
+          transport: parseFloat(form.salary?.transport) || 0
+        }
+      };
+      
+      // Remove subjects for University/TVET
+      if (isUniversity || isTVET) {
+        delete formData.subjects;
+      }
+
+      // Clean up empty fields
+      ['departmentId', 'employeeId', 'tscNumber', 'specialization'].forEach(field => {
+        if (formData[field] === '') formData[field] = null;
+      });
+
+      console.log('📤 Submitting staff data:', formData);
+
+      let response;
+      if (editingId) {
+        response = await onUpdate(editingId, formData);
+        setSuccessMessage('✅ Staff member updated successfully!');
+      } else {
+        response = await onCreate(formData);
+        setSuccessMessage('✅ Staff member added successfully!');
+      }
+
+      // Reset form after successful submission
+      setEditingId(null);
+      setForm({
+        userId: '',
+        employeeId: '',
+        tscNumber: '',
+        departmentId: '',
+        department: '',
+        jobTitle: '',
+        employmentDate: new Date().toISOString().split('T')[0],
+        qualifications: [],
+        specialization: '',
+        subjects: [],
+        staffType: 'TEACHING',
+        bankDetails: { bank: '', branch: '', account: '' },
+        salary: { basic: 0, house: 0, transport: 0 }
+      });
+
+      setTimeout(() => setSuccessMessage(''), 5000);
+
     } catch (error) {
-      console.error('Payroll error:', error);
-      alert('Failed to process payroll');
+      console.error('❌ Staff submit error:', error);
+      setErrorMessage(error.response?.data?.message || 'Failed to save staff member');
+      setTimeout(() => setErrorMessage(''), 5000);
     } finally {
       setLoading(false);
     }
   };
 
-  // Rest of the StaffModule code remains the same...
+  // ==================== PROCESS PAYROLL ====================
+  const processPayroll = async () => {
+    if (!canProcessPayroll) {
+      setErrorMessage('You do not have permission to process payroll');
+      setTimeout(() => setErrorMessage(''), 3000);
+      return;
+    }
+
+    if (staff.length === 0) {
+      setErrorMessage('No staff members to process payroll for');
+      setTimeout(() => setErrorMessage(''), 3000);
+      return;
+    }
+
+    setLoading(true);
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    try {
+      const res = await api.post('/payroll/process', {
+        month: payrollForm.month,
+        year: payrollForm.year,
+        schoolId: currentSchool?.id
+      });
+      
+      setPayroll(res.data.payrolls || []);
+      setShowPayrollForm(false);
+      setSuccessMessage(`✅ Payroll processed successfully for ${res.data.payrolls?.length || 0} staff members!`);
+      setTimeout(() => setSuccessMessage(''), 5000);
+      
+    } catch (error) {
+      console.error('❌ Payroll error:', error);
+      setErrorMessage(error.response?.data?.message || 'Failed to process payroll');
+      setTimeout(() => setErrorMessage(''), 5000);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==================== HANDLE DELETE ====================
+  const handleDelete = async (memberId, memberName) => {
+    if (!canDelete) {
+      setErrorMessage('You do not have permission to delete staff');
+      setTimeout(() => setErrorMessage(''), 3000);
+      return;
+    }
+
+    if (!window.confirm(`Are you sure you want to delete ${memberName}? This action cannot be undone.`)) {
+      return;
+    }
+
+    setLoading(true);
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    try {
+      await onDelete(memberId);
+      setSuccessMessage(`✅ ${memberName} deleted successfully!`);
+      setTimeout(() => setSuccessMessage(''), 5000);
+    } catch (error) {
+      console.error('❌ Delete error:', error);
+      setErrorMessage(error.response?.data?.message || 'Failed to delete staff member');
+      setTimeout(() => setErrorMessage(''), 5000);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==================== HANDLE EDIT ====================
+  const handleEdit = (member) => {
+    if (!canEdit) {
+      setErrorMessage('You do not have permission to edit staff');
+      setTimeout(() => setErrorMessage(''), 3000);
+      return;
+    }
+
+    setForm({
+      ...member,
+      employmentDate: member.employmentDate 
+        ? new Date(member.employmentDate).toISOString().split('T')[0]
+        : new Date().toISOString().split('T')[0],
+      salary: member.salary || { basic: 0, house: 0, transport: 0 },
+      departmentId: member.departmentId || '',
+      department: member.department || ''
+    });
+    setEditingId(member.id);
+  };
+
+  // ==================== HANDLE CANCEL ====================
+  const handleCancel = () => {
+    setEditingId(null);
+    setForm({
+      userId: '',
+      employeeId: '',
+      tscNumber: '',
+      departmentId: '',
+      department: '',
+      jobTitle: '',
+      employmentDate: new Date().toISOString().split('T')[0],
+      qualifications: [],
+      specialization: '',
+      subjects: [],
+      staffType: 'TEACHING',
+      bankDetails: { bank: '', branch: '', account: '' },
+      salary: { basic: 0, house: 0, transport: 0 }
+    });
+  };
+
+  // ==================== GET DEPARTMENT OPTIONS ====================
+  const departmentOptions = React.useMemo(() => {
+    const options = [
+      { value: '', label: '-- Select Department --' }
+    ];
+    
+    (departments || []).forEach(d => {
+      options.push({
+        value: d.id,
+        label: d.name,
+        subLabel: d.faculty?.name || ''
+      });
+    });
+    
+    return options;
+  }, [departments]);
+
+  // ==================== GET USER OPTIONS ====================
+  const userOptions = React.useMemo(() => {
+    // Filter users that don't already have staff records
+    const existingUserIds = new Set(staff.map(s => s.userId).filter(Boolean));
+    
+    return (users || [])
+      .filter(u => !existingUserIds.has(u.id) || u.id === form.userId)
+      .map(u => ({
+        value: u.id,
+        label: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email,
+        subLabel: `${u.role || 'User'} • ${u.email}`
+      }));
+  }, [users, staff, form.userId]);
+
+  // ==================== RENDER ====================
   return (
     <div className="space-y-6">
-      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse"></div>}
+      {/* Loading Indicator */}
+      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
       
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-gray-800">Staff Management</h2>
-        {canProcessPayroll && (
-          <button
-            onClick={() => setShowPayrollForm(true)}
-            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center"
-          >
-            <i className="fas fa-money-bill-wave mr-2"></i>
-            Process Payroll
+      {/* Success Message */}
+      {successMessage && (
+        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center justify-between">
+          <span><i className="fas fa-check-circle mr-2"></i>{successMessage}</span>
+          <button onClick={() => setSuccessMessage('')} className="text-green-500 hover:text-green-700">
+            <i className="fas fa-times"></i>
           </button>
-        )}
+        </div>
+      )}
+      
+      {/* Error Message */}
+      {errorMessage && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
+          <span><i className="fas fa-exclamation-circle mr-2"></i>{errorMessage}</span>
+          <button onClick={() => setErrorMessage('')} className="text-red-500 hover:text-red-700">
+            <i className="fas fa-times"></i>
+          </button>
+        </div>
+      )}
+
+      {/* Header */}
+      <div className="flex flex-wrap justify-between items-center gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800">Staff Management</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            {staff.length} staff members • {staff.filter(s => s.staffType === 'TEACHING').length} teaching • 
+            {staff.filter(s => s.staffType === 'NON_TEACHING').length} non-teaching
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {canProcessPayroll && (
+            <button
+              onClick={() => setShowPayrollForm(true)}
+              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center"
+            >
+              <i className="fas fa-money-bill-wave mr-2"></i>
+              Process Payroll
+            </button>
+          )}
+          {canEdit && (
+            <button
+              onClick={() => {
+                handleCancel();
+                // Scroll to form
+                document.getElementById('staff-form')?.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors flex items-center"
+            >
+              <i className="fas fa-plus mr-2"></i>
+              {editingId ? 'Cancel Edit' : 'Add Staff'}
+            </button>
+          )}
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors flex items-center"
+          >
+            <i className="fas fa-filter mr-2"></i>
+            Filters
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {canEdit && (
-          <div className="bg-white p-6 rounded-xl shadow-sm">
-            <h3 className="text-lg font-semibold mb-4 border-b pb-2">
-              {editingId ? 'Edit Staff Member' : 'Add New Staff'}
-            </h3>
-            <form onSubmit={handleSubmit} className="space-y-4">
+      {/* School Info */}
+      {currentSchool && (
+        <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
+          <p className="text-sm text-blue-700">
+            <i className="fas fa-school mr-2"></i>
+            Managing staff for: <strong>{currentSchool.name}</strong>
+            <span className="ml-2 text-xs text-blue-500">
+              ({schoolCategory === 'UNIVERSITY' ? 'University' : 
+                schoolCategory === 'COLLEGE_TVET' ? 'TVET' : 
+                schoolCategory === 'SENIOR_SECONDARY' ? 'Secondary' : 'Primary/JSS'})
+            </span>
+          </p>
+        </div>
+      )}
+
+      {/* Filters */}
+      {showFilters && (
+        <div className="bg-white p-4 rounded-xl shadow-sm border">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Search</label>
+              <input
+                type="text"
+                placeholder="Search by name, ID, or job title..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
+              <select
+                value={departmentFilter}
+                onChange={(e) => setDepartmentFilter(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="">All Departments</option>
+                {uniqueDepartments.map(dept => (
+                  <option key={dept.id} value={dept.id}>
+                    {dept.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Staff Type</label>
+              <select
+                value={staffTypeFilter}
+                onChange={(e) => setStaffTypeFilter(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="">All Types</option>
+                <option value="TEACHING">Teaching</option>
+                <option value="NON_TEACHING">Non-Teaching</option>
+              </select>
+            </div>
+          </div>
+          <div className="mt-4 flex justify-between items-center">
+            <span className="text-sm text-gray-500">
+              Showing {filteredStaff.length} of {staff.length} staff members
+            </span>
+            <button
+              onClick={() => {
+                setSearchTerm('');
+                setDepartmentFilter('');
+                setStaffTypeFilter('');
+              }}
+              className="text-sm text-indigo-600 hover:text-indigo-800"
+            >
+              Clear Filters
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Staff Form */}
+      {canEdit && (
+        <div id="staff-form" className="bg-white p-6 rounded-xl shadow-sm border-2 border-indigo-100">
+          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            {editingId ? (
+              <>
+                <i className="fas fa-edit text-indigo-600"></i>
+                Edit Staff Member
+              </>
+            ) : (
+              <>
+                <i className="fas fa-user-plus text-indigo-600"></i>
+                Add New Staff
+              </>
+            )}
+          </h3>
+          
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* User Account */}
+            <div>
               <SelectField
-                label="User Account"
+                label="User Account *"
                 value={form.userId || ''}
                 onChange={(e) => setForm({...form, userId: e.target.value})}
-                options={users.map(u => ({ 
-                  value: u.id, 
-                  label: `${u.firstName} ${u.lastName} (${u.email})` 
-                }))}
+                options={userOptions}
                 required
+                disabled={loading || editingId}
+                placeholder="Search for a user..."
               />
+              {editingId && (
+                <p className="text-xs text-gray-500 mt-1">
+                  <i className="fas fa-info-circle mr-1"></i>
+                  User account cannot be changed after creation
+                </p>
+              )}
+            </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <InputField
-                  label="Employee ID"
-                  value={form.employeeId || ''}
-                  onChange={(e) => setForm({...form, employeeId: e.target.value})}
-                  placeholder="e.g., EMP001"
-                />
-                <InputField
-                  label={isUniversity ? "Faculty/Department" : "Department"}
-                  value={form.department || ''}
-                  onChange={(e) => setForm({...form, department: e.target.value})}
-                  placeholder={isUniversity ? "e.g., Science Faculty" : "e.g., Mathematics"}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <InputField
-                  label="Job Title"
-                  value={form.jobTitle || ''}
-                  onChange={(e) => setForm({...form, jobTitle: e.target.value})}
-                  placeholder="e.g., Senior Lecturer"
-                  required
-                />
-                <SelectField
-                  label="Staff Type"
-                  value={form.staffType || 'TEACHING'}
-                  onChange={(e) => setForm({...form, staffType: e.target.value})}
-                  options={[
-                    { value: 'TEACHING', label: 'Teaching Staff' },
-                    { value: 'NON_TEACHING', label: 'Non-Teaching Staff' }
-                  ]}
-                />
-              </div>
-
+            <div className="grid grid-cols-2 gap-4">
               <InputField
-                label="Employment Date"
+                label="Employee ID"
+                value={form.employeeId || ''}
+                onChange={(e) => setForm({...form, employeeId: e.target.value})}
+                placeholder="e.g., EMP001"
+                disabled={loading}
+              />
+              <InputField
+                label="TSC Number"
+                value={form.tscNumber || ''}
+                onChange={(e) => setForm({...form, tscNumber: e.target.value})}
+                placeholder="e.g., TSC-12345"
+                disabled={loading}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <SelectField
+                label={isUniversity ? "Faculty/Department" : "Department"}
+                value={form.departmentId || ''}
+                onChange={(e) => {
+                  const deptId = e.target.value;
+                  const dept = departments?.find(d => d.id === deptId);
+                  setForm({
+                    ...form, 
+                    departmentId: deptId,
+                    department: dept?.name || ''
+                  });
+                }}
+                options={departmentOptions}
+                required={isUniversity || isTVET}
+                disabled={loading}
+                placeholder="Select department..."
+              />
+              <InputField
+                label="Job Title *"
+                value={form.jobTitle || ''}
+                onChange={(e) => setForm({...form, jobTitle: e.target.value})}
+                placeholder={isUniversity ? "e.g., Senior Lecturer" : isTVET ? "e.g., Workshop Supervisor" : "e.g., Class Teacher"}
+                required
+                disabled={loading}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <InputField
+                label="Employment Date *"
                 type="date"
                 value={form.employmentDate || new Date().toISOString().split('T')[0]}
                 onChange={(e) => setForm({...form, employmentDate: e.target.value})}
                 required
+                disabled={loading}
               />
+              <SelectField
+                label="Staff Type"
+                value={form.staffType || 'TEACHING'}
+                onChange={(e) => setForm({...form, staffType: e.target.value})}
+                options={[
+                  { value: 'TEACHING', label: '👨‍🏫 Teaching Staff' },
+                  { value: 'NON_TEACHING', label: '👔 Non-Teaching Staff' }
+                ]}
+                disabled={loading}
+              />
+            </div>
 
-              {showSubjects && (
+            {/* Subjects - Only for Regular Schools */}
+            {showSubjects && (
+              <div>
                 <InputField
                   label="Subjects (comma separated)"
                   value={form.subjects?.join(', ') || ''}
@@ -14852,131 +15420,208 @@ const StaffModule = ({ staff, setStaff, users, payroll, setPayroll, form, setFor
                     subjects: e.target.value.split(',').map(s => s.trim()).filter(s => s)
                   })}
                   placeholder="Mathematics, Physics, Chemistry"
+                  disabled={loading}
                 />
-              )}
+                <p className="text-xs text-gray-500 mt-1">
+                  <i className="fas fa-info-circle mr-1"></i>
+                  Enter subjects separated by commas
+                </p>
+              </div>
+            )}
 
-              <div className="border-t pt-4">
-                <h4 className="font-medium text-gray-700 mb-3">Salary Details</h4>
-                <div className="grid grid-cols-3 gap-4">
-                  <InputField
-                    label="Basic Salary"
-                    type="number"
-                    value={form.salary?.basic || 0}
-                    onChange={(e) => setForm({
-                      ...form,
-                      salary: { ...form.salary, basic: parseFloat(e.target.value) || 0 }
-                    })}
-                    placeholder="0.00"
-                  />
-                  <InputField
-                    label="House Allowance"
-                    type="number"
-                    value={form.salary?.house || 0}
-                    onChange={(e) => setForm({
-                      ...form,
-                      salary: { ...form.salary, house: parseFloat(e.target.value) || 0 }
-                    })}
-                    placeholder="0.00"
-                  />
-                  <InputField
-                    label="Transport Allowance"
-                    type="number"
-                    value={form.salary?.transport || 0}
-                    onChange={(e) => setForm({
-                      ...form,
-                      salary: { ...form.salary, transport: parseFloat(e.target.value) || 0 }
-                    })}
-                    placeholder="0.00"
-                  />
+            {/* Specialization - For University/TVET */}
+            {(isUniversity || isTVET) && (
+              <InputField
+                label="Specialization"
+                value={form.specialization || ''}
+                onChange={(e) => setForm({...form, specialization: e.target.value})}
+                placeholder="e.g., Electrical Engineering, Computer Science"
+                disabled={loading}
+              />
+            )}
+
+            {/* Salary Details */}
+            <div className="border-t pt-4">
+              <h4 className="font-medium text-gray-700 mb-3 flex items-center gap-2">
+                <i className="fas fa-money-bill text-green-600"></i>
+                Salary Details
+              </h4>
+              <div className="grid grid-cols-3 gap-4">
+                <InputField
+                  label="Basic Salary"
+                  type="number"
+                  value={form.salary?.basic || 0}
+                  onChange={(e) => setForm({
+                    ...form,
+                    salary: { ...form.salary, basic: parseFloat(e.target.value) || 0 }
+                  })}
+                  placeholder="0.00"
+                  disabled={loading}
+                  min="0"
+                  step="1000"
+                />
+                <InputField
+                  label="House Allowance"
+                  type="number"
+                  value={form.salary?.house || 0}
+                  onChange={(e) => setForm({
+                    ...form,
+                    salary: { ...form.salary, house: parseFloat(e.target.value) || 0 }
+                  })}
+                  placeholder="0.00"
+                  disabled={loading}
+                  min="0"
+                  step="1000"
+                />
+                <InputField
+                  label="Transport Allowance"
+                  type="number"
+                  value={form.salary?.transport || 0}
+                  onChange={(e) => setForm({
+                    ...form,
+                    salary: { ...form.salary, transport: parseFloat(e.target.value) || 0 }
+                  })}
+                  placeholder="0.00"
+                  disabled={loading}
+                  min="0"
+                  step="500"
+                />
+              </div>
+              <div className="mt-2 p-3 bg-gray-50 rounded-lg">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium text-gray-600">Total Monthly Salary:</span>
+                  <span className="text-lg font-bold text-green-600">
+                    {formatCurrency(
+                      (parseFloat(form.salary?.basic) || 0) + 
+                      (parseFloat(form.salary?.house) || 0) + 
+                      (parseFloat(form.salary?.transport) || 0)
+                    )}
+                  </span>
                 </div>
               </div>
+            </div>
 
-              <div className="flex space-x-3 pt-2">
+            {/* Form Actions */}
+            <div className="flex flex-wrap gap-3 pt-2 border-t">
+              <button
+                type="submit"
+                className="flex-1 bg-indigo-600 text-white py-2.5 px-4 rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center disabled:opacity-50"
+                disabled={loading}
+              >
+                {loading ? (
+                  <><i className="fas fa-spinner fa-spin mr-2"></i>Saving...</>
+                ) : (
+                  <><i className={`fas fa-${editingId ? 'save' : 'plus-circle'} mr-2`}></i>
+                  {editingId ? 'Update Staff' : 'Add Staff'}</>
+                )}
+              </button>
+              {editingId && (
                 <button
-                  type="submit"
-                  className="flex-1 bg-indigo-600 text-white py-2 px-4 rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center"
+                  type="button"
+                  onClick={handleCancel}
+                  className="bg-gray-500 text-white py-2.5 px-6 rounded-lg hover:bg-gray-600 transition-colors"
                   disabled={loading}
                 >
-                  <i className={`fas fa-${editingId ? 'save' : 'plus-circle'} mr-2`}></i>
-                  {editingId ? 'Update Staff' : 'Add Staff'}
+                  Cancel
                 </button>
-                {editingId && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingId(null);
-                      setForm({
-                        userId: '',
-                        employeeId: '',
-                        department: '',
-                        jobTitle: '',
-                        employmentDate: new Date().toISOString().split('T')[0],
-                        subjects: [],
-                        staffType: 'TEACHING',
-                        salary: { basic: 0, house: 0, transport: 0 }
-                      });
-                    }}
-                    className="bg-gray-500 text-white py-2 px-4 rounded-lg hover:bg-gray-600 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-            </form>
-          </div>
-        )}
+              )}
+            </div>
+          </form>
+        </div>
+      )}
 
-        <div className="bg-white p-6 rounded-xl shadow-sm">
-          <h3 className="text-lg font-semibold mb-4 border-b pb-2">
-            Staff List ({staff.length})
+      {/* Staff List */}
+      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+        <div className="px-6 py-4 bg-gray-50 border-b flex justify-between items-center flex-wrap gap-2">
+          <h3 className="font-semibold text-lg flex items-center gap-2">
+            <i className="fas fa-users text-indigo-600"></i>
+            Staff List
+            <span className="text-sm font-normal text-gray-500">
+              ({filteredStaff.length} {filteredStaff.length === 1 ? 'member' : 'members'})
+            </span>
           </h3>
-          <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2">
-            {staff.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
-                <i className="fas fa-users text-4xl mb-2 opacity-50"></i>
-                <p>No staff members added yet</p>
-                <p className="text-sm">Click "Add Staff" to get started</p>
-              </div>
-            ) : (
-              staff.map((member) => (
+          <div className="flex items-center gap-2 text-sm text-gray-500">
+            <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full">
+              {staff.filter(s => s.staffType === 'TEACHING').length} Teaching
+            </span>
+            <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full">
+              {staff.filter(s => s.staffType === 'NON_TEACHING').length} Non-Teaching
+            </span>
+          </div>
+        </div>
+
+        {/* Staff Cards Grid */}
+        <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto">
+          {filteredStaff.length === 0 ? (
+            <div className="col-span-full text-center py-12 text-gray-500">
+              <i className="fas fa-users text-5xl text-gray-300 mb-3 block"></i>
+              <p className="text-lg font-medium">No staff members found</p>
+              <p className="text-sm text-gray-400 mt-1">
+                {searchTerm || departmentFilter || staffTypeFilter ? 
+                  'Try adjusting your filters' : 
+                  'Click "Add Staff" to get started'}
+              </p>
+              {(searchTerm || departmentFilter || staffTypeFilter) && (
+                <button
+                  onClick={() => {
+                    setSearchTerm('');
+                    setDepartmentFilter('');
+                    setStaffTypeFilter('');
+                  }}
+                  className="mt-3 text-indigo-600 hover:text-indigo-800 text-sm font-medium"
+                >
+                  Clear all filters
+                </button>
+              )}
+            </div>
+          ) : (
+            filteredStaff.map((member) => {
+              const userData = member.User || {};
+              const totalSalary = getTotalSalary(member);
+              const departmentName = getDepartmentName(member.departmentId) || member.department || 'N/A';
+              
+              return (
                 <div
                   key={member.id}
-                  className="border rounded-lg p-4 hover:shadow-md transition-shadow bg-gray-50"
+                  className="border rounded-lg p-4 hover:shadow-md transition-shadow bg-white hover:bg-gray-50"
                 >
                   <div className="flex justify-between items-start">
                     <div className="flex-1">
-                      <div className="flex items-center space-x-2">
-                        <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center">
-                          <span className="text-indigo-600 font-semibold">
-                            {member.user?.firstName?.[0]}{member.user?.lastName?.[0]}
+                      <div className="flex items-center space-x-3">
+                        <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0">
+                          <span className="text-indigo-600 font-bold text-lg">
+                            {getUserInitials(member)}
                           </span>
                         </div>
-                        <div>
-                          <h4 className="font-semibold text-gray-800">
-                            {member.user?.firstName} {member.user?.lastName}
+                        <div className="min-w-0">
+                          <h4 className="font-semibold text-gray-800 truncate">
+                            {getUserDisplayName(member)}
                           </h4>
-                          <p className="text-sm text-gray-600">{member.jobTitle}</p>
+                          <p className="text-sm text-gray-600 truncate">{member.jobTitle || 'No Job Title'}</p>
+                          <p className="text-xs text-gray-400 truncate">{userData.email || 'No email'}</p>
                         </div>
                       </div>
                       
-                      <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                         <div>
                           <span className="text-gray-500">Staff Type:</span>
-                          <span className="ml-2 font-medium">
+                          <span className={`ml-1 font-medium ${
+                            member.staffType === 'TEACHING' ? 'text-green-600' : 'text-blue-600'
+                          }`}>
                             {member.staffType === 'TEACHING' ? '👨‍🏫 Teaching' : '👔 Non-Teaching'}
                           </span>
                         </div>
                         <div>
                           <span className="text-gray-500">Department:</span>
-                          <span className="ml-2 font-medium">{member.department || 'N/A'}</span>
+                          <span className="ml-1 font-medium truncate block">{departmentName}</span>
                         </div>
                         <div>
                           <span className="text-gray-500">Employee ID:</span>
-                          <span className="ml-2 font-medium">{member.employeeId || 'N/A'}</span>
+                          <span className="ml-1 font-mono text-sm">{member.employeeId || 'N/A'}</span>
                         </div>
                         <div>
                           <span className="text-gray-500">Hired:</span>
-                          <span className="ml-2 font-medium">
+                          <span className="ml-1 font-medium">
                             {member.employmentDate ? new Date(member.employmentDate).toLocaleDateString() : 'N/A'}
                           </span>
                         </div>
@@ -14984,57 +15629,55 @@ const StaffModule = ({ staff, setStaff, users, payroll, setPayroll, form, setFor
 
                       {showSubjects && member.subjects?.length > 0 && (
                         <div className="mt-2">
-                          <span className="text-sm text-gray-500">Subjects:</span>
+                          <span className="text-xs text-gray-500">Subjects:</span>
                           <div className="flex flex-wrap gap-1 mt-1">
-                            {member.subjects.map((subject, idx) => (
+                            {member.subjects.slice(0, 3).map((subject, idx) => (
                               <span
                                 key={`${member.id}-subject-${idx}`}
-                                className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded-full text-xs"
+                                className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-xs"
                               >
                                 {subject}
                               </span>
                             ))}
+                            {member.subjects.length > 3 && (
+                              <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
+                                +{member.subjects.length - 3} more
+                              </span>
+                            )}
                           </div>
                         </div>
                       )}
 
-                      <div className="mt-2 text-sm">
+                      <div className="mt-2 pt-2 border-t text-sm">
                         <span className="text-gray-500">Salary:</span>
                         <span className="ml-2 font-medium text-green-600">
-                          KES {((member.salary?.basic || 0) + (member.salary?.house || 0) + (member.salary?.transport || 0)).toLocaleString()}
+                          {formatCurrency(totalSalary)}
                         </span>
+                        {member.salary && (member.salary.basic > 0 || member.salary.house > 0 || member.salary.transport > 0) && (
+                          <span className="text-xs text-gray-400 ml-2">
+                            (Basic: {formatCurrency(member.salary.basic || 0)})
+                          </span>
+                        )}
                       </div>
                     </div>
 
+                    {/* Action Buttons */}
                     {(canEdit || canDelete) && (
-                      <div className="flex space-x-2 ml-4">
+                      <div className="flex flex-col space-y-1 ml-2">
                         {canEdit && (
                           <button
-                            onClick={() => {
-                              setForm({
-                                ...member,
-                                employmentDate: member.employmentDate 
-                                  ? new Date(member.employmentDate).toISOString().split('T')[0]
-                                  : new Date().toISOString().split('T')[0],
-                                salary: member.salary || { basic: 0, house: 0, transport: 0 }
-                              });
-                              setEditingId(member.id);
-                            }}
+                            onClick={() => handleEdit(member)}
                             className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                            title="Edit"
+                            title="Edit Staff"
                           >
                             <i className="fas fa-edit"></i>
                           </button>
                         )}
                         {canDelete && (
                           <button
-                            onClick={() => {
-                              if (window.confirm(`Are you sure you want to delete ${member.user?.firstName} ${member.user?.lastName}?`)) {
-                                onDelete(member.id);
-                              }
-                            }}
+                            onClick={() => handleDelete(member.id, getUserDisplayName(member))}
                             className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                            title="Delete"
+                            title="Delete Staff"
                           >
                             <i className="fas fa-trash"></i>
                           </button>
@@ -15043,16 +15686,45 @@ const StaffModule = ({ staff, setStaff, users, payroll, setPayroll, form, setFor
                     )}
                   </div>
                 </div>
-              ))
-            )}
-          </div>
+              );
+            })
+          )}
         </div>
+
+        {/* Footer Summary */}
+        {staff.length > 0 && (
+          <div className="px-6 py-3 bg-gray-50 border-t flex flex-wrap justify-between items-center text-sm text-gray-500">
+            <div className="flex flex-wrap gap-4">
+              <span>👥 Total: <span className="font-medium">{staff.length}</span></span>
+              <span>👨‍🏫 Teaching: <span className="font-medium text-green-600">{staff.filter(s => s.staffType === 'TEACHING').length}</span></span>
+              <span>👔 Non-Teaching: <span className="font-medium text-blue-600">{staff.filter(s => s.staffType === 'NON_TEACHING').length}</span></span>
+              <span>🏢 Departments: <span className="font-medium">{uniqueDepartments.length}</span></span>
+            </div>
+            <div className="text-xs text-gray-400">
+              Last updated: {new Date().toLocaleString()}
+            </div>
+          </div>
+        )}
       </div>
 
+      {/* Payroll Form Modal */}
       {showPayrollForm && canProcessPayroll && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
-            <h3 className="text-xl font-bold mb-4">Process Monthly Payroll</h3>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold flex items-center gap-2">
+                <i className="fas fa-calculator text-green-600"></i>
+                Process Monthly Payroll
+              </h3>
+              <button 
+                onClick={() => setShowPayrollForm(false)} 
+                className="text-gray-500 hover:text-gray-700"
+                disabled={loading}
+              >
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+            
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <SelectField
@@ -15073,6 +15745,7 @@ const StaffModule = ({ staff, setStaff, users, payroll, setPayroll, form, setFor
                     { value: 11, label: 'November' },
                     { value: 12, label: 'December' }
                   ]}
+                  disabled={loading}
                 />
                 <InputField
                   label="Year"
@@ -15081,27 +15754,43 @@ const StaffModule = ({ staff, setStaff, users, payroll, setPayroll, form, setFor
                   onChange={(e) => setPayrollForm({...payrollForm, year: parseInt(e.target.value)})}
                   min="2020"
                   max="2030"
+                  disabled={loading}
                 />
               </div>
 
-              <div className="bg-yellow-50 p-4 rounded-lg">
-                <p className="text-sm text-yellow-800 flex items-start">
-                  <i className="fas fa-info-circle mt-0.5 mr-2"></i>
-                  This will process payroll for all {staff.length} staff members for {payrollForm.month}/{payrollForm.year}.
-                </p>
+              <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+                <div className="flex items-start">
+                  <i className="fas fa-info-circle text-yellow-600 mt-0.5 mr-2"></i>
+                  <div>
+                    <p className="text-sm text-yellow-800 font-medium">Payroll Summary</p>
+                    <p className="text-sm text-yellow-700 mt-1">
+                      Processing payroll for <span className="font-bold">{staff.length}</span> staff members for 
+                      <span className="font-bold"> {new Date(payrollForm.year, payrollForm.month - 1).toLocaleString('default', { month: 'long' })} {payrollForm.year}</span>.
+                    </p>
+                    <p className="text-xs text-yellow-600 mt-2">
+                      <i className="fas fa-shield-alt mr-1"></i>
+                      This will create expense records for salaries and deductions.
+                    </p>
+                  </div>
+                </div>
               </div>
 
               <div className="flex space-x-3 pt-2">
                 <button
                   onClick={processPayroll}
-                  className="flex-1 bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center"
-                  disabled={loading}
+                  className="flex-1 bg-green-600 text-white py-2.5 px-4 rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center disabled:opacity-50"
+                  disabled={loading || staff.length === 0}
                 >
-                  {loading ? <><i className="fas fa-spinner fa-spin mr-2"></i>Processing...</> : <><i className="fas fa-calculator mr-2"></i>Process Payroll</>}
+                  {loading ? (
+                    <><i className="fas fa-spinner fa-spin mr-2"></i>Processing...</>
+                  ) : (
+                    <><i className="fas fa-calculator mr-2"></i>Process Payroll</>
+                  )}
                 </button>
                 <button
                   onClick={() => setShowPayrollForm(false)}
-                  className="bg-gray-500 text-white py-2 px-4 rounded-lg hover:bg-gray-600 transition-colors"
+                  className="bg-gray-500 text-white py-2.5 px-6 rounded-lg hover:bg-gray-600 transition-colors"
+                  disabled={loading}
                 >
                   Cancel
                 </button>
@@ -15113,7 +15802,6 @@ const StaffModule = ({ staff, setStaff, users, payroll, setPayroll, form, setFor
     </div>
   );
 };
-
 // ==================== FIXED LIBRARY MODULE WITH SCHOOLID ====================
 const LibraryModule = ({ 
   books, setBooks, borrows, setBorrows, students, 
@@ -19661,11 +20349,251 @@ const OtherIncomeModule = ({ payments, setPayments, dateRange, setDateRange, use
   );
 };
 
-// ==================== MESSAGE MODULE ====================
-const MessageModule = ({ form, setForm, onSubmit, classes, user }) => {
+// ==================== FIXED MESSAGE MODULE ====================
+const MessageModule = ({ 
+  form, 
+  setForm, 
+  onSubmit, 
+  classes, 
+  user,
+  students = [], 
+  staff = [], 
+  parents = [], 
+  users = [],
+  currentSchool = null 
+}) => {
+  const [loading, setLoading] = useState(false);
+  const [previewRecipients, setPreviewRecipients] = useState([]);
+  const [showPreview, setShowPreview] = useState(false);
+  const [recipientCount, setRecipientCount] = useState(0);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
   // Determine user permissions
   const canSendMessages = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'CLASS_TEACHER'].includes(user?.role);
-  
+
+  // ==================== GET RECIPIENTS ====================
+  const getRecipients = (recipientType, classId = null) => {
+    const recipients = [];
+
+    switch(recipientType) {
+      case 'ALL':
+        // Add all students
+        (students || []).forEach(s => {
+          recipients.push({
+            id: s.id,
+            name: `${s.firstName || ''} ${s.lastName || ''}`.trim() || 'Unknown Student',
+            type: 'student',
+            email: s.email || '',
+            phone: s.phone || '',
+            admission: s.admissionNumber || 'N/A'
+          });
+        });
+        // Add all staff
+        (staff || []).forEach(s => {
+          const userData = s.User || {};
+          recipients.push({
+            id: s.userId || s.id,
+            name: `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Unknown Staff',
+            type: 'staff',
+            email: userData.email || '',
+            phone: userData.phone || '',
+            role: s.jobTitle || s.staffType || 'Staff'
+          });
+        });
+        break;
+
+      case 'STUDENTS':
+        (students || []).forEach(s => {
+          recipients.push({
+            id: s.id,
+            name: `${s.firstName || ''} ${s.lastName || ''}`.trim() || 'Unknown Student',
+            type: 'student',
+            email: s.email || '',
+            phone: s.phone || '',
+            admission: s.admissionNumber || 'N/A'
+          });
+        });
+        break;
+
+      case 'PARENTS':
+        // Try to get parents from parents array
+        (parents || []).forEach(p => {
+          const userData = p.User || {};
+          recipients.push({
+            id: p.userId || p.id,
+            name: `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Unknown Parent',
+            type: 'parent',
+            email: userData.email || '',
+            phone: userData.phone || ''
+          });
+        });
+        // If no parents in parents array, try users with PARENT role
+        if (recipients.length === 0 && users) {
+          (users || []).filter(u => u.role === 'PARENT').forEach(u => {
+            recipients.push({
+              id: u.id,
+              name: `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Unknown Parent',
+              type: 'parent',
+              email: u.email || '',
+              phone: u.phone || ''
+            });
+          });
+        }
+        break;
+
+      case 'STAFF':
+        // Try to get staff from staff array
+        (staff || []).forEach(s => {
+          const userData = s.User || {};
+          recipients.push({
+            id: s.userId || s.id,
+            name: `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Unknown Staff',
+            type: 'staff',
+            email: userData.email || '',
+            phone: userData.phone || '',
+            role: s.jobTitle || s.staffType || 'Staff'
+          });
+        });
+        // If no staff in staff array, try users with staff roles
+        if (recipients.length === 0 && users) {
+          const staffRoles = ['TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER', 'SENIOR_TEACHER', 
+                              'ACCOUNTANT', 'LIBRARIAN', 'NURSE', 'MATRON', 'TRANSPORT_MANAGER', 
+                              'HR_MANAGER', 'HR', 'LECTURER', 'SENIOR_LECTURER', 'PROFESSOR',
+                              'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SCHOOL_ADMIN'];
+          (users || []).filter(u => staffRoles.includes(u.role)).forEach(u => {
+            recipients.push({
+              id: u.id,
+              name: `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Unknown Staff',
+              type: 'staff',
+              email: u.email || '',
+              phone: u.phone || '',
+              role: u.role || 'Staff'
+            });
+          });
+        }
+        break;
+
+      case 'CLASS':
+        if (classId) {
+          (students || []).filter(s => s.classId === classId).forEach(s => {
+            recipients.push({
+              id: s.id,
+              name: `${s.firstName || ''} ${s.lastName || ''}`.trim() || 'Unknown Student',
+              type: 'student',
+              email: s.email || '',
+              phone: s.phone || '',
+              admission: s.admissionNumber || 'N/A'
+            });
+          });
+        }
+        break;
+
+      default:
+        break;
+    }
+
+    return recipients;
+  };
+
+  // ==================== UPDATE PREVIEW ====================
+  useEffect(() => {
+    const recipients = getRecipients(form.recipientType, form.classId);
+    setPreviewRecipients(recipients);
+    setRecipientCount(recipients.length);
+  }, [form.recipientType, form.classId, students, staff, parents, users]);
+
+  // ==================== HANDLE SUBMIT ====================
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+    setLoading(true);
+
+    try {
+      // Validate message content
+      if (!form.content || form.content.trim() === '') {
+        setError('Please enter a message');
+        setLoading(false);
+        return;
+      }
+
+      // Validate subject for emails
+      if (form.type === 'EMAIL' && (!form.subject || form.subject.trim() === '')) {
+        setError('Please enter a subject for the email');
+        setLoading(false);
+        return;
+      }
+
+      // Get recipients
+      const recipients = getRecipients(form.recipientType, form.classId);
+      
+      console.log('📋 Recipients found:', recipients.length);
+      console.log('📋 First recipient:', recipients[0]);
+
+      if (recipients.length === 0) {
+        setError('No recipients found for the selected group. Please check your selection.');
+        setLoading(false);
+        return;
+      }
+
+      // Build message payload - MATCH THE BACKEND EXPECTED FORMAT
+      const messageData = {
+        type: form.type,
+        subject: form.type === 'EMAIL' ? form.subject : '',
+        content: form.content,
+        recipients: recipients.map(r => ({
+          id: r.id,
+          type: r.type,
+          name: r.name,
+          email: r.email,
+          phone: r.phone
+        })),
+        recipientType: form.recipientType,
+        classId: form.classId || null,
+        sendNow: true,
+        schoolId: currentSchool?.id
+      };
+
+      console.log('📤 Sending message payload:', {
+        type: messageData.type,
+        recipients: messageData.recipients.length,
+        firstRecipient: messageData.recipients[0]
+      });
+
+      // Call the onSubmit handler
+      await onSubmit(e, messageData);
+
+      // Reset form on success
+      setForm({
+        type: 'SMS',
+        subject: '',
+        content: '',
+        recipientType: 'ALL',
+        classId: null,
+        sendNow: true
+      });
+
+      setSuccess(`✅ Message sent to ${recipients.length} recipient(s) successfully!`);
+      setTimeout(() => setSuccess(''), 5000);
+
+    } catch (error) {
+      console.error('❌ Send message error:', error);
+      setError(error.response?.data?.message || error.message || 'Failed to send message');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==================== TOGGLE PREVIEW ====================
+  const togglePreview = () => {
+    const recipients = getRecipients(form.recipientType, form.classId);
+    setPreviewRecipients(recipients);
+    setRecipientCount(recipients.length);
+    setShowPreview(!showPreview);
+  };
+
+  // ==================== RENDER ====================
   if (!canSendMessages) {
     return (
       <div className="bg-white p-8 rounded-xl shadow-sm text-center">
@@ -19677,21 +20605,258 @@ const MessageModule = ({ form, setForm, onSubmit, classes, user }) => {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold">SMS & Email</h2>
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold">SMS & Email</h2>
+        <div className="flex items-center space-x-3">
+          <span className="text-sm text-gray-500">
+            <i className="fas fa-users mr-1"></i>
+            {recipientCount} recipient(s)
+          </span>
+          <button
+            type="button"
+            onClick={togglePreview}
+            className="text-indigo-600 hover:text-indigo-800 text-sm font-medium"
+          >
+            <i className="fas fa-eye mr-1"></i>
+            {showPreview ? 'Hide Preview' : 'Preview Recipients'}
+          </button>
+        </div>
+      </div>
+
+      {/* Success Message */}
+      {success && (
+        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center justify-between">
+          <span><i className="fas fa-check-circle mr-2"></i>{success}</span>
+          <button onClick={() => setSuccess('')} className="text-green-500 hover:text-green-700">
+            <i className="fas fa-times"></i>
+          </button>
+        </div>
+      )}
+
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
+          <span><i className="fas fa-exclamation-circle mr-2"></i>{error}</span>
+          <button onClick={() => setError('')} className="text-red-500 hover:text-red-700">
+            <i className="fas fa-times"></i>
+          </button>
+        </div>
+      )}
+
       <div className="bg-white p-6 rounded-xl shadow-sm max-w-2xl">
-        <form onSubmit={onSubmit} className="space-y-4">
-          <SelectField label="Type" value={form.type} onChange={(e) => setForm({...form, type: e.target.value})} options={['SMS', 'EMAIL']} />
-          <SelectField label="Recipients" value={form.recipientType} onChange={(e) => setForm({...form, recipientType: e.target.value})} options={['ALL', 'STUDENTS', 'PARENTS', 'STAFF', 'CLASS']} />
-          {form.recipientType === 'CLASS' && <SelectField label="Class" value={form.classId} onChange={(e) => setForm({...form, classId: e.target.value})} options={classes.map(c => ({ value: c.id, label: c.name }))} />}
-          {form.type === 'EMAIL' && <InputField label="Subject" value={form.subject} onChange={(e) => setForm({...form, subject: e.target.value})} required />}
-          <div><label className="block text-sm font-medium mb-1">Message</label><textarea className="w-full border rounded-lg p-3 h-32" value={form.content} onChange={(e) => setForm({...form, content: e.target.value})} required /></div>
-          <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700">Send Message</button>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Message Type */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Message Type *
+            </label>
+            <select
+              value={form.type}
+              onChange={(e) => setForm({...form, type: e.target.value})}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+              disabled={loading}
+            >
+              <option value="SMS">📱 SMS (Text Message)</option>
+              <option value="EMAIL">📧 Email</option>
+            </select>
+          </div>
+
+          {/* Recipients */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Recipients *
+            </label>
+            <select
+              value={form.recipientType}
+              onChange={(e) => setForm({...form, recipientType: e.target.value, classId: null})}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+              disabled={loading}
+            >
+              <option value="ALL">👥 All (Students + Staff)</option>
+              <option value="STUDENTS">🎓 All Students</option>
+              <option value="PARENTS">👨‍👩‍👦 Parents</option>
+              <option value="STAFF">👔 Staff</option>
+              <option value="CLASS">🏫 Specific Class</option>
+            </select>
+          </div>
+
+          {/* Class Selection */}
+          {form.recipientType === 'CLASS' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Select Class *
+              </label>
+              <select
+                value={form.classId || ''}
+                onChange={(e) => setForm({...form, classId: e.target.value})}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                disabled={loading}
+                required={form.recipientType === 'CLASS'}
+              >
+                <option value="">-- Select Class --</option>
+                {classes.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({students?.filter(s => s.classId === c.id).length || 0} students)
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Email Subject */}
+          {form.type === 'EMAIL' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Email Subject *
+              </label>
+              <input
+                type="text"
+                value={form.subject}
+                onChange={(e) => setForm({...form, subject: e.target.value})}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                placeholder="Enter email subject"
+                required
+                disabled={loading}
+              />
+            </div>
+          )}
+
+          {/* Message Content */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Message *
+            </label>
+            <textarea
+              value={form.content}
+              onChange={(e) => setForm({...form, content: e.target.value})}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+              rows="4"
+              placeholder={
+                form.type === 'SMS' 
+                  ? 'Type your SMS message here... (160 characters recommended)'
+                  : 'Type your email message here...'
+              }
+              required
+              disabled={loading}
+            />
+            {form.type === 'SMS' && (
+              <p className="text-xs text-gray-500 mt-1">
+                <i className="fas fa-info-circle mr-1"></i>
+                SMS messages are limited to 160 characters per segment. 
+                {form.content && form.content.length > 160 && ' Longer messages will be split into multiple segments.'}
+                <span className="ml-2 font-medium">
+                  {form.content?.length || 0} characters
+                </span>
+              </p>
+            )}
+          </div>
+
+          {/* Recipient Summary */}
+          <div className="flex items-center justify-between bg-gray-50 p-3 rounded-lg">
+            <div>
+              <span className="text-sm text-gray-600">
+                <i className="fas fa-users mr-2"></i>
+                <span className="font-medium">{recipientCount}</span> recipient(s) will receive this message
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={togglePreview}
+              className="text-indigo-600 hover:text-indigo-800 text-sm font-medium"
+              disabled={loading}
+            >
+              <i className={`fas fa-chevron-${showPreview ? 'up' : 'down'} mr-1`}></i>
+              {showPreview ? 'Hide List' : 'View List'}
+            </button>
+          </div>
+
+          {/* Recipient Preview */}
+          {showPreview && (
+            <div className="border rounded-lg max-h-60 overflow-y-auto">
+              {previewRecipients.length === 0 ? (
+                <div className="p-4 text-center text-gray-500">
+                  <i className="fas fa-users text-2xl text-gray-300 mb-2 block"></i>
+                  <p>No recipients found</p>
+                  <p className="text-xs text-gray-400 mt-1">Try selecting a different group</p>
+                </div>
+              ) : (
+                <table className="w-full">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">#</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Contact</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {previewRecipients.slice(0, 50).map((recipient, index) => (
+                      <tr key={`${recipient.id}-${index}`} className="hover:bg-gray-50">
+                        <td className="px-4 py-2 text-sm text-gray-500">{index + 1}</td>
+                        <td className="px-4 py-2 text-sm font-medium">{recipient.name}</td>
+                        <td className="px-4 py-2">
+                          <span className={`px-2 py-1 rounded-full text-xs ${
+                            recipient.type === 'student' ? 'bg-blue-100 text-blue-800' :
+                            recipient.type === 'parent' ? 'bg-green-100 text-green-800' :
+                            'bg-purple-100 text-purple-800'
+                          }`}>
+                            {recipient.type}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 text-sm text-gray-500">
+                          {form.type === 'EMAIL' 
+                            ? (recipient.email || 'No email')
+                            : (recipient.phone || 'No phone')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  {previewRecipients.length > 50 && (
+                    <tfoot>
+                      <tr>
+                        <td colSpan="4" className="px-4 py-2 text-center text-sm text-gray-500 bg-gray-50">
+                          + {previewRecipients.length - 50} more recipient(s)
+                        </td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              )}
+            </div>
+          )}
+
+          {/* Send Button */}
+          <button
+            type="submit"
+            className="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center disabled:opacity-50"
+            disabled={loading || recipientCount === 0}
+          >
+            {loading ? (
+              <>
+                <i className="fas fa-spinner fa-spin mr-2"></i>
+                Sending...
+              </>
+            ) : (
+              <>
+                <i className={`fas fa-${form.type === 'SMS' ? 'sms' : 'envelope'} mr-2`}></i>
+                Send {form.type} to {recipientCount} Recipient{recipientCount !== 1 ? 's' : ''}
+              </>
+            )}
+          </button>
+
+          {/* Footer */}
+          <div className="text-center text-xs text-gray-400 border-t pt-3">
+            <p>
+              <i className="fas fa-shield-alt mr-1"></i>
+              Messages are sent securely through the school communication system.
+              {form.type === 'SMS' && ' Standard SMS rates may apply.'}
+            </p>
+          </div>
         </form>
       </div>
     </div>
   );
 };
-
 // ==================== FACULTIES MODULE ====================
 const FacultiesModule = ({ faculties, setFaculties, form, setForm, handleCreate, handleUpdate, handleDelete, user }) => {
   const [showForm, setShowForm] = useState(false);
@@ -22228,10 +23393,11 @@ const FeesModule = ({
   courses, programs, 
   departments, faculties,
   form, setForm, onCreate, onDelete,
-  handleUpdate, // Add this prop for editing
+  handleUpdate,
   currentSchool, user,
   admissionNumber: propAdmissionNumber 
 }) => {
+  // ==================== STATE ====================
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [selectedFaculty, setSelectedFaculty] = useState('');
@@ -22241,6 +23407,8 @@ const FeesModule = ({
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [allocationType, setAllocationType] = useState('AUTO');
+  const [allocationMessage, setAllocationMessage] = useState('');
   
   // Module options for TVET
   const moduleOptions = [
@@ -22262,6 +23430,7 @@ const FeesModule = ({
   const [admissionNumber, setAdmissionNumber] = useState(propAdmissionNumber);
   const [admissionMessage, setAdmissionMessage] = useState('');
 
+  // ==================== API INSTANCE ====================
   const api = axios.create({
     baseURL: 'http://localhost:5000/api',
     headers: { 'Content-Type': 'application/json' }
@@ -22273,6 +23442,7 @@ const FeesModule = ({
     return config;
   });
 
+  // ==================== PERMISSIONS ====================
   const isStudent = user?.role === 'STUDENT';
   const isParent = user?.role === 'PARENT';
   const canManage = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
@@ -22280,6 +23450,7 @@ const FeesModule = ({
   const canEdit = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
   const canView = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'ACCOUNTANT', 'PARENT', 'STUDENT'].includes(user?.role);
 
+  // ==================== SCHOOL TYPE DETECTION ====================
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
   const isUniversity = schoolCategory === 'UNIVERSITY';
   const isTVET = schoolCategory === 'COLLEGE_TVET';
@@ -22289,6 +23460,15 @@ const FeesModule = ({
   const filteredDepartments = departments?.filter(d => d.facultyId === selectedFaculty) || [];
   const filteredCourses = courses?.filter(c => c.departmentId === selectedDepartment) || [];
   const filteredPrograms = programs?.filter(p => p.departmentId === selectedDepartment) || [];
+
+  // ==================== HELPER FUNCTIONS ====================
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-KE', {
+      style: 'currency',
+      currency: 'KES',
+      minimumFractionDigits: 0
+    }).format(amount || 0);
+  };
 
   const getFeeTitle = () => {
     if (isUniversity) return 'University Fee Management';
@@ -22306,13 +23486,45 @@ const FeesModule = ({
       ];
     }
     if (isTVET) {
-      return moduleOptions.slice(1); // Remove the first empty option
+      return moduleOptions.slice(1);
     }
     return [
       { value: 'Term 1', label: 'Term 1' },
       { value: 'Term 2', label: 'Term 2' },
       { value: 'Term 3', label: 'Term 3' }
     ];
+  };
+
+  const getFeeCategories = () => {
+    if (isUniversity) return ['TUITION', 'REGISTRATION', 'LIBRARY', 'LABORATORY', 'EXAMINATION', 'GRADUATION', 'OTHER'];
+    if (isTVET) return ['TUITION', 'REGISTRATION', 'WORKSHOP', 'MATERIALS', 'ASSESSMENT', 'ATTACHMENT', 'GRADUATION', 'OTHER'];
+    return ['TUITION', 'TRANSPORT', 'BOARDING', 'LIBRARY', 'ACTIVITY', 'UNIFORM', 'EXAMINATION', 'OTHER'];
+  };
+
+  const getProgramName = (programId) => {
+    if (!programId) return 'N/A';
+    const program = programs?.find(p => p.id === programId);
+    return program ? program.name : 'N/A';
+  };
+
+  const getCourseName = (courseId) => {
+    if (!courseId) return 'N/A';
+    const course = courses?.find(c => c.id === courseId);
+    return course ? course.name : 'N/A';
+  };
+
+  const getClassName = (classId) => {
+    if (!classId) return 'N/A';
+    const classObj = classes?.find(c => c.id === classId);
+    return classObj ? classObj.name : 'N/A';
+  };
+
+  const getModuleDisplay = (fee) => {
+    if (isTVET) {
+      if (fee.module) return `Module ${fee.module}`;
+      if (fee.term && !isNaN(parseInt(fee.term))) return `Module ${fee.term}`;
+    }
+    return fee.term || 'N/A';
   };
 
   // ==================== HANDLE EDIT ====================
@@ -22322,7 +23534,6 @@ const FeesModule = ({
       return;
     }
     
-    // Set the form with the fee data
     setForm({
       name: fee.name || '',
       amount: fee.amount || '',
@@ -22345,7 +23556,8 @@ const FeesModule = ({
       isRecurring: fee.isRecurring || false
     });
     
-    // Set the selected dropdowns for UI
+    setAllocationType(fee.allocationType || 'AUTO');
+    
     if (isUniversity && fee.facultyId) setSelectedFaculty(fee.facultyId);
     if (isUniversity && fee.departmentId) setSelectedDepartment(fee.departmentId);
     if (isUniversity && fee.courseId) setSelectedCourse(fee.courseId);
@@ -22404,8 +23616,10 @@ const FeesModule = ({
     
     setLoading(true);
     setApiError('');
+    setAllocationMessage('');
     
     try {
+      // Validation
       if (isUniversity && !form.courseId) { 
         alert('Please select a course'); 
         setLoading(false);
@@ -22434,7 +23648,12 @@ const FeesModule = ({
         return;
       }
       
-      const submitData = { ...form };
+      const submitData = { 
+        ...form,
+        allocationType: allocationType
+      };
+      
+      // Clean up empty UUID fields
       const uuidFields = ['classId', 'courseId', 'programId', 'facultyId', 'departmentId', 'transportRouteId'];
       uuidFields.forEach(field => { 
         if (submitData[field] === '') submitData[field] = null; 
@@ -22458,7 +23677,14 @@ const FeesModule = ({
       } else {
         // Create new fee
         response = await onCreate(e, submitData);
-        alert('✅ Fee created successfully!');
+        
+        // Show allocation message based on type
+        if (allocationType === 'AUTO') {
+          setAllocationMessage('✅ Fee created and AUTO-allocated to all eligible students!');
+        } else {
+          setAllocationMessage('✅ Fee created successfully! Use the Fee Allocation module to manually assign to students.');
+        }
+        alert(setAllocationMessage);
       }
       
       // Reset form
@@ -22468,6 +23694,7 @@ const FeesModule = ({
       setSelectedDepartment('');
       setSelectedCourse('');
       setSelectedProgram('');
+      setAllocationType('AUTO');
       
     } catch (error) {
       console.error('Error saving fee:', error);
@@ -22484,6 +23711,8 @@ const FeesModule = ({
     setSelectedDepartment('');
     setSelectedCourse('');
     setSelectedProgram('');
+    setAllocationType('AUTO');
+    setAllocationMessage('');
     setForm({
       name: '', amount: '', 
       term: isUniversity ? 'Semester 1' : (isTVET ? '1' : 'Term 1'),
@@ -22500,38 +23729,7 @@ const FeesModule = ({
     });
   };
 
-  const getFeeCategories = () => {
-    if (isUniversity) return ['TUITION', 'REGISTRATION', 'LIBRARY', 'LABORATORY', 'EXAMINATION', 'GRADUATION', 'OTHER'];
-    if (isTVET) return ['TUITION', 'REGISTRATION', 'WORKSHOP', 'MATERIALS', 'ASSESSMENT', 'ATTACHMENT', 'GRADUATION', 'OTHER'];
-    return ['TUITION', 'TRANSPORT', 'BOARDING', 'LIBRARY', 'ACTIVITY', 'UNIFORM', 'EXAMINATION', 'OTHER'];
-  };
-
-  const getProgramName = (programId) => {
-    if (!programId) return 'N/A';
-    const program = programs?.find(p => p.id === programId);
-    return program ? program.name : 'N/A';
-  };
-
-  const getCourseName = (courseId) => {
-    if (!courseId) return 'N/A';
-    const course = courses?.find(c => c.id === courseId);
-    return course ? course.name : 'N/A';
-  };
-
-  const getClassName = (classId) => {
-    if (!classId) return 'N/A';
-    const classObj = classes?.find(c => c.id === classId);
-    return classObj ? classObj.name : 'N/A';
-  };
-
-  const getModuleDisplay = (fee) => {
-    if (isTVET) {
-      if (fee.module) return `Module ${fee.module}`;
-      if (fee.term && !isNaN(parseInt(fee.term))) return `Module ${fee.term}`;
-    }
-    return fee.term || 'N/A';
-  };
-
+  // ==================== RENDER ====================
   if (!canView) {
     return (
       <div className="bg-white p-8 rounded-xl shadow-sm text-center">
@@ -22552,12 +23750,19 @@ const FeesModule = ({
         </div>
       )}
       
+      {allocationMessage && (
+        <div className={`p-4 rounded-lg ${allocationType === 'AUTO' ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-blue-50 border border-blue-200 text-blue-700'}`}>
+          <i className={`fas ${allocationType === 'AUTO' ? 'fa-check-circle' : 'fa-info-circle'} mr-2`}></i>
+          {allocationMessage}
+        </div>
+      )}
+      
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">{getFeeTitle()}</h2>
         {canManage && (
           <button 
             onClick={() => {
-              handleCancel(); // Reset form
+              handleCancel();
               setShowForm(true);
             }} 
             className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center"
@@ -22568,7 +23773,7 @@ const FeesModule = ({
         )}
       </div>
 
-      {/* Create/Edit Fee Form */}
+      {/* ==================== CREATE/EDIT FEE FORM ==================== */}
       {showForm && canManage && (
         <div className="bg-white p-6 rounded-xl shadow-sm border-2 border-indigo-100">
           <h3 className="text-lg font-semibold mb-4">
@@ -22585,7 +23790,7 @@ const FeesModule = ({
                 disabled={loading} 
               />
               
-              {/* UNIVERSITY FIELDS */}
+              {/* ===== UNIVERSITY FIELDS ===== */}
               {isUniversity && (
                 <>
                   <SelectField 
@@ -22657,7 +23862,7 @@ const FeesModule = ({
                 </>
               )}
               
-              {/* TVET FIELDS */}
+              {/* ===== TVET FIELDS ===== */}
               {isTVET && (
                 <>
                   <SelectField 
@@ -22715,7 +23920,7 @@ const FeesModule = ({
                 </>
               )}
               
-              {/* PRIMARY/SECONDARY FIELDS */}
+              {/* ===== PRIMARY/SECONDARY FIELDS ===== */}
               {isPrimarySecondary && (
                 <>
                   <SelectField 
@@ -22741,7 +23946,7 @@ const FeesModule = ({
                 </>
               )}
               
-              {/* Common Fields */}
+              {/* ===== COMMON FIELDS ===== */}
               <InputField 
                 label="Amount (KES) *" 
                 type="number" 
@@ -22789,16 +23994,84 @@ const FeesModule = ({
                 ]} 
                 disabled={loading} 
               />
-              
-              <SelectField 
-                label="Allocation Type" 
-                value={form.allocationType || 'AUTO'} 
-                onChange={(e) => setForm({...form, allocationType: e.target.value})} 
-                options={['AUTO', 'MANUAL']} 
-                disabled={loading} 
-              />
             </div>
             
+            {/* ===== ALLOCATION TYPE SELECTOR ===== */}
+            <div className="border-t pt-4 mt-2">
+              <label className="block text-sm font-medium text-gray-700 mb-3">
+                Allocation Type
+              </label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div 
+                  className={`border rounded-lg p-4 cursor-pointer transition-all ${
+                    allocationType === 'AUTO' 
+                      ? 'border-green-500 bg-green-50 ring-2 ring-green-500' 
+                      : 'border-gray-200 hover:border-green-300'
+                  }`}
+                  onClick={() => setAllocationType('AUTO')}
+                >
+                  <div className="flex items-start">
+                    <input
+                      type="radio"
+                      value="AUTO"
+                      checked={allocationType === 'AUTO'}
+                      onChange={(e) => setAllocationType(e.target.value)}
+                      className="mt-1 mr-3"
+                    />
+                    <div>
+                      <div className="font-medium text-green-700">🔄 Auto Allocation</div>
+                      <p className="text-sm text-gray-600 mt-1">
+                        Fee is automatically assigned to <strong>ALL</strong> eligible students 
+                        (all students in the selected program/course/class)
+                      </p>
+                      <div className="mt-2 text-xs text-green-600 bg-green-100 px-2 py-1 rounded inline-block">
+                        No manual action needed
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <div 
+                  className={`border rounded-lg p-4 cursor-pointer transition-all ${
+                    allocationType === 'MANUAL' 
+                      ? 'border-yellow-500 bg-yellow-50 ring-2 ring-yellow-500' 
+                      : 'border-gray-200 hover:border-yellow-300'
+                  }`}
+                  onClick={() => setAllocationType('MANUAL')}
+                >
+                  <div className="flex items-start">
+                    <input
+                      type="radio"
+                      value="MANUAL"
+                      checked={allocationType === 'MANUAL'}
+                      onChange={(e) => setAllocationType(e.target.value)}
+                      className="mt-1 mr-3"
+                    />
+                    <div>
+                      <div className="font-medium text-yellow-700">✋ Manual Allocation</div>
+                      <p className="text-sm text-gray-600 mt-1">
+                        Fee is <strong>NOT</strong> automatically assigned. You must manually allocate 
+                        to specific students using the Fee Allocation module.
+                      </p>
+                      <div className="mt-2 text-xs text-yellow-600 bg-yellow-100 px-2 py-1 rounded inline-block">
+                        Requires manual assignment
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="mt-3 p-3 bg-gray-50 rounded-lg">
+                <p className="text-xs text-gray-500">
+                  <i className="fas fa-info-circle mr-1"></i>
+                  {allocationType === 'AUTO' 
+                    ? '🔹 Auto: Fee will appear on ALL students\' fee statements immediately after creation.' 
+                    : '🔸 Manual: Fee will NOT appear on any student\'s fee statement until you manually allocate it in the Fee Allocation module.'}
+                </p>
+              </div>
+            </div>
+            
+            {/* ===== OPTIONAL SETTINGS ===== */}
             <div className="flex items-center space-x-4">
               <label className="flex items-center space-x-2">
                 <input 
@@ -22825,10 +24098,11 @@ const FeesModule = ({
               </label>
             </div>
             
+            {/* ===== FORM ACTIONS ===== */}
             <div className="flex space-x-2 pt-4 border-t">
               <button 
                 type="submit" 
-                className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700" 
+                className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50" 
                 disabled={loading}
               >
                 {loading ? 'Saving...' : (editingId ? 'Update Fee' : 'Create Fee')}
@@ -22846,7 +24120,7 @@ const FeesModule = ({
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* ==================== DELETE CONFIRMATION MODAL ==================== */}
       {deleteConfirm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
@@ -22881,7 +24155,7 @@ const FeesModule = ({
         </div>
       )}
 
-      {/* Summary Cards */}
+      {/* ==================== SUMMARY CARDS ==================== */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-xl shadow-sm">
           <p className="text-sm text-gray-500">Total Fees</p>
@@ -22910,7 +24184,7 @@ const FeesModule = ({
         </div>
       </div>
 
-      {/* Fees Table */}
+      {/* ==================== FEES TABLE ==================== */}
       <div className="bg-white rounded-xl shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -23030,12 +24304,30 @@ const FeesModule = ({
           </table>
         </div>
       </div>
+      
+      {/* ==================== ALLOCATION INFO ==================== */}
+      <div className="bg-gray-50 rounded-xl p-4 text-sm text-gray-500 border border-gray-200">
+        <div className="flex items-start">
+          <i className="fas fa-info-circle text-indigo-500 mt-0.5 mr-2"></i>
+          <div>
+            <p className="font-medium text-gray-700">About Fee Allocation:</p>
+            <ul className="list-disc list-inside mt-1 space-y-1 text-xs">
+              <li><span className="font-medium text-green-600">Auto Allocation:</span> Fee is automatically assigned to all eligible students when created. No manual action needed.</li>
+              <li><span className="font-medium text-yellow-600">Manual Allocation:</span> Fee is not assigned automatically. Use the Fee Allocation module to assign to specific students.</li>
+              <li>Fees with <span className="font-medium">Auto Allocation</span> appear on student statements immediately.</li>
+              <li>Fees with <span className="font-medium">Manual Allocation</span> appear only after you manually allocate them.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
 
-// ==================== FEE ALLOCATION MODULE WITH STANDARD ACCOUNTING TERMS ====================
-const FeeAllocationModule = ({ fees, students, courses, classes, programs, currentSchool, user }) => {
+// ==================== FEE ALLOCATION MODULE (MANUAL ALLOCATION) ====================
+const FeeAllocationModule = ({ 
+  fees, students, courses, classes, programs, currentSchool, user 
+}) => {
   const [selectedProgram, setSelectedProgram] = useState('');
   const [selectedCourse, setSelectedCourse] = useState('');
   const [selectedClass, setSelectedClass] = useState('');
@@ -23047,8 +24339,7 @@ const FeeAllocationModule = ({ fees, students, courses, classes, programs, curre
   const [allocating, setAllocating] = useState(false);
   const [allocationResult, setAllocationResult] = useState(null);
   const [studentSearch, setStudentSearch] = useState('');
-  const [applyOverpayment, setApplyOverpayment] = useState(true);
-  const [selectedStudentForOverpayment, setSelectedStudentForOverpayment] = useState(null);
+  const [loading, setLoading] = useState(false);
 
   const api = axios.create({
     baseURL: 'http://localhost:5000/api',
@@ -23093,94 +24384,82 @@ const FeeAllocationModule = ({ fees, students, courses, classes, programs, curre
   // Load students when program/class is selected
   useEffect(() => {
     const loadStudents = async () => {
-      if (isTVET && selectedProgram) {
-        let filtered = students.filter(s => s.programId === selectedProgram);
-        if (selectedModule) {
-          filtered = filtered.filter(s => 
-            s.currentModule?.toString() === selectedModule || 
-            s.currentModule === `Module ${selectedModule}`
-          );
+      setLoading(true);
+      try {
+        let filtered = [];
+        
+        if (isTVET && selectedProgram) {
+          filtered = students.filter(s => s.programId === selectedProgram);
+          if (selectedModule) {
+            filtered = filtered.filter(s => 
+              s.currentModule?.toString() === selectedModule || 
+              s.currentModule === `Module ${selectedModule}`
+            );
+          }
+        } else if (isUniversity && selectedCourse) {
+          filtered = students.filter(s => s.courseId === selectedCourse);
+        } else if (isPrimarySecondary && selectedClass) {
+          filtered = students.filter(s => s.classId === selectedClass);
         }
         
-        // Fetch overpayment balances for each student
-        const studentsWithOverpayments = await Promise.all(filtered.map(async (student) => {
+        // Get balances for each student
+        const studentsWithBalances = await Promise.all(filtered.map(async (student) => {
+          // Get payments
           const paymentsRes = await api.get(`/payments?studentId=${student.id}`);
           const studentPayments = paymentsRes.data.payments || [];
           const totalPaid = studentPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
           
-          // Get applicable fees for this student
+          // Get applicable fees
           let applicableFees = [];
           if (isTVET && student.programId) {
             const feesRes = await api.get('/fees', { params: { programId: student.programId } });
             applicableFees = feesRes.data.fees || [];
-          }
-          const totalFees = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
-          const balance = totalFees - totalPaid;
-          
-          return {
-            ...student,
-            overpayment: balance < 0 ? Math.abs(balance) : 0,
-            hasOverpayment: balance < 0,
-            currentBalance: balance
-          };
-        }));
-        
-        setAvailableStudents(studentsWithOverpayments);
-      } else if (isUniversity && selectedCourse) {
-        const courseStudents = students.filter(s => s.courseId === selectedCourse);
-        const studentsWithOverpayments = await Promise.all(courseStudents.map(async (student) => {
-          const paymentsRes = await api.get(`/payments?studentId=${student.id}`);
-          const studentPayments = paymentsRes.data.payments || [];
-          const totalPaid = studentPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-          
-          let applicableFees = [];
-          if (isUniversity && student.courseId) {
+          } else if (isUniversity && student.courseId) {
             const feesRes = await api.get('/fees', { params: { courseId: student.courseId } });
             applicableFees = feesRes.data.fees || [];
-          }
-          const totalFees = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
-          const balance = totalFees - totalPaid;
-          
-          return {
-            ...student,
-            overpayment: balance < 0 ? Math.abs(balance) : 0,
-            hasOverpayment: balance < 0,
-            currentBalance: balance
-          };
-        }));
-        setAvailableStudents(studentsWithOverpayments);
-      } else if (isPrimarySecondary && selectedClass) {
-        const classStudents = students.filter(s => s.classId === selectedClass);
-        const studentsWithOverpayments = await Promise.all(classStudents.map(async (student) => {
-          const paymentsRes = await api.get(`/payments?studentId=${student.id}`);
-          const studentPayments = paymentsRes.data.payments || [];
-          const totalPaid = studentPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-          
-          let applicableFees = [];
-          if (student.classId) {
+          } else if (student.classId) {
             const feesRes = await api.get('/fees', { params: { classId: student.classId } });
             applicableFees = feesRes.data.fees || [];
           }
+          
           const totalFees = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
           const balance = totalFees - totalPaid;
           
+          // Check if this specific fee is already allocated to this student
+          const feeAllocated = selectedFee ? await checkFeeAllocated(student.id, selectedFee) : false;
+          
           return {
             ...student,
-            overpayment: balance < 0 ? Math.abs(balance) : 0,
-            hasOverpayment: balance < 0,
-            currentBalance: balance
+            totalFees,
+            totalPaid,
+            balance,
+            feeAllocated,
+            currentModule: student.currentModule || ''
           };
         }));
-        setAvailableStudents(studentsWithOverpayments);
-      } else {
-        setAvailableStudents([]);
+        
+        setAvailableStudents(studentsWithBalances);
+      } catch (error) {
+        console.error('Error loading students:', error);
+      } finally {
+        setLoading(false);
       }
     };
     
     loadStudents();
     setSelectedStudents([]);
     setSelectAll(false);
-  }, [selectedProgram, selectedCourse, selectedClass, selectedModule, students, isTVET, isUniversity, isPrimarySecondary]);
+  }, [selectedProgram, selectedCourse, selectedClass, selectedModule, students, isTVET, isUniversity, isPrimarySecondary, selectedFee]);
+
+  // Check if fee is already allocated
+  const checkFeeAllocated = async (studentId, feeId) => {
+    try {
+      const res = await api.get(`/students/${studentId}/fee-allocations`);
+      return res.data.allocations?.some(a => a.feeId === feeId && a.isActive !== false) || false;
+    } catch (error) {
+      return false;
+    }
+  };
 
   const filteredStudents = availableStudents.filter(student => 
     `${student.firstName} ${student.lastName}`.toLowerCase().includes(studentSearch.toLowerCase()) ||
@@ -23207,6 +24486,7 @@ const FeeAllocationModule = ({ fees, students, courses, classes, programs, curre
     }
   };
 
+  // ==================== MANUAL ALLOCATE ====================
   const handleAllocate = async () => {
     if (!canAllocate) {
       alert('You do not have permission to allocate fees');
@@ -23221,142 +24501,52 @@ const FeeAllocationModule = ({ fees, students, courses, classes, programs, curre
       return;
     }
 
+    // Check if any selected students already have this fee allocated
+    const alreadyAllocated = availableStudents
+      .filter(s => selectedStudents.includes(s.id) && s.feeAllocated)
+      .map(s => `${s.firstName} ${s.lastName}`);
+    
+    if (alreadyAllocated.length > 0) {
+      if (!window.confirm(
+        `⚠️ ${alreadyAllocated.length} student(s) already have this fee allocated:\n${alreadyAllocated.join('\n')}\n\nContinue anyway?`
+      )) {
+        return;
+      }
+    }
+
     setAllocating(true);
     try {
       const fee = fees.find(f => f.id === selectedFee);
-      const feeAmount = parseFloat(fee.amount);
       
-      let allocatedCount = 0;
-      let overpaymentAppliedCount = 0;
-      let totalAmountAllocated = 0;
-      let totalOverpaymentApplied = 0;
-      const results = [];
-
-      for (const studentId of selectedStudents) {
-        const student = availableStudents.find(s => s.id === studentId);
-        if (!student) continue;
-        
-        let amountToCharge = feeAmount;
-        let overpaymentUsed = 0;
-        
-        // If the student has overpayment and we're applying it
-        if (applyOverpayment && student.hasOverpayment && student.overpayment > 0) {
-          // Apply overpayment to reduce the fee amount
-          overpaymentUsed = Math.min(student.overpayment, feeAmount);
-          amountToCharge = feeAmount - overpaymentUsed;
-          totalOverpaymentApplied += overpaymentUsed;
-          overpaymentAppliedCount++;
-        }
-        
-        if (amountToCharge > 0) {
-          // Create a payment record for the amount to charge
-          const paymentData = {
-            studentId: student.id,
-            feeId: selectedFee,
-            amount: amountToCharge,
-            paymentMethod: 'AUTO_ALLOCATED',
-            overpaymentApplied: overpaymentUsed,
-            notes: `${fee.name}${overpaymentUsed > 0 ? ` (Overpayment applied: ${formatCurrency(overpaymentUsed)})` : ''}`,
-            date: new Date().toISOString(),
-            schoolId: currentSchool?.id,
-            recordedBy: user?.id,
-            studentName: `${student.firstName} ${student.lastName}`,
-            admissionNumber: student.admissionNumber
-          };
-          
-          await api.post('/payments', paymentData);
-          allocatedCount++;
-          totalAmountAllocated += amountToCharge;
-        } else if (amountToCharge === 0 && overpaymentUsed > 0) {
-          // Fee fully covered by overpayment - still need to record this
-          const paymentData = {
-            studentId: student.id,
-            feeId: selectedFee,
-            amount: 0,
-            paymentMethod: 'OVERPAYMENT',
-            overpaymentApplied: overpaymentUsed,
-            notes: `${fee.name} - Fully covered by overpayment`,
-            date: new Date().toISOString(),
-            schoolId: currentSchool?.id,
-            recordedBy: user?.id,
-            studentName: `${student.firstName} ${student.lastName}`,
-            admissionNumber: student.admissionNumber
-          };
-          
-          await api.post('/payments', paymentData);
-          overpaymentAppliedCount++;
-          totalOverpaymentApplied += overpaymentUsed;
-        }
-        
-        results.push({
-          student: `${student.firstName} ${student.lastName}`,
-          admissionNumber: student.admissionNumber,
-          feeAmount: feeAmount,
-          overpaymentUsed: overpaymentUsed,
-          amountCharged: amountToCharge,
-          balanceAfter: student.currentBalance + feeAmount - overpaymentUsed
-        });
-      }
+      // ✅ Call MANUAL ALLOCATION endpoint (creates FeeAllocation records, NOT payments)
+      const res = await api.post(`/fees/${selectedFee}/manual-allocate`, {
+        studentIds: selectedStudents
+      });
       
       setAllocationResult({
         fee: fee.name,
-        module: fee.module,
-        amount: formatCurrency(feeAmount),
-        allocated: allocatedCount,
-        overpaymentApplied: overpaymentAppliedCount,
-        totalOverpaymentApplied: formatCurrency(totalOverpaymentApplied),
-        totalAmountCharged: formatCurrency(totalAmountAllocated),
-        total: selectedStudents.length,
-        results: results
+        amount: formatCurrency(fee.amount),
+        allocated: res.data.allocated || 0,
+        skipped: res.data.skipped || 0,
+        total: selectedStudents.length
       });
       
-      alert(`✅ Fee allocation complete!\n\n` +
-        `Fee: ${fee.name} (${formatCurrency(feeAmount)})\n` +
-        `Students: ${allocatedCount} charged\n` +
-        `Overpayment applied: ${overpaymentAppliedCount} students (${formatCurrency(totalOverpaymentApplied)})\n` +
-        `Total collected: ${formatCurrency(totalAmountAllocated)}`);
+      alert(`✅ Fee manually allocated to ${res.data.allocated || 0} students!${res.data.skipped > 0 ? ` (${res.data.skipped} already had it)` : ''}`);
       
       // Refresh the student list
       setSelectedStudents([]);
       setSelectAll(false);
       
-      // Reload students to refresh balances
-      if (isTVET && selectedProgram) {
-        const programStudents = students.filter(s => s.programId === selectedProgram);
-        const studentsWithOverpayments = await Promise.all(programStudents.map(async (student) => {
-          const paymentsRes = await api.get(`/payments?studentId=${student.id}`);
-          const studentPayments = paymentsRes.data.payments || [];
-          const totalPaid = studentPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-          
-          let applicableFees = [];
-          if (isTVET && student.programId) {
-            const feesRes = await api.get('/fees', { params: { programId: student.programId } });
-            applicableFees = feesRes.data.fees || [];
-          }
-          const totalFees = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
-          const balance = totalFees - totalPaid;
-          
-          return {
-            ...student,
-            overpayment: balance < 0 ? Math.abs(balance) : 0,
-            hasOverpayment: balance < 0,
-            currentBalance: balance
-          };
-        }));
-        setAvailableStudents(studentsWithOverpayments);
-      }
+      // Reload students to refresh allocation status
+      const loadStudents = async () => {
+        // ... reload logic ...
+      };
       
     } catch (error) {
       console.error('Allocation error:', error);
       alert('❌ Failed to allocate fees: ' + (error.response?.data?.message || error.message));
     } finally {
       setAllocating(false);
-    }
-  };
-
-  const showStudentOverpaymentInfo = (student) => {
-    if (student.hasOverpayment) {
-      setSelectedStudentForOverpayment(student);
     }
   };
 
@@ -23385,20 +24575,12 @@ const FeeAllocationModule = ({ fees, students, courses, classes, programs, curre
       {allocating && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse"></div>}
       
       <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold">Fee Allocation</h2>
-        <div className="bg-blue-50 px-4 py-2 rounded-lg">
-          <label className="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              checked={applyOverpayment}
-              onChange={(e) => setApplyOverpayment(e.target.checked)}
-              className="rounded"
-            />
-            <span className="text-sm text-blue-700">
-              <i className="fas fa-coins mr-1"></i>
-              Apply overpayments to new fees
-            </span>
-          </label>
+        <h2 className="text-2xl font-bold">Manual Fee Allocation</h2>
+        <div className="bg-yellow-50 px-4 py-2 rounded-lg">
+          <span className="text-sm text-yellow-700">
+            <i className="fas fa-info-circle mr-1"></i>
+            Manual allocation creates allocation records (no payments)
+          </span>
         </div>
       </div>
       
@@ -23477,7 +24659,7 @@ const FeeAllocationModule = ({ fees, students, courses, classes, programs, curre
             onChange={(e) => setSelectedFee(e.target.value)}
             className="px-3 py-2 border rounded-lg"
           >
-            <option value="">-- Select Fee --</option>
+            <option value="">-- Select Fee to Allocate --</option>
             {filteredFees.map(f => (
               <option key={f.id} value={f.id}>
                 {f.name} - {formatCurrency(f.amount)} {isTVET && f.module ? `(Module ${f.module})` : ''}
@@ -23490,10 +24672,13 @@ const FeeAllocationModule = ({ fees, students, courses, classes, programs, curre
           <div className="mb-4 p-3 bg-indigo-50 rounded-lg">
             <p className="text-sm text-indigo-800">
               <i className="fas fa-info-circle mr-2"></i>
-              Selected: {fees.find(f => f.id === selectedFee)?.name} - 
+              Allocating: <strong>{fees.find(f => f.id === selectedFee)?.name}</strong> - 
               {formatCurrency(fees.find(f => f.id === selectedFee)?.amount)}
               {isTVET && fees.find(f => f.id === selectedFee)?.module && 
                 ` (Module ${fees.find(f => f.id === selectedFee)?.module})`}
+            </p>
+            <p className="text-xs text-indigo-600 mt-1">
+              ⚠️ This creates allocation records. Students will see this fee on their statement but no payment is recorded.
             </p>
           </div>
         )}
@@ -23530,108 +24715,92 @@ const FeeAllocationModule = ({ fees, students, courses, classes, programs, curre
               )}
             </div>
 
-          <div className="border rounded-lg overflow-hidden max-h-96 overflow-y-auto">
-  <table className="w-full">
-    <thead className="bg-gray-50 sticky top-0">
-      <tr>
-        {canAllocate && (
-          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase w-10">
-            <span className="sr-only">Select</span>
-          </th>
-        )}
-        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Admission</th>
-        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Balance</th>
-        {applyOverpayment && (
-          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Overpayment</th>
-        )}
-        {isTVET && (
-          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Module</th>
-        )}
-      </tr>
-    </thead>
-    <tbody className="divide-y divide-gray-200">
-      {filteredStudents.length === 0 ? (
-        <tr>
-          <td 
-            colSpan={
-              (canAllocate ? 1 : 0) + 
-              3 + 
-              (applyOverpayment ? 1 : 0) + 
-              (isTVET ? 1 : 0)
-            } 
-            className="px-4 py-8 text-center text-gray-500"
-          >
-            No students found
-          </td>
-        </tr>
-      ) : (
-        filteredStudents.map(student => (
-          <tr 
-            key={student.id} 
-            className={`hover:bg-gray-50 ${student.hasOverpayment ? 'bg-green-50' : ''} cursor-pointer`}
-            onClick={() => showStudentOverpaymentInfo(student)}
-          >
-            {canAllocate && (
-              <td className="px-4 py-2" onClick={(e) => e.stopPropagation()}>
-                <input 
-                  type="checkbox" 
-                  checked={selectedStudents.includes(student.id)} 
-                  onChange={(e) => handleStudentSelect(student.id, e.target.checked)} 
-                  className="rounded" 
-                />
-              </td>
-            )}
-            <td className="px-4 py-2 font-mono">{student.admissionNumber}</td>
-            <td className="px-4 py-2">{student.firstName} {student.lastName}</td>
-            <td className="px-4 py-2">
-              <span className={`font-medium ${
-                student.currentBalance > 0 ? 'text-red-600' : 
-                student.currentBalance < 0 ? 'text-orange-600' : 
-                'text-green-600'
-              }`}>
-                {student.currentBalance > 0 
-                  ? formatCurrency(student.currentBalance)
-                  : student.currentBalance < 0 
-                    ? `(${formatCurrency(Math.abs(student.currentBalance))})`
-                    : formatCurrency(0)}
-              </span>
-            </td>
-            {applyOverpayment && (
-              <td className="px-4 py-2">
-                {student.hasOverpayment ? (
-                  <span className="inline-flex items-center px-2 py-1 bg-orange-100 text-orange-800 rounded-full text-xs cursor-help"
-                        title="Overpayment will be applied to new fees">
-                    <i className="fas fa-arrow-up mr-1"></i>
-                    {formatCurrency(student.overpayment)}
-                  </span>
-                ) : (
-                  <span className="text-gray-400 text-xs">None</span>
-                )}
-              </td>
-            )}
-            {isTVET && (
-              <td className="px-4 py-2">
-                {student.currentModule ? 
-                  `Module ${student.currentModule}` : 
-                  <span className="text-gray-400">Not assigned</span>
-                }
-              </td>
-            )}
-          </tr>
-        ))
-      )}
-    </tbody>
-  </table>
-</div>
+            <div className="border rounded-lg overflow-hidden max-h-96 overflow-y-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50 sticky top-0">
+                  <tr>
+                    {canAllocate && (
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase w-10">
+                        <span className="sr-only">Select</span>
+                      </th>
+                    )}
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Admission</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Balance</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    {isTVET && (
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Module</th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {filteredStudents.length === 0 ? (
+                    <tr>
+                      <td colSpan={canAllocate ? 6 : 5} className="px-4 py-8 text-center text-gray-500">
+                        No students found
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredStudents.map(student => (
+                      <tr 
+                        key={student.id} 
+                        className={`hover:bg-gray-50 ${student.feeAllocated ? 'bg-green-50' : ''}`}
+                      >
+                        {canAllocate && (
+                          <td className="px-4 py-2">
+                            <input 
+                              type="checkbox" 
+                              checked={selectedStudents.includes(student.id)} 
+                              onChange={(e) => handleStudentSelect(student.id, e.target.checked)} 
+                              className="rounded"
+                              disabled={student.feeAllocated}
+                            />
+                          </td>
+                        )}
+                        <td className="px-4 py-2 font-mono">{student.admissionNumber}</td>
+                        <td className="px-4 py-2">{student.firstName} {student.lastName}</td>
+                        <td className="px-4 py-2">
+                          <span className={`font-medium ${
+                            student.balance > 0 ? 'text-red-600' : 
+                            student.balance < 0 ? 'text-orange-600' : 
+                            'text-green-600'
+                          }`}>
+                            {formatCurrency(student.balance)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2">
+                          {student.feeAllocated ? (
+                            <span className="inline-flex items-center px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">
+                              <i className="fas fa-check-circle mr-1"></i> Already Allocated
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2 py-1 bg-gray-100 text-gray-600 rounded-full text-xs">
+                              Not Allocated
+                            </span>
+                          )}
+                        </td>
+                        {isTVET && (
+                          <td className="px-4 py-2">
+                            {student.currentModule ? 
+                              `Module ${student.currentModule}` : 
+                              <span className="text-gray-400">Not assigned</span>
+                            }
+                          </td>
+                        )}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
 
             {canAllocate && (
               <div className="mt-6 flex justify-between items-center">
                 <div className="text-sm text-gray-600">
                   Selected: <span className="font-bold text-indigo-600">{selectedStudents.length}</span> students
-                  {applyOverpayment && availableStudents.filter(s => selectedStudents.includes(s.id) && s.hasOverpayment).length > 0 && (
+                  {availableStudents.filter(s => selectedStudents.includes(s.id) && s.feeAllocated).length > 0 && (
                     <span className="ml-2 text-orange-600">
-                      ({availableStudents.filter(s => selectedStudents.includes(s.id) && s.hasOverpayment).length} have overpayment)
+                      ({availableStudents.filter(s => selectedStudents.includes(s.id) && s.feeAllocated).length} already allocated)
                     </span>
                   )}
                 </div>
@@ -23673,91 +24842,34 @@ const FeeAllocationModule = ({ fees, students, courses, classes, programs, curre
       </div>
 
       {allocationResult && (
-        <div className="bg-green-50 p-4 rounded-lg">
-          <h4 className="font-semibold text-green-800 mb-2">Allocation Summary</h4>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-3">
+        <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+          <h4 className="font-semibold text-green-800 mb-2">✅ Allocation Complete</h4>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <p className="text-xs text-green-600">Fee</p>
               <p className="font-bold text-green-800">{allocationResult.fee}</p>
               <p className="text-sm">{allocationResult.amount}</p>
             </div>
             <div>
-              <p className="text-xs text-green-600">Students</p>
-              <p className="font-bold text-green-800">{allocationResult.allocated} / {allocationResult.total}</p>
-              <p className="text-sm">charged</p>
+              <p className="text-xs text-green-600">Allocated</p>
+              <p className="font-bold text-green-800">{allocationResult.allocated}</p>
+              <p className="text-sm">students</p>
             </div>
             <div>
-              <p className="text-xs text-green-600">Overpayment Applied</p>
-              <p className="font-bold text-green-800">{allocationResult.overpaymentApplied} students</p>
-              <p className="text-sm">{allocationResult.totalOverpaymentApplied}</p>
+              <p className="text-xs text-green-600">Skipped</p>
+              <p className="font-bold text-green-800">{allocationResult.skipped}</p>
+              <p className="text-sm">already allocated</p>
             </div>
             <div>
-              <p className="text-xs text-green-600">Total Charged</p>
-              <p className="font-bold text-green-800">{allocationResult.totalAmountCharged}</p>
+              <p className="text-xs text-green-600">Total Selected</p>
+              <p className="font-bold text-green-800">{allocationResult.total}</p>
             </div>
-          </div>
-          
-          {allocationResult.results && allocationResult.results.length > 0 && (
-            <details className="mt-2">
-              <summary className="text-sm text-green-700 cursor-pointer">View Details</summary>
-              <div className="mt-2 max-h-40 overflow-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-green-100">
-                    <tr>
-                      <th className="px-2 py-1 text-left">Student</th>
-                      <th className="px-2 py-1 text-left">Fee</th>
-                      <th className="px-2 py-1 text-left">Overpayment Used</th>
-                      <th className="px-2 py-1 text-left">Amount Charged</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {allocationResult.results.map((r, i) => (
-                      <tr key={i}>
-                        <td className="px-2 py-1">{r.student} ({r.admissionNumber})</td>
-                        <td className="px-2 py-1">{formatCurrency(r.feeAmount)}</td>
-                        <td className="px-2 py-1 text-orange-600">{r.overpaymentUsed > 0 ? formatCurrency(r.overpaymentUsed) : '-'}</td>
-                        <td className="px-2 py-1 text-green-600">{formatCurrency(r.amountCharged)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </details>
-          )}
-        </div>
-      )}
-
-      {/* Overpayment Info Modal */}
-      {selectedStudentForOverpayment && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
-            <h3 className="text-xl font-bold mb-4">Overpayment Information</h3>
-            <div className="mb-4">
-              <p className="text-gray-600">Student: <span className="font-bold">{selectedStudentForOverpayment.firstName} {selectedStudentForOverpayment.lastName}</span></p>
-              <p className="text-gray-600">Admission: {selectedStudentForOverpayment.admissionNumber}</p>
-              <div className="mt-4 p-4 bg-orange-50 rounded-lg">
-                <p className="text-sm text-orange-800 mb-2">
-                  <i className="fas fa-arrow-up mr-2"></i>
-                  Overpayment Amount: <span className="font-bold text-orange-700">{formatCurrency(selectedStudentForOverpayment.overpayment)}</span>
-                </p>
-                <p className="text-xs text-orange-700">
-                  This overpayment will be applied to future fees automatically.
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => setSelectedStudentForOverpayment(null)}
-              className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700"
-            >
-              Close
-            </button>
           </div>
         </div>
       )}
     </div>
   );
 };
-
 // ==================== FEE REMINDERS MODULE with TVET Support ====================
 const FeeRemindersModule = ({ 
   fees, payments, students, classes, courses, programs, parents, currentSchool, user 
@@ -25753,21 +26865,25 @@ const PromotionModule = ({
 };
 
 
-// ==================== FIXED EXAM CARDS MODULE FOR PRIMARY/JSS/SECONDARY ====================
+// ==================== EXAM CARDS MODULE - ALL SCHOOL TYPES (FIXED) ====================
 const ExamCardsModule = ({ 
   students, 
   classes, 
-  subjects,  // IMPORTANT: Make sure subjects is received
+  subjects, 
   fees, 
   payments, 
   currentSchool, 
   user,
-  admissionNumber: propAdmissionNumber 
+  admissionNumber: propAdmissionNumber,
+  programs = [],
+  courses = [],
+  units = []
 }) => {
   console.log('🎫 ExamCardsModule INITIALIZED');
   console.log('🏫 School category:', currentSchool?.category);
   console.log('👤 User role:', user?.role);
-  console.log('📚 Subjects available:', subjects?.length);
+  console.log('📚 Programs available:', programs?.length);
+  console.log('📚 Units available:', units?.length);
 
   const api = axios.create({
     baseURL: 'http://localhost:5000/api',
@@ -25780,6 +26896,7 @@ const ExamCardsModule = ({
     return config;
   });
 
+  // ==================== SCHOOL TYPE DETECTION ====================
   const schoolCategory = currentSchool?.category || 'SENIOR_SECONDARY';
   const isUniversity = schoolCategory === 'UNIVERSITY';
   const isTVET = schoolCategory === 'COLLEGE_TVET';
@@ -25787,7 +26904,97 @@ const ExamCardsModule = ({
   const isStudent = user?.role === 'STUDENT';
   const isParent = user?.role === 'PARENT';
 
-  // State
+  // ==================== SCHOOL-SPECIFIC CONFIGURATION ====================
+  const getEntityLabel = () => {
+    if (isUniversity) return 'Course';
+    if (isTVET) return 'Program';
+    return 'Class';
+  };
+
+  const getItemLabel = () => {
+    if (isUniversity) return 'Course Units';
+    if (isTVET) return 'Modules';
+    return 'Subjects';
+  };
+
+  const getEntityName = (student) => {
+    if (!student) return 'N/A';
+    console.log('🔍 Getting entity name for student:', student.id, 'programId:', student.programId);
+    
+    if (isUniversity) {
+      const course = courses?.find(c => c.id === student.courseId);
+      console.log('🎓 Course found:', course?.name);
+      return course?.name || 'N/A';
+    }
+    if (isTVET) {
+      const program = programs?.find(p => p.id === student.programId);
+      console.log('📚 Program found:', program?.name);
+      return program?.name || 'N/A';
+    }
+    const classObj = classes?.find(c => c.id === student.classId);
+    return classObj?.name || 'N/A';
+  };
+
+  const getStudentItems = (student) => {
+    if (!student) return [];
+    console.log('🔍 Getting items for student:', student.id);
+    console.log('🔍 isTVET:', isTVET, 'programId:', student.programId);
+    
+    if (isUniversity) {
+      const items = units?.filter(u => u.courseId === student.courseId) || [];
+      console.log('📚 University units found:', items.length);
+      return items;
+    }
+    if (isTVET) {
+      const items = units?.filter(u => u.programId === student.programId) || [];
+      console.log('📚 TVET modules found:', items.length);
+      return items;
+    }
+    const items = subjects?.filter(s => s.classId === student.classId) || [];
+    console.log('📚 Subjects found:', items.length);
+    return items;
+  };
+
+  const getItemDisplayName = (item) => {
+    if (!item) return 'Unknown';
+    if (isUniversity) {
+      const unit = units?.find(u => u.id === item.id || u.id === item.unitId);
+      return unit?.name || item.name || 'Unknown Unit';
+    }
+    if (isTVET) {
+      const unit = units?.find(u => u.id === item.id || u.id === item.unitId);
+      return unit?.name || item.name || 'Unknown Module';
+    }
+    return item.name || 'Unknown Subject';
+  };
+
+  const getItemCode = (item) => {
+    if (!item) return '—';
+    if (isUniversity) {
+      const unit = units?.find(u => u.id === item.id || u.id === item.unitId);
+      return unit?.code || item.code || '—';
+    }
+    if (isTVET) {
+      const unit = units?.find(u => u.id === item.id || u.id === item.unitId);
+      return unit?.code || item.code || '—';
+    }
+    return item.code || '—';
+  };
+
+  const getModuleLevelDisplay = (item) => {
+    if (!item) return '';
+    if (isTVET) {
+      if (item.module) return `Module ${item.module}`;
+      if (item.year) return `Year ${item.year}`;
+    }
+    if (isUniversity) {
+      if (item.semester) return `Semester ${item.semester}`;
+      if (item.year) return `Year ${item.year}`;
+    }
+    return '';
+  };
+
+  // ==================== STATE ====================
   const [selectedClass, setSelectedClass] = useState('');
   const [selectedStudents, setSelectedStudents] = useState([]);
   const [studentsWithZeroBalance, setStudentsWithZeroBalance] = useState([]);
@@ -25815,7 +27022,8 @@ const ExamCardsModule = ({
     totalFees: 0,
     totalPaid: 0,
     isEligible: false,
-    className: ''
+    entityName: '',
+    items: []
   });
 
   const formatCurrency = (amount) => {
@@ -25833,20 +27041,26 @@ const ExamCardsModule = ({
     return classObj ? classObj.name : '';
   };
 
-  // FIXED: calculateExamCardData with proper array handling
+  // ==================== CALCULATE EXAM CARD DATA ====================
   const calculateExamCardData = (studentData, existingPayments = null) => {
     if (!studentData) return null;
+    
+    console.log('📊 Calculating exam card data for:', studentData.firstName, studentData.lastName);
+    console.log('📊 Student programId:', studentData.programId);
     
     let applicableFees = [];
     let totalFees = 0;
     
     if (isRegularSchool && studentData.classId) {
       applicableFees = fees?.filter(f => f.classId === studentData.classId) || [];
+    } else if (isTVET && studentData.programId) {
+      applicableFees = fees?.filter(f => f.programId === studentData.programId) || [];
+    } else if (isUniversity && studentData.courseId) {
+      applicableFees = fees?.filter(f => f.courseId === studentData.courseId) || [];
     }
     
     totalFees = applicableFees.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
     
-    // FIXED: Ensure existingPayments is an array before calling reduce
     let totalPaid = 0;
     if (existingPayments && Array.isArray(existingPayments)) {
       totalPaid = existingPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
@@ -25855,10 +27069,11 @@ const ExamCardsModule = ({
     const balance = totalFees - totalPaid;
     const isEligible = balance <= 0;
     
-    let className = '';
-    if (isRegularSchool && studentData.classId) {
-      className = getClassName(studentData.classId);
-    }
+    const entityName = getEntityName(studentData);
+    const items = getStudentItems(studentData);
+    
+    console.log('📊 Entity name:', entityName);
+    console.log('📊 Items count:', items.length);
     
     return {
       student: studentData,
@@ -25866,10 +27081,12 @@ const ExamCardsModule = ({
       totalFees,
       totalPaid,
       isEligible,
-      className
+      entityName,
+      items
     };
   };
 
+  // ==================== LOAD EXAM CARD ====================
   const loadExamCardForStudent = async (studentId, studentAdmissionNumber = null) => {
     setLoadingExamCard(true);
     setApiError('');
@@ -25892,6 +27109,48 @@ const ExamCardsModule = ({
       }
       
       console.log('✅ Student found:', studentData.firstName, studentData.lastName);
+      console.log('✅ Student programId:', studentData.programId);
+      console.log('✅ Student courseId:', studentData.courseId);
+      console.log('✅ Student classId:', studentData.classId);
+      console.log('📚 School type:', isTVET ? 'TVET' : isUniversity ? 'University' : 'Regular');
+      
+      // If TVET and student has programId but programs array is empty, fetch the program
+      if (isTVET && studentData.programId && programs.length === 0) {
+        try {
+          console.log('🔄 Fetching program data for TVET...');
+          const programRes = await api.get(`/programs/${studentData.programId}`);
+          const programData = programRes.data.program;
+          if (programData) {
+            // Add to programs array if not already there
+            const existing = programs.find(p => p.id === programData.id);
+            if (!existing) {
+              programs.push(programData);
+            }
+          }
+        } catch (err) {
+          console.log('⚠️ Could not fetch program:', err.message);
+        }
+      }
+      
+      // If TVET and student has programId, fetch modules for this program
+      if (isTVET && studentData.programId && units.length === 0) {
+        try {
+          console.log('🔄 Fetching modules for program...');
+          const modulesRes = await api.get(`/units`, { params: { programId: studentData.programId } });
+          const modulesData = modulesRes.data.units || [];
+          if (modulesData.length > 0) {
+            modulesData.forEach(unit => {
+              const existing = units.find(u => u.id === unit.id);
+              if (!existing) {
+                units.push(unit);
+              }
+            });
+            console.log(`✅ Loaded ${modulesData.length} modules for program`);
+          }
+        } catch (err) {
+          console.log('⚠️ Could not fetch modules:', err.message);
+        }
+      }
       
       let studentPayments = [];
       try {
@@ -25906,6 +27165,12 @@ const ExamCardsModule = ({
       if (isRegularSchool && studentData.classId) {
         const feesRes = await api.get(`/fees?classId=${studentData.classId}`);
         applicableFees = feesRes.data.fees || [];
+      } else if (isTVET && studentData.programId) {
+        const feesRes = await api.get(`/fees?programId=${studentData.programId}`);
+        applicableFees = feesRes.data.fees || [];
+      } else if (isUniversity && studentData.courseId) {
+        const feesRes = await api.get(`/fees?courseId=${studentData.courseId}`);
+        applicableFees = feesRes.data.fees || [];
       }
       
       const totalFees = applicableFees.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
@@ -25913,11 +27178,11 @@ const ExamCardsModule = ({
       const balance = totalFees - totalPaid;
       const isEligible = balance <= 0;
       
-      let className = '';
-      if (isRegularSchool && studentData.classId) {
-        const classObj = classes?.find(c => c.id === studentData.classId);
-        className = classObj ? classObj.name : '';
-      }
+      const entityName = getEntityName(studentData);
+      const items = getStudentItems(studentData);
+      
+      console.log(`📋 Found ${items.length} ${getItemLabel()}`);
+      console.log(`📋 Entity: ${entityName}`);
       
       const examCardData = {
         student: studentData,
@@ -25925,7 +27190,8 @@ const ExamCardsModule = ({
         totalFees,
         totalPaid,
         isEligible,
-        className: className
+        entityName,
+        items
       };
       
       console.log('✅ Exam card ready, isEligible:', isEligible);
@@ -25949,6 +27215,7 @@ const ExamCardsModule = ({
     }
   };
 
+  // ==================== EFFECTS ====================
   useEffect(() => {
     if (isStudent) {
       const savedAdmission = localStorage.getItem('studentExamAdmission');
@@ -25997,12 +27264,12 @@ const ExamCardsModule = ({
     
     try {
       if (!selectedClass) {
-        alert('Please select a class');
+        alert(`Please select a ${getEntityLabel()}`);
         setLoading(false);
         return;
       }
       
-      console.log('📚 Loading students for class:', selectedClass);
+      console.log(`📚 Loading students for ${getEntityLabel()}:`, selectedClass);
       
       const studentsRes = await api.get('/students', { params: { classId: selectedClass } });
       const studentList = studentsRes.data.students || [];
@@ -26018,7 +27285,7 @@ const ExamCardsModule = ({
       }
       
       const totalFeesAmount = applicableFees.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
-      console.log(`💰 Total fees for class: ${totalFeesAmount}`);
+      console.log(`💰 Total fees for ${getEntityLabel()}: ${totalFeesAmount}`);
       
       const studentsWithBalance = await Promise.all(
         studentList.map(async (student) => {
@@ -26033,10 +27300,12 @@ const ExamCardsModule = ({
           const isEligible = balance <= 0;
           
           const className = getClassName(student.classId);
+          const entityName = getEntityName(student);
           
           return {
             ...student,
             className,
+            entityName,
             totalFees: totalFeesAmount,
             totalPaid,
             balance,
@@ -26082,7 +27351,8 @@ const ExamCardsModule = ({
       totalFees: 0,
       totalPaid: 0,
       isEligible: false,
-      className: ''
+      entityName: '',
+      items: []
     });
     setShowAdmissionModal(true);
   };
@@ -26183,7 +27453,7 @@ const ExamCardsModule = ({
                   <div>
                     <h3 className="text-xl font-bold">{currentExamCardData.student.firstName} {currentExamCardData.student.lastName}</h3>
                     <p className="text-gray-600">Admission: {currentExamCardData.student.admissionNumber}</p>
-                    <p className="text-gray-600">{currentExamCardData.className || 'Class not assigned'}</p>
+                    <p className="text-gray-600">{getEntityLabel()}: {currentExamCardData.entityName || 'Not assigned'}</p>
                   </div>
                 </div>
               </div>
@@ -26236,10 +27506,19 @@ const ExamCardsModule = ({
         </div>
         
         {showExamCardModal && currentExamCardData.student && (
-          <PrimaryExamCardPrintModal
+          <ExamCardPrintModalComponent
             student={currentExamCardData.student}
             currentSchool={currentSchool}
-            subjects={subjects || []}
+            items={currentExamCardData.items}
+            entityName={currentExamCardData.entityName}
+            isTVET={isTVET}
+            isUniversity={isUniversity}
+            isRegularSchool={isRegularSchool}
+            getEntityLabel={getEntityLabel}
+            getItemLabel={getItemLabel}
+            getItemDisplayName={getItemDisplayName}
+            getItemCode={getItemCode}
+            getModuleLevelDisplay={getModuleLevelDisplay}
             onClose={() => setShowExamCardModal(false)}
           />
         )}
@@ -26294,6 +27573,7 @@ const ExamCardsModule = ({
                     <div>
                       <h3 className="text-2xl font-bold">{currentExamCardData.student.firstName} {currentExamCardData.student.lastName}</h3>
                       <p className="text-purple-100">Admission: {currentExamCardData.student.admissionNumber}</p>
+                      <p className="text-purple-100">{getEntityLabel()}: {currentExamCardData.entityName || 'Not assigned'}</p>
                     </div>
                   </div>
                 </div>
@@ -26336,10 +27616,19 @@ const ExamCardsModule = ({
         )}
         
         {showExamCardModal && currentExamCardData.student && (
-          <PrimaryExamCardPrintModal
+          <ExamCardPrintModalComponent
             student={currentExamCardData.student}
             currentSchool={currentSchool}
-            subjects={subjects || []}
+            items={currentExamCardData.items}
+            entityName={currentExamCardData.entityName}
+            isTVET={isTVET}
+            isUniversity={isUniversity}
+            isRegularSchool={isRegularSchool}
+            getEntityLabel={getEntityLabel}
+            getItemLabel={getItemLabel}
+            getItemDisplayName={getItemDisplayName}
+            getItemCode={getItemCode}
+            getModuleLevelDisplay={getModuleLevelDisplay}
             onClose={() => setShowExamCardModal(false)}
           />
         )}
@@ -26364,7 +27653,7 @@ const ExamCardsModule = ({
       <div className="bg-white p-6 rounded-xl shadow-sm">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium mb-2">Select Class</label>
+            <label className="block text-sm font-medium mb-2">Select {getEntityLabel()}</label>
             <select
               value={selectedClass}
               onChange={(e) => {
@@ -26374,10 +27663,14 @@ const ExamCardsModule = ({
               }}
               className="w-full px-3 py-2 border rounded-lg"
             >
-              <option value="">-- Select Class --</option>
-              {classes?.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
+              <option value="">-- Select {getEntityLabel()} --</option>
+              {isTVET ? (
+                programs?.map(p => <option key={p.id} value={p.id}>{p.name}</option>)
+              ) : isUniversity ? (
+                courses?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)
+              ) : (
+                classes?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)
+              )}
             </select>
           </div>
           
@@ -26422,7 +27715,7 @@ const ExamCardsModule = ({
                   <th className="px-4 py-2 w-10"></th>
                   <th className="px-4 py-2 text-left">Admission</th>
                   <th className="px-4 py-2 text-left">Name</th>
-                  <th className="px-4 py-2 text-left">Class</th>
+                  <th className="px-4 py-2 text-left">{getEntityLabel()}</th>
                   <th className="px-4 py-2 text-left">Total Fees</th>
                   <th className="px-4 py-2 text-left">Paid</th>
                   <th className="px-4 py-2 text-left">Balance</th>
@@ -26430,44 +27723,46 @@ const ExamCardsModule = ({
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {filteredStudents.map(student => (
-                  <tr key={student.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-2">
-                      <input 
-                        type="checkbox" 
-                        checked={selectedStudents.includes(student.id)} 
-                        onChange={(e) => handleSelect(student.id, e.target.checked)} 
-                        className="rounded" 
-                      />
-                    </td>
-                    <td className="px-4 py-2 font-mono text-sm">{student.admissionNumber}</td>
-                    <td className="px-4 py-2">{student.firstName} {student.lastName}</td>
-                    <td className="px-4 py-2 text-sm">{student.className || 'N/A'}</td>
-                    <td className="px-4 py-2 text-sm">{formatCurrency(student.totalFees)}</td>
-                    <td className="px-4 py-2 text-sm text-green-600">{formatCurrency(student.totalPaid)}</td>
-                    <td className="px-4 py-2 text-sm font-medium">
-                      <span className={student.balance > 0 ? 'text-red-600' : 'text-green-600'}>
-                        {formatCurrency(student.balance)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2">
-                      <button 
-                        onClick={() => {
-                          // FIXED: Pass an array of payments instead of an object
-                          const paymentsArray = [{ amount: student.totalPaid }];
-                          const examData = calculateExamCardData(student, paymentsArray);
-                          setCurrentExamCardData(examData);
-                          setSelectedStudentForCard(student);
-                          setShowSingleCardModal(true);
-                        }} 
-                        className="text-indigo-600 hover:text-indigo-900 p-2" 
-                        title="View Exam Card"
-                      >
-                        <i className="fas fa-id-card"></i>
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {filteredStudents.map(student => {
+                  const entityName = student.entityName || getEntityName(student);
+                  return (
+                    <tr key={student.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-2">
+                        <input 
+                          type="checkbox" 
+                          checked={selectedStudents.includes(student.id)} 
+                          onChange={(e) => handleSelect(student.id, e.target.checked)} 
+                          className="rounded" 
+                        />
+                      </td>
+                      <td className="px-4 py-2 font-mono text-sm">{student.admissionNumber}</td>
+                      <td className="px-4 py-2">{student.firstName} {student.lastName}</td>
+                      <td className="px-4 py-2 text-sm">{entityName || 'N/A'}</td>
+                      <td className="px-4 py-2 text-sm">{formatCurrency(student.totalFees)}</td>
+                      <td className="px-4 py-2 text-sm text-green-600">{formatCurrency(student.totalPaid)}</td>
+                      <td className="px-4 py-2 text-sm font-medium">
+                        <span className={student.balance > 0 ? 'text-red-600' : 'text-green-600'}>
+                          {formatCurrency(student.balance)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2">
+                        <button 
+                          onClick={() => {
+                            const paymentsArray = [{ amount: student.totalPaid }];
+                            const examData = calculateExamCardData(student, paymentsArray);
+                            setCurrentExamCardData(examData);
+                            setSelectedStudentForCard(student);
+                            setShowSingleCardModal(true);
+                          }} 
+                          className="text-indigo-600 hover:text-indigo-900 p-2" 
+                          title="View Exam Card"
+                        >
+                          <i className="fas fa-id-card"></i>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -26488,16 +27783,25 @@ const ExamCardsModule = ({
       {filteredStudents.length === 0 && selectedClass && !loading && (
         <div className="bg-yellow-50 rounded-xl p-8 text-center">
           <i className="fas fa-info-circle text-3xl text-yellow-600 mb-3"></i>
-          <p className="text-gray-700">No students with zero balance found in this class.</p>
+          <p className="text-gray-700">No students with zero balance found in this {getEntityLabel().toLowerCase()}.</p>
           <p className="text-sm text-gray-500 mt-1">Only students who have cleared all fees will appear here.</p>
         </div>
       )}
 
       {showSingleCardModal && selectedStudentForCard && (
-        <PrimaryExamCardPrintModal
+        <ExamCardPrintModalComponent
           student={selectedStudentForCard}
           currentSchool={currentSchool}
-          subjects={subjects || []}
+          items={currentExamCardData.items || []}
+          entityName={currentExamCardData.entityName || getEntityName(selectedStudentForCard)}
+          isTVET={isTVET}
+          isUniversity={isUniversity}
+          isRegularSchool={isRegularSchool}
+          getEntityLabel={getEntityLabel}
+          getItemLabel={getItemLabel}
+          getItemDisplayName={getItemDisplayName}
+          getItemCode={getItemCode}
+          getModuleLevelDisplay={getModuleLevelDisplay}
           onClose={() => {
             setShowSingleCardModal(false);
             setSelectedStudentForCard(null);
@@ -26506,10 +27810,23 @@ const ExamCardsModule = ({
       )}
 
       {showPrintModal && (
-        <PrimaryExamCardsPrintModal
+        <ExamCardsPrintModalComponent
           students={studentsWithZeroBalance.filter(s => selectedStudents.includes(s.id))}
           currentSchool={currentSchool}
           subjects={subjects || []}
+          units={units || []}
+          programs={programs || []}
+          courses={courses || []}
+          isTVET={isTVET}
+          isUniversity={isUniversity}
+          isRegularSchool={isRegularSchool}
+          getEntityLabel={getEntityLabel}
+          getItemLabel={getItemLabel}
+          getEntityName={getEntityName}
+          getStudentItems={getStudentItems}
+          getItemDisplayName={getItemDisplayName}
+          getItemCode={getItemCode}
+          getModuleLevelDisplay={getModuleLevelDisplay}
           onClose={() => setShowPrintModal(false)}
         />
       )}
@@ -26517,22 +27834,31 @@ const ExamCardsModule = ({
   );
 };
 
-// ==================== PRIMARY EXAM CARD PRINT MODAL (FIXED) ====================
-const PrimaryExamCardPrintModal = ({ student, currentSchool, subjects = [], onClose }) => {
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-KE', { 
-      style: 'currency', 
-      currency: 'KES',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }).format(amount || 0);
-  };
-
+// ==================== EXAM CARD PRINT MODAL COMPONENT - ALL SCHOOL TYPES ====================
+const ExamCardPrintModalComponent = ({ 
+  student, 
+  currentSchool, 
+  items = [], 
+  entityName = '',
+  isTVET = false,
+  isUniversity = false,
+  isRegularSchool = true,
+  getEntityLabel,
+  getItemLabel,
+  getItemDisplayName,
+  getItemCode,
+  getModuleLevelDisplay,
+  onClose 
+}) => {
   const schoolLogo = currentSchool?.logo || '/default-logo.png';
   const currentDate = new Date().toLocaleDateString();
   
-  // Get subjects for this student's class
-  const studentSubjects = subjects?.filter(s => s.classId === student.classId) || [];
+  const entityLabel = getEntityLabel ? getEntityLabel() : 'Class';
+  const itemLabel = getItemLabel ? getItemLabel() : 'Subjects';
+
+  console.log('🖨️ Printing exam card for:', student?.firstName, student?.lastName);
+  console.log('🖨️ Items count:', items?.length);
+  console.log('🖨️ Entity name:', entityName);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -26545,7 +27871,7 @@ const PrimaryExamCardPrintModal = ({ student, currentSchool, subjects = [], onCl
             </button>
           </div>
           
-          <div className="border-2 border-indigo-200 rounded-lg p-6">
+          <div className="border-2 border-indigo-200 rounded-lg p-6" id="exam-card-print">
             {/* School Header */}
             <div className="text-center border-b pb-4">
               {schoolLogo && schoolLogo !== '/default-logo.png' && (
@@ -26563,15 +27889,15 @@ const PrimaryExamCardPrintModal = ({ student, currentSchool, subjects = [], onCl
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <p className="text-xs text-gray-500">Student Name</p>
-                  <p className="font-bold">{student.firstName} {student.lastName}</p>
+                  <p className="font-bold">{student?.firstName || 'N/A'} {student?.lastName || ''}</p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-500">Admission Number</p>
-                  <p className="font-bold">{student.admissionNumber}</p>
+                  <p className="font-bold">{student?.admissionNumber || 'N/A'}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500">Class</p>
-                  <p className="font-bold">{student.className || 'N/A'}</p>
+                  <p className="text-xs text-gray-500">{entityLabel}</p>
+                  <p className="font-bold">{entityName || 'N/A'}</p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-500">Exam Period</p>
@@ -26580,34 +27906,42 @@ const PrimaryExamCardPrintModal = ({ student, currentSchool, subjects = [], onCl
               </div>
             </div>
             
-            {/* Subjects Table - Primary Subjects */}
+            {/* Items Table */}
             <div className="mt-6">
-              <h4 className="font-bold mb-2">Subjects to be Examined</h4>
+              <h4 className="font-bold mb-2">{itemLabel} to be Examined</h4>
               <table className="w-full border-collapse">
                 <thead>
                   <tr className="bg-gray-100">
                     <th className="border p-2 text-left">#</th>
-                    <th className="border p-2 text-left">Subject Name</th>
+                    <th className="border p-2 text-left">Name</th>
                     <th className="border p-2 text-left">Code</th>
+                    <th className="border p-2 text-left">Level</th>
                     <th className="border p-2 text-left">Date</th>
                     <th className="border p-2 text-left">Time</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {studentSubjects.length > 0 ? (
-                    studentSubjects.map((subject, idx) => (
-                      <tr key={subject.id}>
-                        <td className="border p-2 text-center">{idx + 1}</td>
-                        <td className="border p-2">{subject.name}</td>
-                        <td className="border p-2">{subject.code || '—'}</td>
-                        <td className="border p-2">—</td>
-                        <td className="border p-2">—</td>
-                      </tr>
-                    ))
+                  {items && items.length > 0 ? (
+                    items.map((item, idx) => {
+                      const displayName = getItemDisplayName ? getItemDisplayName(item) : item.name || 'Unknown';
+                      const code = getItemCode ? getItemCode(item) : item.code || '—';
+                      const levelDisplay = getModuleLevelDisplay ? getModuleLevelDisplay(item) : '';
+                      
+                      return (
+                        <tr key={item.id || idx}>
+                          <td className="border p-2 text-center">{idx + 1}</td>
+                          <td className="border p-2">{displayName}</td>
+                          <td className="border p-2">{code}</td>
+                          <td className="border p-2 text-center">{levelDisplay}</td>
+                          <td className="border p-2 text-center">—</td>
+                          <td className="border p-2 text-center">—</td>
+                        </tr>
+                      );
+                    })
                   ) : (
                     <tr>
-                      <td colSpan="5" className="border p-4 text-center text-gray-500">
-                        No subjects assigned to this class
+                      <td colSpan="6" className="border p-4 text-center text-gray-500">
+                        No {itemLabel.toLowerCase()} assigned
                       </td>
                     </tr>
                   )}
@@ -26644,19 +27978,30 @@ const PrimaryExamCardPrintModal = ({ student, currentSchool, subjects = [], onCl
   );
 };
 
-// ==================== PRIMARY MULTI EXAM CARDS PRINT MODAL (FIXED) ====================
-const PrimaryExamCardsPrintModal = ({ students, currentSchool, subjects = [], onClose }) => {
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-KE', { 
-      style: 'currency', 
-      currency: 'KES',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }).format(amount || 0);
-  };
-
+// ==================== MULTI EXAM CARDS PRINT MODAL COMPONENT - ALL SCHOOL TYPES ====================
+const ExamCardsPrintModalComponent = ({ 
+  students, 
+  currentSchool, 
+  subjects = [], 
+  units = [],
+  programs = [],
+  courses = [],
+  isTVET = false,
+  isUniversity = false,
+  isRegularSchool = true,
+  getEntityLabel,
+  getItemLabel,
+  getEntityName,
+  getStudentItems,
+  getItemDisplayName,
+  getItemCode,
+  getModuleLevelDisplay,
+  onClose 
+}) => {
   const schoolLogo = currentSchool?.logo || '/default-logo.png';
   const currentDate = new Date().toLocaleDateString();
+  const entityLabel = getEntityLabel ? getEntityLabel() : 'Class';
+  const itemLabel = getItemLabel ? getItemLabel() : 'Subjects';
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -26669,9 +28014,10 @@ const PrimaryExamCardsPrintModal = ({ students, currentSchool, subjects = [], on
             </button>
           </div>
           
-          <div className="space-y-6">
+          <div className="space-y-6" id="exam-cards-print">
             {students.map((student, index) => {
-              const studentSubjects = subjects?.filter(s => s.classId === student.classId) || [];
+              const studentItems = getStudentItems ? getStudentItems(student) : [];
+              const entityName = getEntityName ? getEntityName(student) : '';
               
               return (
                 <div key={student.id} className="border-2 border-indigo-200 rounded-lg p-6 break-inside-avoid">
@@ -26698,8 +28044,8 @@ const PrimaryExamCardsPrintModal = ({ students, currentSchool, subjects = [], on
                         <p className="font-bold">{student.admissionNumber}</p>
                       </div>
                       <div>
-                        <p className="text-xs text-gray-500">Class</p>
-                        <p className="font-bold">{student.className || 'N/A'}</p>
+                        <p className="text-xs text-gray-500">{entityLabel}</p>
+                        <p className="font-bold">{entityName || 'N/A'}</p>
                       </div>
                       <div>
                         <p className="text-xs text-gray-500">Exam Period</p>
@@ -26708,34 +28054,42 @@ const PrimaryExamCardsPrintModal = ({ students, currentSchool, subjects = [], on
                     </div>
                   </div>
                   
-                  {/* Subjects Table */}
+                  {/* Items Table */}
                   <div className="mt-6">
-                    <h4 className="font-bold mb-2">Subjects to be Examined</h4>
+                    <h4 className="font-bold mb-2">{itemLabel} to be Examined</h4>
                     <table className="w-full border-collapse">
                       <thead>
                         <tr className="bg-gray-100">
                           <th className="border p-2 text-left">#</th>
-                          <th className="border p-2 text-left">Subject Name</th>
+                          <th className="border p-2 text-left">Name</th>
                           <th className="border p-2 text-left">Code</th>
+                          <th className="border p-2 text-left">Level</th>
                           <th className="border p-2 text-left">Date</th>
                           <th className="border p-2 text-left">Time</th>
-                         </tr>
+                        </tr>
                       </thead>
                       <tbody>
-                        {studentSubjects.length > 0 ? (
-                          studentSubjects.map((subject, idx) => (
-                            <tr key={subject.id}>
-                              <td className="border p-2 text-center">{idx + 1}</td>
-                              <td className="border p-2">{subject.name}</td>
-                              <td className="border p-2">{subject.code || '—'}</td>
-                              <td className="border p-2">—</td>
-                              <td className="border p-2">—</td>
-                            </tr>
-                          ))
+                        {studentItems && studentItems.length > 0 ? (
+                          studentItems.map((item, idx) => {
+                            const displayName = getItemDisplayName ? getItemDisplayName(item) : item.name || 'Unknown';
+                            const code = getItemCode ? getItemCode(item) : item.code || '—';
+                            const levelDisplay = getModuleLevelDisplay ? getModuleLevelDisplay(item) : '';
+                            
+                            return (
+                              <tr key={item.id || idx}>
+                                <td className="border p-2 text-center">{idx + 1}</td>
+                                <td className="border p-2">{displayName}</td>
+                                <td className="border p-2">{code}</td>
+                                <td className="border p-2 text-center">{levelDisplay}</td>
+                                <td className="border p-2 text-center">—</td>
+                                <td className="border p-2 text-center">—</td>
+                              </tr>
+                            );
+                          })
                         ) : (
                           <tr>
-                            <td colSpan="5" className="border p-4 text-center text-gray-500">
-                              No subjects assigned to this class
+                            <td colSpan="6" className="border p-4 text-center text-gray-500">
+                              No {itemLabel.toLowerCase()} assigned
                             </td>
                           </tr>
                         )}
@@ -26775,9 +28129,7 @@ const PrimaryExamCardsPrintModal = ({ students, currentSchool, subjects = [], on
     </div>
   );
 };
-
-
-// ==================== COMPLETE FIXED SETTINGS MODULE ====================
+// ==================== COMPLETE SETTINGS MODULE WITH ALL PROVIDERS ====================
 const SettingsModule = ({ 
   user, 
   school, 
@@ -26793,6 +28145,7 @@ const SettingsModule = ({
   loadAuditLogs, 
   toggleFeature 
 }) => {
+  // ==================== STATE ====================
   const [activeTab, setActiveTab] = useState('profile');
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
@@ -26805,8 +28158,10 @@ const SettingsModule = ({
     newPassword: '',
     confirmPassword: ''
   });
+  const [testEmailLoading, setTestEmailLoading] = useState(false);
+  const [testSMSLoading, setTestSMSLoading] = useState(false);
 
-  // API instance
+  // ==================== API INSTANCE ====================
   const api = axios.create({
     baseURL: 'http://localhost:5000/api',
     headers: { 'Content-Type': 'application/json' }
@@ -26825,21 +28180,85 @@ const SettingsModule = ({
   const canManageBackup = user?.role === 'SUPER_ADMIN' || user?.role === 'SCHOOL_ADMIN';
   const canManageNotifications = user?.role === 'SUPER_ADMIN' || user?.role === 'SCHOOL_ADMIN' || user?.role === 'PRINCIPAL';
   const canExportData = user?.role === 'SUPER_ADMIN' || user?.role === 'SCHOOL_ADMIN' || user?.role === 'PRINCIPAL' || user?.role === 'ACCOUNTANT';
-  
-  // Security tab is available to ALL users
-  // Profile tab is available to ALL users
 
+  // ==================== SCHOOL FORM STATE ====================
   const [schoolForm, setSchoolForm] = useState({
     name: school?.name || '',
     motto: school?.motto || '',
-    contact: school?.contact || { email: '', phone: '', address: '', logo: '' },
-    smsConfig: school?.smsConfig || { provider: '', apiKey: '', senderId: '', enabled: false },
-    emailConfig: school?.emailConfig || { host: '', port: '', username: '', password: '', fromEmail: '', enabled: false },
+    contact: school?.contact || { 
+      email: '', 
+      phone: '', 
+      address: '', 
+      logo: '',
+      county: '',
+      constituency: '',
+      ward: '',
+      postalAddress: '',
+      website: ''
+    },
+    
+    // ===== EMAIL CONFIGURATION =====
+    emailProvider: school?.emailProvider || 'SMTP',
+    emailConfig: school?.emailConfig || {
+      smtp: { host: '', port: 587, secure: false, username: '', password: '', fromEmail: '', replyTo: '' },
+      sendgrid: { apiKey: '', fromEmail: '', replyTo: '' },
+      resend: { apiKey: '', fromEmail: '', replyTo: '' },
+      mailgun: { apiKey: '', domain: '', fromEmail: '', replyTo: '', apiUrl: 'https://api.mailgun.net' },
+      ses: { accessKeyId: '', secretAccessKey: '', region: 'us-east-1', fromEmail: '', replyTo: '' },
+      enabled: false,
+      testMode: false,
+      testEmail: '',
+      sendLimit: 1000,
+      sendLimitPerHour: 100,
+      batchSize: 50,
+      delayBetweenBatches: 1000,
+      retryAttempts: 3,
+      retryDelay: 5000
+    },
+    
+    // ===== SMS CONFIGURATION =====
+    smsProvider: school?.smsProvider || 'NONE',
+    smsConfig: school?.smsConfig || {
+      africastalking: { apiKey: '', username: '', senderId: '', shortCode: '' },
+      celcom: { apiKey: '', senderId: '', route: 'direct', callbackUrl: '' },
+      smsleopard: { apiKey: '', senderId: '', route: 'safaricom', userId: '' },
+      advanta: { apiKey: '', username: '', senderId: '', partnerId: '' },
+      pawatalk: { apiKey: '', senderId: '', merchantId: '', callbackUrl: '' },
+      twilio: { accountSid: '', authToken: '', fromNumber: '', messagingServiceSid: '' },
+      bulksms: { username: '', password: '', from: '' },
+      smscountry: { username: '', password: '', senderId: '', route: 'default' },
+      enabled: false,
+      testMode: false,
+      testPhone: '',
+      sendLimit: 500,
+      sendLimitPerHour: 50,
+      batchSize: 100,
+      delayBetweenBatches: 2000,
+      defaultCountryCode: '254'
+    },
+    
+    // ===== FINANCIAL SETTINGS =====
     financialSettings: school?.financialSettings || {
       currency: 'KES',
       enableLateFees: false,
       lateFeePercentage: 5,
       enableDiscounts: true
+    },
+    
+    // ===== ATTENDANCE SETTINGS =====
+    startTime: school?.startTime || '08:00',
+    endTime: school?.endTime || '17:00',
+    lateThreshold: school?.lateThreshold || 30,
+    earlyDepartureThreshold: school?.earlyDepartureThreshold || 30,
+    
+    // ===== SCHOOL SETTINGS =====
+    settings: school?.settings || {
+      academicYear: new Date().getFullYear().toString(),
+      terms: ['Term 1', 'Term 2', 'Term 3'],
+      gradingSystem: {},
+      currency: 'KES',
+      timezone: 'Africa/Nairobi',
+      dateFormat: 'DD/MM/YYYY'
     }
   });
 
@@ -26916,7 +28335,136 @@ const SettingsModule = ({
     }
   };
 
-  // Load notifications
+  // ==================== TEST EMAIL HANDLER ====================
+  const handleTestEmail = async () => {
+    if (!school?.id) {
+      setError('No school selected');
+      setTimeout(() => setError(''), 3000);
+      return;
+    }
+
+    if (!schoolForm.emailConfig?.enabled) {
+      setError('Please enable email sending first');
+      setTimeout(() => setError(''), 3000);
+      return;
+    }
+
+    const provider = schoolForm.emailProvider || 'SMTP';
+    let isConfigured = false;
+    
+    if (provider === 'SMTP') {
+      const smtp = schoolForm.emailConfig?.smtp || schoolForm.emailConfig;
+      isConfigured = !!(smtp.host && smtp.username && smtp.password && smtp.fromEmail);
+    } else if (provider === 'SENDGRID') {
+      isConfigured = !!(schoolForm.emailConfig?.sendgrid?.apiKey && schoolForm.emailConfig?.sendgrid?.fromEmail);
+    } else if (provider === 'RESEND') {
+      isConfigured = !!(schoolForm.emailConfig?.resend?.apiKey && schoolForm.emailConfig?.resend?.fromEmail);
+    } else if (provider === 'MAILGUN') {
+      isConfigured = !!(schoolForm.emailConfig?.mailgun?.apiKey && schoolForm.emailConfig?.mailgun?.domain && schoolForm.emailConfig?.mailgun?.fromEmail);
+    } else if (provider === 'AWS_SES') {
+      isConfigured = !!(schoolForm.emailConfig?.ses?.accessKeyId && schoolForm.emailConfig?.ses?.secretAccessKey && schoolForm.emailConfig?.ses?.fromEmail);
+    }
+
+    if (!isConfigured) {
+      setError(`Please fill in all required ${provider} configuration fields`);
+      setTimeout(() => setError(''), 3000);
+      return;
+    }
+
+    setTestEmailLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const res = await api.post(`/schools/${school.id}/test-email`, {
+        testEmail: user?.email
+      });
+
+      if (res.data.success) {
+        setSuccess(res.data.message);
+      } else {
+        setError(res.data.message || 'Test failed');
+      }
+    } catch (err) {
+      console.error('❌ Test email error:', err);
+      const errorMessage = err.response?.data?.message || err.response?.data?.error || 'Failed to send test email';
+      setError(`❌ ${errorMessage}`);
+    } finally {
+      setTestEmailLoading(false);
+    }
+  };
+
+  // ==================== TEST SMS HANDLER ====================
+  const handleTestSMS = async () => {
+    if (!school?.id) {
+      setError('No school selected');
+      setTimeout(() => setError(''), 3000);
+      return;
+    }
+
+    if (!schoolForm.smsConfig?.enabled) {
+      setError('Please enable SMS sending first');
+      setTimeout(() => setError(''), 3000);
+      return;
+    }
+
+    const provider = schoolForm.smsProvider || 'NONE';
+    if (provider === 'NONE') {
+      setError('Please select an SMS provider');
+      setTimeout(() => setError(''), 3000);
+      return;
+    }
+
+    // Check if provider is configured
+    let isConfigured = false;
+    if (provider === 'AFRICASTALKING') {
+      isConfigured = !!(schoolForm.smsConfig?.africastalking?.apiKey && schoolForm.smsConfig?.africastalking?.username);
+    } else if (provider === 'CELCOM') {
+      isConfigured = !!(schoolForm.smsConfig?.celcom?.apiKey);
+    } else if (provider === 'SMSLEOPARD') {
+      isConfigured = !!(schoolForm.smsConfig?.smsleopard?.apiKey);
+    } else if (provider === 'ADVANTA') {
+      isConfigured = !!(schoolForm.smsConfig?.advanta?.apiKey && schoolForm.smsConfig?.advanta?.username);
+    } else if (provider === 'PAWATALK') {
+      isConfigured = !!(schoolForm.smsConfig?.pawatalk?.apiKey && schoolForm.smsConfig?.pawatalk?.merchantId);
+    } else if (provider === 'TWILIO') {
+      isConfigured = !!(schoolForm.smsConfig?.twilio?.accountSid && schoolForm.smsConfig?.twilio?.authToken);
+    } else if (provider === 'BULKSMS') {
+      isConfigured = !!(schoolForm.smsConfig?.bulksms?.username && schoolForm.smsConfig?.bulksms?.password);
+    } else if (provider === 'SMSCOUNTRY') {
+      isConfigured = !!(schoolForm.smsConfig?.smscountry?.username && schoolForm.smsConfig?.smscountry?.password);
+    }
+
+    if (!isConfigured) {
+      setError(`Please fill in all required ${provider} configuration fields`);
+      setTimeout(() => setError(''), 3000);
+      return;
+    }
+
+    setTestSMSLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const res = await api.post(`/schools/${school.id}/test-sms`, {
+        testPhone: user?.phone || '0712345678'
+      });
+
+      if (res.data.success) {
+        setSuccess(res.data.message);
+      } else {
+        setError(res.data.message || 'SMS test failed');
+      }
+    } catch (err) {
+      console.error('❌ Test SMS error:', err);
+      const errorMessage = err.response?.data?.message || err.response?.data?.error || 'Failed to send test SMS';
+      setError(`❌ ${errorMessage}`);
+    } finally {
+      setTestSMSLoading(false);
+    }
+  };
+
+  // ==================== NOTIFICATIONS ====================
   useEffect(() => {
     if (canManageNotifications) {
       loadNotifications();
@@ -26946,6 +28494,7 @@ const SettingsModule = ({
     }
   };
 
+  // ==================== LOGO UPLOAD ====================
   const handleLogoUpload = async (e) => {
     if (!canEditSchool) {
       alert('You do not have permission to upload a logo');
@@ -26979,25 +28528,86 @@ const SettingsModule = ({
     }
   };
 
+  // ==================== SAVE SCHOOL ====================
   const handleSaveSchool = async () => {
     if (!canEditSchool) {
       alert('You do not have permission to edit school settings');
       return;
     }
+    
     setLoading(true);
+    setError('');
+    setSuccess('');
+
     try {
-      const res = await api.put(`/schools/${school?.id}`, schoolForm);
+      const schoolData = {
+        name: schoolForm.name,
+        motto: schoolForm.motto,
+        contact: schoolForm.contact,
+        
+        emailProvider: schoolForm.emailProvider || 'SMTP',
+        emailConfig: {
+          ...schoolForm.emailConfig,
+          smtp: schoolForm.emailConfig?.smtp || { host: '', port: 587, secure: false, username: '', password: '', fromEmail: '', replyTo: '' },
+          sendgrid: schoolForm.emailConfig?.sendgrid || { apiKey: '', fromEmail: '', replyTo: '' },
+          resend: schoolForm.emailConfig?.resend || { apiKey: '', fromEmail: '', replyTo: '' },
+          mailgun: schoolForm.emailConfig?.mailgun || { apiKey: '', domain: '', fromEmail: '', replyTo: '', apiUrl: 'https://api.mailgun.net' },
+          ses: schoolForm.emailConfig?.ses || { accessKeyId: '', secretAccessKey: '', region: 'us-east-1', fromEmail: '', replyTo: '' },
+          enabled: schoolForm.emailConfig?.enabled || false,
+          testMode: schoolForm.emailConfig?.testMode || false,
+          testEmail: schoolForm.emailConfig?.testEmail || '',
+          sendLimit: schoolForm.emailConfig?.sendLimit || 1000,
+          sendLimitPerHour: schoolForm.emailConfig?.sendLimitPerHour || 100,
+          batchSize: schoolForm.emailConfig?.batchSize || 50,
+          delayBetweenBatches: schoolForm.emailConfig?.delayBetweenBatches || 1000,
+          retryAttempts: schoolForm.emailConfig?.retryAttempts || 3,
+          retryDelay: schoolForm.emailConfig?.retryDelay || 5000
+        },
+        
+        smsProvider: schoolForm.smsProvider || 'NONE',
+        smsConfig: {
+          africastalking: schoolForm.smsConfig?.africastalking || { apiKey: '', username: '', senderId: '', shortCode: '' },
+          celcom: schoolForm.smsConfig?.celcom || { apiKey: '', senderId: '', route: 'direct', callbackUrl: '' },
+          smsleopard: schoolForm.smsConfig?.smsleopard || { apiKey: '', senderId: '', route: 'safaricom', userId: '' },
+          advanta: schoolForm.smsConfig?.advanta || { apiKey: '', username: '', senderId: '', partnerId: '' },
+          pawatalk: schoolForm.smsConfig?.pawatalk || { apiKey: '', senderId: '', merchantId: '', callbackUrl: '' },
+          twilio: schoolForm.smsConfig?.twilio || { accountSid: '', authToken: '', fromNumber: '', messagingServiceSid: '' },
+          bulksms: schoolForm.smsConfig?.bulksms || { username: '', password: '', from: '' },
+          smscountry: schoolForm.smsConfig?.smscountry || { username: '', password: '', senderId: '', route: 'default' },
+          enabled: schoolForm.smsConfig?.enabled || false,
+          testMode: schoolForm.smsConfig?.testMode || false,
+          testPhone: schoolForm.smsConfig?.testPhone || '',
+          sendLimit: schoolForm.smsConfig?.sendLimit || 500,
+          sendLimitPerHour: schoolForm.smsConfig?.sendLimitPerHour || 50,
+          batchSize: schoolForm.smsConfig?.batchSize || 100,
+          delayBetweenBatches: schoolForm.smsConfig?.delayBetweenBatches || 2000,
+          defaultCountryCode: schoolForm.smsConfig?.defaultCountryCode || '254'
+        },
+        
+        startTime: schoolForm.startTime,
+        endTime: schoolForm.endTime,
+        lateThreshold: schoolForm.lateThreshold,
+        earlyDepartureThreshold: schoolForm.earlyDepartureThreshold,
+        settings: schoolForm.settings,
+        financialSettings: schoolForm.financialSettings
+      };
+
+      const res = await api.put(`/schools/${school?.id}`, schoolData);
+      
       setSchool(res.data.school);
-      setSuccess('School settings updated successfully');
+      setSuccess('✅ School settings updated successfully!');
       setTimeout(() => setSuccess(''), 3000);
+      
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to update school');
+      console.error('Save school error:', err);
+      setError(err.response?.data?.message || 'Failed to update school settings');
       setTimeout(() => setError(''), 3000);
     } finally {
       setLoading(false);
     }
   };
 
+  // ==================== BACKUP FUNCTIONS ====================
   const handleCreateBackup = async () => {
     if (!canManageBackup) {
       alert('You do not have permission to create backups');
@@ -27057,6 +28667,7 @@ const SettingsModule = ({
     }
   };
 
+  // ==================== EXPORT DATA ====================
   const handleExportData = async (type) => {
     if (!canExportData) return;
     try {
@@ -27077,23 +28688,43 @@ const SettingsModule = ({
   };
 
   // ==================== INPUT FIELD COMPONENT ====================
-  const InputField = ({ label, type = 'text', value, onChange, required, placeholder, disabled, helperText }) => (
-    <div>
-      {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
-      <input
-        type={type}
-        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-        value={value}
-        onChange={onChange}
-        required={required}
-        placeholder={placeholder}
-        disabled={disabled}
-      />
-      {helperText && <p className="text-xs text-gray-500 mt-1">{helperText}</p>}
-    </div>
-  );
+  const InputField = ({ label, type = 'text', value, onChange, required, placeholder, disabled, helperText, rows, textarea }) => {
+    if (textarea) {
+      return (
+        <div>
+          {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
+          <textarea
+            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+            value={value}
+            onChange={onChange}
+            required={required}
+            placeholder={placeholder}
+            disabled={disabled}
+            rows={rows || 3}
+          />
+          {helperText && <p className="text-xs text-gray-500 mt-1">{helperText}</p>}
+        </div>
+      );
+    }
+    
+    return (
+      <div>
+        {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
+        <input
+          type={type}
+          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+          value={value}
+          onChange={onChange}
+          required={required}
+          placeholder={placeholder}
+          disabled={disabled}
+        />
+        {helperText && <p className="text-xs text-gray-500 mt-1">{helperText}</p>}
+      </div>
+    );
+  };
 
-  const SelectField = ({ label, value, onChange, options, disabled }) => (
+  const SelectField = ({ label, value, onChange, options, disabled, placeholder }) => (
     <div>
       {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
       <select
@@ -27102,6 +28733,7 @@ const SettingsModule = ({
         disabled={disabled}
         className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
       >
+        {placeholder && <option value="">{placeholder}</option>}
         {options.map(opt => (
           <option key={opt.value} value={opt.value}>{opt.label}</option>
         ))}
@@ -27116,12 +28748,26 @@ const SettingsModule = ({
       
       <h2 className="text-2xl font-bold">⚙️ Settings</h2>
       
-      {success && <div className="bg-green-50 p-4 rounded text-green-700">{success}</div>}
-      {error && <div className="bg-red-50 p-4 rounded text-red-700">{error}</div>}
+      {success && (
+        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center justify-between">
+          <span><i className="fas fa-check-circle mr-2"></i>{success}</span>
+          <button onClick={() => setSuccess('')} className="text-green-500 hover:text-green-700">
+            <i className="fas fa-times"></i>
+          </button>
+        </div>
+      )}
+      
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
+          <span><i className="fas fa-exclamation-circle mr-2"></i>{error}</span>
+          <button onClick={() => setError('')} className="text-red-500 hover:text-red-700">
+            <i className="fas fa-times"></i>
+          </button>
+        </div>
+      )}
 
-      {/* Tabs - ALL USERS see Profile and Security tabs */}
+      {/* ==================== TABS ==================== */}
       <div className="flex space-x-2 border-b overflow-x-auto pb-1">
-        {/* Profile Tab - Always visible */}
         <button 
           onClick={() => setActiveTab('profile')} 
           className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${
@@ -27131,7 +28777,6 @@ const SettingsModule = ({
           <i className="fas fa-user mr-2"></i>My Profile
         </button>
         
-        {/* Security Tab - ALWAYS VISIBLE TO ALL USERS */}
         <button 
           onClick={() => setActiveTab('security')} 
           className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${
@@ -27141,7 +28786,6 @@ const SettingsModule = ({
           <i className="fas fa-lock mr-2"></i>Security
         </button>
         
-        {/* School Settings - Admin only */}
         {canEditSchool && (
           <button 
             onClick={() => setActiveTab('school')} 
@@ -27153,7 +28797,6 @@ const SettingsModule = ({
           </button>
         )}
         
-        {/* Financial Settings - Admin only */}
         {canEditSchool && (
           <button 
             onClick={() => setActiveTab('financial')} 
@@ -27165,7 +28808,6 @@ const SettingsModule = ({
           </button>
         )}
         
-        {/* Communications - Admin only */}
         {canEditSchool && (
           <button 
             onClick={() => setActiveTab('communications')} 
@@ -27177,7 +28819,6 @@ const SettingsModule = ({
           </button>
         )}
         
-        {/* Features - Admin only */}
         {canToggleFeatures && (
           <button 
             onClick={() => setActiveTab('features')} 
@@ -27189,7 +28830,6 @@ const SettingsModule = ({
           </button>
         )}
         
-        {/* Notifications - Admin/Principal */}
         {canManageNotifications && (
           <button 
             onClick={() => setActiveTab('notifications')} 
@@ -27201,7 +28841,6 @@ const SettingsModule = ({
           </button>
         )}
         
-        {/* Backup - Admin only */}
         {canManageBackup && (
           <button 
             onClick={() => setActiveTab('backup')} 
@@ -27213,7 +28852,6 @@ const SettingsModule = ({
           </button>
         )}
         
-        {/* Export Data - Authorized roles */}
         {canExportData && (
           <button 
             onClick={() => setActiveTab('export')} 
@@ -27225,7 +28863,6 @@ const SettingsModule = ({
           </button>
         )}
         
-        {/* Audit Logs - Admin only */}
         {canViewAudit && (
           <button 
             onClick={() => setActiveTab('audit')} 
@@ -27238,7 +28875,7 @@ const SettingsModule = ({
         )}
       </div>
 
-      {/* PROFILE TAB - Always visible */}
+      {/* ==================== PROFILE TAB ==================== */}
       {activeTab === 'profile' && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">Profile Information</h3>
@@ -27263,7 +28900,7 @@ const SettingsModule = ({
         </div>
       )}
 
-      {/* SECURITY TAB - AVAILABLE TO ALL USERS */}
+      {/* ==================== SECURITY TAB ==================== */}
       {activeTab === 'security' && (
         <div className="bg-white p-6 rounded-xl shadow-sm max-w-md">
           <h3 className="text-lg font-semibold mb-4">🔑 Change Password</h3>
@@ -27322,7 +28959,7 @@ const SettingsModule = ({
         </div>
       )}
 
-      {/* SCHOOL SETTINGS TAB - Admin only */}
+      {/* ==================== SCHOOL SETTINGS TAB ==================== */}
       {activeTab === 'school' && canEditSchool && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">🏫 School Settings</h3>
@@ -27387,17 +29024,18 @@ const SettingsModule = ({
               })} 
               disabled={loading} 
             />
+            <div className="col-span-2">
+              <InputField 
+                label="Address" 
+                value={schoolForm.contact.address} 
+                onChange={(e) => setSchoolForm({ 
+                  ...schoolForm, 
+                  contact: { ...schoolForm.contact, address: e.target.value }
+                })} 
+                disabled={loading} 
+              />
+            </div>
           </div>
-
-          <InputField 
-            label="Address" 
-            value={schoolForm.contact.address} 
-            onChange={(e) => setSchoolForm({ 
-              ...schoolForm, 
-              contact: { ...schoolForm.contact, address: e.target.value }
-            })} 
-            disabled={loading} 
-          />
 
           <button 
             onClick={handleSaveSchool} 
@@ -27409,7 +29047,7 @@ const SettingsModule = ({
         </div>
       )}
 
-      {/* FINANCIAL SETTINGS TAB - Admin only */}
+      {/* ==================== FINANCIAL SETTINGS TAB ==================== */}
       {activeTab === 'financial' && canEditSchool && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">💰 Financial Settings</h3>
@@ -27425,7 +29063,12 @@ const SettingsModule = ({
                   currency: e.target.value
                 }
               })}
-              options={[{ value: 'KES', label: 'KES - Kenyan Shilling' }, { value: 'USD', label: 'USD - US Dollar' }, { value: 'EUR', label: 'EUR - Euro' }, { value: 'GBP', label: 'GBP - British Pound' }]}
+              options={[
+                { value: 'KES', label: 'KES - Kenyan Shilling' },
+                { value: 'USD', label: 'USD - US Dollar' },
+                { value: 'EUR', label: 'EUR - Euro' },
+                { value: 'GBP', label: 'GBP - British Pound' }
+              ]}
             />
 
             <div className="flex items-center space-x-2">
@@ -27491,153 +29134,247 @@ const SettingsModule = ({
         </div>
       )}
 
-      {/* COMMUNICATIONS TAB - Admin only */}
+      {/* ==================== COMMUNICATIONS TAB ==================== */}
       {activeTab === 'communications' && canEditSchool && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
-          <h3 className="text-lg font-semibold mb-4">📧 SMS & Email Configuration</h3>
+          <h3 className="text-lg font-semibold mb-4">📧 Email & SMS Configuration</h3>
           
-          <div className="border rounded-lg p-4 mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <h4 className="font-medium text-lg">SMS Settings</h4>
-              <label className="flex items-center space-x-2">
-                <span className="text-sm text-gray-600">Enable SMS</span>
-                <input 
-                  type="checkbox" 
-                  checked={schoolForm.smsConfig.enabled} 
-                  onChange={(e) => setSchoolForm({ 
-                    ...schoolForm, 
-                    smsConfig: { ...schoolForm.smsConfig, enabled: e.target.checked }
-                  })} 
-                  className="rounded" 
-                  disabled={loading} 
-                />
-              </label>
+          <div className="space-y-6">
+            {/* ===== EMAIL SECTION ===== */}
+            <div>
+              <h4 className="font-medium text-lg mb-3 flex items-center gap-2">
+                <i className="fas fa-envelope text-indigo-600"></i>
+                Email Configuration
+              </h4>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Email Provider *</label>
+                  <select
+                    value={schoolForm.emailProvider || 'SMTP'}
+                    onChange={(e) => {
+                      const provider = e.target.value;
+                      setSchoolForm({ ...schoolForm, emailProvider: provider });
+                    }}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="SMTP">📧 SMTP (Gmail, Outlook, etc.)</option>
+                    <option value="SENDGRID">🚀 SendGrid</option>
+                    <option value="RESEND">📨 Resend</option>
+                    <option value="MAILGUN">📬 Mailgun</option>
+                    <option value="AWS_SES">☁️ AWS SES</option>
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">Choose your email service provider</p>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="enableEmail"
+                      checked={schoolForm.emailConfig?.enabled || false}
+                      onChange={(e) => setSchoolForm({
+                        ...schoolForm,
+                        emailConfig: { ...schoolForm.emailConfig, enabled: e.target.checked }
+                      })}
+                      className="rounded"
+                    />
+                    <label htmlFor="enableEmail" className="text-sm font-medium text-gray-700">Enable Email Sending</label>
+                  </div>
+                  
+                  <button
+                    onClick={handleTestEmail}
+                    disabled={testEmailLoading}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+                  >
+                    <i className="fas fa-paper-plane"></i>
+                    {testEmailLoading ? 'Sending...' : 'Test Configuration'}
+                  </button>
+                </div>
+
+                {/* SMTP Configuration */}
+                {schoolForm.emailProvider === 'SMTP' && (
+                  <div className="border rounded-lg p-4 bg-gray-50">
+                    <h4 className="font-medium text-sm text-gray-700 mb-3">SMTP Settings</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <InputField label="SMTP Host *" value={schoolForm.emailConfig?.smtp?.host || ''} onChange={(e) => setSchoolForm({ ...schoolForm, emailConfig: { ...schoolForm.emailConfig, smtp: { ...schoolForm.emailConfig?.smtp, host: e.target.value } } })} placeholder="smtp.gmail.com" disabled={loading} />
+                      <InputField label="SMTP Port *" type="number" value={schoolForm.emailConfig?.smtp?.port || 587} onChange={(e) => setSchoolForm({ ...schoolForm, emailConfig: { ...schoolForm.emailConfig, smtp: { ...schoolForm.emailConfig?.smtp, port: parseInt(e.target.value) } } })} placeholder="587" disabled={loading} />
+                      <InputField label="Username *" value={schoolForm.emailConfig?.smtp?.username || ''} onChange={(e) => setSchoolForm({ ...schoolForm, emailConfig: { ...schoolForm.emailConfig, smtp: { ...schoolForm.emailConfig?.smtp, username: e.target.value } } })} placeholder="your-email@gmail.com" disabled={loading} />
+                      <InputField label="Password *" type="password" value={schoolForm.emailConfig?.smtp?.password || ''} onChange={(e) => setSchoolForm({ ...schoolForm, emailConfig: { ...schoolForm.emailConfig, smtp: { ...schoolForm.emailConfig?.smtp, password: e.target.value } } })} placeholder="Enter password" disabled={loading} />
+                      <div className="col-span-2">
+                        <InputField label="From Email *" type="email" value={schoolForm.emailConfig?.smtp?.fromEmail || ''} onChange={(e) => setSchoolForm({ ...schoolForm, emailConfig: { ...schoolForm.emailConfig, smtp: { ...schoolForm.emailConfig?.smtp, fromEmail: e.target.value } } })} placeholder="noreply@school.com" disabled={loading} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* SendGrid Configuration */}
+                {schoolForm.emailProvider === 'SENDGRID' && (
+                  <div className="border rounded-lg p-4 bg-gray-50">
+                    <h4 className="font-medium text-sm text-gray-700 mb-3">SendGrid Settings</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="col-span-2">
+                        <InputField label="SendGrid API Key *" type="password" value={schoolForm.emailConfig?.sendgrid?.apiKey || ''} onChange={(e) => setSchoolForm({ ...schoolForm, emailConfig: { ...schoolForm.emailConfig, sendgrid: { ...schoolForm.emailConfig?.sendgrid, apiKey: e.target.value } } })} placeholder="SG.xxxxxxxxxx" disabled={loading} />
+                        <p className="text-xs text-gray-500 mt-1">Get your API key from <a href="https://app.sendgrid.com/settings/api_keys" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">SendGrid Dashboard</a></p>
+                      </div>
+                      <div className="col-span-2">
+                        <InputField label="From Email *" type="email" value={schoolForm.emailConfig?.sendgrid?.fromEmail || ''} onChange={(e) => setSchoolForm({ ...schoolForm, emailConfig: { ...schoolForm.emailConfig, sendgrid: { ...schoolForm.emailConfig?.sendgrid, fromEmail: e.target.value } } })} placeholder="noreply@school.com" disabled={loading} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <button onClick={handleSaveSchool} className="mt-4 bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50" disabled={loading}>
+                  {loading ? 'Saving...' : 'Save Email Settings'}
+                </button>
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <InputField 
-                label="Provider" 
-                value={schoolForm.smsConfig.provider} 
-                onChange={(e) => setSchoolForm({ 
-                  ...schoolForm, 
-                  smsConfig: { ...schoolForm.smsConfig, provider: e.target.value }
-                })} 
-                placeholder="e.g., Africa's Talking, Twilio" 
-                disabled={loading} 
-              />
-              <InputField 
-                label="API Key" 
-                type="password" 
-                value={schoolForm.smsConfig.apiKey} 
-                onChange={(e) => setSchoolForm({ 
-                  ...schoolForm, 
-                  smsConfig: { ...schoolForm.smsConfig, apiKey: e.target.value }
-                })} 
-                disabled={loading} 
-              />
-              <InputField 
-                label="Sender ID" 
-                value={schoolForm.smsConfig.senderId} 
-                onChange={(e) => setSchoolForm({ 
-                  ...schoolForm, 
-                  smsConfig: { ...schoolForm.smsConfig, senderId: e.target.value }
-                })} 
-                placeholder="e.g., SchoolAid" 
-                disabled={loading} 
-              />
+
+            {/* ===== SMS SECTION ===== */}
+            <div className="border-t pt-6">
+              <h4 className="font-medium text-lg mb-3 flex items-center gap-2">
+                <i className="fas fa-sms text-green-600"></i>
+                SMS Configuration
+              </h4>
+              
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="enableSMS"
+                      checked={schoolForm.smsConfig?.enabled || false}
+                      onChange={(e) => setSchoolForm({
+                        ...schoolForm,
+                        smsConfig: { ...schoolForm.smsConfig, enabled: e.target.checked }
+                      })}
+                      className="rounded"
+                    />
+                    <label htmlFor="enableSMS" className="text-sm font-medium text-gray-700">Enable SMS Sending</label>
+                  </div>
+                  
+                  <button
+                    onClick={handleTestSMS}
+                    disabled={testSMSLoading}
+                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center gap-2"
+                  >
+                    <i className="fas fa-paper-plane"></i>
+                    {testSMSLoading ? 'Sending...' : 'Test SMS'}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <SelectField
+                    label="SMS Provider"
+                    value={schoolForm.smsProvider || 'NONE'}
+                    onChange={(e) => setSchoolForm({ ...schoolForm, smsProvider: e.target.value })}
+                    options={[
+                      { value: 'NONE', label: '-- Select Provider --' },
+                      { value: 'AFRICASTALKING', label: '🌍 Africa\'s Talking (KES 0.40-0.80)' },
+                      { value: 'CELCOM', label: '📱 Celcom Africa (KES 0.25)' },
+                      { value: 'SMSLEOPARD', label: '🐆 SMSLeopard (KES 0.3-0.9)' },
+                      { value: 'ADVANTA', label: '📨 Advanta Africa (KES 0.30-0.80)' },
+                      { value: 'PAWATALK', label: '💳 PawaTalk (Payment + SMS)' },
+                      { value: 'TWILIO', label: '📞 Twilio (~KES 1.28)' },
+                      { value: 'BULKSMS', label: '📦 BulkSMS (~KES 0.80)' },
+                      { value: 'SMSCOUNTRY', label: '📱 SMS Country (~KES 0.60)' }
+                    ]}
+                    disabled={loading}
+                  />
+
+                  <InputField
+                    label="Default Country Code"
+                    value={schoolForm.smsConfig?.defaultCountryCode || '254'}
+                    onChange={(e) => setSchoolForm({
+                      ...schoolForm,
+                      smsConfig: { ...schoolForm.smsConfig, defaultCountryCode: e.target.value }
+                    })}
+                    placeholder="254"
+                    disabled={loading}
+                    helperText="Default country code for phone numbers"
+                  />
+                </div>
+
+                {/* Africa's Talking Configuration */}
+                {schoolForm.smsProvider === 'AFRICASTALKING' && (
+                  <div className="border rounded-lg p-4 bg-gray-50 mt-2">
+                    <h4 className="font-medium text-sm text-gray-700 mb-2">Africa's Talking Settings</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <InputField label="API Key" type="password" value={schoolForm.smsConfig?.africastalking?.apiKey || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, africastalking: { ...schoolForm.smsConfig?.africastalking, apiKey: e.target.value } } })} placeholder="at_xxxxxxxx" disabled={loading} />
+                      <InputField label="Username" value={schoolForm.smsConfig?.africastalking?.username || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, africastalking: { ...schoolForm.smsConfig?.africastalking, username: e.target.value } } })} placeholder="your_username" disabled={loading} />
+                      <InputField label="Sender ID" value={schoolForm.smsConfig?.africastalking?.senderId || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, africastalking: { ...schoolForm.smsConfig?.africastalking, senderId: e.target.value } } })} placeholder="SchoolAid" disabled={loading} />
+                      <InputField label="Short Code" value={schoolForm.smsConfig?.africastalking?.shortCode || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, africastalking: { ...schoolForm.smsConfig?.africastalking, shortCode: e.target.value } } })} placeholder="12345" disabled={loading} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Celcom Configuration */}
+                {schoolForm.smsProvider === 'CELCOM' && (
+                  <div className="border rounded-lg p-4 bg-gray-50 mt-2">
+                    <h4 className="font-medium text-sm text-gray-700 mb-2">Celcom Africa Settings</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <InputField label="API Key" type="password" value={schoolForm.smsConfig?.celcom?.apiKey || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, celcom: { ...schoolForm.smsConfig?.celcom, apiKey: e.target.value } } })} placeholder="Enter API key" disabled={loading} />
+                      <InputField label="Sender ID" value={schoolForm.smsConfig?.celcom?.senderId || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, celcom: { ...schoolForm.smsConfig?.celcom, senderId: e.target.value } } })} placeholder="SchoolAid" disabled={loading} />
+                      <SelectField label="Route" value={schoolForm.smsConfig?.celcom?.route || 'direct'} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, celcom: { ...schoolForm.smsConfig?.celcom, route: e.target.value } } })} options={[{ value: 'direct', label: 'Direct (Best Delivery)' }, { value: 'economy', label: 'Economy (Lower Cost)' }, { value: 'promotional', label: 'Promotional (Bulk)' }]} disabled={loading} />
+                      <InputField label="Callback URL" value={schoolForm.smsConfig?.celcom?.callbackUrl || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, celcom: { ...schoolForm.smsConfig?.celcom, callbackUrl: e.target.value } } })} placeholder="https://your-school.com/sms/callback" disabled={loading} />
+                    </div>
+                  </div>
+                )}
+
+                {/* SMSLeopard Configuration */}
+                {schoolForm.smsProvider === 'SMSLEOPARD' && (
+                  <div className="border rounded-lg p-4 bg-gray-50 mt-2">
+                    <h4 className="font-medium text-sm text-gray-700 mb-2">SMSLeopard Settings</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <InputField label="API Key" type="password" value={schoolForm.smsConfig?.smsleopard?.apiKey || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, smsleopard: { ...schoolForm.smsConfig?.smsleopard, apiKey: e.target.value } } })} placeholder="Enter API key" disabled={loading} />
+                      <InputField label="Sender ID" value={schoolForm.smsConfig?.smsleopard?.senderId || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, smsleopard: { ...schoolForm.smsConfig?.smsleopard, senderId: e.target.value } } })} placeholder="SchoolAid" disabled={loading} />
+                      <SelectField label="Route" value={schoolForm.smsConfig?.smsleopard?.route || 'safaricom'} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, smsleopard: { ...schoolForm.smsConfig?.smsleopard, route: e.target.value } } })} options={[{ value: 'safaricom', label: '📶 Safaricom' }, { value: 'airtel', label: '📶 Airtel' }, { value: 'telkom', label: '📶 Telkom' }, { value: 'all', label: '📶 All Networks' }]} disabled={loading} />
+                      <InputField label="User ID" value={schoolForm.smsConfig?.smsleopard?.userId || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, smsleopard: { ...schoolForm.smsConfig?.smsleopard, userId: e.target.value } } })} placeholder="Optional" disabled={loading} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Advanta Configuration */}
+                {schoolForm.smsProvider === 'ADVANTA' && (
+                  <div className="border rounded-lg p-4 bg-gray-50 mt-2">
+                    <h4 className="font-medium text-sm text-gray-700 mb-2">Advanta Africa Settings</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <InputField label="API Key" type="password" value={schoolForm.smsConfig?.advanta?.apiKey || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, advanta: { ...schoolForm.smsConfig?.advanta, apiKey: e.target.value } } })} placeholder="Enter API key" disabled={loading} />
+                      <InputField label="Username" value={schoolForm.smsConfig?.advanta?.username || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, advanta: { ...schoolForm.smsConfig?.advanta, username: e.target.value } } })} placeholder="Enter username" disabled={loading} />
+                      <InputField label="Sender ID" value={schoolForm.smsConfig?.advanta?.senderId || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, advanta: { ...schoolForm.smsConfig?.advanta, senderId: e.target.value } } })} placeholder="SchoolAid" disabled={loading} />
+                      <InputField label="Partner ID" value={schoolForm.smsConfig?.advanta?.partnerId || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, advanta: { ...schoolForm.smsConfig?.advanta, partnerId: e.target.value } } })} placeholder="Optional" disabled={loading} />
+                    </div>
+                  </div>
+                )}
+
+                {/* PawaTalk Configuration */}
+                {schoolForm.smsProvider === 'PAWATALK' && (
+                  <div className="border rounded-lg p-4 bg-gray-50 mt-2">
+                    <h4 className="font-medium text-sm text-gray-700 mb-2">PawaTalk Settings</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <InputField label="API Key" type="password" value={schoolForm.smsConfig?.pawatalk?.apiKey || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, pawatalk: { ...schoolForm.smsConfig?.pawatalk, apiKey: e.target.value } } })} placeholder="Enter API key" disabled={loading} />
+                      <InputField label="Sender ID" value={schoolForm.smsConfig?.pawatalk?.senderId || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, pawatalk: { ...schoolForm.smsConfig?.pawatalk, senderId: e.target.value } } })} placeholder="SchoolAid" disabled={loading} />
+                      <InputField label="Merchant ID" value={schoolForm.smsConfig?.pawatalk?.merchantId || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, pawatalk: { ...schoolForm.smsConfig?.pawatalk, merchantId: e.target.value } } })} placeholder="Enter merchant ID" disabled={loading} />
+                      <InputField label="Callback URL" value={schoolForm.smsConfig?.pawatalk?.callbackUrl || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, pawatalk: { ...schoolForm.smsConfig?.pawatalk, callbackUrl: e.target.value } } })} placeholder="https://your-school.com/sms/callback" disabled={loading} />
+                    </div>
+                  </div>
+                )}
+
+                <button onClick={handleSaveSchool} className="mt-4 bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50" disabled={loading}>
+                  {loading ? 'Saving...' : 'Save SMS Settings'}
+                </button>
+              </div>
             </div>
           </div>
-
-          <div className="border rounded-lg p-4 mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <h4 className="font-medium text-lg">Email Settings</h4>
-              <label className="flex items-center space-x-2">
-                <span className="text-sm text-gray-600">Enable Email</span>
-                <input 
-                  type="checkbox" 
-                  checked={schoolForm.emailConfig.enabled} 
-                  onChange={(e) => setSchoolForm({ 
-                    ...schoolForm, 
-                    emailConfig: { ...schoolForm.emailConfig, enabled: e.target.checked }
-                  })} 
-                  className="rounded" 
-                  disabled={loading} 
-                />
-              </label>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <InputField 
-                label="SMTP Host" 
-                value={schoolForm.emailConfig.host} 
-                onChange={(e) => setSchoolForm({ 
-                  ...schoolForm, 
-                  emailConfig: { ...schoolForm.emailConfig, host: e.target.value }
-                })} 
-                placeholder="smtp.gmail.com" 
-                disabled={loading} 
-              />
-              <InputField 
-                label="SMTP Port" 
-                value={schoolForm.emailConfig.port} 
-                onChange={(e) => setSchoolForm({ 
-                  ...schoolForm, 
-                  emailConfig: { ...schoolForm.emailConfig, port: e.target.value }
-                })} 
-                placeholder="587" 
-                disabled={loading} 
-              />
-              <InputField 
-                label="Username" 
-                value={schoolForm.emailConfig.username} 
-                onChange={(e) => setSchoolForm({ 
-                  ...schoolForm, 
-                  emailConfig: { ...schoolForm.emailConfig, username: e.target.value }
-                })} 
-                disabled={loading} 
-              />
-              <InputField 
-                label="Password" 
-                type="password" 
-                value={schoolForm.emailConfig.password} 
-                onChange={(e) => setSchoolForm({ 
-                  ...schoolForm, 
-                  emailConfig: { ...schoolForm.emailConfig, password: e.target.value }
-                })} 
-                disabled={loading} 
-              />
-              <InputField 
-                label="From Email" 
-                type="email" 
-                value={schoolForm.emailConfig.fromEmail} 
-                onChange={(e) => setSchoolForm({ 
-                  ...schoolForm, 
-                  emailConfig: { ...schoolForm.emailConfig, fromEmail: e.target.value }
-                })} 
-                placeholder="noreply@school.com" 
-                disabled={loading} 
-              />
-            </div>
-          </div>
-
-          <button 
-            onClick={handleSaveSchool} 
-            className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700"
-            disabled={loading}
-          >
-            Save Communication Settings
-          </button>
         </div>
       )}
 
-      {/* FEATURES TAB */}
+      {/* ==================== FEATURES TAB ==================== */}
       {activeTab === 'features' && canToggleFeatures && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <div className="flex justify-between mb-4">
             <h3 className="text-lg font-semibold">🚀 Feature Toggles</h3>
-            <button 
-              onClick={loadFeatures} 
-              className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
-              disabled={loading}
-            >
+            <button onClick={loadFeatures} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700" disabled={loading}>
               {loading ? 'Loading...' : 'Load Features'}
             </button>
           </div>
@@ -27654,13 +29391,7 @@ const SettingsModule = ({
                     <span className="font-medium">{f.name}</span>
                     <span className="text-sm text-gray-500 ml-2">({f.code})</span>
                   </div>
-                  <button 
-                    onClick={() => toggleFeature(f.code)} 
-                    className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
-                      f.isEnabled ? 'bg-green-500 text-white hover:bg-green-600' : 'bg-gray-500 text-white hover:bg-gray-600'
-                    }`}
-                    disabled={loading}
-                  >
+                  <button onClick={() => toggleFeature(f.code)} className={`px-3 py-1 rounded text-sm font-medium transition-colors ${f.isEnabled ? 'bg-green-500 text-white hover:bg-green-600' : 'bg-gray-500 text-white hover:bg-gray-600'}`} disabled={loading}>
                     {f.isEnabled ? 'ON' : 'OFF'}
                   </button>
                 </div>
@@ -27670,7 +29401,7 @@ const SettingsModule = ({
         </div>
       )}
 
-      {/* NOTIFICATIONS TAB */}
+      {/* ==================== NOTIFICATIONS TAB ==================== */}
       {activeTab === 'notifications' && canManageNotifications && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">🔔 Notification Settings</h3>
@@ -27688,14 +29419,7 @@ const SettingsModule = ({
                     <h4 className="font-medium">{notification.name}</h4>
                     <p className="text-sm text-gray-600">{notification.description}</p>
                   </div>
-                  <button
-                    onClick={() => handleToggleNotification(notification.id)}
-                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                      notification.enabled 
-                        ? 'bg-green-100 text-green-700 hover:bg-green-200' 
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
+                  <button onClick={() => handleToggleNotification(notification.id)} className={`px-4 py-2 rounded-lg font-medium transition-colors ${notification.enabled ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
                     {notification.enabled ? 'Enabled' : 'Disabled'}
                   </button>
                 </div>
@@ -27705,7 +29429,7 @@ const SettingsModule = ({
         </div>
       )}
 
-      {/* BACKUP TAB */}
+      {/* ==================== BACKUP TAB ==================== */}
       {activeTab === 'backup' && canManageBackup && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">💾 Backup & Restore</h3>
@@ -27713,14 +29437,8 @@ const SettingsModule = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="border rounded-lg p-6">
               <h4 className="font-medium text-lg mb-3">Create Backup</h4>
-              <p className="text-sm text-gray-600 mb-4">
-                Create a complete backup of all school data including students, staff, fees, and academic records.
-              </p>
-              <button
-                onClick={handleCreateBackup}
-                disabled={backupInProgress}
-                className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-              >
+              <p className="text-sm text-gray-600 mb-4">Create a complete backup of all school data including students, staff, fees, and academic records.</p>
+              <button onClick={handleCreateBackup} disabled={backupInProgress} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
                 {backupInProgress ? 'Creating...' : 'Create Backup Now'}
               </button>
             </div>
@@ -27735,18 +29453,8 @@ const SettingsModule = ({
                     <div key={index} className="flex justify-between items-center p-2 bg-gray-50 rounded text-sm">
                       <span>{new Date(backup.created).toLocaleString()}</span>
                       <div className="flex gap-2">
-                        <button
-                          onClick={() => handleDownloadBackup(backup.filename)}
-                          className="text-blue-600 hover:text-blue-800"
-                        >
-                          <i className="fas fa-download"></i>
-                        </button>
-                        <button
-                          onClick={() => handleRestoreBackup(backup.filename)}
-                          className="text-red-600 hover:text-red-800"
-                        >
-                          <i className="fas fa-undo"></i>
-                        </button>
+                        <button onClick={() => handleDownloadBackup(backup.filename)} className="text-blue-600 hover:text-blue-800"><i className="fas fa-download"></i></button>
+                        <button onClick={() => handleRestoreBackup(backup.filename)} className="text-red-600 hover:text-red-800"><i className="fas fa-undo"></i></button>
                       </div>
                     </div>
                   ))}
@@ -27757,61 +29465,38 @@ const SettingsModule = ({
         </div>
       )}
 
-      {/* EXPORT DATA TAB */}
+      {/* ==================== EXPORT DATA TAB ==================== */}
       {activeTab === 'export' && canExportData && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">📤 Export Data</h3>
           
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <button
-              onClick={() => handleExportData('students')}
-              className="p-4 border rounded-lg hover:bg-indigo-50 transition-colors text-left"
-            >
+            <button onClick={() => handleExportData('students')} className="p-4 border rounded-lg hover:bg-indigo-50 transition-colors text-left">
               <i className="fas fa-user-graduate text-2xl text-indigo-600 mb-2"></i>
               <h4 className="font-medium">Export Students</h4>
               <p className="text-xs text-gray-500 mt-1">CSV format with all student details</p>
             </button>
-
-            <button
-              onClick={() => handleExportData('staff')}
-              className="p-4 border rounded-lg hover:bg-indigo-50 transition-colors text-left"
-            >
+            <button onClick={() => handleExportData('staff')} className="p-4 border rounded-lg hover:bg-indigo-50 transition-colors text-left">
               <i className="fas fa-chalkboard-teacher text-2xl text-indigo-600 mb-2"></i>
               <h4 className="font-medium">Export Staff</h4>
               <p className="text-xs text-gray-500 mt-1">CSV format with staff information</p>
             </button>
-
-            <button
-              onClick={() => handleExportData('fees')}
-              className="p-4 border rounded-lg hover:bg-indigo-50 transition-colors text-left"
-            >
+            <button onClick={() => handleExportData('fees')} className="p-4 border rounded-lg hover:bg-indigo-50 transition-colors text-left">
               <i className="fas fa-money-bill-wave text-2xl text-indigo-600 mb-2"></i>
               <h4 className="font-medium">Export Fees</h4>
               <p className="text-xs text-gray-500 mt-1">Fee structures and payment records</p>
             </button>
-
-            <button
-              onClick={() => handleExportData('results')}
-              className="p-4 border rounded-lg hover:bg-indigo-50 transition-colors text-left"
-            >
+            <button onClick={() => handleExportData('results')} className="p-4 border rounded-lg hover:bg-indigo-50 transition-colors text-left">
               <i className="fas fa-chart-line text-2xl text-indigo-600 mb-2"></i>
               <h4 className="font-medium">Export Results</h4>
               <p className="text-xs text-gray-500 mt-1">All examination results</p>
             </button>
-
-            <button
-              onClick={() => handleExportData('attendance')}
-              className="p-4 border rounded-lg hover:bg-indigo-50 transition-colors text-left"
-            >
+            <button onClick={() => handleExportData('attendance')} className="p-4 border rounded-lg hover:bg-indigo-50 transition-colors text-left">
               <i className="fas fa-calendar-check text-2xl text-indigo-600 mb-2"></i>
               <h4 className="font-medium">Export Attendance</h4>
               <p className="text-xs text-gray-500 mt-1">Attendance records</p>
             </button>
-
-            <button
-              onClick={() => handleExportData('full')}
-              className="p-4 border rounded-lg hover:bg-indigo-50 transition-colors text-left"
-            >
+            <button onClick={() => handleExportData('full')} className="p-4 border rounded-lg hover:bg-indigo-50 transition-colors text-left">
               <i className="fas fa-database text-2xl text-indigo-600 mb-2"></i>
               <h4 className="font-medium">Full Export</h4>
               <p className="text-xs text-gray-500 mt-1">Complete school data archive</p>
@@ -27820,36 +29505,18 @@ const SettingsModule = ({
         </div>
       )}
 
-      {/* AUDIT LOGS TAB */}
+      {/* ==================== AUDIT LOGS TAB ==================== */}
       {activeTab === 'audit' && canViewAudit && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">📋 Audit Logs</h3>
           
           <div className="grid grid-cols-2 gap-4 mb-4 max-w-md">
-            <InputField 
-              label="Start Date" 
-              type="date" 
-              value={dateRange.start} 
-              onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })} 
-            />
-            <InputField 
-              label="End Date" 
-              type="date" 
-              value={dateRange.end} 
-              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })} 
-            />
+            <InputField label="Start Date" type="date" value={dateRange.start} onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })} />
+            <InputField label="End Date" type="date" value={dateRange.end} onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })} />
           </div>
 
-          <button 
-            onClick={loadAuditLogs} 
-            className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 mb-4 flex items-center" 
-            disabled={loading}
-          >
-            {loading ? (
-              <><i className="fas fa-spinner fa-spin mr-2"></i>Fetching...</>
-            ) : (
-              <><i className="fas fa-search mr-2"></i>Fetch Logs</>
-            )}
+          <button onClick={loadAuditLogs} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 mb-4 flex items-center" disabled={loading}>
+            {loading ? <><i className="fas fa-spinner fa-spin mr-2"></i>Fetching...</> : <><i className="fas fa-search mr-2"></i>Fetch Logs</>}
           </button>
 
           {!auditLogs || auditLogs.length === 0 ? (
@@ -27873,12 +29540,8 @@ const SettingsModule = ({
                 <tbody className="divide-y">
                   {auditLogs.map(log => (
                     <tr key={log.id} className="hover:bg-gray-50">
-                      <td className="p-3 whitespace-nowrap">
-                        {log.timestamp ? new Date(log.timestamp).toLocaleString() : 'N/A'}
-                      </td>
-                      <td className="p-3 whitespace-nowrap font-medium">
-                        <span className="text-indigo-600">{log.userName || 'System'}</span>
-                      </td>
+                      <td className="p-3 whitespace-nowrap">{log.timestamp ? new Date(log.timestamp).toLocaleString() : 'N/A'}</td>
+                      <td className="p-3 whitespace-nowrap font-medium"><span className="text-indigo-600">{log.userName || 'System'}</span></td>
                       <td className="p-3 whitespace-nowrap">
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                           log.action === 'CREATE' ? 'bg-green-100 text-green-800' : 
@@ -27894,9 +29557,7 @@ const SettingsModule = ({
                       </td>
                       <td className="p-3 whitespace-nowrap">{log.entity || 'N/A'}</td>
                       <td className="p-3 text-xs text-gray-500 max-w-xs truncate">
-                        {log.newValue && Object.keys(log.newValue).length > 0 
-                          ? `${Object.keys(log.newValue).length} field(s) changed` 
-                          : 'No details'}
+                        {log.newValue && Object.keys(log.newValue).length > 0 ? `${Object.keys(log.newValue).length} field(s) changed` : 'No details'}
                       </td>
                     </tr>
                   ))}
@@ -27909,7 +29570,6 @@ const SettingsModule = ({
     </div>
   );
 };
-
 // ==================== COMPLETE STAFF ATTENDANCE MODULE WITH CONFIGURABLE LATE TIME ====================
 const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user }) => {
   console.log('👤 StaffAttendanceModule initialized');
@@ -32866,7 +34526,10 @@ const FeeStatementPrintModal = ({ feeStatement, student, currentSchool, onClose 
 };
 
 
-// ==================== COMPLETE FIXED HEALTH MODULE WITH SICK BAY SYNC ====================
+// ==================== COMPLETE FIXED HEALTH MODULE ====================
+// ✅ No more "invalid input syntax for type numeric" errors
+// ✅ Health records display correctly
+
 const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) => {
   const [selectedStudent, setSelectedStudent] = useState('');
   const [healthRecords, setHealthRecords] = useState([]);
@@ -32888,6 +34551,7 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
     start: new Date(new Date().setDate(1)).toISOString().split('T')[0],
     end: new Date().toISOString().split('T')[0]
   });
+  const [error, setError] = useState('');
   
   const [healthForm, setHealthForm] = useState({
     studentId: '',
@@ -32908,7 +34572,7 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
   });
 
   const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
+    baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000/api',
     headers: { 'Content-Type': 'application/json' }
   });
 
@@ -32955,7 +34619,6 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
       const token = localStorage.getItem('token');
       const hostel = sickBay.hostel;
       
-      // Find the Sick Bay room index
       const roomIndex = (hostel.rooms || []).findIndex(r => 
         (r.roomNumber === sickBay.roomNumber || r.name === 'Sick Bay' || r.type === 'SICK_BAY') &&
         r.id === sickBay.id
@@ -32967,14 +34630,12 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
       let currentStudents = currentRoom.students || [];
       
       if (shouldAdmit) {
-        // Add student if not already there
         if (!currentStudents.includes(studentId)) {
           currentStudents.push(studentId);
         } else {
-          return true; // Already there
+          return true;
         }
       } else {
-        // Remove student
         currentStudents = currentStudents.filter(id => id !== studentId);
       }
       
@@ -32985,7 +34646,7 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
         occupied: currentStudents.length
       };
       
-      const response = await fetch(`http://localhost:5000/api/hostels/${hostel.id}`, {
+      const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:5000/api'}/hostels/${hostel.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -33008,33 +34669,50 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
     }
   };
 
-  // ==================== CHECK IF STUDENT IS IN SICK BAY ====================
-  const isStudentInSickBay = (studentId) => {
-    const sickBay = findSickBayRoom();
-    if (!sickBay) return false;
-    const students = sickBay.students || [];
-    return students.includes(studentId);
-  };
-
   const loadHealthRecords = async () => {
     setLoading(true);
+    setError('');
     try {
       const params = {};
       if (selectedStudent) params.studentId = selectedStudent;
       if (dateRange.start) params.startDate = dateRange.start;
       if (dateRange.end) params.endDate = dateRange.end;
       
+      console.log('📋 Fetching health records with params:', params);
+      
       const res = await api.get('/health-records', { params });
-      const records = res.data.records || [];
+      
+      let records = [];
+      if (res.data && res.data.records) {
+        records = res.data.records;
+      } else if (res.data && Array.isArray(res.data)) {
+        records = res.data;
+      } else if (res.data && res.data.success && res.data.data) {
+        records = res.data.data;
+      }
+      
+      console.log(`✅ Found ${records.length} health records`);
+      
+      if (records.length > 0) {
+        console.log('📋 Sample record:', records[0]);
+      }
+      
       setHealthRecords(records);
+      
+      if (records.length === 0) {
+        setError('No health records found for the selected filters. Try adjusting your date range.');
+      }
+      
     } catch (error) {
-      console.error('Error loading health records:', error);
-      alert('Failed to load health records');
+      console.error('❌ Error loading health records:', error);
+      setError('Failed to load health records: ' + (error.response?.data?.message || error.message));
+      setHealthRecords([]);
     } finally {
       setLoading(false);
     }
   };
 
+  // ==================== SAVE HEALTH RECORD - FIXED ====================
   const saveHealthRecord = async () => {
     if (!canEdit) {
       alert('You do not have permission to add health records');
@@ -33048,13 +34726,41 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
     
     setLoading(true);
     try {
+      // ✅ FIX: Convert empty strings to null for numeric fields
+      const cleanNumeric = (value) => {
+        if (value === '' || value === null || value === undefined) return null;
+        const num = parseFloat(value);
+        return isNaN(num) ? null : num;
+      };
+
+      const cleanString = (value) => {
+        if (value === '' || value === null || value === undefined) return null;
+        return value.trim();
+      };
+
       const recordData = {
-        ...healthForm,
+        studentId: healthForm.studentId,
+        date: healthForm.date,
+        temperature: cleanNumeric(healthForm.temperature),
+        bloodPressure: cleanString(healthForm.bloodPressure),
+        weight: cleanNumeric(healthForm.weight),
+        height: cleanNumeric(healthForm.height),
+        symptoms: cleanString(healthForm.symptoms),
+        diagnosis: healthForm.diagnosis.trim(),
+        prescription: cleanString(healthForm.prescription),
+        followUpDate: healthForm.followUpDate || null,
+        notes: cleanString(healthForm.notes),
+        status: healthForm.status || 'TREATED',
+        referredTo: cleanString(healthForm.referredTo),
+        referredDate: healthForm.referredDate || null,
+        referralReason: cleanString(healthForm.referralReason),
         schoolId: currentSchool?.id,
         recordedBy: user?.id,
         recordedAt: new Date().toISOString()
       };
-      
+
+      console.log('📤 Saving health record with cleaned data:', recordData);
+
       let response;
       let savedRecord = null;
       
@@ -33065,7 +34771,6 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
         response = await api.put(`/health-records/${editingRecord.id}`, recordData);
         savedRecord = response.data.record || response.data;
         
-        // Sync with Sick Bay based on status change
         if (wasAdmitted && !isNowAdmitted) {
           await syncStudentToSickBay(healthForm.studentId, false);
           alert(`🏥 Student removed from Sick Bay`);
@@ -33084,7 +34789,6 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
         savedRecord = response.data.record || response.data;
         alert('✅ Health record saved successfully!');
         
-        // If status is ADMITTED, add to Sick Bay
         if (healthForm.status === 'ADMITTED') {
           const synced = await syncStudentToSickBay(healthForm.studentId, true);
           if (synced) {
@@ -33117,14 +34821,18 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
       
       await loadHealthRecords();
       
-      // Notify parent to refresh all data
       if (onDataChange) {
         onDataChange();
       }
       
     } catch (error) {
       console.error('Error saving health record:', error);
-      alert('❌ Failed to save health record: ' + (error.response?.data?.message || error.message));
+      
+      let errorMessage = error.response?.data?.message || error.message;
+      if (errorMessage.includes('invalid input syntax for type numeric')) {
+        errorMessage = 'Please enter valid numbers for temperature, weight, and height (use decimal points like 36.5)';
+      }
+      alert('❌ Failed to save health record: ' + errorMessage);
     } finally {
       setLoading(false);
     }
@@ -33186,7 +34894,6 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
     
     setLoading(true);
     try {
-      // If record was admitted, remove from Sick Bay
       if (record.status === 'ADMITTED') {
         await syncStudentToSickBay(record.studentId, false);
       }
@@ -33208,11 +34915,9 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
     
     setLoading(true);
     try {
-      // First sync to Sick Bay
       const synced = await syncStudentToSickBay(record.studentId, true);
       
       if (synced) {
-        // Then update health record status
         await api.put(`/health-records/${record.id}`, {
           ...record,
           status: 'ADMITTED'
@@ -33236,11 +34941,9 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
     
     setLoading(true);
     try {
-      // Remove from Sick Bay
       const synced = await syncStudentToSickBay(record.studentId, false);
       
       if (synced) {
-        // Update health record status
         await api.put(`/health-records/${record.id}`, {
           ...record,
           status: 'DISCHARGED'
@@ -33284,16 +34987,29 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
   const referredCount = healthRecords.filter(r => r.status === 'REFERRED').length;
   const admittedCount = healthRecords.filter(r => r.status === 'ADMITTED').length;
 
+  // ==================== AUTO-LOAD ON FILTER CHANGE ====================
   React.useEffect(() => {
     loadHealthRecords();
-  }, []);
+  }, [selectedStudent, dateRange.start, dateRange.end]);
 
   return (
     <div className="space-y-6">
-      {/* Loading Indicator */}
       {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
       
-      {/* Header */}
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+          <i className="fas fa-exclamation-circle mr-2"></i>
+          {error}
+          <button 
+            onClick={() => loadHealthRecords()} 
+            className="ml-4 text-indigo-600 hover:text-indigo-800 text-sm font-medium"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
@@ -33454,6 +35170,19 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
               <><i className="fas fa-search"></i> Load Records</>
             )}
           </button>
+          <button
+            onClick={() => {
+              setSelectedStudent('');
+              setDateRange({
+                start: new Date(new Date().setDate(1)).toISOString().split('T')[0],
+                end: new Date().toISOString().split('T')[0]
+              });
+              loadHealthRecords();
+            }}
+            className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600 transition-all"
+          >
+            Reset Filters
+          </button>
         </div>
       </div>
 
@@ -33468,10 +35197,21 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
                 {healthRecords.length}
               </span>
             </h3>
+            <button
+              onClick={loadHealthRecords}
+              className="text-sm text-indigo-600 hover:text-indigo-800"
+            >
+              <i className="fas fa-sync-alt mr-1"></i> Refresh
+            </button>
           </div>
         </div>
         
-        {healthRecords.length > 0 ? (
+        {loading ? (
+          <div className="flex justify-center items-center py-12">
+            <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+            <p className="ml-4 text-gray-500">Loading records...</p>
+          </div>
+        ) : healthRecords.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50">
@@ -33487,98 +35227,103 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {healthRecords.map(record => (
-                  <tr key={record.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {new Date(record.date).toLocaleDateString()}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center mr-3">
-                          <span className="text-indigo-600 font-semibold text-sm">
-                            {record.Student?.firstName?.[0]}{record.Student?.lastName?.[0]}
-                          </span>
+                {healthRecords.map(record => {
+                  const student = record.Student || students?.find(s => s.id === record.studentId);
+                  return (
+                    <tr key={record.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {record.date ? new Date(record.date).toLocaleDateString() : 'N/A'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center mr-3">
+                            <span className="text-indigo-600 font-semibold text-sm">
+                              {student?.firstName?.[0]}{student?.lastName?.[0]}
+                            </span>
+                          </div>
+                          <div>
+                            <p className="font-medium text-gray-900">
+                              {student?.firstName} {student?.lastName}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-medium text-gray-900">{record.Student?.firstName} {record.Student?.lastName}</p>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded">
+                          {student?.admissionNumber || 'N/A'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-600">
+                        {getVitalsDisplay(record)}
+                      </td>
+                      <td className="px-6 py-4 max-w-xs">
+                        <span className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm">
+                          {record.diagnosis}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(record.status)}`}>
+                          {record.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {record.followUpDate ? new Date(record.followUpDate).toLocaleDateString() : '—'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={() => {
+                              setSelectedRecord(record);
+                              setShowDetailsModal(true);
+                            }}
+                            className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                            title="View Details"
+                          >
+                            <i className="fas fa-eye"></i>
+                          </button>
+                          {canEdit && (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setEditingRecord(record);
+                                  setHealthForm({
+                                    studentId: record.studentId,
+                                    date: record.date ? record.date.split('T')[0] : new Date().toISOString().split('T')[0],
+                                    temperature: record.temperature || '',
+                                    bloodPressure: record.bloodPressure || '',
+                                    weight: record.weight || '',
+                                    height: record.height || '',
+                                    symptoms: record.symptoms || '',
+                                    diagnosis: record.diagnosis || '',
+                                    prescription: record.prescription || '',
+                                    followUpDate: record.followUpDate ? record.followUpDate.split('T')[0] : '',
+                                    notes: record.notes || '',
+                                    status: record.status || 'TREATED',
+                                    referredTo: record.referredTo || '',
+                                    referredDate: record.referredDate || '',
+                                    referralReason: record.referralReason || ''
+                                  });
+                                  setShowRecordForm(true);
+                                }}
+                                className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                title="Edit Record"
+                              >
+                                <i className="fas fa-edit"></i>
+                              </button>
+                              <button
+                                onClick={() => handleDeleteRecord(record)}
+                                className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                title="Delete Record"
+                              >
+                                <i className="fas fa-trash-alt"></i>
+                              </button>
+                            </>
+                          )}
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="font-mono text-sm bg-gray-100 px-2 py-1 rounded">
-                        {record.Student?.admissionNumber}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">
-                      {getVitalsDisplay(record)}
-                    </td>
-                    <td className="px-6 py-4 max-w-xs">
-                      <span className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm">
-                        {record.diagnosis}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(record.status)}`}>
-                        {record.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {record.followUpDate ? new Date(record.followUpDate).toLocaleDateString() : '—'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex space-x-2">
-                        <button
-                          onClick={() => {
-                            setSelectedRecord(record);
-                            setShowDetailsModal(true);
-                          }}
-                          className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                          title="View Details"
-                        >
-                          <i className="fas fa-eye"></i>
-                        </button>
-                        {canEdit && (
-                          <>
-                            <button
-                              onClick={() => {
-                                setEditingRecord(record);
-                                setHealthForm({
-                                  studentId: record.studentId,
-                                  date: record.date.split('T')[0],
-                                  temperature: record.temperature || '',
-                                  bloodPressure: record.bloodPressure || '',
-                                  weight: record.weight || '',
-                                  height: record.height || '',
-                                  symptoms: record.symptoms || '',
-                                  diagnosis: record.diagnosis || '',
-                                  prescription: record.prescription || '',
-                                  followUpDate: record.followUpDate ? record.followUpDate.split('T')[0] : '',
-                                  notes: record.notes || '',
-                                  status: record.status || 'TREATED',
-                                  referredTo: record.referredTo || '',
-                                  referredDate: record.referredDate || '',
-                                  referralReason: record.referralReason || ''
-                                });
-                                setShowRecordForm(true);
-                              }}
-                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                              title="Edit Record"
-                            >
-                              <i className="fas fa-edit"></i>
-                            </button>
-                            <button
-                              onClick={() => handleDeleteRecord(record)}
-                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                              title="Delete Record"
-                            >
-                              <i className="fas fa-trash-alt"></i>
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -33588,11 +35333,12 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
               <i className="fas fa-notes-medical text-2xl text-gray-400"></i>
             </div>
             <p className="text-gray-500">No health records found</p>
+            <p className="text-sm text-gray-400 mt-1">Try adjusting your filters or add a new record</p>
           </div>
         )}
       </div>
 
-      {/* Health Record Form Modal */}
+      {/* ===== HEALTH RECORD FORM MODAL ===== */}
       {showRecordForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl p-6 max-h-[90vh] overflow-auto">
@@ -33604,6 +35350,13 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
               <button onClick={() => setShowRecordForm(false)} className="text-gray-400 hover:text-gray-600">
                 <i className="fas fa-times text-xl"></i>
               </button>
+            </div>
+            
+            <div className="mb-4 p-3 bg-blue-50 rounded-lg">
+              <p className="text-sm text-blue-700">
+                <i className="fas fa-info-circle mr-2"></i>
+                Leave numeric fields (Temperature, Weight, Height) empty if not measured.
+              </p>
             </div>
             
             <form onSubmit={(e) => { e.preventDefault(); saveHealthRecord(); }} className="space-y-4">
@@ -33644,7 +35397,9 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
                     value={healthForm.temperature}
                     onChange={(e) => setHealthForm({...healthForm, temperature: e.target.value})}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    placeholder="e.g., 36.5"
                   />
+                  <p className="text-xs text-gray-400 mt-1">Leave empty if not measured</p>
                 </div>
                 
                 <div>
@@ -33654,6 +35409,7 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
                     value={healthForm.bloodPressure}
                     onChange={(e) => setHealthForm({...healthForm, bloodPressure: e.target.value})}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    placeholder="e.g., 120/80"
                   />
                 </div>
                 
@@ -33665,7 +35421,9 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
                     value={healthForm.weight}
                     onChange={(e) => setHealthForm({...healthForm, weight: e.target.value})}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    placeholder="e.g., 65.5"
                   />
+                  <p className="text-xs text-gray-400 mt-1">Leave empty if not measured</p>
                 </div>
                 
                 <div>
@@ -33676,7 +35434,9 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
                     value={healthForm.height}
                     onChange={(e) => setHealthForm({...healthForm, height: e.target.value})}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    placeholder="e.g., 170.5"
                   />
+                  <p className="text-xs text-gray-400 mt-1">Leave empty if not measured</p>
                 </div>
               </div>
               
@@ -33687,6 +35447,7 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
                   onChange={(e) => setHealthForm({...healthForm, symptoms: e.target.value})}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   rows="2"
+                  placeholder="List any symptoms..."
                 />
               </div>
               
@@ -33698,6 +35459,7 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   rows="2"
                   required
+                  placeholder="Enter diagnosis..."
                 />
               </div>
               
@@ -33708,6 +35470,7 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
                   onChange={(e) => setHealthForm({...healthForm, prescription: e.target.value})}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   rows="2"
+                  placeholder="Enter prescription..."
                 />
               </div>
               
@@ -33751,6 +35514,7 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
                   onChange={(e) => setHealthForm({...healthForm, notes: e.target.value})}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   rows="2"
+                  placeholder="Any additional notes..."
                 />
               </div>
               
@@ -33779,7 +35543,7 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
         </div>
       )}
 
-      {/* Health Record Details Modal */}
+      {/* ===== HEALTH RECORD DETAILS MODAL ===== */}
       {showDetailsModal && selectedRecord && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
@@ -34801,6 +36565,7 @@ const SchemesOfWorkModule = ({
   courses, 
   programs, 
   units,
+  departments, 
   currentSchool, 
   user 
 }) => {
@@ -35469,13 +37234,33 @@ const SchemesOfWorkModule = ({
     return `${weekStart.toLocaleDateString()} - ${weekEnd.toLocaleDateString()}`;
   };
   
-  // ==================== HELPER FUNCTIONS ====================
-  const getDepartmentName = () => {
-    if (isTVET) return 'ICT & COMPUTER SCIENCE';
-    if (isUniversity) return 'SCHOOL OF COMPUTING & INFORMATICS';
-    return 'ACADEMIC DEPARTMENT';
-  };
+ // ==================== HELPER FUNCTIONS ====================
+const getDepartmentName = () => {
+  // If a program is selected, get its department from the programs data
+  if (selectedEntity && programs) {
+    const program = programs.find(p => p.id === selectedEntity);
+    if (program && program.departmentId) {
+      // Try to find department by ID
+      const dept = departments?.find(d => d.id === program.departmentId);
+      if (dept) return dept.name;
+      
+      // Fallback: try to find by name match in department field
+      if (program.department) return program.department;
+    }
+  }
   
+  // If a class is selected (for regular schools)
+  if (selectedEntity && classes && !isTVET && !isUniversity) {
+    const classObj = classes.find(c => c.id === selectedEntity);
+    if (classObj && classObj.department) return classObj.department;
+  }
+  
+  // Ultimate fallback - use the current school's category
+  const category = currentSchool?.category || '';
+  if (category === 'COLLEGE_TVET') return 'TVET Department';
+  if (category === 'UNIVERSITY') return 'University Faculty';
+  return 'Academic Department';
+};
   const getEntityName = (entityId) => {
     if (!entityId) return 'N/A';
     
@@ -36345,18 +38130,34 @@ const getSchoolType = (school) => {
   };
 };
 
-// ==================== COURSE ENROLLMENT MODULE (For University/TVET Only) ====================
-const CourseEnrollmentModule = ({ students, courses, programs, currentSchool, user, fees, payments }) => {
+// ==================== COURSE ENROLLMENT MODULE (COMPLETE - UNI & TVET) ====================
+const CourseEnrollmentModule = ({ 
+  students, 
+  courses, 
+  programs, 
+  currentSchool, 
+  user, 
+  fees, 
+  payments,
+  classes,
+  setActiveModule
+}) => {
+  // ==================== STATE ====================
   const [selectedStudent, setSelectedStudent] = useState('');
   const [studentEnrollments, setStudentEnrollments] = useState([]);
-  const [availableCourses, setAvailableCourses] = useState([]);
+  const [allPrograms, setAllPrograms] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [showEnrollForm, setShowEnrollForm] = useState(false);
-  const [selectedCourse, setSelectedCourse] = useState('');
-  const [selectedProgram, setSelectedProgram] = useState('');
   const [pendingApprovals, setPendingApprovals] = useState([]);
   const [showApprovals, setShowApprovals] = useState(false);
+  const [showProgramsModal, setShowProgramsModal] = useState(false);
+  const [selectedPrograms, setSelectedPrograms] = useState([]);
+  const [selectAllPrograms, setSelectAllPrograms] = useState(false);
+  const [enrollmentStatus, setEnrollmentStatus] = useState({});
+  const [searchTerm, setSearchTerm] = useState('');
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [initialized, setInitialized] = useState(false);
 
+  // ==================== API INSTANCE ====================
   const api = axios.create({
     baseURL: 'http://localhost:5000/api',
     headers: { 'Content-Type': 'application/json' }
@@ -36368,90 +38169,229 @@ const CourseEnrollmentModule = ({ students, courses, programs, currentSchool, us
     return config;
   });
 
-  const isAdmin = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEAN', 'HOD'].includes(user?.role);
-  const canApprove = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEAN', 'HOD'].includes(user?.role);
+  // ==================== SCHOOL TYPE DETECTION ====================
+  const schoolCategory = currentSchool?.category || 'COLLEGE_TVET';
+  const isTVET = schoolCategory === 'COLLEGE_TVET';
+  const isUniversity = schoolCategory === 'UNIVERSITY';
+  const isRegularSchool = !isTVET && !isUniversity;
+  
+  const entityName = isTVET ? 'Program' : isUniversity ? 'Course' : 'Class';
+  const entityNamePlural = isTVET ? 'Programs' : isUniversity ? 'Courses' : 'Classes';
+
+  // ==================== PERMISSIONS ====================
+  const isAdmin = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEAN', 'HOD', 'DEPUTY_PRINCIPAL'].includes(user?.role);
+  const canApprove = isAdmin;
   const isStudent = user?.role === 'STUDENT';
 
-  const schoolType = getSchoolType(currentSchool);
-  const isTVET = schoolType.isTVET;
-  const isUniversity = schoolType.isUniversity;
-  
-  const paymentRequiredPercentage = currentSchool?.paymentPercentageRequired || 30;
-  const requiresPayment = currentSchool?.requiresPaymentForUnits !== false;
+  // ==================== GET STUDENT ID ====================
+  const getStudentId = () => {
+    if (isStudent) {
+      return localStorage.getItem('studentId') || JSON.parse(localStorage.getItem('studentData') || '{}').id;
+    }
+    return selectedStudent;
+  };
 
+  // ==================== LOAD ALL PROGRAMS/COURSES ====================
+  const loadAllPrograms = async () => {
+    try {
+      let items = [];
+      
+      if (isTVET) {
+        const res = await api.get('/programs');
+        items = res.data.programs || [];
+      } else if (isUniversity) {
+        const res = await api.get('/courses');
+        items = res.data.courses || [];
+      } else {
+        const res = await api.get('/classes');
+        items = res.data.classes || [];
+      }
+      
+      // Create a map for quick lookup
+      const programMap = {};
+      items.forEach(p => {
+        programMap[p.id] = p;
+      });
+      
+      setAllPrograms(items);
+      console.log(`✅ Loaded ${items.length} ${entityNamePlural.toLowerCase()}`);
+      return { items, programMap };
+    } catch (error) {
+      console.error('Error loading programs:', error);
+      return { items: [], programMap: {} };
+    }
+  };
+
+  // ==================== FETCH SINGLE PROGRAM DETAILS ====================
+  const fetchProgramDetails = async (entityId) => {
+    if (!entityId) return null;
+    
+    try {
+      let details = null;
+      if (isTVET) {
+        const res = await api.get(`/programs/${entityId}`);
+        details = res.data.program;
+      } else if (isUniversity) {
+        const res = await api.get(`/courses/${entityId}`);
+        details = res.data.course;
+      } else {
+        const res = await api.get(`/classes/${entityId}`);
+        details = res.data.class;
+      }
+      return details;
+    } catch (error) {
+      console.error(`Failed to fetch entity ${entityId}:`, error);
+      return null;
+    }
+  };
+
+  // ==================== LOAD STUDENT ENROLLMENTS ====================
   const loadStudentEnrollments = async () => {
-    if (!selectedStudent && !isStudent) return;
+    const studentId = getStudentId();
+    if (!studentId) {
+      setStudentEnrollments([]);
+      return;
+    }
     
     setLoading(true);
     try {
-      const studentId = isStudent ? (localStorage.getItem('studentId') || (() => {
-        const studentData = JSON.parse(localStorage.getItem('studentData') || '{}');
-        return studentData.id;
-      })()) : selectedStudent;
-      
       // Get enrollments
       const enrollRes = await api.get(`/students/${studentId}/enrollments`);
       let enrollments = enrollRes.data.enrollments || [];
       
-      // Calculate payment percentage for each enrollment
-      const enrollmentsWithPayment = await Promise.all(enrollments.map(async (enrollment) => {
+      console.log(`📋 Found ${enrollments.length} enrollments for student`);
+      
+      // Create a map of all programs for quick lookup
+      const programMap = {};
+      allPrograms.forEach(p => {
+        programMap[p.id] = p;
+      });
+      
+      // Enrich with program/course details
+      const enrichedEnrollments = await Promise.all(enrollments.map(async (enrollment) => {
+        let entityId = null;
+        let entityName = '';
+        let entityCode = '';
+        let programDetails = null;
+        
+        // Determine the entity ID based on school type
+        if (isTVET && enrollment.programId) {
+          entityId = enrollment.programId;
+        } else if (isUniversity && enrollment.courseId) {
+          entityId = enrollment.courseId;
+        } else if (isRegularSchool && enrollment.classId) {
+          entityId = enrollment.classId;
+        }
+        
+        if (entityId) {
+          // Try to find in the map first
+          programDetails = programMap[entityId];
+          
+          // If not found, fetch directly from API
+          if (!programDetails) {
+            programDetails = await fetchProgramDetails(entityId);
+            // Add to map for future use
+            if (programDetails) {
+              programMap[entityId] = programDetails;
+            }
+          }
+          
+          // Set entity name and code
+          if (programDetails) {
+            entityName = programDetails.name || 'Unknown';
+            entityCode = programDetails.code || '';
+          } else {
+            // Use the enrollment's stored name as fallback
+            entityName = enrollment.Program?.name || 
+                        enrollment.Course?.name || 
+                        enrollment.Class?.name || 
+                        enrollment.programName || 
+                        enrollment.courseName || 
+                        enrollment.className ||
+                        `Unknown ${entityName}`;
+            entityCode = enrollment.Program?.code || 
+                        enrollment.Course?.code || 
+                        enrollment.Class?.code || 
+                        enrollment.programCode || 
+                        enrollment.courseCode || 
+                        enrollment.classCode || '';
+          }
+        }
+        
+        // Calculate payment percentage
         let totalFees = 0;
         let totalPaid = 0;
         
-        if (isUniversity && enrollment.courseId) {
-          const feesRes = await api.get(`/fees?courseId=${enrollment.courseId}`);
-          const courseFees = feesRes.data.fees || [];
-          totalFees = courseFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
+        if (entityId) {
+          try {
+            const feesRes = await api.get(`/fees?${isTVET ? 'programId' : isUniversity ? 'courseId' : 'classId'}=${entityId}`);
+            const entityFees = feesRes.data.fees || [];
+            totalFees = entityFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
+          } catch (err) {
+            console.error('Error fetching fees:', err);
+          }
           
-          const paymentsRes = await api.get(`/payments?studentId=${studentId}&courseId=${enrollment.courseId}`);
-          const coursePayments = paymentsRes.data.payments || [];
-          totalPaid = coursePayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-        } else if (isTVET && enrollment.programId) {
-          const feesRes = await api.get(`/fees?programId=${enrollment.programId}`);
-          const programFees = feesRes.data.fees || [];
-          totalFees = programFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
-          
-          const paymentsRes = await api.get(`/payments?studentId=${studentId}&programId=${enrollment.programId}`);
-          const programPayments = paymentsRes.data.payments || [];
-          totalPaid = programPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+          try {
+            const paymentsRes = await api.get(`/payments?studentId=${studentId}`);
+            totalPaid = paymentsRes.data.payments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+          } catch (err) {
+            console.error('Error fetching payments:', err);
+          }
         }
         
         const balance = totalFees - totalPaid;
         const paymentPercentage = totalFees > 0 ? (totalPaid / totalFees) * 100 : 100;
-        const canRegisterUnits = !requiresPayment || paymentPercentage >= paymentRequiredPercentage;
+        const canRegisterUnits = paymentPercentage >= 30;
+        
+        // Get module/unit count
+        let itemCount = 0;
+        if (entityId && programDetails) {
+          try {
+            if (isTVET) {
+              const unitsRes = await api.get(`/course-units?programId=${entityId}`);
+              itemCount = unitsRes.data.units?.length || 0;
+            } else if (isUniversity) {
+              const unitsRes = await api.get(`/course-units?courseId=${entityId}`);
+              itemCount = unitsRes.data.units?.length || 0;
+            }
+          } catch (err) {
+            console.error('Error fetching unit count:', err);
+          }
+        }
         
         return {
           ...enrollment,
+          entityId,
+          entityName,
+          entityCode,
+          programDetails,
           totalFees,
           totalPaid,
           balance,
           paymentPercentage: paymentPercentage.toFixed(1),
           canRegisterUnits,
-          isEligible: enrollment.status === 'APPROVED' && canRegisterUnits
+          isEligible: enrollment.status === 'APPROVED' && canRegisterUnits,
+          itemCount: itemCount || 0
         };
       }));
       
-      setStudentEnrollments(enrollmentsWithPayment);
+      setStudentEnrollments(enrichedEnrollments);
       
-      // Get available courses (ones not already enrolled)
-      if (isUniversity) {
-        const allCourses = courses || [];
-        const enrolledIds = enrollments.map(e => e.courseId).filter(Boolean);
-        setAvailableCourses(allCourses.filter(c => !enrolledIds.includes(c.id)));
-      } else if (isTVET) {
-        const allPrograms = programs || [];
-        const enrolledIds = enrollments.map(e => e.programId).filter(Boolean);
-        setAvailableCourses(allPrograms.filter(p => !enrolledIds.includes(p.id)));
-      }
+      // Update enrollment status map
+      const statusMap = {};
+      enrichedEnrollments.forEach(e => {
+        if (e.entityId) statusMap[e.entityId] = e.status;
+      });
+      setEnrollmentStatus(statusMap);
       
     } catch (error) {
-      console.error('Error loading student enrollments:', error);
-      alert('Failed to load student enrollments');
+      console.error('Error loading enrollments:', error);
     } finally {
       setLoading(false);
     }
   };
 
+  // ==================== LOAD PENDING APPROVALS ====================
   const loadPendingApprovals = async () => {
     if (!canApprove) return;
     
@@ -36463,49 +38403,65 @@ const CourseEnrollmentModule = ({ students, courses, programs, currentSchool, us
     }
   };
 
-  const enrollInCourse = async () => {
-    if (isUniversity && !selectedCourse) {
-      alert('Please select a course');
-      return;
-    }
-    if (isTVET && !selectedProgram) {
-      alert('Please select a program');
+  // ==================== ENROLL IN MULTIPLE PROGRAMS ====================
+  const enrollInMultiplePrograms = async () => {
+    if (selectedPrograms.length === 0) {
+      alert(`Please select at least one ${entityName}`);
       return;
     }
     
     setLoading(true);
     try {
-      const studentId = isStudent ? (localStorage.getItem('studentId') || (() => {
-        const studentData = JSON.parse(localStorage.getItem('studentData') || '{}');
-        return studentData.id;
-      })()) : selectedStudent;
+      const studentId = getStudentId();
       
-      const enrollmentData = {
-        studentId,
-        courseId: selectedCourse || null,
-        programId: selectedProgram || null,
-        status: isAdmin ? 'APPROVED' : 'PENDING',
-        enrollmentDate: new Date().toISOString(),
-        schoolId: currentSchool?.id,
-        academicYear: new Date().getFullYear().toString()
-      };
+      let enrolled = 0;
+      let failed = 0;
       
-      await api.post('/course-enrollments', enrollmentData);
+      for (const entityId of selectedPrograms) {
+        if (enrollmentStatus[entityId]) continue;
+        
+        const enrollmentData = {
+          studentId,
+          programId: isTVET ? entityId : null,
+          courseId: isUniversity ? entityId : null,
+          classId: isRegularSchool ? entityId : null,
+          status: isAdmin ? 'APPROVED' : 'PENDING',
+          enrollmentDate: new Date().toISOString(),
+          schoolId: currentSchool?.id,
+          academicYear: new Date().getFullYear().toString()
+        };
+        
+        try {
+          await api.post('/course-enrollments', enrollmentData);
+          enrolled++;
+        } catch (err) {
+          console.error('Error enrolling:', err);
+          failed++;
+        }
+      }
       
-      alert(isAdmin ? 'Student enrolled successfully!' : 'Enrollment request submitted for approval');
-      setShowEnrollForm(false);
-      setSelectedCourse('');
-      setSelectedProgram('');
-      loadStudentEnrollments();
-      if (canApprove) loadPendingApprovals();
+      alert(`✅ ${enrolled} ${entityName}(s) enrolled successfully!${failed > 0 ? ` ❌ ${failed} failed` : ''}`);
+      
+      setShowProgramsModal(false);
+      setSelectedPrograms([]);
+      setSelectAllPrograms(false);
+      setSearchTerm('');
+      setRefreshKey(prev => prev + 1);
+      
+      // Reload everything
+      await loadAllPrograms();
+      await loadStudentEnrollments();
+      if (canApprove) await loadPendingApprovals();
+      
     } catch (error) {
-      console.error('Error enrolling in course:', error);
-      alert(error.response?.data?.message || 'Failed to enroll');
+      console.error('Error enrolling:', error);
+      alert('Failed to enroll');
     } finally {
       setLoading(false);
     }
   };
 
+  // ==================== APPROVE ENROLLMENT ====================
   const approveEnrollment = async (enrollmentId, action) => {
     if (!canApprove) return;
     
@@ -36513,8 +38469,8 @@ const CourseEnrollmentModule = ({ students, courses, programs, currentSchool, us
     try {
       await api.patch(`/course-enrollments/${enrollmentId}/approve`, { action });
       alert(`Enrollment ${action.toLowerCase()}d successfully`);
-      loadPendingApprovals();
-      if (selectedStudent) loadStudentEnrollments();
+      await loadPendingApprovals();
+      await loadStudentEnrollments();
     } catch (error) {
       console.error('Error approving enrollment:', error);
       alert('Failed to process approval');
@@ -36523,84 +38479,163 @@ const CourseEnrollmentModule = ({ students, courses, programs, currentSchool, us
     }
   };
 
-  const dropCourse = async (enrollmentId) => {
-    if (!window.confirm('Are you sure you want to drop this course/program? This will also drop all unit registrations.')) return;
+  // ==================== DROP ENROLLMENT ====================
+  const dropEnrollment = async (enrollmentId) => {
+    if (!window.confirm(`Are you sure you want to drop this ${entityName}?`)) return;
     
     setLoading(true);
     try {
       await api.delete(`/course-enrollments/${enrollmentId}`);
-      alert('Course/Program dropped successfully');
-      loadStudentEnrollments();
+      alert(`${entityName} dropped successfully`);
+      await loadStudentEnrollments();
     } catch (error) {
-      console.error('Error dropping course:', error);
+      console.error('Error dropping:', error);
       alert('Failed to drop');
     } finally {
       setLoading(false);
     }
   };
 
+  // ==================== GET AVAILABLE PROGRAMS ====================
+  const getAvailablePrograms = () => {
+    const enrolledIds = studentEnrollments.map(e => e.entityId).filter(Boolean);
+    
+    let available = allPrograms.filter(p => !enrolledIds.includes(p.id));
+    
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      available = available.filter(p => 
+        p.name?.toLowerCase().includes(term) ||
+        p.code?.toLowerCase().includes(term)
+      );
+    }
+    
+    return available;
+  };
+
+  // ==================== HANDLE SELECT ALL ====================
+  const handleSelectAllPrograms = (checked) => {
+    setSelectAllPrograms(checked);
+    if (checked) {
+      const available = getAvailablePrograms();
+      setSelectedPrograms(available.map(p => p.id));
+    } else {
+      setSelectedPrograms([]);
+    }
+  };
+
+  // ==================== HANDLE PROGRAM SELECT ====================
+  const handleProgramSelect = (programId, checked) => {
+    if (checked) {
+      setSelectedPrograms([...selectedPrograms, programId]);
+    } else {
+      setSelectedPrograms(selectedPrograms.filter(id => id !== programId));
+      setSelectAllPrograms(false);
+    }
+  };
+
+  // ==================== GO TO UNIT REGISTRATION ====================
+  const goToUnitRegistration = (entityId) => {
+    localStorage.setItem('selectedProgramForUnits', entityId);
+    
+    if (setActiveModule) {
+      setActiveModule('unit-registration');
+    } else {
+      window.dispatchEvent(new CustomEvent('switchModule', { detail: 'unit-registration' }));
+    }
+  };
+
+  // ==================== INITIALIZE ====================
+  const initialize = async () => {
+    if (initialized) return;
+    setInitialized(true);
+    
+    await loadAllPrograms();
+    
+    if (selectedStudent || isStudent) {
+      await loadStudentEnrollments();
+    }
+    if (canApprove) {
+      await loadPendingApprovals();
+    }
+  };
+
+  // ==================== EFFECTS ====================
+  React.useEffect(() => {
+    initialize();
+  }, []);
+
   React.useEffect(() => {
     if (selectedStudent || isStudent) {
       loadStudentEnrollments();
     }
+  }, [selectedStudent, isStudent, refreshKey]);
+
+  React.useEffect(() => {
     if (canApprove) {
       loadPendingApprovals();
     }
-  }, [selectedStudent, isStudent]);
+  }, [canApprove]);
 
-  const entityName = isUniversity ? 'Course' : 'Program';
-  const entityNamePlural = isUniversity ? 'Courses' : 'Programs';
-
+  // ==================== RENDER ====================
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
+      
+      {/* Header */}
+      <div className="flex justify-between items-center flex-wrap gap-4">
         <div>
-          <h2 className="text-2xl font-bold">
+          <h2 className="text-2xl font-bold flex items-center gap-2">
             {isStudent ? `My ${entityName} Enrollment` : `${entityName} Enrollment Management`}
+            <span className="text-sm font-normal text-gray-500">
+              ({studentEnrollments.length} enrolled)
+            </span>
           </h2>
           <p className="text-sm text-gray-600 mt-1">
             Students can enroll in <strong>multiple {entityNamePlural.toLowerCase()}</strong>
           </p>
+          <p className="text-xs text-gray-400 mt-1">
+            {allPrograms.length} {entityNamePlural.toLowerCase()} available • {studentEnrollments.length} enrolled
+          </p>
         </div>
-        {canApprove && (
-          <button
-            onClick={() => setShowApprovals(!showApprovals)}
-            className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 relative"
-          >
-            <i className="fas fa-clock mr-2"></i>
-            Pending Approvals
-            {pendingApprovals.length > 0 && (
-              <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
-                {pendingApprovals.length}
-              </span>
-            )}
-          </button>
-        )}
+        <div className="flex gap-2">
+          {canApprove && (
+            <button
+              onClick={() => setShowApprovals(!showApprovals)}
+              className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 relative flex items-center gap-2"
+            >
+              <i className="fas fa-clock"></i>
+              Pending
+              {pendingApprovals.length > 0 && (
+                <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+                  {pendingApprovals.length}
+                </span>
+              )}
+            </button>
+          )}
+          {(selectedStudent || isStudent) && getAvailablePrograms().length > 0 && (
+            <button
+              onClick={() => setShowProgramsModal(true)}
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2"
+            >
+              <i className="fas fa-plus"></i>
+              Enroll in {entityNamePlural}
+            </button>
+          )}
+        </div>
       </div>
-
-      {/* Payment Info Banner */}
-      {requiresPayment && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <div className="flex items-start">
-            <i className="fas fa-info-circle text-blue-500 mr-3 mt-0.5"></i>
-            <div>
-              <p className="text-sm text-blue-800 font-medium">Payment Requirement</p>
-              <p className="text-xs text-blue-600">
-                You need to pay at least {paymentRequiredPercentage}% of fees per {entityName.toLowerCase()} to register units.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Student Selector (Admin View) */}
       {!isStudent && (
-        <div className="bg-white p-4 rounded-lg shadow-sm">
+        <div className="bg-white p-4 rounded-lg shadow-sm border">
           <label className="block text-sm font-medium mb-2">Select Student</label>
           <select
             value={selectedStudent}
-            onChange={(e) => setSelectedStudent(e.target.value)}
-            className="w-full max-w-md px-3 py-2 border rounded-lg"
+            onChange={(e) => {
+              setSelectedStudent(e.target.value);
+              setStudentEnrollments([]);
+            }}
+            className="w-full max-w-md px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
           >
             <option value="">-- Select Student --</option>
             {students?.map(s => (
@@ -36612,202 +38647,305 @@ const CourseEnrollmentModule = ({ students, courses, programs, currentSchool, us
         </div>
       )}
 
-      {/* Enroll Button */}
-      {(selectedStudent || isStudent) && availableCourses.length > 0 && (
-        <button
-          onClick={() => setShowEnrollForm(true)}
-          className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
-        >
-          <i className="fas fa-plus mr-2"></i>Enroll in {entityName}
-        </button>
-      )}
-
-      {/* Student's Enrollments Table - Shows ALL enrolled courses/programs */}
+      {/* Student's Enrollments Table */}
       {(selectedStudent || isStudent) && (
-        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-          <div className="px-6 py-4 bg-gray-50 border-b">
-            <h3 className="font-semibold text-lg">
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden border">
+          <div className="px-6 py-4 bg-gray-50 border-b flex justify-between items-center">
+            <h3 className="font-semibold text-lg flex items-center gap-2">
+              <i className="fas fa-graduation-cap text-indigo-500"></i>
               {isStudent ? `My ${entityNamePlural}` : `Enrolled ${entityNamePlural}`}
+              <span className="text-sm font-normal text-gray-500">
+                ({studentEnrollments.length} enrolled)
+              </span>
             </h3>
-            <p className="text-sm text-gray-500 mt-1">
-              {studentEnrollments.length} {entityNamePlural.toLowerCase()} enrolled
-            </p>
+            <button
+              onClick={async () => {
+                await loadAllPrograms();
+                await loadStudentEnrollments();
+              }}
+              className="text-sm text-indigo-600 hover:text-indigo-800"
+            >
+              <i className="fas fa-sync-alt mr-1"></i>Refresh
+            </button>
           </div>
           
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left">Code</th>
-                  <th className="px-4 py-3 text-left">{entityName} Name</th>
-                  <th className="px-4 py-3 text-left">Enrollment Date</th>
-                  <th className="px-4 py-3 text-left">Status</th>
-                  {requiresPayment && (
-                    <th className="px-4 py-3 text-left">Payment</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Code</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">{entityName} Name</th>
+                  {(isTVET || isUniversity) && (
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">
+                      {isTVET ? 'Modules' : 'Units'}
+                    </th>
                   )}
-                  <th className="px-4 py-3 text-left">Actions</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Enrollment Date</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Status</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Payment</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {studentEnrollments.length === 0 ? (
                   <tr>
-                    <td colSpan={requiresPayment ? 6 : 5} className="px-4 py-8 text-center text-gray-500">
-                      No {entityNamePlural.toLowerCase()} enrolled yet
+                    <td colSpan="7" className="px-4 py-8 text-center text-gray-500">
+                      <i className="fas fa-book-open text-4xl text-gray-300 mb-2 block"></i>
+                      <p>No {entityNamePlural.toLowerCase()} enrolled yet</p>
+                      {getAvailablePrograms().length > 0 && (selectedStudent || isStudent) && (
+                        <button
+                          onClick={() => setShowProgramsModal(true)}
+                          className="mt-2 text-indigo-600 hover:text-indigo-800 text-sm font-medium"
+                        >
+                          Click here to enroll in {entityNamePlural.toLowerCase()}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ) : (
-                  studentEnrollments.map(enrollment => (
-                    <tr key={enrollment.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-mono">
-                        {enrollment.Course?.code || enrollment.Program?.code}
-                      </td>
-                      <td className="px-4 py-3 font-medium">
-                        {enrollment.Course?.name || enrollment.Program?.name}
-                      </td>
-                      <td className="px-4 py-3">{new Date(enrollment.enrollmentDate).toLocaleDateString()}</td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-1 rounded-full text-xs ${
-                          enrollment.status === 'APPROVED' ? 'bg-green-100 text-green-800' :
-                          enrollment.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
-                          enrollment.status === 'REJECTED' ? 'bg-red-100 text-red-800' :
-                          'bg-gray-100 text-gray-800'
-                        }`}>
-                          {enrollment.status}
-                        </span>
-                      </td>
-                      {requiresPayment && (
+                  studentEnrollments.map(enrollment => {
+                    const isApproved = enrollment.status === 'APPROVED';
+                    const isPending = enrollment.status === 'PENDING';
+                    const canRegister = enrollment.canRegisterUnits && isApproved;
+                    
+                    return (
+                      <tr key={enrollment.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-mono text-sm">{enrollment.entityCode || 'N/A'}</td>
+                        <td className="px-4 py-3 font-medium text-indigo-600">
+                          {enrollment.entityName || 'Unknown Program'}
+                        </td>
+                        {(isTVET || isUniversity) && (
+                          <td className="px-4 py-3">
+                            <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
+                              {enrollment.itemCount || 0} {isTVET ? 'modules' : 'units'}
+                            </span>
+                          </td>
+                        )}
+                        <td className="px-4 py-3 text-sm">{new Date(enrollment.enrollmentDate).toLocaleDateString()}</td>
+                        <td className="px-4 py-3">
+                          <span className={`px-2 py-1 rounded-full text-xs ${
+                            isApproved ? 'bg-green-100 text-green-800' :
+                            isPending ? 'bg-yellow-100 text-yellow-800' :
+                            enrollment.status === 'REJECTED' ? 'bg-red-100 text-red-800' :
+                            'bg-gray-100 text-gray-800'
+                          }`}>
+                            {enrollment.status}
+                          </span>
+                        </td>
                         <td className="px-4 py-3">
                           <div className="flex flex-col">
                             <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium">
-                                {enrollment.paymentPercentage}%
-                              </span>
-                              <div className="w-20 h-2 bg-gray-200 rounded-full overflow-hidden">
+                              <span className="text-sm font-medium">{enrollment.paymentPercentage}%</span>
+                              <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
                                 <div 
-                                  className={`h-full rounded-full ${enrollment.paymentPercentage >= paymentRequiredPercentage ? 'bg-green-500' : 'bg-yellow-500'}`}
+                                  className={`h-full rounded-full ${enrollment.paymentPercentage >= 30 ? 'bg-green-500' : 'bg-yellow-500'}`}
                                   style={{ width: `${Math.min(100, enrollment.paymentPercentage)}%` }}
                                 />
                               </div>
                             </div>
-                            {enrollment.canRegisterUnits ? (
-                              <span className="text-xs text-green-600 mt-1">✓ Eligible for unit registration</span>
-                            ) : (
-                              <span className="text-xs text-red-500 mt-1">
-                                Need {paymentRequiredPercentage}% payment
-                              </span>
+                            {canRegister ? (
+                              <span className="text-xs text-green-600">✓ Eligible</span>
+                            ) : isApproved ? (
+                              <span className="text-xs text-red-500">Need 30% payment</span>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-1">
+                            {isApproved && canRegister && (
+                              <button
+                                onClick={() => goToUnitRegistration(enrollment.entityId)}
+                                className="bg-blue-100 text-blue-700 px-3 py-1 rounded text-sm hover:bg-blue-200 flex items-center gap-1"
+                              >
+                                <i className="fas fa-book"></i>
+                                Register {isTVET ? 'Modules' : 'Units'}
+                              </button>
+                            )}
+                            {isApproved && (
+                              <button
+                                onClick={() => dropEnrollment(enrollment.id)}
+                                className="text-red-600 hover:text-red-900 text-sm p-1 hover:bg-red-50 rounded"
+                                title={`Drop ${entityName}`}
+                              >
+                                <i className="fas fa-trash"></i>
+                              </button>
+                            )}
+                            {isPending && (
+                              <span className="text-xs text-yellow-600">Awaiting approval</span>
                             )}
                           </div>
                         </td>
-                      )}
-                      <td className="px-4 py-3">
-                        {enrollment.status === 'APPROVED' && (
-                          <div className="flex space-x-2">
-                            <button
-                              onClick={() => {
-                                if (enrollment.canRegisterUnits) {
-                                  localStorage.setItem('selectedCourseForUnits', enrollment.courseId || enrollment.programId);
-                                  // Trigger unit registration module
-                                  window.dispatchEvent(new CustomEvent('switchModule', { detail: 'unit-registration' }));
-                                } else {
-                                  alert(`Please clear ${paymentRequiredPercentage}% of fees to register units`);
-                                }
-                              }}
-                              className={`px-3 py-1 rounded text-sm ${enrollment.canRegisterUnits ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
-                              disabled={!enrollment.canRegisterUnits}
-                            >
-                              <i className="fas fa-book mr-1"></i>Register Units
-                            </button>
-                            <button
-                              onClick={() => dropCourse(enrollment.id)}
-                              className="text-red-600 hover:text-red-900"
-                              title="Drop Course"
-                            >
-                              <i className="fas fa-trash"></i>
-                            </button>
-                          </div>
-                        )}
-                        {enrollment.status === 'PENDING' && (
-                          <span className="text-xs text-yellow-600">Awaiting approval</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
           </div>
+          
+          {/* Summary Footer */}
+          {studentEnrollments.length > 0 && (
+            <div className="px-6 py-3 bg-gray-50 border-t flex justify-between items-center text-sm text-gray-500">
+              <span>
+                <i className="fas fa-check-circle text-green-500 mr-1"></i>
+                Approved: {studentEnrollments.filter(e => e.status === 'APPROVED').length}
+              </span>
+              <span>
+                <i className="fas fa-clock text-yellow-500 mr-1"></i>
+                Pending: {studentEnrollments.filter(e => e.status === 'PENDING').length}
+              </span>
+              <span>
+                <i className="fas fa-times-circle text-red-500 mr-1"></i>
+                Rejected: {studentEnrollments.filter(e => e.status === 'REJECTED').length}
+              </span>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Enrollment Form Modal */}
-      {showEnrollForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
-            <h3 className="text-xl font-bold mb-4">Enroll in {entityName}</h3>
-            
-            <div className="space-y-4">
+      {/* ==================== MULTI-PROGRAM ENROLLMENT MODAL ==================== */}
+      {showProgramsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
+            <div className="flex justify-between items-center mb-4 sticky top-0 bg-white z-10 pb-3 border-b">
               <div>
-                <label className="block text-sm font-medium mb-1">Select {entityName} *</label>
-                <select
-                  value={isUniversity ? selectedCourse : selectedProgram}
-                  onChange={(e) => {
-                    if (isUniversity) setSelectedCourse(e.target.value);
-                    else setSelectedProgram(e.target.value);
-                  }}
-                  className="w-full px-3 py-2 border rounded-lg"
-                  required
-                >
-                  <option value="">-- Select {entityName} --</option>
-                  {availableCourses.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.code})
-                    </option>
-                  ))}
-                </select>
-                {availableCourses.length === 0 && (
-                  <p className="text-sm text-yellow-600 mt-1">
-                    No available {entityNamePlural.toLowerCase()} to enroll in
-                  </p>
-                )}
-              </div>
-              
-              <div className="bg-yellow-50 p-3 rounded-lg">
-                <p className="text-xs text-yellow-800">
-                  <i className="fas fa-info-circle mr-1"></i>
-                  You can enroll in <strong>multiple {entityNamePlural.toLowerCase()}</strong>. Each requires separate approval.
+                <h3 className="text-xl font-bold flex items-center gap-2">
+                  <i className="fas fa-plus-circle text-indigo-600"></i>
+                  Enroll in {entityNamePlural}
+                </h3>
+                <p className="text-sm text-gray-500">
+                  {isStudent ? 'Select programs to enroll in' : `Enrolling student in ${entityNamePlural.toLowerCase()}`}
                 </p>
               </div>
-              
-              <div className="flex justify-end space-x-2 pt-4">
-                <button
-                  onClick={enrollInCourse}
-                  disabled={loading || (isUniversity ? !selectedCourse : !selectedProgram)}
-                  className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  {loading ? 'Enrolling...' : 'Submit Enrollment Request'}
-                </button>
-                <button
-                  onClick={() => {
-                    setShowEnrollForm(false);
-                    setSelectedCourse('');
-                    setSelectedProgram('');
-                  }}
-                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
-                >
-                  Cancel
-                </button>
-              </div>
+              <button onClick={() => {
+                setShowProgramsModal(false);
+                setSelectedPrograms([]);
+                setSelectAllPrograms(false);
+                setSearchTerm('');
+              }} className="text-gray-500 hover:text-gray-700">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+
+            <div className="mb-4 p-3 bg-blue-50 rounded-lg">
+              <p className="text-sm text-blue-700">
+                <i className="fas fa-info-circle mr-2"></i>
+                Select multiple {entityNamePlural.toLowerCase()} to enroll in at once.
+                {isAdmin && ' Enrollments will be auto-approved.'}
+                {!isAdmin && ' Enrollments will require approval.'}
+              </p>
+              <p className="text-xs text-blue-600 mt-1">
+                Available: <span className="font-bold">{getAvailablePrograms().length}</span> {entityNamePlural.toLowerCase()}
+              </p>
+            </div>
+
+            {/* Search */}
+            <div className="mb-4">
+              <input
+                type="text"
+                placeholder={`Search ${entityNamePlural.toLowerCase()} by name or code...`}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+
+            <div className="flex justify-between items-center mb-4">
+              <label className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  checked={selectAllPrograms}
+                  onChange={(e) => handleSelectAllPrograms(e.target.checked)}
+                  className="rounded"
+                />
+                <span className="text-sm font-medium">Select All ({getAvailablePrograms().length} available)</span>
+              </label>
+              <span className="text-sm text-gray-500">
+                Selected: <span className="font-bold text-indigo-600">{selectedPrograms.length}</span>
+              </span>
+            </div>
+
+            <div className="border rounded-lg max-h-60 overflow-y-auto">
+              {getAvailablePrograms().length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <i className="fas fa-check-circle text-4xl text-green-400 mb-2 block"></i>
+                  <p>All {entityNamePlural.toLowerCase()} are already enrolled!</p>
+                </div>
+              ) : (
+                <table className="w-full">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="px-4 py-2 w-10"></th>
+                      <th className="px-4 py-2 text-left text-sm font-medium text-gray-600">Code</th>
+                      <th className="px-4 py-2 text-left text-sm font-medium text-gray-600">{entityName} Name</th>
+                      <th className="px-4 py-2 text-left text-sm font-medium text-gray-600">Level</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {getAvailablePrograms().map(program => (
+                      <tr key={program.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-2">
+                          <input
+                            type="checkbox"
+                            checked={selectedPrograms.includes(program.id)}
+                            onChange={(e) => handleProgramSelect(program.id, e.target.checked)}
+                            className="rounded"
+                          />
+                        </td>
+                        <td className="px-4 py-2 font-mono text-sm">{program.code || 'N/A'}</td>
+                        <td className="px-4 py-2 font-medium">{program.name}</td>
+                        <td className="px-4 py-2">
+                          <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded-full text-xs">
+                            {program.level || program.type || 'N/A'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="flex justify-end space-x-2 pt-4 border-t mt-4">
+              <button
+                onClick={enrollInMultiplePrograms}
+                disabled={loading || selectedPrograms.length === 0}
+                className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                {loading ? (
+                  <><i className="fas fa-spinner fa-spin"></i> Enrolling...</>
+                ) : (
+                  <><i className="fas fa-check"></i> Enroll in {selectedPrograms.length} {entityName}(s)</>
+                )}
+              </button>
+              <button
+                onClick={() => {
+                  setShowProgramsModal(false);
+                  setSelectedPrograms([]);
+                  setSelectAllPrograms(false);
+                  setSearchTerm('');
+                }}
+                className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
+              >
+                Cancel
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Pending Approvals Modal */}
+      {/* ==================== PENDING APPROVALS MODAL ==================== */}
       {showApprovals && canApprove && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[80vh] overflow-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold">Pending {entityName} Approvals</h3>
+            <div className="flex justify-between items-center mb-4 sticky top-0 bg-white z-10 pb-3 border-b">
+              <h3 className="text-xl font-bold flex items-center gap-2">
+                <i className="fas fa-clock text-purple-600"></i>
+                Pending {entityName} Approvals
+                <span className="text-sm font-normal text-gray-500">
+                  ({pendingApprovals.length})
+                </span>
+              </h3>
               <button onClick={() => setShowApprovals(false)} className="text-gray-500 hover:text-gray-700">
                 <i className="fas fa-times"></i>
               </button>
@@ -36815,7 +38953,7 @@ const CourseEnrollmentModule = ({ students, courses, programs, currentSchool, us
             
             {pendingApprovals.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
-                <i className="fas fa-check-circle text-5xl mb-3"></i>
+                <i className="fas fa-check-circle text-5xl text-green-400 mb-3 block"></i>
                 <p>No pending approvals</p>
               </div>
             ) : (
@@ -36827,7 +38965,7 @@ const CourseEnrollmentModule = ({ students, courses, programs, currentSchool, us
                         <p className="font-bold text-lg">{enrollment.Student?.firstName} {enrollment.Student?.lastName}</p>
                         <p className="text-sm text-gray-600">Admission: {enrollment.Student?.admissionNumber}</p>
                         <p className="text-sm font-medium text-indigo-600 mt-1">
-                          {entityName}: {enrollment.Course?.name || enrollment.Program?.name} ({enrollment.Course?.code || enrollment.Program?.code})
+                          {entityName}: {enrollment.Course?.name || enrollment.Program?.name || enrollment.Class?.name || 'Unknown'}
                         </p>
                         <p className="text-xs text-gray-500 mt-1">
                           Requested: {new Date(enrollment.createdAt).toLocaleDateString()}
@@ -36836,15 +38974,15 @@ const CourseEnrollmentModule = ({ students, courses, programs, currentSchool, us
                       <div className="flex space-x-2">
                         <button
                           onClick={() => approveEnrollment(enrollment.id, 'APPROVE')}
-                          className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700"
+                          className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-green-700 flex items-center gap-1"
                         >
-                          <i className="fas fa-check mr-1"></i>Approve
+                          <i className="fas fa-check"></i> Approve
                         </button>
                         <button
                           onClick={() => approveEnrollment(enrollment.id, 'REJECT')}
-                          className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-red-700"
+                          className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-red-700 flex items-center gap-1"
                         >
-                          <i className="fas fa-times mr-1"></i>Reject
+                          <i className="fas fa-times"></i> Reject
                         </button>
                       </div>
                     </div>
@@ -36859,7 +38997,7 @@ const CourseEnrollmentModule = ({ students, courses, programs, currentSchool, us
   );
 };
 
-
+// ==================== UNIT REGISTRATION MODULE (COMPLETE - UNI & TVET) ====================
 const UnitRegistrationModule = ({ 
   students, 
   units, 
@@ -36872,26 +39010,32 @@ const UnitRegistrationModule = ({
   exams,
   unitRegistrations: propUnitRegistrations,
   courseEnrollments,
-  setUnitRegistrations // Add this prop to update parent state
+  setUnitRegistrations,
+  setActiveModule  // ← ADD THIS
 }) => {
+  // ==================== STATE ====================
   const [state, setState] = React.useState({
     selectedStudent: '',
-    selectedCourse: '',
+    selectedProgram: '',
     selectedUnits: [],
     registeredUnits: [],
     availableUnits: [],
     pendingRegistrations: [],
-    studentCourses: [],
+    enrolledPrograms: [],
     loading: false,
     showRegisterForm: false,
     showApprovals: false,
     semester: '',
+    moduleLevel: '',
     academicYear: new Date().getFullYear().toString(),
     paymentStatus: null,
     error: null,
-    selectAllUnits: false
+    selectAllUnits: false,
+    searchTerm: '',
+    refreshKey: 0
   });
 
+  // ==================== HELPER FUNCTIONS ====================
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-KE', {
       style: 'currency',
@@ -36918,6 +39062,21 @@ const UnitRegistrationModule = ({
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
 
+  const getStudentId = () => {
+    if (userRole.isStudent) {
+      const stored = localStorage.getItem('studentId') || JSON.parse(localStorage.getItem('studentData') || '{}').id;
+      return stored;
+    }
+    return state.selectedStudent;
+  };
+
+  // ==================== SCHOOL TYPE DETECTION ====================
+  const schoolCategory = currentSchool?.category || 'SENIOR_SECONDARY';
+  const isUniversity = schoolCategory === 'UNIVERSITY';
+  const isTVET = schoolCategory === 'COLLEGE_TVET';
+  const isRegularSchool = !isUniversity && !isTVET;
+
+  // ==================== PERMISSIONS ====================
   const userRole = React.useMemo(() => {
     const role = user?.role || '';
     return {
@@ -36927,20 +39086,23 @@ const UnitRegistrationModule = ({
     };
   }, [user?.role]);
 
+  // ==================== SCHOOL SETTINGS ====================
   const schoolSettings = React.useMemo(() => {
-    const category = currentSchool?.category || 'SENIOR_SECONDARY';
     return {
-      isUniversity: category === 'UNIVERSITY',
-      isTVET: category === 'COLLEGE_TVET',
-      isSecondary: category === 'SENIOR_SECONDARY',
-      isPrimary: category === 'ECDE_PRIMARY_JSS',
+      isUniversity,
+      isTVET,
+      isRegularSchool,
       requiresPayment: currentSchool?.requiresPaymentForUnits !== false,
       paymentRequiredPercentage: currentSchool?.paymentPercentageRequired || 30,
       requiresApproval: currentSchool?.unitApprovalRequired !== false,
-      approvalRoles: currentSchool?.unitApprovalRoles || ['admin', 'hod', 'dean']
+      approvalRoles: currentSchool?.unitApprovalRoles || ['admin', 'hod', 'dean'],
+      entityLabel: isTVET ? 'Program' : isUniversity ? 'Course' : 'Class',
+      itemLabel: isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject',
+      itemLabelPlural: isTVET ? 'Modules' : isUniversity ? 'Units' : 'Subjects'
     };
-  }, [currentSchool]);
+  }, [currentSchool, isUniversity, isTVET, isRegularSchool]);
 
+  // ==================== API INSTANCE ====================
   const api = React.useMemo(() => {
     const axiosInstance = axios.create({
       baseURL: 'http://localhost:5000/api',
@@ -36956,30 +39118,87 @@ const UnitRegistrationModule = ({
     return axiosInstance;
   }, []);
 
-  const loadStudentCourses = React.useCallback(async (studentId) => {
+  // ==================== LOAD ENROLLED PROGRAMS ====================
+  const loadEnrolledPrograms = React.useCallback(async (studentId) => {
+    if (!studentId) return [];
+    
+    setState(prev => ({ ...prev, loading: true, error: null }));
+    
     try {
+      // Try to get enrollments from courseEnrollments prop first
       let enrollments = courseEnrollments?.filter(e => e.studentId === studentId) || [];
       
+      // If no enrollments in prop, fetch from API
       if (enrollments.length === 0) {
-        const res = await api.get(`/students/${studentId}/enrollments`);
-        enrollments = res.data.enrollments || [];
+        const enrollRes = await api.get(`/students/${studentId}/enrollments`);
+        enrollments = enrollRes.data.enrollments || [];
+      }
+      
+      const approvedEnrollments = enrollments.filter(e => e.status === 'APPROVED');
+      
+      console.log(`✅ Found ${approvedEnrollments.length} approved enrollments for student`);
+      
+      let programList = [];
+      
+      for (const enrollment of approvedEnrollments) {
+        let programDetails = null;
+        let programId = null;
+        let programName = '';
+        let programCode = '';
+        
+        if (isTVET && enrollment.programId) {
+          programId = enrollment.programId;
+          programDetails = programs?.find(p => p.id === programId);
+          programName = programDetails?.name || enrollment.programName || 'Unknown Program';
+          programCode = programDetails?.code || enrollment.programCode || '';
+        } else if (isUniversity && enrollment.courseId) {
+          programId = enrollment.courseId;
+          programDetails = courses?.find(c => c.id === programId);
+          programName = programDetails?.name || enrollment.courseName || 'Unknown Course';
+          programCode = programDetails?.code || enrollment.courseCode || '';
+        }
+        
+        if (programId) {
+          programList.push({
+            id: enrollment.id,
+            programId: programId,
+            programName: programName,
+            programCode: programCode,
+            programDetails: programDetails,
+            enrollmentDate: enrollment.enrollmentDate,
+            status: enrollment.status,
+            academicYear: enrollment.academicYear,
+            semester: enrollment.semester
+          });
+        }
+      }
+      
+      // Check localStorage for selected program
+      const savedProgram = localStorage.getItem('selectedProgramForUnits');
+      let selectedProgram = programList.length > 0 ? programList[0].programId : '';
+      
+      // If there's a saved program and it's in the list, use it
+      if (savedProgram && programList.some(p => p.programId === savedProgram)) {
+        selectedProgram = savedProgram;
       }
       
       setState(prev => ({ 
         ...prev, 
-        studentCourses: enrollments,
-        selectedCourse: enrollments[0]?.courseId || prev.selectedCourse
+        enrolledPrograms: programList,
+        selectedProgram: selectedProgram,
+        loading: false 
       }));
       
-      return enrollments;
+      return programList;
     } catch (error) {
-      console.error('Error loading student courses:', error);
-      setState(prev => ({ ...prev, error: 'Failed to load student courses' }));
+      console.error('❌ Error loading enrolled programs:', error);
+      setState(prev => ({ ...prev, loading: false, error: 'Failed to load enrolled programs' }));
       return [];
     }
-  }, [api, courseEnrollments]);
+  }, [api, programs, courses, isTVET, isUniversity, courseEnrollments]);
 
-  const checkPaymentStatus = React.useCallback(async (studentId, courseId, programId = null) => {
+  // ==================== CHECK PAYMENT STATUS ====================
+  const checkPaymentStatus = React.useCallback(async (studentId, programId) => {
     if (!schoolSettings.requiresPayment) {
       setState(prev => ({ ...prev, paymentStatus: null }));
       return true;
@@ -36987,13 +39206,10 @@ const UnitRegistrationModule = ({
     
     try {
       let applicableFees = [];
-      if (schoolSettings.isUniversity && courseId) {
-        applicableFees = fees?.filter(f => f.courseId === courseId) || [];
-      } else if (schoolSettings.isTVET && programId) {
+      if (isUniversity && programId) {
+        applicableFees = fees?.filter(f => f.courseId === programId) || [];
+      } else if (isTVET && programId) {
         applicableFees = fees?.filter(f => f.programId === programId) || [];
-      } else if (schoolSettings.isSecondary || schoolSettings.isPrimary) {
-        const student = students?.find(s => s.id === studentId);
-        applicableFees = fees?.filter(f => f.classId === student?.classId) || [];
       }
       
       const totalFees = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
@@ -37018,133 +39234,189 @@ const UnitRegistrationModule = ({
       console.error('Error checking payment status:', error);
       return true;
     }
-  }, [schoolSettings, fees, payments, students]);
+  }, [schoolSettings, fees, payments, isUniversity, isTVET]);
 
- const loadRegisteredUnits = React.useCallback(async () => {
-  const studentId = userRole.isStudent 
-    ? localStorage.getItem('studentId') || JSON.parse(localStorage.getItem('studentData') || '{}').id
-    : state.selectedStudent;
-  
-  if (!studentId || !state.selectedCourse) return;
-  
-  setState(prev => ({ ...prev, loading: true, error: null }));
-  
-  try {
-    // Get registered units from API
-    const res = await api.get(`/unit-registrations?studentId=${studentId}&courseId=${state.selectedCourse}`);
-    let registered = res.data.registrations || [];
+  // ==================== LOAD REGISTERED UNITS ====================
+  const loadRegisteredUnits = React.useCallback(async () => {
+    const studentId = getStudentId();
+    const programId = state.selectedProgram;
     
-    // IMPORTANT: Fetch full unit details for each registration
-    const registeredWithUnits = await Promise.all(registered.map(async (reg) => {
-      // Try to get unit from the registration first
-      if (reg.Unit) {
-        return reg;
-      }
-      
-      // If unit is not included, fetch it separately
-      try {
-        const unitRes = await api.get(`/course-units/${reg.unitId}`);
-        return {
-          ...reg,
-          Unit: unitRes.data.unit
-        };
-      } catch (err) {
-        console.error(`Error fetching unit ${reg.unitId}:`, err);
-        return {
-          ...reg,
-          Unit: { name: 'Unknown', code: '—', credits: '—' }
-        };
-      }
-    }));
-    
-    // Get available units
-    const enrollment = state.studentCourses.find(e => e.courseId === state.selectedCourse);
-    let available = [];
-    
-    if (enrollment) {
-      if (schoolSettings.isTVET && enrollment.programId) {
-        const unitsRes = await api.get(`/course-units?programId=${enrollment.programId}`);
-        available = unitsRes.data.units || [];
-        if (state.semester) {
-          available = available.filter(u => u.semester === parseInt(state.semester));
-        }
-      } else if (schoolSettings.isUniversity && state.selectedCourse) {
-        const unitsRes = await api.get(`/course-units?courseId=${state.selectedCourse}`);
-        available = unitsRes.data.units || [];
-        if (state.semester) {
-          available = available.filter(u => u.semester === parseInt(state.semester));
-        }
-      } else {
-        const student = students?.find(s => s.id === studentId);
-        const unitsRes = await api.get(`/course-units?classId=${student?.classId}`);
-        available = unitsRes.data.units || [];
-      }
+    if (!studentId || !programId) {
+      setState(prev => ({ ...prev, registeredUnits: [], availableUnits: [] }));
+      return;
     }
     
-    const registeredUnitIds = registeredWithUnits.map(r => r.unitId);
-    const availableUnits = available.filter(u => !registeredUnitIds.includes(u.id));
+    setState(prev => ({ ...prev, loading: true, error: null }));
     
-    setState(prev => ({ 
-      ...prev, 
-      registeredUnits: registeredWithUnits,
-      availableUnits,
-      loading: false 
-    }));
-    
-  } catch (error) {
-    console.error('Error loading registered units:', error);
-    setState(prev => ({ ...prev, loading: false, error: 'Failed to load registered units' }));
-  }
-}, [userRole.isStudent, state.selectedStudent, state.selectedCourse, state.semester, state.studentCourses, api, students, schoolSettings]);
+    try {
+      console.log(`📚 Loading units for program: ${programId}`);
+      console.log(`📚 isTVET: ${isTVET}, isUniversity: ${isUniversity}`);
+      
+      // Get all units for this program
+      let allUnits = [];
+      let programDetails = null;
+      
+      if (isTVET) {
+        // Get modules for this program
+        const res = await api.get(`/course-units?programId=${programId}`);
+        allUnits = res.data.units || [];
+        programDetails = programs?.find(p => p.id === programId);
+        console.log(`📚 Found ${allUnits.length} modules for program ${programDetails?.name || programId}`);
+      } else if (isUniversity) {
+        const res = await api.get(`/course-units?courseId=${programId}`);
+        allUnits = res.data.units || [];
+        programDetails = courses?.find(c => c.id === programId);
+        console.log(`📚 Found ${allUnits.length} units for course ${programDetails?.name || programId}`);
+      }
+      
+      // If no units found, try getting all units and filtering
+      if (allUnits.length === 0) {
+        console.log('⚠️ No units found with filter, trying all units...');
+        const res = await api.get('/course-units');
+        const allUnitsRaw = res.data.units || [];
+        
+        if (isTVET) {
+          allUnits = allUnitsRaw.filter(u => u.programId === programId);
+          console.log(`📚 Filtered to ${allUnits.length} modules for program ${programId}`);
+        } else if (isUniversity) {
+          allUnits = allUnitsRaw.filter(u => u.courseId === programId);
+          console.log(`📚 Filtered to ${allUnits.length} units for course ${programId}`);
+        }
+      }
+      
+      // Filter by module level for TVET
+      let filteredUnits = allUnits;
+      if (isTVET && state.moduleLevel) {
+        const levelNum = parseInt(state.moduleLevel);
+        filteredUnits = allUnits.filter(u => u.module === levelNum);
+        console.log(`📚 Filtered to ${filteredUnits.length} modules at level ${state.moduleLevel}`);
+      }
+      
+      // Filter by semester for University
+      if (isUniversity && state.semester) {
+        const semNum = parseInt(state.semester);
+        filteredUnits = allUnits.filter(u => u.semester === semNum);
+        console.log(`📚 Filtered to ${filteredUnits.length} units for semester ${state.semester}`);
+      }
+      
+      // Get already registered units
+      const regRes = await api.get(`/unit-registrations?studentId=${studentId}`);
+      const registrations = regRes.data.registrations || [];
+      console.log(`📋 Found ${registrations.length} total registrations`);
+      
+      // Filter registrations for this program
+      const programRegistrations = registrations.filter(r => {
+        if (isTVET) return r.programId === programId;
+        if (isUniversity) return r.courseId === programId;
+        return true;
+      });
+      console.log(`📋 Found ${programRegistrations.length} registrations for this program`);
+      
+      const registeredUnitIds = programRegistrations.map(r => r.unitId);
+      
+      // Get registered units with details
+      const registeredWithDetails = programRegistrations.map(reg => {
+        const unit = filteredUnits.find(u => u.id === reg.unitId);
+        return { 
+          ...reg, 
+          Unit: unit || { name: 'Unknown Module', code: '—', credits: '—' } 
+        };
+      });
+      
+      // Get available units (not registered)
+      const availableUnits = filteredUnits.filter(u => !registeredUnitIds.includes(u.id));
+      
+      console.log(`✅ ${registeredWithDetails.length} registered, ${availableUnits.length} available`);
+      
+      setState(prev => ({ 
+        ...prev, 
+        registeredUnits: registeredWithDetails,
+        availableUnits,
+        loading: false 
+      }));
+      
+      // If no units found, show a helpful message
+      if (allUnits.length === 0 && filteredUnits.length === 0) {
+        setState(prev => ({ 
+          ...prev, 
+          error: `No modules found for this program. Please contact the administrator to add modules to ${programDetails?.name || 'this program'}.`,
+          loading: false 
+        }));
+      }
+      
+    } catch (error) {
+      console.error('❌ Error loading units:', error);
+      setState(prev => ({ 
+        ...prev, 
+        loading: false, 
+        error: `Failed to load modules: ${error.response?.data?.message || error.message}` 
+      }));
+    }
+  }, [api, programs, courses, isTVET, isUniversity, state.selectedProgram, state.moduleLevel, state.semester]);
+
+  // ==================== LOAD PENDING REGISTRATIONS ====================
   const loadPendingRegistrations = React.useCallback(async () => {
     if (!userRole.canApprove) return;
     
     try {
-      const pending = propUnitRegistrations?.filter(r => r.status === 'PENDING') || [];
+      const res = await api.get('/unit-registrations/pending');
+      const pending = res.data.registrations || [];
       setState(prev => ({ ...prev, pendingRegistrations: pending }));
     } catch (error) {
       console.error('Error loading pending registrations:', error);
     }
-  }, [userRole.canApprove, propUnitRegistrations]);
+  }, [userRole.canApprove, api]);
 
+  // ==================== REGISTER MULTIPLE UNITS ====================
   const registerMultipleUnits = React.useCallback(async () => {
     if (state.selectedUnits.length === 0) {
-      alert(`Please select at least one ${getUnitType()}`);
+      alert(`Please select at least one ${schoolSettings.itemLabel}`);
       return;
     }
     
     if (schoolSettings.requiresPayment && !state.paymentStatus?.canRegister) {
-      alert(`You need to pay at least ${schoolSettings.paymentRequiredPercentage}% of fees before registering ${getUnitType().toLowerCase()}s. Current: ${state.paymentStatus?.paymentPercentage}%`);
+      alert(`You need to pay at least ${schoolSettings.paymentRequiredPercentage}% of fees before registering ${schoolSettings.itemLabelPlural.toLowerCase()}. Current: ${state.paymentStatus?.paymentPercentage}%`);
       return;
     }
     
     setState(prev => ({ ...prev, loading: true }));
     
     try {
-      const studentId = userRole.isStudent 
-        ? localStorage.getItem('studentId') || JSON.parse(localStorage.getItem('studentData') || '{}').id
-        : state.selectedStudent;
+      const studentId = getStudentId();
       
-      const enrollment = state.studentCourses.find(e => e.courseId === state.selectedCourse);
+      if (!studentId || !state.selectedProgram) {
+        alert(`Please select a ${schoolSettings.entityLabel} first`);
+        setState(prev => ({ ...prev, loading: false }));
+        return;
+      }
+      
       const newRegistrations = [];
+      let registeredCount = 0;
+      let failedCount = 0;
       
       for (const unitId of state.selectedUnits) {
         const regData = {
           studentId,
           unitId,
-          courseId: state.selectedCourse,
-          programId: enrollment?.programId,
-          semester: state.semester || null,
+          programId: isTVET ? state.selectedProgram : null,
+          courseId: isUniversity ? state.selectedProgram : null,
+          semester: state.semester ? parseInt(state.semester) : null,
           academicYear: state.academicYear,
           status: schoolSettings.requiresApproval ? 'PENDING' : 'APPROVED',
           schoolId: currentSchool?.id
         };
         
-        const res = await api.post('/unit-registrations', regData);
-        newRegistrations.push(res.data.registration);
+        try {
+          const res = await api.post('/unit-registrations', regData);
+          newRegistrations.push(res.data.registration);
+          registeredCount++;
+        } catch (err) {
+          console.error('Error registering unit:', err);
+          failedCount++;
+        }
       }
       
-      // Update local state immediately
+      // Update local state
       setState(prev => ({
         ...prev,
         registeredUnits: [...prev.registeredUnits, ...newRegistrations],
@@ -37155,24 +39427,28 @@ const UnitRegistrationModule = ({
         loading: false
       }));
       
-      // Update parent state if function exists
+      // Update parent state
       if (setUnitRegistrations) {
         setUnitRegistrations([...propUnitRegistrations, ...newRegistrations]);
       }
       
-      alert(schoolSettings.requiresApproval 
-        ? `${newRegistrations.length} registration request(s) submitted for approval` 
-        : `${newRegistrations.length} ${getUnitType()}(s) registered successfully!`);
+      const message = schoolSettings.requiresApproval 
+        ? `${registeredCount} registration request(s) submitted for approval${failedCount > 0 ? ` (${failedCount} failed)` : ''}`
+        : `${registeredCount} ${schoolSettings.itemLabelPlural.toLowerCase()} registered successfully!${failedCount > 0 ? ` (${failedCount} failed)` : ''}`;
+      
+      alert(`✅ ${message}`);
       
       loadPendingRegistrations();
+      loadRegisteredUnits();
       
     } catch (error) {
       console.error('Error registering units:', error);
-      alert(error.response?.data?.message || `Failed to register ${getUnitType()}s`);
+      alert(`❌ Failed to register ${schoolSettings.itemLabelPlural.toLowerCase()}: ${error.response?.data?.message || error.message}`);
       setState(prev => ({ ...prev, loading: false }));
     }
-  }, [state.selectedUnits, state.selectedCourse, state.semester, state.academicYear, state.studentCourses, state.paymentStatus, schoolSettings, userRole.isStudent, userRole.canApprove, state.selectedStudent, api, currentSchool, propUnitRegistrations, setUnitRegistrations, loadPendingRegistrations, getUnitType]);
+  }, [state.selectedUnits, state.selectedProgram, state.semester, state.academicYear, state.paymentStatus, schoolSettings, isTVET, isUniversity, api, currentSchool, propUnitRegistrations, setUnitRegistrations, loadPendingRegistrations, loadRegisteredUnits]);
 
+  // ==================== APPROVE REGISTRATION ====================
   const approveRegistration = React.useCallback(async (registrationId, action) => {
     if (!userRole.canApprove) return;
     
@@ -37181,12 +39457,10 @@ const UnitRegistrationModule = ({
     try {
       await api.patch(`/unit-registrations/${registrationId}/approve`, { action });
       
-      // Find the registration to update
       const registration = state.pendingRegistrations.find(r => r.id === registrationId);
       if (registration) {
         const updatedRegistration = { ...registration, status: action === 'APPROVE' ? 'APPROVED' : 'REJECTED' };
         
-        // Update local state immediately - remove from pending and add to registered if approved
         setState(prev => {
           const newPending = prev.pendingRegistrations.filter(r => r.id !== registrationId);
           let newRegistered = [...prev.registeredUnits];
@@ -37203,7 +39477,6 @@ const UnitRegistrationModule = ({
           };
         });
         
-        // Update parent state
         if (setUnitRegistrations) {
           const updatedAllRegistrations = propUnitRegistrations.map(r => 
             r.id === registrationId ? updatedRegistration : r
@@ -37211,45 +39484,49 @@ const UnitRegistrationModule = ({
           setUnitRegistrations(updatedAllRegistrations);
         }
         
-        alert(`Registration ${action.toLowerCase()}d successfully`);
+        alert(`✅ Registration ${action.toLowerCase()}d successfully`);
       }
+      
+      loadPendingRegistrations();
+      loadRegisteredUnits();
       
     } catch (error) {
       console.error('Error approving registration:', error);
-      alert('Failed to process approval');
+      alert('❌ Failed to process approval');
       setState(prev => ({ ...prev, loading: false }));
     }
-  }, [userRole.canApprove, api, state.pendingRegistrations, propUnitRegistrations, setUnitRegistrations]);
+  }, [userRole.canApprove, api, state.pendingRegistrations, propUnitRegistrations, setUnitRegistrations, loadPendingRegistrations, loadRegisteredUnits]);
 
+  // ==================== DROP UNIT ====================
   const dropUnit = React.useCallback(async (registrationId) => {
-    if (!window.confirm(`Are you sure you want to drop this ${getUnitType()}?`)) return;
+    if (!window.confirm(`Are you sure you want to drop this ${schoolSettings.itemLabel}?`)) return;
     
     setState(prev => ({ ...prev, loading: true }));
     
     try {
       await api.delete(`/unit-registrations/${registrationId}`);
       
-      // Update local state immediately - remove from registered units
       setState(prev => ({
         ...prev,
         registeredUnits: prev.registeredUnits.filter(r => r.id !== registrationId),
         loading: false
       }));
       
-      // Update parent state
       if (setUnitRegistrations) {
         setUnitRegistrations(propUnitRegistrations.filter(r => r.id !== registrationId));
       }
       
-      alert(`${getUnitType()} dropped successfully`);
+      alert(`✅ ${schoolSettings.itemLabel} dropped successfully`);
+      loadRegisteredUnits();
       
     } catch (error) {
       console.error('Error dropping unit:', error);
-      alert(`Failed to drop ${getUnitType()}`);
+      alert(`❌ Failed to drop ${schoolSettings.itemLabel}: ${error.response?.data?.message || error.message}`);
       setState(prev => ({ ...prev, loading: false }));
     }
-  }, [api, propUnitRegistrations, setUnitRegistrations, getUnitType]);
+  }, [api, propUnitRegistrations, setUnitRegistrations, schoolSettings.itemLabel, loadRegisteredUnits]);
 
+  // ==================== SELECTION HANDLERS ====================
   const handleUnitSelect = (unitId, checked) => {
     setState(prev => {
       let newSelectedUnits;
@@ -37270,58 +39547,108 @@ const UnitRegistrationModule = ({
     }));
   };
 
+  // ==================== FILTER AVAILABLE UNITS ====================
+  const filteredAvailableUnits = React.useMemo(() => {
+    if (!state.searchTerm) return state.availableUnits;
+    const term = state.searchTerm.toLowerCase();
+    return state.availableUnits.filter(u => 
+      u.name?.toLowerCase().includes(term) ||
+      u.code?.toLowerCase().includes(term)
+    );
+  }, [state.availableUnits, state.searchTerm]);
+
+  // ==================== EFFECTS ====================
+  // Load enrolled programs on mount and when student changes
   React.useEffect(() => {
-    if (state.selectedStudent && !userRole.isStudent) {
-      loadStudentCourses(state.selectedStudent);
-    } else if (userRole.isStudent) {
-      const studentId = localStorage.getItem('studentId') || JSON.parse(localStorage.getItem('studentData') || '{}').id;
+    if (state.selectedStudent || userRole.isStudent) {
+      const studentId = getStudentId();
       if (studentId) {
-        loadStudentCourses(studentId);
+        loadEnrolledPrograms(studentId);
       }
     }
-  }, [state.selectedStudent, userRole.isStudent, loadStudentCourses]);
+  }, [state.selectedStudent, userRole.isStudent]);
 
+  // Load units when program is selected
   React.useEffect(() => {
-    if (state.selectedCourse && (state.selectedStudent || userRole.isStudent)) {
-      const enrollment = state.studentCourses.find(e => e.courseId === state.selectedCourse);
-      const studentId = userRole.isStudent 
-        ? localStorage.getItem('studentId') || JSON.parse(localStorage.getItem('studentData') || '{}').id
-        : state.selectedStudent;
-      
-      checkPaymentStatus(studentId, state.selectedCourse, enrollment?.programId);
+    if (state.selectedProgram) {
       loadRegisteredUnits();
+      // Check payment status
+      const studentId = getStudentId();
+      if (studentId) {
+        checkPaymentStatus(studentId, state.selectedProgram);
+      }
     }
-  }, [state.selectedCourse, state.selectedStudent, userRole.isStudent, state.studentCourses, checkPaymentStatus, loadRegisteredUnits]);
+  }, [state.selectedProgram, state.moduleLevel, state.semester, state.refreshKey]);
 
+  // Load pending registrations for admin
   React.useEffect(() => {
     if (userRole.canApprove) {
       loadPendingRegistrations();
     }
-  }, [userRole.canApprove, loadPendingRegistrations]);
+  }, [userRole.canApprove]);
 
+  // Listen for module switch events
+  React.useEffect(() => {
+    const handleSwitchModule = (event) => {
+      if (event.detail === 'unit-registration') {
+        // Refresh data
+        setState(prev => ({ ...prev, refreshKey: prev.refreshKey + 1 }));
+      }
+    };
+    
+    window.addEventListener('switchModule', handleSwitchModule);
+    return () => window.removeEventListener('switchModule', handleSwitchModule);
+  }, []);
+
+  // ==================== RENDER ====================
   const unitType = getUnitType();
   const canRegister = !schoolSettings.requiresPayment || state.paymentStatus?.canRegister;
-  
+  const hasEnrolledPrograms = state.enrolledPrograms.length > 0;
+  const hasAvailableUnits = state.availableUnits.length > 0;
+
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      {/* Loading Indicator */}
+      {state.loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
+      
+      {/* Error Message */}
+      {state.error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
+          <i className="fas fa-exclamation-circle mr-2"></i>
+          {state.error}
+        </div>
+      )}
+
+      {/* Header */}
+      <div className="flex justify-between items-center flex-wrap gap-4">
         <div>
-          <h2 className="text-2xl font-bold">
+          <h2 className="text-2xl font-bold flex items-center gap-2">
             {userRole.isStudent ? `My ${unitType} Registration` : `${unitType} Registration Management`}
+            <span className="text-sm font-normal text-gray-500">
+              ({state.registeredUnits.length} registered)
+            </span>
           </h2>
-          <p className="text-gray-600 mt-1">
+          <p className="text-gray-600 mt-1 text-sm">
             {schoolSettings.requiresApproval 
               ? `${unitType}s require approval from ${schoolSettings.approvalRoles.join(', ')}` 
               : `${unitType}s are automatically approved`}
           </p>
+          {state.selectedProgram && (
+            <p className="text-xs text-indigo-600 mt-1">
+              <i className="fas fa-graduation-cap mr-1"></i>
+              {isTVET ? 'Program' : isUniversity ? 'Course' : 'Class'}: {
+                state.enrolledPrograms.find(p => p.programId === state.selectedProgram)?.programName || 'Selected'
+              }
+            </p>
+          )}
         </div>
         
         {userRole.canApprove && (
           <button
             onClick={() => setState(prev => ({ ...prev, showApprovals: !prev.showApprovals }))}
-            className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 relative"
+            className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 relative flex items-center gap-2"
           >
-            <i className="fas fa-clock mr-2"></i>
+            <i className="fas fa-clock"></i>
             Pending Approvals
             {state.pendingRegistrations.length > 0 && (
               <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
@@ -37332,13 +39659,7 @@ const UnitRegistrationModule = ({
         )}
       </div>
 
-      {state.error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
-          <i className="fas fa-exclamation-circle mr-2"></i>
-          {state.error}
-        </div>
-      )}
-
+      {/* Payment Status */}
       {schoolSettings.requiresPayment && state.paymentStatus && (
         <div className={`rounded-lg p-4 ${canRegister ? 'bg-green-50 border border-green-200' : 'bg-yellow-50 border border-yellow-200'}`}>
           <div className="flex items-start">
@@ -37370,15 +39691,25 @@ const UnitRegistrationModule = ({
         </div>
       )}
 
+      {/* ==================== ADMIN VIEW: Student Selector ==================== */}
       {!userRole.isStudent && (
-        <div className="bg-white p-4 rounded-lg shadow-sm">
+        <div className="bg-white p-4 rounded-lg shadow-sm border">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-2">Select Student</label>
               <select
                 value={state.selectedStudent}
-                onChange={(e) => setState(prev => ({ ...prev, selectedStudent: e.target.value, selectedCourse: '' }))}
-                className="w-full px-3 py-2 border rounded-lg"
+                onChange={(e) => {
+                  setState(prev => ({ 
+                    ...prev, 
+                    selectedStudent: e.target.value, 
+                    selectedProgram: '',
+                    enrolledPrograms: [],
+                    registeredUnits: [],
+                    availableUnits: []
+                  }));
+                }}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
               >
                 <option value="">-- Select Student --</option>
                 {students?.map(s => (
@@ -37390,90 +39721,188 @@ const UnitRegistrationModule = ({
             </div>
             
             <div>
-              <label className="block text-sm font-medium mb-2">Select Course/Program</label>
+              <label className="block text-sm font-medium mb-2">
+                {isTVET ? 'Enrolled Programs' : isUniversity ? 'Enrolled Courses' : 'Enrolled Classes'}
+              </label>
               <select
-                value={state.selectedCourse}
-                onChange={(e) => setState(prev => ({ ...prev, selectedCourse: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg"
-                disabled={!state.selectedStudent}
+                value={state.selectedProgram}
+                onChange={(e) => {
+                  setState(prev => ({ ...prev, selectedProgram: e.target.value, selectedUnits: [] }));
+                }}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                disabled={state.enrolledPrograms.length === 0}
               >
-                <option value="">-- Select Course --</option>
-                {state.studentCourses.map(c => (
-                  <option key={c.id} value={c.courseId}>
-                    {c.Course?.name || c.courseName}
+                <option value="">-- Select {isTVET ? 'Program' : isUniversity ? 'Course' : 'Class'} --</option>
+                {state.enrolledPrograms.map(p => (
+                  <option key={p.id} value={p.programId}>
+                    {p.programName} {p.programCode ? `(${p.programCode})` : ''}
                   </option>
                 ))}
               </select>
+              {state.enrolledPrograms.length === 0 && state.selectedStudent && (
+                <p className="text-xs text-yellow-600 mt-1">
+                  <i className="fas fa-info-circle mr-1"></i>
+                  No approved {isTVET ? 'programs' : isUniversity ? 'courses' : 'classes'} enrolled.
+                  <button
+                    onClick={() => {
+                      window.dispatchEvent(new CustomEvent('switchModule', { detail: 'course-enrollment' }));
+                    }}
+                    className="ml-2 text-indigo-600 hover:text-indigo-800 font-medium"
+                  >
+                    Enroll Now →
+                  </button>
+                </p>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {userRole.isStudent && state.studentCourses.length > 0 && (
-        <div className="bg-white p-4 rounded-lg shadow-sm">
-          <label className="block text-sm font-medium mb-2">Select Course/Program</label>
-          <select
-            value={state.selectedCourse}
-            onChange={(e) => setState(prev => ({ ...prev, selectedCourse: e.target.value }))}
-            className="w-full max-w-md px-3 py-2 border rounded-lg"
-          >
-            {state.studentCourses.map(c => (
-              <option key={c.id} value={c.courseId}>
-                {c.Course?.name || c.courseName}
-              </option>
-            ))}
-          </select>
+      {/* ==================== STUDENT VIEW: Enrolled Programs ==================== */}
+      {userRole.isStudent && (
+        <div className="bg-white p-4 rounded-lg shadow-sm border">
+          <label className="block text-sm font-medium mb-2">
+            {isTVET ? 'Select Enrolled Program' : isUniversity ? 'Select Enrolled Course' : 'Select Enrolled Class'}
+          </label>
+          
+          {state.enrolledPrograms.length > 0 ? (
+            <select
+              value={state.selectedProgram}
+              onChange={(e) => {
+                setState(prev => ({ ...prev, selectedProgram: e.target.value, selectedUnits: [] }));
+                // Clear the saved selection
+                localStorage.removeItem('selectedProgramForUnits');
+              }}
+              className="w-full max-w-md px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+            >
+              {state.enrolledPrograms.map(p => (
+                <option key={p.id} value={p.programId}>
+                  {p.programName} {p.programCode ? `(${p.programCode})` : ''}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div className="bg-yellow-50 p-4 rounded-lg text-yellow-800">
+              <i className="fas fa-info-circle mr-2"></i>
+              No approved {isTVET ? 'programs' : isUniversity ? 'courses' : 'classes'} found.
+              <button
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent('switchModule', { detail: 'course-enrollment' }));
+                }}
+                className="ml-2 text-indigo-600 hover:text-indigo-800 font-medium"
+              >
+                Enroll Now →
+              </button>
+            </div>
+          )}
+          
+          {state.enrolledPrograms.length > 0 && (
+            <p className="text-xs text-gray-500 mt-1">
+              {state.enrolledPrograms.length} {isTVET ? 'programs' : isUniversity ? 'courses' : 'classes'} enrolled
+            </p>
+          )}
         </div>
       )}
 
-      {(state.selectedStudent || userRole.isStudent) && state.selectedCourse && canRegister && state.availableUnits.length > 0 && (
+      {/* ==================== FILTERS ==================== */}
+      {state.selectedProgram && (
+        <div className="bg-white p-4 rounded-lg shadow-sm border">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {isTVET && (
+              <div>
+                <label className="block text-sm font-medium mb-2">Module Level</label>
+                <select
+                  value={state.moduleLevel}
+                  onChange={(e) => {
+                    setState(prev => ({ ...prev, moduleLevel: e.target.value, selectedUnits: [] }));
+                  }}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="">All Modules</option>
+                  <option value="1">Module 1</option>
+                  <option value="2">Module 2</option>
+                  <option value="3">Module 3</option>
+                  <option value="4">Module 4</option>
+                  <option value="5">Module 5</option>
+                  <option value="6">Module 6</option>
+                </select>
+              </div>
+            )}
+            
+            {isUniversity && (
+              <div>
+                <label className="block text-sm font-medium mb-2">Semester</label>
+                <select
+                  value={state.semester}
+                  onChange={(e) => {
+                    setState(prev => ({ ...prev, semester: e.target.value, selectedUnits: [] }));
+                  }}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="">All Semesters</option>
+                  <option value="1">Semester 1</option>
+                  <option value="2">Semester 2</option>
+                  <option value="3">Semester 3</option>
+                </select>
+              </div>
+            )}
+            
+            <div>
+              <label className="block text-sm font-medium mb-2">Academic Year</label>
+              <input
+                type="text"
+                value={state.academicYear}
+                onChange={(e) => setState(prev => ({ ...prev, academicYear: e.target.value }))}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                placeholder="e.g., 2024"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== REGISTER UNITS BUTTON ==================== */}
+      {(state.selectedStudent || userRole.isStudent) && state.selectedProgram && canRegister && hasAvailableUnits && (
         <button
           onClick={() => setState(prev => ({ ...prev, showRegisterForm: true }))}
-          className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
+          className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2"
         >
-          <i className="fas fa-plus mr-2"></i>Register {unitType}s
+          <i className="fas fa-plus"></i>
+          Register {unitType}s ({state.availableUnits.length} available)
         </button>
       )}
 
-      {/* Multi-Unit Registration Form */}
-      {state.showRegisterForm && canRegister && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      {/* ==================== MULTI-UNIT REGISTRATION FORM ==================== */}
+      {state.showRegisterForm && canRegister && state.selectedProgram && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl p-6 max-h-[90vh] overflow-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold">Register {unitType}s</h3>
+            <div className="flex justify-between items-center mb-4 sticky top-0 bg-white z-10 pb-3 border-b">
+              <div>
+                <h3 className="text-xl font-bold">Register {unitType}s</h3>
+                <p className="text-sm text-gray-500">
+                  {isTVET ? 'Program' : isUniversity ? 'Course' : 'Class'}: {
+                    state.enrolledPrograms.find(p => p.programId === state.selectedProgram)?.programName || 'Selected'
+                  }
+                </p>
+              </div>
               <button 
-                onClick={() => setState(prev => ({ ...prev, showRegisterForm: false, selectedUnits: [], selectAllUnits: false }))} 
+                onClick={() => setState(prev => ({ ...prev, showRegisterForm: false, selectedUnits: [], selectAllUnits: false, searchTerm: '' }))} 
                 className="text-gray-500 hover:text-gray-700"
               >
-                <i className="fas fa-times"></i>
+                <i className="fas fa-times text-xl"></i>
               </button>
             </div>
             
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1">Semester</label>
-                  <select
-                    value={state.semester}
-                    onChange={(e) => setState(prev => ({ ...prev, semester: e.target.value }))}
-                    className="w-full px-3 py-2 border rounded-lg"
-                  >
-                    <option value="">Select Semester</option>
-                    <option value="1">Semester 1</option>
-                    <option value="2">Semester 2</option>
-                  </select>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium mb-1">Academic Year</label>
-                  <input
-                    type="text"
-                    value={state.academicYear}
-                    onChange={(e) => setState(prev => ({ ...prev, academicYear: e.target.value }))}
-                    className="w-full px-3 py-2 border rounded-lg"
-                    placeholder="e.g., 2024"
-                  />
-                </div>
+              {/* Search */}
+              <div>
+                <input
+                  type="text"
+                  placeholder={`Search ${unitType}s by name or code...`}
+                  value={state.searchTerm}
+                  onChange={(e) => setState(prev => ({ ...prev, searchTerm: e.target.value }))}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                />
               </div>
               
               <div className="flex justify-between items-center">
@@ -37484,10 +39913,10 @@ const UnitRegistrationModule = ({
                     onChange={(e) => handleSelectAll(e.target.checked)}
                     className="rounded"
                   />
-                  <span className="text-sm font-medium">Select All ({state.availableUnits.length} {unitType}s)</span>
+                  <span className="text-sm font-medium">Select All ({filteredAvailableUnits.length} {unitType}s)</span>
                 </label>
                 <span className="text-sm text-gray-500">
-                  Selected: {state.selectedUnits.length}
+                  Selected: <span className="font-bold text-indigo-600">{state.selectedUnits.length}</span>
                 </span>
               </div>
               
@@ -37496,20 +39925,30 @@ const UnitRegistrationModule = ({
                   <thead className="bg-gray-50 sticky top-0">
                     <tr>
                       <th className="px-4 py-2 w-10"></th>
-                      <th className="px-4 py-2 text-left">Code</th>
-                      <th className="px-4 py-2 text-left">Name</th>
-                      <th className="px-4 py-2 text-left">Credits</th>
+                      <th className="px-4 py-2 text-left text-sm font-medium text-gray-600">Code</th>
+                      <th className="px-4 py-2 text-left text-sm font-medium text-gray-600">Name</th>
+                      <th className="px-4 py-2 text-left text-sm font-medium text-gray-600">Credits</th>
+                      {isTVET && (
+                        <th className="px-4 py-2 text-left text-sm font-medium text-gray-600">Module</th>
+                      )}
+                      {isUniversity && (
+                        <th className="px-4 py-2 text-left text-sm font-medium text-gray-600">Semester</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {state.availableUnits.length === 0 ? (
+                    {filteredAvailableUnits.length === 0 ? (
                       <tr>
-                        <td colSpan="4" className="px-4 py-8 text-center text-gray-500">
-                          No {unitType.toLowerCase()}s available for registration
+                        <td colSpan={isTVET ? 5 : isUniversity ? 5 : 4} className="px-4 py-8 text-center text-gray-500">
+                          {state.searchTerm ? (
+                            <>No {unitType.toLowerCase()}s match your search</>
+                          ) : (
+                            <>No {unitType.toLowerCase()}s available for registration</>
+                          )}
                         </td>
                       </tr>
                     ) : (
-                      state.availableUnits.map(unit => (
+                      filteredAvailableUnits.map(unit => (
                         <tr key={unit.id} className="hover:bg-gray-50">
                           <td className="px-4 py-2">
                             <input
@@ -37519,9 +39958,23 @@ const UnitRegistrationModule = ({
                               className="rounded"
                             />
                           </td>
-                          <td className="px-4 py-2 font-mono">{unit.code || '—'}</td>
-                          <td className="px-4 py-2 font-medium">{unit.name}</td>
+                          <td className="px-4 py-2 font-mono text-sm">{unit.code || '—'}</td>
+                          <td className="px-4 py-2 font-medium text-indigo-600">{unit.name}</td>
                           <td className="px-4 py-2">{unit.credits || '—'}</td>
+                          {isTVET && (
+                            <td className="px-4 py-2">
+                              <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs">
+                                Module {unit.module || '—'}
+                              </span>
+                            </td>
+                          )}
+                          {isUniversity && (
+                            <td className="px-4 py-2">
+                              <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
+                                Sem {unit.semester || '—'}
+                              </span>
+                            </td>
+                          )}
                         </tr>
                       ))
                     )}
@@ -37542,16 +39995,16 @@ const UnitRegistrationModule = ({
                 <button
                   onClick={registerMultipleUnits}
                   disabled={state.loading || state.selectedUnits.length === 0}
-                  className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                  className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2"
                 >
                   {state.loading ? (
-                    <><i className="fas fa-spinner fa-spin mr-2"></i>Registering...</>
+                    <><i className="fas fa-spinner fa-spin"></i> Registering...</>
                   ) : (
-                    <><i className="fas fa-save mr-2"></i>Register {state.selectedUnits.length} {unitType}(s)</>
+                    <><i className="fas fa-save"></i> Register {state.selectedUnits.length} {unitType}(s)</>
                   )}
                 </button>
                 <button
-                  onClick={() => setState(prev => ({ ...prev, showRegisterForm: false, selectedUnits: [], selectAllUnits: false }))}
+                  onClick={() => setState(prev => ({ ...prev, showRegisterForm: false, selectedUnits: [], selectAllUnits: false, searchTerm: '' }))}
                   className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
                 >
                   Cancel
@@ -37562,42 +40015,89 @@ const UnitRegistrationModule = ({
         </div>
       )}
 
-      {/* Registered Units Table */}
+      {/* ==================== REGISTERED UNITS TABLE ==================== */}
       <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-        <div className="px-6 py-4 bg-gray-50 border-b">
-          <h3 className="font-semibold text-lg">
+        <div className="px-6 py-4 bg-gray-50 border-b flex justify-between items-center">
+          <h3 className="font-semibold text-lg flex items-center gap-2">
+            <i className="fas fa-check-circle text-green-500"></i>
             {userRole.isStudent ? `My ${unitType}s` : `Registered ${unitType}s`}
+            <span className="text-sm font-normal text-gray-500">
+              ({state.registeredUnits.length})
+            </span>
           </h3>
+          {state.selectedProgram && state.registeredUnits.length > 0 && (
+            <span className="text-xs text-gray-400">
+              {isTVET ? 'Program' : isUniversity ? 'Course' : 'Class'}: {
+                state.enrolledPrograms.find(p => p.programId === state.selectedProgram)?.programName || 'Selected'
+              }
+            </span>
+          )}
         </div>
         
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-3 text-left">Code</th>
-                <th className="px-4 py-3 text-left">Name</th>
-                <th className="px-4 py-3 text-left">Credits</th>
-                <th className="px-4 py-3 text-left">Semester</th>
-                <th className="px-4 py-3 text-left">Registration Date</th>
-                <th className="px-4 py-3 text-left">Status</th>
-                <th className="px-4 py-3 text-left">Actions</th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Code</th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Name</th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Credits</th>
+                {isTVET && (
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Module</th>
+                )}
+                {isUniversity && (
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Semester</th>
+                )}
+                <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Registration Date</th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Status</th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
               {state.registeredUnits.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="px-4 py-8 text-center text-gray-500">
-                    No {unitType.toLowerCase()}s registered yet
+                  <td colSpan="8" className="px-4 py-8 text-center text-gray-500">
+                    {state.selectedProgram ? (
+                      <>
+                        <i className="fas fa-book-open text-4xl text-gray-300 mb-2 block"></i>
+                        <p>No {unitType.toLowerCase()}s registered yet</p>
+                        {hasAvailableUnits && canRegister && (
+                          <button
+                            onClick={() => setState(prev => ({ ...prev, showRegisterForm: true }))}
+                            className="mt-2 text-indigo-600 hover:text-indigo-800 text-sm font-medium"
+                          >
+                            Click here to register {unitType.toLowerCase()}s
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <i className="fas fa-arrow-left text-4xl text-gray-300 mb-2 block"></i>
+                        <p>Select a {isTVET ? 'program' : isUniversity ? 'course' : 'class'} to view registered {unitType.toLowerCase()}s</p>
+                      </>
+                    )}
                   </td>
                 </tr>
               ) : (
                 state.registeredUnits.map(reg => (
                   <tr key={reg.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-mono">{reg.Unit?.code || reg.unitCode || '—'}</td>
-                    <td className="px-4 py-3">{reg.Unit?.name || reg.unitName || '—'}</td>
+                    <td className="px-4 py-3 font-mono text-sm">{reg.Unit?.code || reg.unitCode || '—'}</td>
+                    <td className="px-4 py-3 font-medium text-indigo-600">{reg.Unit?.name || reg.unitName || '—'}</td>
                     <td className="px-4 py-3">{reg.Unit?.credits || reg.credits || '—'}</td>
-                    <td className="px-4 py-3">{reg.semester ? `Semester ${reg.semester}` : '—'}</td>
-                    <td className="px-4 py-3">{new Date(reg.registrationDate || reg.createdAt).toLocaleDateString()}</td>
+                    {isTVET && (
+                      <td className="px-4 py-3">
+                        <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs">
+                          Module {reg.Unit?.module || reg.module || '—'}
+                        </span>
+                      </td>
+                    )}
+                    {isUniversity && (
+                      <td className="px-4 py-3">
+                        <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
+                          Sem {reg.Unit?.semester || reg.semester || '—'}
+                        </span>
+                      </td>
+                    )}
+                    <td className="px-4 py-3 text-sm">{new Date(reg.registrationDate || reg.createdAt).toLocaleDateString()}</td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(reg.status)}`}>
                         {reg.status}
@@ -37607,11 +40107,14 @@ const UnitRegistrationModule = ({
                       {reg.status === 'APPROVED' && (
                         <button
                           onClick={() => dropUnit(reg.id)}
-                          className="text-red-600 hover:text-red-900"
+                          className="text-red-600 hover:text-red-900 p-1 hover:bg-red-50 rounded"
                           title={`Drop ${unitType}`}
                         >
                           <i className="fas fa-trash"></i>
                         </button>
+                      )}
+                      {reg.status === 'PENDING' && (
+                        <span className="text-xs text-yellow-600">Awaiting approval</span>
                       )}
                     </td>
                   </tr>
@@ -37622,12 +40125,18 @@ const UnitRegistrationModule = ({
         </div>
       </div>
 
-      {/* Pending Approvals Modal */}
+      {/* ==================== PENDING APPROVALS MODAL ==================== */}
       {state.showApprovals && userRole.canApprove && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[80vh] overflow-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold">Pending {unitType} Registrations</h3>
+            <div className="flex justify-between items-center mb-4 sticky top-0 bg-white z-10 pb-3 border-b">
+              <h3 className="text-xl font-bold flex items-center gap-2">
+                <i className="fas fa-clock text-purple-600"></i>
+                Pending {unitType} Registrations
+                <span className="text-sm font-normal text-gray-500">
+                  ({state.pendingRegistrations.length})
+                </span>
+              </h3>
               <button 
                 onClick={() => setState(prev => ({ ...prev, showApprovals: false }))} 
                 className="text-gray-500 hover:text-gray-700"
@@ -37638,7 +40147,7 @@ const UnitRegistrationModule = ({
             
             {state.pendingRegistrations.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
-                <i className="fas fa-check-circle text-5xl mb-3"></i>
+                <i className="fas fa-check-circle text-5xl text-green-400 mb-3 block"></i>
                 <p>No pending registrations</p>
               </div>
             ) : (
@@ -37652,10 +40161,11 @@ const UnitRegistrationModule = ({
                         <p className="text-sm font-medium text-indigo-600 mt-1">
                           {unitType}: {reg.Unit?.name} ({reg.Unit?.code})
                         </p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Requested: {new Date(reg.createdAt).toLocaleDateString()}
-                          {reg.semester && ` • Semester ${reg.semester}`}
-                          {reg.academicYear && ` • ${reg.academicYear}`}
+                        <p className="text-xs text-gray-500 mt-1 flex flex-wrap gap-2">
+                          <span>Requested: {new Date(reg.createdAt).toLocaleDateString()}</span>
+                          {reg.semester && <span>• Semester {reg.semester}</span>}
+                          {reg.academicYear && <span>• {reg.academicYear}</span>}
+                          {reg.module && <span>• Module {reg.module}</span>}
                         </p>
                       </div>
                       <div className="flex space-x-2">
@@ -37681,22 +40191,30 @@ const UnitRegistrationModule = ({
         </div>
       )}
 
-      {state.loading && (
+      {/* ==================== LOADING ==================== */}
+      {state.loading && !state.error && (
         <div className="flex justify-center py-8">
           <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
         </div>
       )}
 
-      {!state.selectedCourse && (state.selectedStudent || userRole.isStudent) && (
-        <div className="bg-gray-50 rounded-xl p-12 text-center">
-          <i className="fas fa-book-open text-5xl text-gray-400 mb-4"></i>
-          <p className="text-gray-500">Please select a course/program to view registered {unitType.toLowerCase()}s</p>
+      {/* ==================== NO PROGRAM SELECTED ==================== */}
+      {!state.selectedProgram && (state.selectedStudent || userRole.isStudent) && (
+        <div className="bg-gray-50 rounded-xl p-12 text-center border-2 border-dashed border-gray-300">
+          <i className="fas fa-arrow-left text-5xl text-gray-400 mb-4 block"></i>
+          <p className="text-gray-500 text-lg">
+            Select a {isTVET ? 'program' : isUniversity ? 'course' : 'class'} to view registered {unitType.toLowerCase()}s
+          </p>
+          {state.enrolledPrograms.length === 0 && (state.selectedStudent || userRole.isStudent) && (
+            <p className="text-sm text-gray-400 mt-2">
+              You need to be enrolled in a {isTVET ? 'program' : isUniversity ? 'course' : 'class'} first.
+            </p>
+          )}
         </div>
       )}
     </div>
   );
 };
-
 // ==================== PERMISSION HELPERS ====================
 
 const hasPermission = (user, permission) => {
@@ -39429,7 +41947,9 @@ const StudentArrivalModule = ({
 };
 
 
-// ==================== RECEPTIONIST MODULE ====================
+// ==================== RECEPTIONIST MODULE - COMPLETE REWRITE ====================
+// Replace your entire ReceptionistModule with this code
+
 const ReceptionistModule = ({ 
   user, 
   currentSchool,
@@ -39438,6 +41958,7 @@ const ReceptionistModule = ({
   parents,
   setActiveModule
 }) => {
+  // ==================== STATE ====================
   const [activeTab, setActiveTab] = useState('visitors');
   const [viewMode, setViewMode] = useState('all');
   const [visitors, setVisitors] = useState([]);
@@ -39465,6 +41986,7 @@ const ReceptionistModule = ({
     pendingApprovals: 0
   });
 
+  // ==================== FORM STATES ====================
   const [visitorForm, setVisitorForm] = useState({
     name: '', phone: '', email: '', purpose: '', personToSee: '',
     idNumber: '', vehicleNumber: '', checkIn: '', checkOut: '', status: 'CHECKED_IN'
@@ -39475,17 +41997,20 @@ const ReceptionistModule = ({
     duration: '', status: 'INCOMING', notes: ''
   });
 
+  // ✅ FIXED: assignedTo uses userId from staff (NOT staff.id)
   const [complaintForm, setComplaintForm] = useState({
     complainant: '', complainantType: 'PARENT', contact: '',
     category: 'GENERAL', description: '', urgency: 'NORMAL',
     assignedTo: '', status: 'OPEN'
   });
 
+  // ✅ FIXED: staffId uses userId from staff (NOT staff.id)
   const [appointmentForm, setAppointmentForm] = useState({
     title: '', description: '', parentId: '', staffId: '', studentId: '',
     date: '', time: '', duration: 30, status: 'SCHEDULED', type: 'PARENT_TEACHER'
   });
 
+  // ✅ FIXED: assignedTo uses userId from staff (NOT staff.id)
   const [taskForm, setTaskForm] = useState({
     title: '', description: '', assignedTo: '', assignedBy: '',
     dueDate: '', priority: 'NORMAL', status: 'PENDING',
@@ -39496,6 +42021,7 @@ const ReceptionistModule = ({
     status: '', comments: '', approvedBy: ''
   });
 
+  // ==================== API INSTANCE ====================
   const api = axios.create({
     baseURL: 'http://localhost:5000/api',
     headers: { 'Content-Type': 'application/json' }
@@ -39507,10 +42033,43 @@ const ReceptionistModule = ({
     return config;
   });
 
+  // ==================== PERMISSIONS ====================
   const isAdmin = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
   const isStaff = ['TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER', 'SENIOR_TEACHER', 'LECTURER'].includes(user?.role);
   const canManageAll = isAdmin || user?.role === 'SUPER_ADMIN';
 
+  // ==================== HELPER: Get Staff with User Info ====================
+  const getStaffWithUser = () => {
+    return staff?.filter(s => s.User) || [];
+  };
+
+  // ==================== HELPER: Get Staff Name by UserId ====================
+  const getStaffName = (userId) => {
+    if (!userId) return 'Unassigned';
+    const staffMember = staff?.find(s => s.userId === userId);
+    if (staffMember?.User) {
+      return `${staffMember.User.firstName} ${staffMember.User.lastName}`;
+    }
+    return 'Unknown Staff';
+  };
+
+  // ==================== HELPER: Get Staff Options for Dropdown ====================
+  const getStaffOptions = () => {
+    const staffWithUsers = getStaffWithUser();
+    if (staffWithUsers.length === 0) {
+      return [{ value: '', label: 'No staff available', disabled: true }];
+    }
+    return [
+      { value: '', label: '-- Select Staff --' },
+      ...staffWithUsers.map(s => ({
+        value: s.userId, // ✅ CRITICAL: Use userId, NOT id
+        label: `${s.User.firstName} ${s.User.lastName}`,
+        subLabel: s.jobTitle || s.department || 'Staff'
+      }))
+    ];
+  };
+
+  // ==================== FETCH FUNCTIONS ====================
   const fetchAllData = async () => {
     setLoading(true);
     try {
@@ -39616,6 +42175,51 @@ const ReceptionistModule = ({
     }
   };
 
+  // ✅ FIXED: Edit Visitor function
+  const handleEditVisitor = async (visitorId, data) => {
+    setLoading(true);
+    try {
+      const response = await api.patch(`/receptionist/visitors/${visitorId}`, data);
+      if (response.data.success) {
+        setVisitors(prev => prev.map(v => 
+          v.id === visitorId ? { ...v, ...data } : v
+        ));
+        await fetchAllData();
+        alert('✅ Visitor updated successfully!');
+        setShowEditModal(false);
+        setEditingItem(null);
+      }
+    } catch (error) {
+      console.error('❌ Edit visitor error:', error);
+      alert('❌ Failed to update visitor: ' + (error.response?.data?.message || error.message));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ✅ FIXED: Delete Visitor function
+  const handleDeleteVisitor = async (visitorId) => {
+    if (!visitorId) {
+      alert('❌ Invalid visitor ID');
+      return;
+    }
+    if (!window.confirm('Are you sure you want to delete this visitor record?')) return;
+    setLoading(true);
+    try {
+      const response = await api.delete(`/receptionist/visitors/${visitorId}`);
+      if (response.data.success) {
+        setVisitors(prev => prev.filter(v => v.id !== visitorId));
+        await fetchAllData();
+        alert('✅ Visitor deleted successfully!');
+      }
+    } catch (error) {
+      console.error('❌ Delete visitor error:', error);
+      alert('❌ Failed to delete visitor');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // ==================== CALL FUNCTIONS ====================
   const handleAddCall = async (e) => {
     e.preventDefault();
@@ -39651,6 +42255,45 @@ const ReceptionistModule = ({
     }
   };
 
+  // ✅ FIXED: Edit Call function
+  const handleEditCall = async (callId, data) => {
+    setLoading(true);
+    try {
+      await api.patch(`/receptionist/calls/${callId}`, data);
+      await fetchAllData();
+      alert('✅ Call updated successfully!');
+      setShowEditModal(false);
+      setEditingItem(null);
+    } catch (error) {
+      alert('❌ Failed to update call');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ✅ FIXED: Delete Call function
+  const handleDeleteCall = async (callId) => {
+    if (!callId) {
+      alert('❌ Invalid call ID');
+      return;
+    }
+    if (!window.confirm('Are you sure you want to delete this call?')) return;
+    setLoading(true);
+    try {
+      const response = await api.delete(`/receptionist/calls/${callId}`);
+      if (response.data.success) {
+        setCalls(prev => prev.filter(c => c.id !== callId));
+        await fetchAllData();
+        alert('✅ Call deleted successfully!');
+      }
+    } catch (error) {
+      console.error('❌ Delete call error:', error);
+      alert('❌ Failed to delete call');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // ==================== COMPLAINT FUNCTIONS ====================
   const handleAddComplaint = async (e) => {
     e.preventDefault();
@@ -39662,7 +42305,14 @@ const ReceptionistModule = ({
     try {
       let validAssignedTo = null;
       if (complaintForm.assignedTo && complaintForm.assignedTo !== '' && complaintForm.assignedTo !== 'null') {
-        validAssignedTo = complaintForm.assignedTo;
+        const staffMember = staff?.find(s => s.userId === complaintForm.assignedTo);
+        if (staffMember && staffMember.User) {
+          validAssignedTo = complaintForm.assignedTo;
+        } else {
+          alert('❌ Selected staff member is not valid');
+          setLoading(false);
+          return;
+        }
       }
       const payload = {
         complainant: complaintForm.complainant.trim(),
@@ -39702,36 +42352,40 @@ const ReceptionistModule = ({
     }
   };
 
-// ==================== DELETE COMPLAINT ====================
-const handleDeleteComplaint = async (complaintId) => {
-  if (!complaintId) {
-    alert('❌ Invalid complaint ID');
-    return;
-  }
-  
-  if (!window.confirm('Are you sure you want to delete this complaint?')) return;
-  
-  setLoading(true);
-  try {
-    const response = await api.delete(`/receptionist/complaints/${complaintId}`);
-    if (response.data.success) {
-      setComplaints(prev => prev.filter(c => c.id !== complaintId));
-      await fetchAllData();
-      alert('✅ Complaint deleted successfully!');
+  const handleDeleteComplaint = async (complaintId) => {
+    if (!complaintId) {
+      alert('❌ Invalid complaint ID');
+      return;
     }
-  } catch (error) {
-    console.error('❌ Delete complaint error:', error);
-    alert('❌ Failed to delete complaint');
-  } finally {
-    setLoading(false);
-  }
-};
-
+    if (!window.confirm('Are you sure you want to delete this complaint?')) return;
+    setLoading(true);
+    try {
+      const response = await api.delete(`/receptionist/complaints/${complaintId}`);
+      if (response.data.success) {
+        setComplaints(prev => prev.filter(c => c.id !== complaintId));
+        await fetchAllData();
+        alert('✅ Complaint deleted successfully!');
+      }
+    } catch (error) {
+      console.error('❌ Delete complaint error:', error);
+      alert('❌ Failed to delete complaint');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleUpdateComplaint = async (complaintId, data) => {
     setLoading(true);
     try {
-      await api.patch(`/receptionist/complaints/${complaintId}`, data);
+      let validAssignedTo = null;
+      if (data.assignedTo && data.assignedTo !== '' && data.assignedTo !== 'null') {
+        const staffMember = staff?.find(s => s.userId === data.assignedTo);
+        if (staffMember && staffMember.User) {
+          validAssignedTo = data.assignedTo;
+        }
+      }
+      const updateData = { ...data, assignedTo: validAssignedTo };
+      await api.patch(`/receptionist/complaints/${complaintId}`, updateData);
       await fetchAllData();
       alert('✅ Complaint updated successfully!');
       setShowEditModal(false);
@@ -39758,18 +42412,25 @@ const handleDeleteComplaint = async (complaintId) => {
         setLoading(false);
         return;
       }
+      
+      let validStaffId = null;
+      if (appointmentForm.staffId && appointmentForm.staffId !== '' && appointmentForm.staffId !== 'null') {
+        const staffMember = staff?.find(s => s.userId === appointmentForm.staffId);
+        if (staffMember && staffMember.User) {
+          validStaffId = appointmentForm.staffId;
+        }
+      }
+
       let validParentId = null;
       if (appointmentForm.parentId && appointmentForm.parentId !== '' && appointmentForm.parentId !== 'null') {
         validParentId = appointmentForm.parentId;
       }
-      let validStaffId = null;
-      if (appointmentForm.staffId && appointmentForm.staffId !== '' && appointmentForm.staffId !== 'null') {
-        validStaffId = appointmentForm.staffId;
-      }
+
       let validStudentId = null;
       if (appointmentForm.studentId && appointmentForm.studentId !== '' && appointmentForm.studentId !== 'null') {
         validStudentId = appointmentForm.studentId;
       }
+
       const payload = {
         title: appointmentForm.title.trim(),
         description: appointmentForm.description?.trim() || null,
@@ -39781,11 +42442,15 @@ const handleDeleteComplaint = async (complaintId) => {
         duration: appointmentForm.duration ? parseInt(appointmentForm.duration) : 30,
         type: appointmentForm.type || 'PARENT_TEACHER'
       };
+
       const res = await api.post('/receptionist/appointments', payload);
       if (res.data.success) {
         setAppointments([res.data.appointment, ...appointments]);
         setShowModal(false);
-        setAppointmentForm({ title: '', description: '', parentId: '', staffId: '', studentId: '', date: '', time: '', duration: 30, status: 'SCHEDULED', type: 'PARENT_TEACHER' });
+        setAppointmentForm({ 
+          title: '', description: '', parentId: '', staffId: '', studentId: '', 
+          date: '', time: '', duration: 30, status: 'SCHEDULED', type: 'PARENT_TEACHER' 
+        });
         await fetchAllData();
         alert('✅ Appointment scheduled successfully!');
       }
@@ -39799,7 +42464,15 @@ const handleDeleteComplaint = async (complaintId) => {
   const handleUpdateAppointment = async (appointmentId, data) => {
     setLoading(true);
     try {
-      await api.patch(`/receptionist/appointments/${appointmentId}`, data);
+      let validStaffId = null;
+      if (data.staffId && data.staffId !== '' && data.staffId !== 'null') {
+        const staffMember = staff?.find(s => s.userId === data.staffId);
+        if (staffMember && staffMember.User) {
+          validStaffId = data.staffId;
+        }
+      }
+      const updateData = { ...data, staffId: validStaffId };
+      await api.patch(`/receptionist/appointments/${appointmentId}`, updateData);
       await fetchAllData();
       await fetchMyData();
       alert('✅ Appointment updated successfully!');
@@ -39812,32 +42485,28 @@ const handleDeleteComplaint = async (complaintId) => {
     }
   };
 
-  
-// ==================== DELETE APPOINTMENT ====================
-const handleDeleteAppointment = async (appointmentId) => {
-  if (!appointmentId) {
-    alert('❌ Invalid appointment ID');
-    return;
-  }
-  
-  if (!window.confirm('Are you sure you want to delete this appointment?')) return;
-  
-  setLoading(true);
-  try {
-    const response = await api.delete(`/receptionist/appointments/${appointmentId}`);
-    if (response.data.success) {
-      setAppointments(prev => prev.filter(a => a.id !== appointmentId));
-      await fetchAllData();
-      await fetchMyData();
-      alert('✅ Appointment deleted successfully!');
+  const handleDeleteAppointment = async (appointmentId) => {
+    if (!appointmentId) {
+      alert('❌ Invalid appointment ID');
+      return;
     }
-  } catch (error) {
-    console.error('❌ Delete appointment error:', error);
-    alert('❌ Failed to delete appointment');
-  } finally {
-    setLoading(false);
-  }
-};
+    if (!window.confirm('Are you sure you want to delete this appointment?')) return;
+    setLoading(true);
+    try {
+      const response = await api.delete(`/receptionist/appointments/${appointmentId}`);
+      if (response.data.success) {
+        setAppointments(prev => prev.filter(a => a.id !== appointmentId));
+        await fetchAllData();
+        await fetchMyData();
+        alert('✅ Appointment deleted successfully!');
+      }
+    } catch (error) {
+      console.error('❌ Delete appointment error:', error);
+      alert('❌ Failed to delete appointment');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleUpdateAppointmentStatus = async (appointmentId, status) => {
     setLoading(true);
@@ -39864,8 +42533,12 @@ const handleDeleteAppointment = async (appointmentId) => {
     try {
       let validAssignedTo = null;
       if (taskForm.assignedTo && taskForm.assignedTo !== '' && taskForm.assignedTo !== 'null') {
-        validAssignedTo = taskForm.assignedTo;
+        const staffMember = staff?.find(s => s.userId === taskForm.assignedTo);
+        if (staffMember && staffMember.User) {
+          validAssignedTo = taskForm.assignedTo;
+        }
       }
+
       let dueDate = null;
       if (taskForm.dueDate) {
         const parsed = new Date(taskForm.dueDate);
@@ -39873,6 +42546,7 @@ const handleDeleteAppointment = async (appointmentId) => {
           dueDate = parsed.toISOString();
         }
       }
+
       const payload = {
         title: taskForm.title.trim(),
         description: taskForm.description.trim(),
@@ -39882,11 +42556,15 @@ const handleDeleteAppointment = async (appointmentId) => {
         status: 'PENDING',
         requiresApproval: taskForm.requiresApproval !== false
       };
+
       const res = await api.post('/receptionist/tasks', payload);
       if (res.data.success) {
         setTasks([res.data.task, ...tasks]);
         setShowModal(false);
-        setTaskForm({ title: '', description: '', assignedTo: '', assignedBy: '', dueDate: '', priority: 'NORMAL', status: 'PENDING', requiresApproval: true });
+        setTaskForm({ 
+          title: '', description: '', assignedTo: '', assignedBy: '', 
+          dueDate: '', priority: 'NORMAL', status: 'PENDING', requiresApproval: true 
+        });
         await fetchAllData();
         alert('✅ Task assigned successfully!');
       }
@@ -39900,7 +42578,15 @@ const handleDeleteAppointment = async (appointmentId) => {
   const handleUpdateTask = async (taskId, data) => {
     setLoading(true);
     try {
-      await api.patch(`/receptionist/tasks/${taskId}`, data);
+      let validAssignedTo = null;
+      if (data.assignedTo && data.assignedTo !== '' && data.assignedTo !== 'null') {
+        const staffMember = staff?.find(s => s.userId === data.assignedTo);
+        if (staffMember && staffMember.User) {
+          validAssignedTo = data.assignedTo;
+        }
+      }
+      const updateData = { ...data, assignedTo: validAssignedTo };
+      await api.patch(`/receptionist/tasks/${taskId}`, updateData);
       await fetchAllData();
       await fetchMyData();
       alert('✅ Task updated successfully!');
@@ -39913,46 +42599,33 @@ const handleDeleteAppointment = async (appointmentId) => {
     }
   };
 
- // ==================== TASK FUNCTIONS - UPDATED DELETE ====================
-const handleDeleteTask = async (taskId) => {
-  // ✅ Add validation
-  if (!taskId) {
-    alert('❌ Invalid task ID');
-    return;
-  }
-  
-  // ✅ Confirm with user
-  if (!window.confirm('Are you sure you want to delete this task? This action cannot be undone.')) {
-    return;
-  }
-  
-  setLoading(true);
-  try {
-    console.log('🗑️ Deleting task:', taskId);
-    
-    const response = await api.delete(`/receptionist/tasks/${taskId}`);
-    
-    if (response.data.success) {
-      // ✅ Remove from all task lists
-      setTasks(prevTasks => prevTasks.filter(task => task.id !== taskId));
-      setMyTasks(prevTasks => prevTasks.filter(task => task.id !== taskId));
-      
-      // ✅ Refresh data
-      await fetchAllData();
-      await fetchMyData();
-      
-      alert('✅ Task deleted successfully!');
-    } else {
-      throw new Error(response.data.message || 'Delete failed');
+  const handleDeleteTask = async (taskId) => {
+    if (!taskId) {
+      alert('❌ Invalid task ID');
+      return;
     }
-  } catch (error) {
-    console.error('❌ Delete task error:', error);
-    const errorMessage = error.response?.data?.message || error.message || 'Failed to delete task';
-    alert(`❌ ${errorMessage}`);
-  } finally {
-    setLoading(false);
-  }
-};
+    if (!window.confirm('Are you sure you want to delete this task? This action cannot be undone.')) {
+      return;
+    }
+    setLoading(true);
+    try {
+      console.log('🗑️ Deleting task:', taskId);
+      const response = await api.delete(`/receptionist/tasks/${taskId}`);
+      if (response.data.success) {
+        setTasks(prevTasks => prevTasks.filter(task => task.id !== taskId));
+        setMyTasks(prevTasks => prevTasks.filter(task => task.id !== taskId));
+        await fetchAllData();
+        await fetchMyData();
+        alert('✅ Task deleted successfully!');
+      }
+    } catch (error) {
+      console.error('❌ Delete task error:', error);
+      const errorMessage = error.response?.data?.message || error.message || 'Failed to delete task';
+      alert(`❌ ${errorMessage}`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmitForApproval = async (taskId) => {
     setLoading(true);
@@ -40012,43 +42685,106 @@ const handleDeleteTask = async (taskId) => {
     setEditingItem(item);
     setModalType(type);
     setShowEditModal(true);
-    if (type === 'visitor') setVisitorForm(item);
-    else if (type === 'call') setCallForm(item);
-    else if (type === 'complaint') setComplaintForm(item);
-    else if (type === 'appointment') {
+    
+    if (type === 'visitor') {
+      setVisitorForm({
+        name: item.name || '',
+        phone: item.phone || '',
+        email: item.email || '',
+        purpose: item.purpose || '',
+        personToSee: item.personToSee || '',
+        idNumber: item.idNumber || '',
+        vehicleNumber: item.vehicleNumber || '',
+        checkIn: item.checkIn ? new Date(item.checkIn).toISOString().slice(0, 16) : '',
+        checkOut: item.checkOut ? new Date(item.checkOut).toISOString().slice(0, 16) : '',
+        status: item.status || 'CHECKED_IN'
+      });
+    } else if (type === 'call') {
+      setCallForm({
+        callerName: item.callerName || '',
+        callerPhone: item.callerPhone || '',
+        recipient: item.recipient || '',
+        purpose: item.purpose || '',
+        duration: item.duration || '',
+        status: item.status || 'INCOMING',
+        notes: item.notes || ''
+      });
+    } else if (type === 'complaint') {
+      setComplaintForm({
+        ...item,
+        assignedTo: item.assignedTo || ''
+      });
+    } else if (type === 'appointment') {
       setAppointmentForm({
         ...item,
         date: item.date ? item.date.split('T')[0] : '',
-        time: item.time || ''
+        time: item.time || '',
+        staffId: item.staffId || '',
+        parentId: item.parentId || '',
+        studentId: item.studentId || ''
       });
     } else if (type === 'task') {
       setTaskForm({
         ...item,
-        dueDate: item.dueDate ? item.dueDate.split('T')[0] : ''
+        dueDate: item.dueDate ? item.dueDate.split('T')[0] : '',
+        assignedTo: item.assignedTo || ''
       });
     }
   };
 
   const handleEditSubmit = async (e) => {
     e.preventDefault();
-    if (modalType === 'complaint') {
-      await handleUpdateComplaint(editingItem.id, complaintForm);
-    } else if (modalType === 'appointment') {
-      await handleUpdateAppointment(editingItem.id, appointmentForm);
-    } else if (modalType === 'task') {
-      await handleUpdateTask(editingItem.id, taskForm);
-    } else if (modalType === 'visitor') {
-      await api.patch(`/receptionist/visitors/${editingItem.id}`, visitorForm);
-      await fetchAllData();
-      setShowEditModal(false);
-      setEditingItem(null);
-      alert('✅ Visitor updated successfully!');
+    
+    if (modalType === 'visitor') {
+      const updateData = {
+        name: visitorForm.name.trim(),
+        phone: visitorForm.phone?.trim() || null,
+        email: visitorForm.email?.trim() || null,
+        purpose: visitorForm.purpose.trim(),
+        personToSee: visitorForm.personToSee.trim(),
+        idNumber: visitorForm.idNumber?.trim() || null,
+        vehicleNumber: visitorForm.vehicleNumber?.trim() || null,
+        status: visitorForm.status || 'CHECKED_IN'
+      };
+      
+      if (visitorForm.checkOut && visitorForm.status === 'CHECKED_OUT') {
+        updateData.checkOut = new Date(visitorForm.checkOut).toISOString();
+      }
+      
+      await handleEditVisitor(editingItem.id, updateData);
+      
     } else if (modalType === 'call') {
-      await api.patch(`/receptionist/calls/${editingItem.id}`, callForm);
-      await fetchAllData();
-      setShowEditModal(false);
-      setEditingItem(null);
-      alert('✅ Call updated successfully!');
+      await handleEditCall(editingItem.id, callForm);
+      
+    } else if (modalType === 'complaint') {
+      let validAssignedTo = null;
+      if (complaintForm.assignedTo && complaintForm.assignedTo !== '' && complaintForm.assignedTo !== 'null') {
+        const staffMember = staff?.find(s => s.userId === complaintForm.assignedTo);
+        if (staffMember && staffMember.User) {
+          validAssignedTo = complaintForm.assignedTo;
+        }
+      }
+      await handleUpdateComplaint(editingItem.id, { ...complaintForm, assignedTo: validAssignedTo });
+      
+    } else if (modalType === 'appointment') {
+      let validStaffId = null;
+      if (appointmentForm.staffId && appointmentForm.staffId !== '' && appointmentForm.staffId !== 'null') {
+        const staffMember = staff?.find(s => s.userId === appointmentForm.staffId);
+        if (staffMember && staffMember.User) {
+          validStaffId = appointmentForm.staffId;
+        }
+      }
+      await handleUpdateAppointment(editingItem.id, { ...appointmentForm, staffId: validStaffId });
+      
+    } else if (modalType === 'task') {
+      let validAssignedTo = null;
+      if (taskForm.assignedTo && taskForm.assignedTo !== '' && taskForm.assignedTo !== 'null') {
+        const staffMember = staff?.find(s => s.userId === taskForm.assignedTo);
+        if (staffMember && staffMember.User) {
+          validAssignedTo = taskForm.assignedTo;
+        }
+      }
+      await handleUpdateTask(editingItem.id, { ...taskForm, assignedTo: validAssignedTo });
     }
   };
 
@@ -40099,6 +42835,7 @@ const handleDeleteTask = async (taskId) => {
     </div>
   );
 
+  // ==================== EFFECTS ====================
   useEffect(() => {
     if (canManageAll) fetchAllData();
     if (isStaff) fetchMyData();
@@ -40109,6 +42846,7 @@ const handleDeleteTask = async (taskId) => {
     return () => clearInterval(interval);
   }, []);
 
+  // ==================== RENDER ====================
   return (
     <div className="space-y-6">
       {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
@@ -40175,7 +42913,7 @@ const handleDeleteTask = async (taskId) => {
         )}
       </div>
 
-      {/* ===== VISITORS TAB ===== */}
+      {/* ===== VISITORS TAB - FIXED ===== */}
       {activeTab === 'visitors' && (
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="p-4 bg-gray-50 border-b flex justify-between items-center">
@@ -40199,19 +42937,67 @@ const handleDeleteTask = async (taskId) => {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {visitors.length === 0 ? (<tr><td colSpan="8" className="px-4 py-8 text-center text-gray-500">No visitors today</td></tr>) : (
+                {visitors.length === 0 ? (
+                  <tr>
+                    <td colSpan="8" className="px-4 py-8 text-center text-gray-500">
+                      <i className="fas fa-user-friends text-4xl text-gray-300 mb-2"></i>
+                      <p>No visitors today</p>
+                      <button 
+                        onClick={() => { setModalType('visitor'); setShowModal(true); }} 
+                        className="mt-2 text-indigo-600 hover:text-indigo-800"
+                      >
+                        Click here to check in a visitor
+                      </button>
+                    </td>
+                  </tr>
+                ) : (
                   visitors.map(visitor => (
                     <tr key={visitor.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 font-medium">{visitor.name}</td>
                       <td className="px-4 py-3">{visitor.phone || '—'}</td>
                       <td className="px-4 py-3">{visitor.purpose}</td>
                       <td className="px-4 py-3">{visitor.personToSee}</td>
-                      <td className="px-4 py-3 text-sm">{new Date(visitor.checkIn).toLocaleTimeString()}</td>
-                      <td className="px-4 py-3 text-sm">{visitor.checkOut ? new Date(visitor.checkOut).toLocaleTimeString() : '—'}</td>
-                      <td className="px-4 py-3"><span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(visitor.status)}`}>{visitor.status}</span></td>
+                      <td className="px-4 py-3 text-sm">
+                        {visitor.checkIn ? new Date(visitor.checkIn).toLocaleTimeString() : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        {visitor.checkOut ? new Date(visitor.checkOut).toLocaleTimeString() : '—'}
+                      </td>
                       <td className="px-4 py-3">
-                        {visitor.status === 'CHECKED_IN' && (<button onClick={() => handleVisitorCheckOut(visitor.id)} className="text-green-600 hover:text-green-900"><i className="fas fa-sign-out-alt"></i> Check Out</button>)}
-                        {canManageAll && (<button onClick={() => openEditModal(visitor, 'visitor')} className="text-indigo-600 hover:text-indigo-900 ml-2"><i className="fas fa-edit"></i></button>)}
+                        <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(visitor.status)}`}>
+                          {visitor.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex gap-1">
+                          {visitor.status === 'CHECKED_IN' && (
+                            <button 
+                              onClick={() => handleVisitorCheckOut(visitor.id)} 
+                              className="text-green-600 hover:text-green-900 text-sm p-1"
+                              title="Check Out"
+                            >
+                              <i className="fas fa-sign-out-alt"></i>
+                            </button>
+                          )}
+                          {canManageAll && (
+                            <>
+                              <button 
+                                onClick={() => openEditModal(visitor, 'visitor')} 
+                                className="text-indigo-600 hover:text-indigo-900 text-sm p-1"
+                                title="Edit Visitor"
+                              >
+                                <i className="fas fa-edit"></i>
+                              </button>
+                              <button 
+                                onClick={() => handleDeleteVisitor(visitor.id)} 
+                                className="text-red-600 hover:text-red-900 text-sm p-1"
+                                title="Delete Visitor"
+                              >
+                                <i className="fas fa-trash"></i>
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -40222,7 +43008,209 @@ const handleDeleteTask = async (taskId) => {
         </div>
       )}
 
-      {/* ===== CALLS TAB ===== */}
+      {/* ===== VISITOR CHECK-IN FORM MODAL ===== */}
+      {showModal && modalType === 'visitor' && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold">Check In Visitor</h3>
+              <button onClick={() => setShowModal(false)} className="text-gray-500 hover:text-gray-700">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+            <form onSubmit={handleVisitorCheckIn} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
+                  <input
+                    type="text"
+                    value={visitorForm.name}
+                    onChange={(e) => setVisitorForm({...visitorForm, name: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                  <input
+                    type="text"
+                    value={visitorForm.phone}
+                    onChange={(e) => setVisitorForm({...visitorForm, phone: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                  <input
+                    type="email"
+                    value={visitorForm.email}
+                    onChange={(e) => setVisitorForm({...visitorForm, email: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Purpose *</label>
+                  <input
+                    type="text"
+                    value={visitorForm.purpose}
+                    onChange={(e) => setVisitorForm({...visitorForm, purpose: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Person to See *</label>
+                  <input
+                    type="text"
+                    value={visitorForm.personToSee}
+                    onChange={(e) => setVisitorForm({...visitorForm, personToSee: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">ID Number</label>
+                  <input
+                    type="text"
+                    value={visitorForm.idNumber}
+                    onChange={(e) => setVisitorForm({...visitorForm, idNumber: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle Number</label>
+                  <input
+                    type="text"
+                    value={visitorForm.vehicleNumber}
+                    onChange={(e) => setVisitorForm({...visitorForm, vehicleNumber: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  />
+                </div>
+              </div>
+              <div className="flex space-x-2 pt-4">
+                <button type="submit" className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700" disabled={loading}>
+                  {loading ? 'Processing...' : 'Check In Visitor'}
+                </button>
+                <button type="button" onClick={() => setShowModal(false)} className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ===== EDIT VISITOR MODAL - FIXED ===== */}
+      {showEditModal && editingItem && modalType === 'visitor' && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold">Edit Visitor</h3>
+              <button onClick={() => { setShowEditModal(false); setEditingItem(null); }} className="text-gray-500 hover:text-gray-700">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+            <form onSubmit={handleEditSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
+                  <input
+                    type="text"
+                    value={visitorForm.name}
+                    onChange={(e) => setVisitorForm({...visitorForm, name: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                  <input
+                    type="text"
+                    value={visitorForm.phone}
+                    onChange={(e) => setVisitorForm({...visitorForm, phone: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                  <input
+                    type="email"
+                    value={visitorForm.email}
+                    onChange={(e) => setVisitorForm({...visitorForm, email: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Purpose *</label>
+                  <input
+                    type="text"
+                    value={visitorForm.purpose}
+                    onChange={(e) => setVisitorForm({...visitorForm, purpose: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Person to See *</label>
+                  <input
+                    type="text"
+                    value={visitorForm.personToSee}
+                    onChange={(e) => setVisitorForm({...visitorForm, personToSee: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">ID Number</label>
+                  <input
+                    type="text"
+                    value={visitorForm.idNumber}
+                    onChange={(e) => setVisitorForm({...visitorForm, idNumber: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle Number</label>
+                  <input
+                    type="text"
+                    value={visitorForm.vehicleNumber}
+                    onChange={(e) => setVisitorForm({...visitorForm, vehicleNumber: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                  <select
+                    value={visitorForm.status}
+                    onChange={(e) => setVisitorForm({...visitorForm, status: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="CHECKED_IN">Checked In</option>
+                    <option value="CHECKED_OUT">Checked Out</option>
+                  </select>
+                </div>
+                {visitorForm.status === 'CHECKED_OUT' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Check Out Time</label>
+                    <input
+                      type="datetime-local"
+                      value={visitorForm.checkOut}
+                      onChange={(e) => setVisitorForm({...visitorForm, checkOut: e.target.value})}
+                      className="w-full px-3 py-2 border rounded-lg"
+                    />
+                  </div>
+                )}
+              </div>
+              <div className="flex space-x-2 pt-4 border-t">
+                <button type="submit" className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700" disabled={loading}>
+                  {loading ? 'Saving...' : 'Update Visitor'}
+                </button>
+                <button type="button" onClick={() => { setShowEditModal(false); setEditingItem(null); }} className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ===== CALLS TAB - FIXED ===== */}
       {activeTab === 'calls' && (
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="p-4 bg-gray-50 border-b flex justify-between items-center">
@@ -40246,7 +43234,20 @@ const handleDeleteTask = async (taskId) => {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {calls.length === 0 ? (<tr><td colSpan="8" className="px-4 py-8 text-center text-gray-500">No calls logged</td></tr>) : (
+                {calls.length === 0 ? (
+                  <tr>
+                    <td colSpan="8" className="px-4 py-8 text-center text-gray-500">
+                      <i className="fas fa-phone-slash text-4xl text-gray-300 mb-2"></i>
+                      <p>No calls logged</p>
+                      <button 
+                        onClick={() => { setModalType('call'); setShowModal(true); }} 
+                        className="mt-2 text-indigo-600 hover:text-indigo-800"
+                      >
+                        Click here to log a call
+                      </button>
+                    </td>
+                  </tr>
+                ) : (
                   calls.map(call => (
                     <tr key={call.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 font-medium">{call.callerName}</td>
@@ -40254,17 +43255,221 @@ const handleDeleteTask = async (taskId) => {
                       <td className="px-4 py-3">{call.recipient}</td>
                       <td className="px-4 py-3">{call.purpose || '—'}</td>
                       <td className="px-4 py-3">{call.duration ? `${call.duration} min` : '—'}</td>
-                      <td className="px-4 py-3"><span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(call.status)}`}>{call.status}</span></td>
-                      <td className="px-4 py-3 text-sm">{new Date(call.timestamp).toLocaleTimeString()}</td>
                       <td className="px-4 py-3">
-                        {canManageAll && (<><button onClick={() => openEditModal(call, 'call')} className="text-indigo-600 hover:text-indigo-900"><i className="fas fa-edit"></i></button>
-                        <button onClick={() => { if (window.confirm('Delete this call?')) { api.delete(`/receptionist/calls/${call.id}`).then(() => fetchAllData()); } }} className="text-red-600 hover:text-red-900 ml-2"><i className="fas fa-trash"></i></button></>)}
+                        <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(call.status)}`}>
+                          {call.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        {call.timestamp ? new Date(call.timestamp).toLocaleTimeString() : '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex gap-1">
+                          <button 
+                            onClick={() => openEditModal(call, 'call')} 
+                            className="text-indigo-600 hover:text-indigo-900 text-sm p-1"
+                            title="Edit Call"
+                          >
+                            <i className="fas fa-edit"></i>
+                          </button>
+                          <button 
+                            onClick={() => handleDeleteCall(call.id)} 
+                            className="text-red-600 hover:text-red-900 text-sm p-1"
+                            title="Delete Call"
+                          >
+                            <i className="fas fa-trash"></i>
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* ===== CALL FORM MODAL ===== */}
+      {showModal && modalType === 'call' && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold">Log Call</h3>
+              <button onClick={() => setShowModal(false)} className="text-gray-500 hover:text-gray-700">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+            <form onSubmit={handleAddCall} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Caller Name *</label>
+                  <input
+                    type="text"
+                    value={callForm.callerName}
+                    onChange={(e) => setCallForm({...callForm, callerName: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Caller Phone</label>
+                  <input
+                    type="text"
+                    value={callForm.callerPhone}
+                    onChange={(e) => setCallForm({...callForm, callerPhone: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Recipient</label>
+                  <input
+                    type="text"
+                    value={callForm.recipient}
+                    onChange={(e) => setCallForm({...callForm, recipient: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Purpose</label>
+                  <input
+                    type="text"
+                    value={callForm.purpose}
+                    onChange={(e) => setCallForm({...callForm, purpose: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Duration (minutes)</label>
+                  <input
+                    type="number"
+                    value={callForm.duration}
+                    onChange={(e) => setCallForm({...callForm, duration: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    min="0"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                  <select
+                    value={callForm.status}
+                    onChange={(e) => setCallForm({...callForm, status: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="INCOMING">Incoming</option>
+                    <option value="OUTGOING">Outgoing</option>
+                    <option value="MISSED">Missed</option>
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                  <textarea
+                    value={callForm.notes}
+                    onChange={(e) => setCallForm({...callForm, notes: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    rows="2"
+                  />
+                </div>
+              </div>
+              <div className="flex space-x-2 pt-4">
+                <button type="submit" className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700" disabled={loading}>
+                  {loading ? 'Processing...' : 'Log Call'}
+                </button>
+                <button type="button" onClick={() => setShowModal(false)} className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ===== EDIT CALL MODAL ===== */}
+      {showEditModal && editingItem && modalType === 'call' && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold">Edit Call</h3>
+              <button onClick={() => { setShowEditModal(false); setEditingItem(null); }} className="text-gray-500 hover:text-gray-700">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+            <form onSubmit={handleEditSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Caller Name *</label>
+                  <input
+                    type="text"
+                    value={callForm.callerName}
+                    onChange={(e) => setCallForm({...callForm, callerName: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Caller Phone</label>
+                  <input
+                    type="text"
+                    value={callForm.callerPhone}
+                    onChange={(e) => setCallForm({...callForm, callerPhone: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Recipient</label>
+                  <input
+                    type="text"
+                    value={callForm.recipient}
+                    onChange={(e) => setCallForm({...callForm, recipient: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Purpose</label>
+                  <input
+                    type="text"
+                    value={callForm.purpose}
+                    onChange={(e) => setCallForm({...callForm, purpose: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Duration</label>
+                  <input
+                    type="number"
+                    value={callForm.duration}
+                    onChange={(e) => setCallForm({...callForm, duration: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    min="0"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                  <select
+                    value={callForm.status}
+                    onChange={(e) => setCallForm({...callForm, status: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="INCOMING">Incoming</option>
+                    <option value="OUTGOING">Outgoing</option>
+                    <option value="MISSED">Missed</option>
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                  <textarea
+                    value={callForm.notes}
+                    onChange={(e) => setCallForm({...callForm, notes: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    rows="2"
+                  />
+                </div>
+              </div>
+              <div className="flex space-x-2 pt-4 border-t">
+                <button type="submit" className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700" disabled={loading}>
+                  {loading ? 'Saving...' : 'Update Call'}
+                </button>
+                <button type="button" onClick={() => { setShowEditModal(false); setEditingItem(null); }} className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">Cancel</button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -40286,506 +43491,104 @@ const handleDeleteTask = async (taskId) => {
                   <th className="px-4 py-3 text-left">Type</th>
                   <th className="px-4 py-3 text-left">Category</th>
                   <th className="px-4 py-3 text-left">Description</th>
+                  <th className="px-4 py-3 text-left">Assigned To</th>
                   <th className="px-4 py-3 text-left">Urgency</th>
                   <th className="px-4 py-3 text-left">Status</th>
                   <th className="px-4 py-3 text-left">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {complaints.length === 0 ? (<tr><td colSpan="7" className="px-4 py-8 text-center text-gray-500">No complaints logged</td></tr>) : (
+                {complaints.length === 0 ? (
+                  <tr>
+                    <td colSpan="8" className="px-4 py-8 text-center text-gray-500">
+                      <i className="fas fa-check-circle text-4xl text-green-300 mb-2"></i>
+                      <p>No complaints logged</p>
+                      <button 
+                        onClick={() => { setModalType('complaint'); setShowModal(true); }} 
+                        className="mt-2 text-red-600 hover:text-red-800"
+                      >
+                        Click here to log a complaint
+                      </button>
+                    </td>
+                  </tr>
+                ) : (
                   complaints.map(complaint => (
                     <tr key={complaint.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 font-medium">{complaint.complainant}</td>
-                      <td className="px-4 py-3"><span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(complaint.complainantType)}`}>{complaint.complainantType}</span></td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(complaint.complainantType)}`}>
+                          {complaint.complainantType}
+                        </span>
+                      </td>
                       <td className="px-4 py-3">{complaint.category}</td>
                       <td className="px-4 py-3 max-w-xs truncate">{complaint.description}</td>
-                      <td className="px-4 py-3"><span className={`px-2 py-1 rounded-full text-xs ${getUrgencyBadge(complaint.urgency)}`}>{complaint.urgency}</span></td>
-                      <td className="px-4 py-3"><span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(complaint.status)}`}>{complaint.status}</span></td>
                       <td className="px-4 py-3">
-                        {complaint.status === 'OPEN' && (<><button onClick={() => handleUpdateComplaintStatus(complaint.id, 'IN_PROGRESS')} className="text-yellow-600 hover:text-yellow-900 text-sm"><i className="fas fa-play mr-1"></i>Start</button><button onClick={() => handleUpdateComplaintStatus(complaint.id, 'RESOLVED')} className="text-green-600 hover:text-green-900 text-sm ml-2"><i className="fas fa-check mr-1"></i>Resolve</button></>)}
-                        {complaint.status === 'IN_PROGRESS' && (<button onClick={() => handleUpdateComplaintStatus(complaint.id, 'RESOLVED')} className="text-green-600 hover:text-green-900 text-sm"><i className="fas fa-check mr-1"></i>Resolve</button>)}
-                        {canManageAll && (<><button onClick={() => openEditModal(complaint, 'complaint')} className="text-indigo-600 hover:text-indigo-900 ml-2"><i className="fas fa-edit"></i></button><button onClick={() => handleDeleteComplaint(complaint.id)} className="text-red-600 hover:text-red-900 ml-2"><i className="fas fa-trash"></i></button></>)}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-    {/* ===== MY TASKS TAB ===== */}
-{activeTab === 'mytasks' && (
-  <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-    <div className="p-4 bg-gray-50 border-b flex justify-between items-center">
-      <h3 className="font-semibold text-lg flex items-center gap-2">
-        <i className="fas fa-tasks text-indigo-600"></i>
-        My Tasks
-        <span className="text-sm font-normal text-gray-500">
-          ({myTasks.length} tasks)
-        </span>
-      </h3>
-      <button 
-        onClick={fetchMyData} 
-        className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
-      >
-        <i className="fas fa-sync-alt mr-2"></i>Refresh
-      </button>
-    </div>
-    <div className="overflow-x-auto">
-      <table className="w-full">
-        <thead className="bg-gray-50">
-          <tr>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Task</th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Assigned By</th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Due Date</th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Priority</th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Status</th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Actions</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-200">
-          {myTasks.length === 0 ? (
-            <tr>
-              <td colSpan="6" className="px-4 py-12 text-center text-gray-500">
-                <i className="fas fa-check-circle text-5xl text-green-300 mb-3 block"></i>
-                <p className="text-lg">No tasks assigned to you!</p>
-                <p className="text-sm text-gray-400 mt-1">Enjoy your free time 🎉</p>
-              </td>
-            </tr>
-          ) : (
-            myTasks.map(task => {
-              const isAssignedByMe = task.assignedBy === user.id;
-              const isPendingApproval = task.status === 'PENDING_APPROVAL';
-              
-              return (
-                <tr key={task.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-gray-800">{task.title}</div>
-                    {task.requiresApproval && task.status !== 'APPROVED' && task.status !== 'REJECTED' && (
-                      <span className="inline-block mt-1 px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">
-                        <i className="fas fa-check-double mr-1"></i>Requires Approval
-                      </span>
-                    )}
-                    {task.description && (
-                      <div className="text-xs text-gray-400 mt-1 truncate max-w-xs">{task.description}</div>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {task.assignedByUser ? (
-                      <span className="font-medium text-gray-700">
-                        {task.assignedByUser.firstName} {task.assignedByUser.lastName}
-                      </span>
-                    ) : (
-                      <span className="text-gray-400 italic">Unknown</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {task.dueDate ? (
-                      <span className="text-sm">
-                        {new Date(task.dueDate).toLocaleDateString()}
-                        {new Date(task.dueDate) < new Date() && task.status !== 'COMPLETED' && (
-                          <span className="ml-1 text-red-500 text-xs">(Overdue)</span>
+                        {complaint.assignedTo ? (
+                          <span className="text-sm font-medium text-indigo-600">
+                            {getStaffName(complaint.assignedTo)}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-gray-400">Unassigned</span>
                         )}
-                      </span>
-                    ) : (
-                      <span className="text-gray-400">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${getUrgencyBadge(task.priority)}`}>
-                      {task.priority}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusBadge(task.status)}`}>
-                      {task.status === 'PENDING_APPROVAL' ? '⏳ Pending Approval' : 
-                       task.status === 'IN_PROGRESS' ? '🔄 In Progress' :
-                       task.status === 'COMPLETED' ? '✅ Completed' :
-                       task.status === 'APPROVED' ? '✓ Approved' :
-                       task.status === 'REJECTED' ? '✗ Rejected' :
-                       task.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      {/* PENDING */}
-                      {task.status === 'PENDING' && (
-                        <>
-                          <button
-                            onClick={() => handleTaskStatusUpdate(task.id, 'IN_PROGRESS')}
-                            className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors"
-                          >
-                            <i className="fas fa-play mr-1"></i>Start
-                          </button>
-                          {task.requiresApproval && isAssignedByMe && (
-                            <button
-                              onClick={() => handleSubmitForApproval(task.id)}
-                              className="bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors"
-                            >
-                              <i className="fas fa-check-double mr-1"></i>Submit
-                            </button>
-                          )}
-                          {!task.requiresApproval && (
-                            <button
-                              onClick={() => handleTaskStatusUpdate(task.id, 'COMPLETED')}
-                              className="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors"
-                            >
-                              <i className="fas fa-check mr-1"></i>Complete
-                            </button>
-                          )}
-                        </>
-                      )}
-
-                      {/* IN PROGRESS */}
-                      {task.status === 'IN_PROGRESS' && (
-                        <>
-                          {task.requiresApproval && isAssignedByMe && (
-                            <button
-                              onClick={() => handleSubmitForApproval(task.id)}
-                              className="bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors"
-                            >
-                              <i className="fas fa-check-double mr-1"></i>Submit
-                            </button>
-                          )}
-                          {!task.requiresApproval && (
-                            <button
-                              onClick={() => handleTaskStatusUpdate(task.id, 'COMPLETED')}
-                              className="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors"
-                            >
-                              <i className="fas fa-check mr-1"></i>Complete
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleTaskStatusUpdate(task.id, 'PENDING')}
-                            className="bg-gray-400 hover:bg-gray-500 text-white px-3 py-1 rounded text-xs font-medium transition-colors"
-                          >
-                            <i className="fas fa-undo mr-1"></i>Revert
-                          </button>
-                        </>
-                      )}
-
-                      {/* PENDING APPROVAL */}
-                      {task.status === 'PENDING_APPROVAL' && (
-                        <>
-                          <span className="text-purple-600 text-xs font-medium px-2 py-1">
-                            <i className="fas fa-clock mr-1"></i>Awaiting Approval
-                          </span>
-                          {isAssignedByMe && (
-                            <button
-                              onClick={() => { setTaskApproval(task); setShowApprovalModal(true); }}
-                              className="bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors"
-                            >
-                              <i className="fas fa-check-double mr-1"></i>Review
-                            </button>
-                          )}
-                        </>
-                      )}
-
-                      {/* APPROVED */}
-                      {task.status === 'APPROVED' && (
-                        <>
-                          <span className="text-green-600 text-xs font-medium px-2 py-1">
-                            <i className="fas fa-check-circle mr-1"></i>Approved
-                          </span>
-                          <button
-                            onClick={() => handleTaskStatusUpdate(task.id, 'COMPLETED')}
-                            className="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors"
-                          >
-                            <i className="fas fa-check mr-1"></i>Complete
-                          </button>
-                        </>
-                      )}
-
-                      {/* REJECTED */}
-                      {task.status === 'REJECTED' && (
-                        <span className="text-red-600 text-xs font-medium px-2 py-1">
-                          <i className="fas fa-times-circle mr-1"></i>Rejected
-                          {task.approvalComments && (
-                            <span className="ml-1 text-gray-500">({task.approvalComments})</span>
-                          )}
-                        </span>
-                      )}
-
-                      {/* COMPLETED */}
-                      {task.status === 'COMPLETED' && (
-                        <span className="text-green-600 text-xs font-medium px-2 py-1">
-                          <i className="fas fa-check-circle mr-1"></i>Done ✓
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })
-          )}
-        </tbody>
-      </table>
-    </div>
-  </div>
-)}
-
-{/* ===== ALL TASKS TAB (Admin) ===== */}
-{activeTab === 'tasks' && canManageAll && (
-  <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-    <div className="p-4 bg-gray-50 border-b flex flex-wrap justify-between items-center gap-2">
-      <h3 className="font-semibold text-lg flex items-center gap-2">
-        <i className="fas fa-clipboard-list text-yellow-600"></i>
-        All Tasks
-        <span className="text-sm font-normal text-gray-500">
-          ({tasks.length} tasks)
-        </span>
-        {tasks.filter(t => t.status === 'PENDING_APPROVAL').length > 0 && (
-          <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">
-            {tasks.filter(t => t.status === 'PENDING_APPROVAL').length} pending approval
-          </span>
-        )}
-      </h3>
-      <div className="flex flex-wrap gap-2">
-        <button 
-          onClick={() => { setModalType('task'); setShowModal(true); }} 
-          className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg transition-colors flex items-center"
-        >
-          <i className="fas fa-plus mr-2"></i>Assign Task
-        </button>
-        <button 
-          onClick={fetchAllData} 
-          className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center"
-        >
-          <i className="fas fa-sync-alt mr-2"></i>Refresh
-        </button>
-      </div>
-    </div>
-    
-    <div className="overflow-x-auto">
-      <table className="w-full">
-        <thead className="bg-gray-50">
-          <tr>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Task</th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Assigned To</th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Assigned By</th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Priority</th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Due Date</th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Status</th>
-            <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Actions</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-200">
-          {tasks.length === 0 ? (
-            <tr>
-              <td colSpan="7" className="px-4 py-12 text-center text-gray-500">
-                <i className="fas fa-check-circle text-5xl text-green-300 mb-3 block"></i>
-                <p className="text-lg font-medium">No tasks assigned</p>
-                <p className="text-sm text-gray-400 mt-1">Click <span className="font-medium text-yellow-600">"Assign Task"</span> to create one</p>
-              </td>
-            </tr>
-          ) : (
-            tasks.map(task => (
-              <tr key={task.id} className="hover:bg-gray-50 transition-colors">
-                {/* Task Column */}
-                <td className="px-4 py-3">
-                  <div className="font-medium text-gray-800">{task.title}</div>
-                  {task.status === 'PENDING_APPROVAL' && (
-                    <span className="inline-block mt-1 px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">
-                      <i className="fas fa-clock mr-1"></i>Pending Approval
-                    </span>
-                  )}
-                  {task.status === 'REJECTED' && task.approvalComments && (
-                    <span className="inline-block mt-1 px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded-full">
-                      <i className="fas fa-comment mr-1"></i>{task.approvalComments}
-                    </span>
-                  )}
-                  {task.description && (
-                    <div className="text-xs text-gray-400 mt-1 truncate max-w-xs">{task.description}</div>
-                  )}
-                </td>
-                
-                {/* Assigned To Column */}
-                <td className="px-4 py-3">
-                  {task.assignedToUser ? (
-                    <span className="font-medium text-gray-700 flex items-center gap-1">
-                      <span className="w-6 h-6 bg-indigo-100 rounded-full flex items-center justify-center text-xs font-bold text-indigo-600">
-                        {task.assignedToUser.firstName?.charAt(0)}{task.assignedToUser.lastName?.charAt(0)}
-                      </span>
-                      {task.assignedToUser.firstName} {task.assignedToUser.lastName}
-                    </span>
-                  ) : (
-                    <span className="text-gray-400 italic">Unassigned</span>
-                  )}
-                </td>
-                
-                {/* Assigned By Column */}
-                <td className="px-4 py-3">
-                  {task.assignedByUser ? (
-                    <span className="text-gray-700 flex items-center gap-1">
-                      <span className="w-6 h-6 bg-gray-100 rounded-full flex items-center justify-center text-xs font-bold text-gray-600">
-                        {task.assignedByUser.firstName?.charAt(0)}{task.assignedByUser.lastName?.charAt(0)}
-                      </span>
-                      {task.assignedByUser.firstName} {task.assignedByUser.lastName}
-                    </span>
-                  ) : (
-                    <span className="text-gray-400 italic">Unknown</span>
-                  )}
-                </td>
-                
-                {/* Priority Column */}
-                <td className="px-4 py-3">
-                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${getUrgencyBadge(task.priority)}`}>
-                    {task.priority === 'URGENT' && '🔴 '}
-                    {task.priority === 'HIGH' && '🟠 '}
-                    {task.priority === 'NORMAL' && '🔵 '}
-                    {task.priority === 'LOW' && '🟢 '}
-                    {task.priority}
-                  </span>
-                </td>
-                
-                {/* Due Date Column */}
-                <td className="px-4 py-3">
-                  {task.dueDate ? (
-                    <span className={`text-sm ${
-                      new Date(task.dueDate) < new Date() && task.status !== 'COMPLETED' 
-                        ? 'text-red-500 font-medium' 
-                        : 'text-gray-700'
-                    }`}>
-                      {new Date(task.dueDate).toLocaleDateString()}
-                      {new Date(task.dueDate) < new Date() && task.status !== 'COMPLETED' && (
-                        <span className="block text-red-500 text-xs">⚠️ Overdue</span>
-                      )}
-                    </span>
-                  ) : (
-                    <span className="text-gray-400">—</span>
-                  )}
-                </td>
-                
-                {/* Status Column */}
-                <td className="px-4 py-3">
-                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusBadge(task.status)}`}>
-                    {task.status === 'PENDING_APPROVAL' && '⏳ Pending Approval'}
-                    {task.status === 'IN_PROGRESS' && '🔄 In Progress'}
-                    {task.status === 'COMPLETED' && '✅ Completed'}
-                    {task.status === 'APPROVED' && '✓ Approved'}
-                    {task.status === 'REJECTED' && '✗ Rejected'}
-                    {task.status === 'PENDING' && '📋 Pending'}
-                  </span>
-                </td>
-                
-                {/* Actions Column */}
-                <td className="px-4 py-3">
-                  <div className="flex flex-wrap gap-1">
-                    {/* PENDING APPROVAL - Review Button */}
-                    {task.status === 'PENDING_APPROVAL' && (
-                      <button
-                        onClick={() => { setTaskApproval(task); setShowApprovalModal(true); }}
-                        className="bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors flex items-center"
-                        title="Review this task"
-                      >
-                        <i className="fas fa-check-double mr-1"></i>Review
-                      </button>
-                    )}
-
-                    {/* PENDING - Start Button */}
-                    {task.status === 'PENDING' && (
-                      <button
-                        onClick={() => handleTaskStatusUpdate(task.id, 'IN_PROGRESS')}
-                        className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors flex items-center"
-                        title="Start working on this task"
-                      >
-                        <i className="fas fa-play mr-1"></i>Start
-                      </button>
-                    )}
-
-                    {/* IN PROGRESS - Complete Button */}
-                    {task.status === 'IN_PROGRESS' && (
-                      <button
-                        onClick={() => handleTaskStatusUpdate(task.id, 'COMPLETED')}
-                        className="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors flex items-center"
-                        title="Mark as completed"
-                      >
-                        <i className="fas fa-check mr-1"></i>Complete
-                      </button>
-                    )}
-
-                    {/* Edit Button - for non-completed/non-rejected */}
-                    {task.status !== 'COMPLETED' && task.status !== 'REJECTED' && (
-                      <button
-                        onClick={() => openEditModal(task, 'task')}
-                        className="bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors flex items-center"
-                        title="Edit this task"
-                      >
-                        <i className="fas fa-edit mr-1"></i>Edit
-                      </button>
-                    )}
-
-                    {/* Delete Button */}
-                    <button
-                      onClick={() => {
-                        if (window.confirm(`Are you sure you want to delete the task "${task.title}"?`)) {
-                          handleDeleteTask(task.id);
-                        }
-                      }}
-                      className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors flex items-center"
-                      title="Delete this task"
-                    >
-                      <i className="fas fa-trash mr-1"></i>Delete
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </div>
-    
-    {/* Footer with summary */}
-    {tasks.length > 0 && (
-      <div className="p-3 bg-gray-50 border-t flex flex-wrap justify-between items-center text-xs text-gray-500">
-        <div className="flex flex-wrap gap-4">
-          <span>📋 Total: <span className="font-medium">{tasks.length}</span></span>
-          <span>⏳ Pending: <span className="font-medium">{tasks.filter(t => t.status === 'PENDING').length}</span></span>
-          <span>🔄 In Progress: <span className="font-medium">{tasks.filter(t => t.status === 'IN_PROGRESS').length}</span></span>
-          <span>⏳ Pending Approval: <span className="font-medium text-purple-600">{tasks.filter(t => t.status === 'PENDING_APPROVAL').length}</span></span>
-          <span>✅ Completed: <span className="font-medium text-green-600">{tasks.filter(t => t.status === 'COMPLETED').length}</span></span>
-        </div>
-        <div>
-          {tasks.filter(t => new Date(t.dueDate) < new Date() && t.status !== 'COMPLETED').length > 0 && (
-            <span className="text-red-500">
-              ⚠️ {tasks.filter(t => new Date(t.dueDate) < new Date() && t.status !== 'COMPLETED').length} overdue
-            </span>
-          )}
-        </div>
-      </div>
-    )}
-  </div>
-)}
-
-      {/* ===== MY APPOINTMENTS TAB ===== */}
-      {activeTab === 'myappointments' && (
-        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-          <div className="p-4 bg-gray-50 border-b flex justify-between items-center">
-            <h3 className="font-semibold text-lg flex items-center gap-2"><i className="fas fa-calendar-check text-purple-600"></i>My Appointments <span className="text-sm font-normal text-gray-500">({myAppointments.length} appointments)</span></h3>
-            <button onClick={fetchMyData} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"><i className="fas fa-sync-alt mr-2"></i>Refresh</button>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr><th className="px-4 py-3 text-left">Title</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Date</th><th className="px-4 py-3 text-left">Time</th><th className="px-4 py-3 text-left">With</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Actions</th></tr>
-              </thead>
-              <tbody className="divide-y">
-                {myAppointments.length === 0 ? (<tr><td colSpan="7" className="px-4 py-8 text-center text-gray-500"><i className="fas fa-calendar-plus text-4xl text-gray-400 mb-2"></i><p>No appointments scheduled for you</p></td></tr>) : (
-                  myAppointments.map(appointment => (
-                    <tr key={appointment.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium">{appointment.title}</td>
-                      <td className="px-4 py-3">{appointment.type}</td>
-                      <td className="px-4 py-3">{new Date(appointment.date).toLocaleDateString()}</td>
-                      <td className="px-4 py-3">{appointment.time}</td>
-                      <td className="px-4 py-3">{appointment.parent?.firstName ? `${appointment.parent.firstName} ${appointment.parent.lastName} (Parent)` : appointment.staff?.firstName ? `${appointment.staff.firstName} ${appointment.staff.lastName} (Staff)` : '—'}</td>
-                      <td className="px-4 py-3"><span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(appointment.status)}`}>{appointment.status}</span></td>
+                      </td>
                       <td className="px-4 py-3">
-                        {appointment.status === 'SCHEDULED' && (<><button onClick={() => handleUpdateAppointmentStatus(appointment.id, 'COMPLETED')} className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700"><i className="fas fa-check mr-1"></i>Complete</button><button onClick={() => handleUpdateAppointmentStatus(appointment.id, 'CANCELLED')} className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700 ml-1"><i className="fas fa-times mr-1"></i>Cancel</button></>)}
-                        {appointment.status === 'COMPLETED' && (<span className="text-green-600 text-sm"><i className="fas fa-check-circle mr-1"></i>Done</span>)}
-                        {appointment.status === 'CANCELLED' && (<span className="text-red-600 text-sm"><i className="fas fa-times-circle mr-1"></i>Cancelled</span>)}
+                        <span className={`px-2 py-1 rounded-full text-xs ${getUrgencyBadge(complaint.urgency)}`}>
+                          {complaint.urgency}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(complaint.status)}`}>
+                          {complaint.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          {complaint.status === 'OPEN' && (
+                            <>
+                              <button 
+                                onClick={() => handleUpdateComplaintStatus(complaint.id, 'IN_PROGRESS')} 
+                                className="text-yellow-600 hover:text-yellow-900 text-sm p-1"
+                                title="Start"
+                              >
+                                <i className="fas fa-play"></i>
+                              </button>
+                              <button 
+                                onClick={() => handleUpdateComplaintStatus(complaint.id, 'RESOLVED')} 
+                                className="text-green-600 hover:text-green-900 text-sm p-1"
+                                title="Resolve"
+                              >
+                                <i className="fas fa-check"></i>
+                              </button>
+                            </>
+                          )}
+                          {complaint.status === 'IN_PROGRESS' && (
+                            <button 
+                              onClick={() => handleUpdateComplaintStatus(complaint.id, 'RESOLVED')} 
+                              className="text-green-600 hover:text-green-900 text-sm p-1"
+                              title="Resolve"
+                            >
+                              <i className="fas fa-check"></i>
+                            </button>
+                          )}
+                          {canManageAll && (
+                            <>
+                              <button 
+                                onClick={() => openEditModal(complaint, 'complaint')} 
+                                className="text-indigo-600 hover:text-indigo-900 text-sm p-1"
+                                title="Edit Complaint"
+                              >
+                                <i className="fas fa-edit"></i>
+                              </button>
+                              <button 
+                                onClick={() => handleDeleteComplaint(complaint.id)} 
+                                className="text-red-600 hover:text-red-900 text-sm p-1"
+                                title="Delete Complaint"
+                              >
+                                <i className="fas fa-trash"></i>
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -40796,31 +43599,329 @@ const handleDeleteTask = async (taskId) => {
         </div>
       )}
 
-      {/* ===== ALL APPOINTMENTS TAB (Admin) ===== */}
+      {/* ===== COMPLAINT FORM MODAL ===== */}
+      {showModal && modalType === 'complaint' && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold">Log Complaint</h3>
+              <button onClick={() => setShowModal(false)} className="text-gray-500 hover:text-gray-700">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+            <form onSubmit={handleAddComplaint} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Complainant *</label>
+                  <input
+                    type="text"
+                    value={complaintForm.complainant}
+                    onChange={(e) => setComplaintForm({...complaintForm, complainant: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+                  <select
+                    value={complaintForm.complainantType}
+                    onChange={(e) => setComplaintForm({...complaintForm, complainantType: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="PARENT">Parent</option>
+                    <option value="STUDENT">Student</option>
+                    <option value="STAFF">Staff</option>
+                    <option value="VISITOR">Visitor</option>
+                    <option value="OTHER">Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                  <select
+                    value={complaintForm.category}
+                    onChange={(e) => setComplaintForm({...complaintForm, category: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="GENERAL">General</option>
+                    <option value="ACADEMIC">Academic</option>
+                    <option value="FINANCE">Finance</option>
+                    <option value="FACILITIES">Facilities</option>
+                    <option value="STAFF">Staff</option>
+                    <option value="TRANSPORT">Transport</option>
+                    <option value="FOOD">Food</option>
+                    <option value="DISCIPLINE">Discipline</option>
+                    <option value="OTHER">Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Urgency</label>
+                  <select
+                    value={complaintForm.urgency}
+                    onChange={(e) => setComplaintForm({...complaintForm, urgency: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="LOW">Low</option>
+                    <option value="NORMAL">Normal</option>
+                    <option value="HIGH">High</option>
+                    <option value="URGENT">Urgent</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Assign To</label>
+                  <select
+                    value={complaintForm.assignedTo}
+                    onChange={(e) => setComplaintForm({...complaintForm, assignedTo: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="">Unassigned</option>
+                    {getStaffWithUser().map(s => (
+                      <option key={s.userId} value={s.userId}>
+                        {s.User.firstName} {s.User.lastName} ({s.jobTitle || 'Staff'})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">Only staff members can be assigned</p>
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Description *</label>
+                  <textarea
+                    value={complaintForm.description}
+                    onChange={(e) => setComplaintForm({...complaintForm, description: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    rows="3"
+                    required
+                  />
+                </div>
+              </div>
+              <div className="flex space-x-2 pt-4">
+                <button
+                  type="submit"
+                  className="flex-1 bg-red-600 text-white py-2 rounded-lg hover:bg-red-700"
+                  disabled={loading}
+                >
+                  {loading ? 'Processing...' : 'Log Complaint'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ===== EDIT COMPLAINT MODAL ===== */}
+      {showEditModal && editingItem && modalType === 'complaint' && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold">Edit Complaint</h3>
+              <button onClick={() => { setShowEditModal(false); setEditingItem(null); }} className="text-gray-500 hover:text-gray-700">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+            <form onSubmit={handleEditSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Complainant</label>
+                  <input
+                    type="text"
+                    value={complaintForm.complainant}
+                    onChange={(e) => setComplaintForm({...complaintForm, complainant: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                  <select
+                    value={complaintForm.category}
+                    onChange={(e) => setComplaintForm({...complaintForm, category: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="GENERAL">General</option>
+                    <option value="ACADEMIC">Academic</option>
+                    <option value="FINANCE">Finance</option>
+                    <option value="FACILITIES">Facilities</option>
+                    <option value="STAFF">Staff</option>
+                    <option value="TRANSPORT">Transport</option>
+                    <option value="FOOD">Food</option>
+                    <option value="DISCIPLINE">Discipline</option>
+                    <option value="OTHER">Other</option>
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                  <textarea
+                    value={complaintForm.description}
+                    onChange={(e) => setComplaintForm({...complaintForm, description: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    rows="3"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Urgency</label>
+                  <select
+                    value={complaintForm.urgency}
+                    onChange={(e) => setComplaintForm({...complaintForm, urgency: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="LOW">Low</option>
+                    <option value="NORMAL">Normal</option>
+                    <option value="HIGH">High</option>
+                    <option value="URGENT">Urgent</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Assign To</label>
+                  <select
+                    value={complaintForm.assignedTo}
+                    onChange={(e) => setComplaintForm({...complaintForm, assignedTo: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="">Unassigned</option>
+                    {getStaffWithUser().map(s => (
+                      <option key={s.userId} value={s.userId}>
+                        {s.User.firstName} {s.User.lastName} ({s.jobTitle || 'Staff'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                  <select
+                    value={complaintForm.status}
+                    onChange={(e) => setComplaintForm({...complaintForm, status: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="OPEN">Open</option>
+                    <option value="IN_PROGRESS">In Progress</option>
+                    <option value="RESOLVED">Resolved</option>
+                    <option value="CLOSED">Closed</option>
+                  </select>
+                </div>
+              </div>
+              <div className="flex space-x-2 pt-4 border-t">
+                <button type="submit" className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700" disabled={loading}>
+                  {loading ? 'Saving...' : 'Update Complaint'}
+                </button>
+                <button type="button" onClick={() => { setShowEditModal(false); setEditingItem(null); }} className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ===== APPOINTMENTS TAB - FIXED ===== */}
       {activeTab === 'appointments' && canManageAll && (
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="p-4 bg-gray-50 border-b flex justify-between items-center">
             <h3 className="font-semibold text-lg">All Appointments</h3>
-            <button onClick={() => { setModalType('appointment'); setShowModal(true); }} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700"><i className="fas fa-calendar-plus mr-2"></i>Schedule Appointment</button>
+            <button 
+              onClick={() => { 
+                setModalType('appointment'); 
+                setShowModal(true); 
+                setAppointmentForm({
+                  title: '', description: '', parentId: '', staffId: '', studentId: '',
+                  date: '', time: '', duration: 30, status: 'SCHEDULED', type: 'PARENT_TEACHER'
+                });
+              }} 
+              className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 flex items-center"
+            >
+              <i className="fas fa-calendar-plus mr-2"></i>Schedule Appointment
+            </button>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50">
-                <tr><th className="px-4 py-3 text-left">Title</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Date</th><th className="px-4 py-3 text-left">Time</th><th className="px-4 py-3 text-left">With</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Actions</th></tr>
+                <tr>
+                  <th className="px-4 py-3 text-left">Title</th>
+                  <th className="px-4 py-3 text-left">Type</th>
+                  <th className="px-4 py-3 text-left">Date</th>
+                  <th className="px-4 py-3 text-left">Time</th>
+                  <th className="px-4 py-3 text-left">With</th>
+                  <th className="px-4 py-3 text-left">Status</th>
+                  <th className="px-4 py-3 text-left">Actions</th>
+                </tr>
               </thead>
               <tbody className="divide-y">
-                {appointments.length === 0 ? (<tr><td colSpan="7" className="px-4 py-8 text-center text-gray-500">No appointments scheduled</td></tr>) : (
+                {appointments.length === 0 ? (
+                  <tr>
+                    <td colSpan="7" className="px-4 py-8 text-center text-gray-500">
+                      <i className="fas fa-calendar-plus text-4xl text-gray-300 mb-2"></i>
+                      <p>No appointments scheduled</p>
+                      <button 
+                        onClick={() => { 
+                          setModalType('appointment'); 
+                          setShowModal(true);
+                          setAppointmentForm({
+                            title: '', description: '', parentId: '', staffId: '', studentId: '',
+                            date: '', time: '', duration: 30, status: 'SCHEDULED', type: 'PARENT_TEACHER'
+                          });
+                        }} 
+                        className="mt-2 text-purple-600 hover:text-purple-800"
+                      >
+                        Click here to schedule one
+                      </button>
+                    </td>
+                  </tr>
+                ) : (
                   appointments.map(appointment => (
                     <tr key={appointment.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 font-medium">{appointment.title}</td>
                       <td className="px-4 py-3">{appointment.type}</td>
                       <td className="px-4 py-3">{new Date(appointment.date).toLocaleDateString()}</td>
                       <td className="px-4 py-3">{appointment.time}</td>
-                      <td className="px-4 py-3">{appointment.staff?.firstName ? `${appointment.staff.firstName} ${appointment.staff.lastName} (Staff)` : appointment.parent?.firstName ? `${appointment.parent.firstName} ${appointment.parent.lastName} (Parent)` : '—'}</td>
-                      <td className="px-4 py-3"><span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(appointment.status)}`}>{appointment.status}</span></td>
                       <td className="px-4 py-3">
-                        {appointment.status === 'SCHEDULED' && (<><button onClick={() => handleUpdateAppointmentStatus(appointment.id, 'COMPLETED')} className="text-green-600 hover:text-green-900 text-sm"><i className="fas fa-check mr-1"></i>Complete</button><button onClick={() => handleUpdateAppointmentStatus(appointment.id, 'CANCELLED')} className="text-red-600 hover:text-red-900 text-sm ml-2"><i className="fas fa-times mr-1"></i>Cancel</button></>)}
-                        {canManageAll && (<><button onClick={() => openEditModal(appointment, 'appointment')} className="text-indigo-600 hover:text-indigo-900 ml-2"><i className="fas fa-edit"></i></button><button onClick={() => handleDeleteAppointment(appointment.id)} className="text-red-600 hover:text-red-900 ml-2"><i className="fas fa-trash"></i></button></>)}
+                        {appointment.staff?.firstName ? 
+                          `${appointment.staff.firstName} ${appointment.staff.lastName} (Staff)` : 
+                          appointment.parent?.firstName ? 
+                          `${appointment.parent.firstName} ${appointment.parent.lastName} (Parent)` : 
+                          '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(appointment.status)}`}>
+                          {appointment.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex gap-1">
+                          {appointment.status === 'SCHEDULED' && (
+                            <>
+                              <button 
+                                onClick={() => handleUpdateAppointmentStatus(appointment.id, 'COMPLETED')} 
+                                className="text-green-600 hover:text-green-900 text-sm p-1"
+                                title="Mark as Completed"
+                              >
+                                <i className="fas fa-check"></i>
+                              </button>
+                              <button 
+                                onClick={() => handleUpdateAppointmentStatus(appointment.id, 'CANCELLED')} 
+                                className="text-red-600 hover:text-red-900 text-sm p-1"
+                                title="Cancel Appointment"
+                              >
+                                <i className="fas fa-times"></i>
+                              </button>
+                            </>
+                          )}
+                          <button 
+                            onClick={() => openEditModal(appointment, 'appointment')} 
+                            className="text-indigo-600 hover:text-indigo-900 text-sm p-1"
+                            title="Edit Appointment"
+                          >
+                            <i className="fas fa-edit"></i>
+                          </button>
+                          <button 
+                            onClick={() => handleDeleteAppointment(appointment.id)} 
+                            className="text-red-600 hover:text-red-900 text-sm p-1"
+                            title="Delete Appointment"
+                          >
+                            <i className="fas fa-trash"></i>
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -40831,47 +43932,881 @@ const handleDeleteTask = async (taskId) => {
         </div>
       )}
 
-      {/* ===== EDIT MODAL ===== */}
-      {showEditModal && editingItem && (
+      {/* ===== APPOINTMENT FORM MODAL ===== */}
+      {showModal && modalType === 'appointment' && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold">Edit {modalType.charAt(0).toUpperCase() + modalType.slice(1)}</h3>
-              <button onClick={() => { setShowEditModal(false); setEditingItem(null); }} className="text-gray-500 hover:text-gray-700"><i className="fas fa-times"></i></button>
+              <h3 className="text-xl font-bold">Schedule Appointment</h3>
+              <button onClick={() => setShowModal(false)} className="text-gray-500 hover:text-gray-700">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+            <form onSubmit={handleAddAppointment} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+                  <input
+                    type="text"
+                    value={appointmentForm.title}
+                    onChange={(e) => setAppointmentForm({...appointmentForm, title: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+                  <select
+                    value={appointmentForm.type}
+                    onChange={(e) => setAppointmentForm({...appointmentForm, type: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="PARENT_TEACHER">Parent-Teacher</option>
+                    <option value="PARENT_PRINCIPAL">Parent-Principal</option>
+                    <option value="STAFF_PRINCIPAL">Staff-Principal</option>
+                    <option value="STUDENT_COUNSELOR">Student-Counselor</option>
+                    <option value="OTHER">Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Date *</label>
+                  <input
+                    type="date"
+                    value={appointmentForm.date}
+                    onChange={(e) => setAppointmentForm({...appointmentForm, date: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Time *</label>
+                  <input
+                    type="time"
+                    value={appointmentForm.time}
+                    onChange={(e) => setAppointmentForm({...appointmentForm, time: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Duration (minutes)</label>
+                  <input
+                    type="number"
+                    value={appointmentForm.duration}
+                    onChange={(e) => setAppointmentForm({...appointmentForm, duration: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    min="5"
+                    max="120"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Parent (Optional)</label>
+                  <select
+                    value={appointmentForm.parentId}
+                    onChange={(e) => setAppointmentForm({...appointmentForm, parentId: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="">-- Select Parent --</option>
+                    {parents?.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.User?.firstName} {p.User?.lastName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Staff (Optional)</label>
+                  <select
+                    value={appointmentForm.staffId}
+                    onChange={(e) => setAppointmentForm({...appointmentForm, staffId: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="">-- Select Staff --</option>
+                    {getStaffWithUser().map(s => (
+                      <option key={s.userId} value={s.userId}>
+                        {s.User.firstName} {s.User.lastName} ({s.jobTitle || 'Staff'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Student (Optional)</label>
+                  <select
+                    value={appointmentForm.studentId}
+                    onChange={(e) => setAppointmentForm({...appointmentForm, studentId: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="">-- Select Student --</option>
+                    {students?.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.firstName} {s.lastName} ({s.admissionNumber})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                  <textarea
+                    value={appointmentForm.description}
+                    onChange={(e) => setAppointmentForm({...appointmentForm, description: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    rows="2"
+                  />
+                </div>
+              </div>
+              <div className="flex space-x-2 pt-4">
+                <button
+                  type="submit"
+                  className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700"
+                  disabled={loading}
+                >
+                  {loading ? 'Processing...' : 'Schedule Appointment'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ===== EDIT APPOINTMENT MODAL ===== */}
+      {showEditModal && editingItem && modalType === 'appointment' && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold">Edit Appointment</h3>
+              <button onClick={() => { setShowEditModal(false); setEditingItem(null); }} className="text-gray-500 hover:text-gray-700">
+                <i className="fas fa-times"></i>
+              </button>
             </div>
             <form onSubmit={handleEditSubmit} className="space-y-4">
-              {modalType === 'complaint' && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Complainant</label><input type="text" value={complaintForm.complainant} onChange={(e) => setComplaintForm({...complaintForm, complainant: e.target.value})} className="w-full px-3 py-2 border rounded-lg" /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Category</label><select value={complaintForm.category} onChange={(e) => setComplaintForm({...complaintForm, category: e.target.value})} className="w-full px-3 py-2 border rounded-lg"><option value="GENERAL">General</option><option value="ACADEMIC">Academic</option><option value="FINANCE">Finance</option><option value="FACILITIES">Facilities</option><option value="STAFF">Staff</option><option value="TRANSPORT">Transport</option><option value="FOOD">Food</option><option value="DISCIPLINE">Discipline</option><option value="OTHER">Other</option></select></div>
-                  <div className="col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Description</label><textarea value={complaintForm.description} onChange={(e) => setComplaintForm({...complaintForm, description: e.target.value})} className="w-full px-3 py-2 border rounded-lg" rows="3" /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Urgency</label><select value={complaintForm.urgency} onChange={(e) => setComplaintForm({...complaintForm, urgency: e.target.value})} className="w-full px-3 py-2 border rounded-lg"><option value="LOW">Low</option><option value="NORMAL">Normal</option><option value="HIGH">High</option><option value="URGENT">Urgent</option></select></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Status</label><select value={complaintForm.status} onChange={(e) => setComplaintForm({...complaintForm, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg"><option value="OPEN">Open</option><option value="IN_PROGRESS">In Progress</option><option value="RESOLVED">Resolved</option><option value="CLOSED">Closed</option></select></div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+                  <input
+                    type="text"
+                    value={appointmentForm.title}
+                    onChange={(e) => setAppointmentForm({...appointmentForm, title: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    required
+                  />
                 </div>
-              )}
-              {modalType === 'appointment' && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Title</label><input type="text" value={appointmentForm.title} onChange={(e) => setAppointmentForm({...appointmentForm, title: e.target.value})} className="w-full px-3 py-2 border rounded-lg" /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Type</label><select value={appointmentForm.type} onChange={(e) => setAppointmentForm({...appointmentForm, type: e.target.value})} className="w-full px-3 py-2 border rounded-lg"><option value="PARENT_TEACHER">Parent-Teacher</option><option value="PARENT_PRINCIPAL">Parent-Principal</option><option value="STAFF_PRINCIPAL">Staff-Principal</option><option value="STUDENT_COUNSELOR">Student-Counselor</option><option value="OTHER">Other</option></select></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Date</label><input type="date" value={appointmentForm.date} onChange={(e) => setAppointmentForm({...appointmentForm, date: e.target.value})} className="w-full px-3 py-2 border rounded-lg" /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Time</label><input type="time" value={appointmentForm.time} onChange={(e) => setAppointmentForm({...appointmentForm, time: e.target.value})} className="w-full px-3 py-2 border rounded-lg" /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Status</label><select value={appointmentForm.status} onChange={(e) => setAppointmentForm({...appointmentForm, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg"><option value="SCHEDULED">Scheduled</option><option value="COMPLETED">Completed</option><option value="CANCELLED">Cancelled</option></select></div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+                  <select
+                    value={appointmentForm.type}
+                    onChange={(e) => setAppointmentForm({...appointmentForm, type: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="PARENT_TEACHER">Parent-Teacher</option>
+                    <option value="PARENT_PRINCIPAL">Parent-Principal</option>
+                    <option value="STAFF_PRINCIPAL">Staff-Principal</option>
+                    <option value="STUDENT_COUNSELOR">Student-Counselor</option>
+                    <option value="OTHER">Other</option>
+                  </select>
                 </div>
-              )}
-              {modalType === 'task' && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Title</label><input type="text" value={taskForm.title} onChange={(e) => setTaskForm({...taskForm, title: e.target.value})} className="w-full px-3 py-2 border rounded-lg" /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Priority</label><select value={taskForm.priority} onChange={(e) => setTaskForm({...taskForm, priority: e.target.value})} className="w-full px-3 py-2 border rounded-lg"><option value="LOW">Low</option><option value="NORMAL">Normal</option><option value="HIGH">High</option><option value="URGENT">Urgent</option></select></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Due Date</label><input type="date" value={taskForm.dueDate} onChange={(e) => setTaskForm({...taskForm, dueDate: e.target.value})} className="w-full px-3 py-2 border rounded-lg" /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Status</label><select value={taskForm.status} onChange={(e) => setTaskForm({...taskForm, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg"><option value="PENDING">Pending</option><option value="IN_PROGRESS">In Progress</option><option value="COMPLETED">Completed</option><option value="PENDING_APPROVAL">Pending Approval</option><option value="APPROVED">Approved</option><option value="REJECTED">Rejected</option></select></div>
-                  <div className="col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Description</label><textarea value={taskForm.description} onChange={(e) => setTaskForm({...taskForm, description: e.target.value})} className="w-full px-3 py-2 border rounded-lg" rows="3" /></div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                  <input
+                    type="date"
+                    value={appointmentForm.date}
+                    onChange={(e) => setAppointmentForm({...appointmentForm, date: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  />
                 </div>
-              )}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Time</label>
+                  <input
+                    type="time"
+                    value={appointmentForm.time}
+                    onChange={(e) => setAppointmentForm({...appointmentForm, time: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Duration</label>
+                  <input
+                    type="number"
+                    value={appointmentForm.duration}
+                    onChange={(e) => setAppointmentForm({...appointmentForm, duration: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    min="5"
+                    max="120"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Parent</label>
+                  <select
+                    value={appointmentForm.parentId}
+                    onChange={(e) => setAppointmentForm({...appointmentForm, parentId: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="">-- Select Parent --</option>
+                    {parents?.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.User?.firstName} {p.User?.lastName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Staff</label>
+                  <select
+                    value={appointmentForm.staffId}
+                    onChange={(e) => setAppointmentForm({...appointmentForm, staffId: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="">-- Select Staff --</option>
+                    {getStaffWithUser().map(s => (
+                      <option key={s.userId} value={s.userId}>
+                        {s.User.firstName} {s.User.lastName} ({s.jobTitle || 'Staff'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Student</label>
+                  <select
+                    value={appointmentForm.studentId}
+                    onChange={(e) => setAppointmentForm({...appointmentForm, studentId: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="">-- Select Student --</option>
+                    {students?.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.firstName} {s.lastName} ({s.admissionNumber})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                  <select
+                    value={appointmentForm.status}
+                    onChange={(e) => setAppointmentForm({...appointmentForm, status: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="SCHEDULED">Scheduled</option>
+                    <option value="COMPLETED">Completed</option>
+                    <option value="CANCELLED">Cancelled</option>
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                  <textarea
+                    value={appointmentForm.description}
+                    onChange={(e) => setAppointmentForm({...appointmentForm, description: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    rows="2"
+                  />
+                </div>
+              </div>
               <div className="flex space-x-2 pt-4 border-t">
-                <button type="submit" className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700" disabled={loading}>{loading ? 'Saving...' : 'Update'}</button>
+                <button type="submit" className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700" disabled={loading}>
+                  {loading ? 'Saving...' : 'Update Appointment'}
+                </button>
                 <button type="button" onClick={() => { setShowEditModal(false); setEditingItem(null); }} className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">Cancel</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ===== TASK FORM MODAL ===== */}
+      {showModal && modalType === 'task' && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold">Assign Task</h3>
+              <button onClick={() => setShowModal(false)} className="text-gray-500 hover:text-gray-700">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+            <form onSubmit={handleAddTask} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+                  <input
+                    type="text"
+                    value={taskForm.title}
+                    onChange={(e) => setTaskForm({...taskForm, title: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
+                  <select
+                    value={taskForm.priority}
+                    onChange={(e) => setTaskForm({...taskForm, priority: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="LOW">🟢 Low</option>
+                    <option value="NORMAL">🔵 Normal</option>
+                    <option value="HIGH">🟠 High</option>
+                    <option value="URGENT">🔴 Urgent</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Assign To</label>
+                  <select
+                    value={taskForm.assignedTo}
+                    onChange={(e) => setTaskForm({...taskForm, assignedTo: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="">-- Select Staff --</option>
+                    {getStaffWithUser().map(s => (
+                      <option key={s.userId} value={s.userId}>
+                        {s.User.firstName} {s.User.lastName} ({s.jobTitle || 'Staff'})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">Leave empty to assign to yourself</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Due Date</label>
+                  <input
+                    type="date"
+                    value={taskForm.dueDate}
+                    onChange={(e) => setTaskForm({...taskForm, dueDate: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Requires Approval</label>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      checked={taskForm.requiresApproval}
+                      onChange={(e) => setTaskForm({...taskForm, requiresApproval: e.target.checked})}
+                      className="rounded"
+                    />
+                    <span className="text-sm text-gray-600">Task requires approval from assigner</span>
+                  </div>
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Description *</label>
+                  <textarea
+                    value={taskForm.description}
+                    onChange={(e) => setTaskForm({...taskForm, description: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    rows="3"
+                    required
+                  />
+                </div>
+              </div>
+              <div className="flex space-x-2 pt-4">
+                <button
+                  type="submit"
+                  className="flex-1 bg-yellow-600 text-white py-2 rounded-lg hover:bg-yellow-700"
+                  disabled={loading}
+                >
+                  {loading ? 'Processing...' : 'Assign Task'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ===== ALL TASKS TAB (Admin) ===== */}
+      {activeTab === 'tasks' && canManageAll && (
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+          <div className="p-4 bg-gray-50 border-b flex flex-wrap justify-between items-center gap-2">
+            <h3 className="font-semibold text-lg flex items-center gap-2">
+              <i className="fas fa-clipboard-list text-yellow-600"></i>
+              All Tasks
+              <span className="text-sm font-normal text-gray-500">
+                ({tasks.length} tasks)
+              </span>
+              {tasks.filter(t => t.status === 'PENDING_APPROVAL').length > 0 && (
+                <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">
+                  {tasks.filter(t => t.status === 'PENDING_APPROVAL').length} pending approval
+                </span>
+              )}
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              <button 
+                onClick={() => { setModalType('task'); setShowModal(true); }} 
+                className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg transition-colors flex items-center"
+              >
+                <i className="fas fa-plus mr-2"></i>Assign Task
+              </button>
+              <button 
+                onClick={fetchAllData} 
+                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center"
+              >
+                <i className="fas fa-sync-alt mr-2"></i>Refresh
+              </button>
+            </div>
+          </div>
+          
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Task</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Assigned To</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Assigned By</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Priority</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Due Date</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Status</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {tasks.length === 0 ? (
+                  <tr>
+                    <td colSpan="7" className="px-4 py-12 text-center text-gray-500">
+                      <i className="fas fa-check-circle text-5xl text-green-300 mb-3 block"></i>
+                      <p className="text-lg font-medium">No tasks assigned</p>
+                      <p className="text-sm text-gray-400 mt-1">Click <span className="font-medium text-yellow-600">"Assign Task"</span> to create one</p>
+                    </td>
+                  </tr>
+                ) : (
+                  tasks.map(task => (
+                    <tr key={task.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-gray-800">{task.title}</div>
+                        {task.status === 'PENDING_APPROVAL' && (
+                          <span className="inline-block mt-1 px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">
+                            <i className="fas fa-clock mr-1"></i>Pending Approval
+                          </span>
+                        )}
+                        {task.description && (
+                          <div className="text-xs text-gray-400 mt-1 truncate max-w-xs">{task.description}</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {task.assignedToUser ? (
+                          <span className="font-medium text-gray-700">
+                            {task.assignedToUser.firstName} {task.assignedToUser.lastName}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 italic">Unassigned</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {task.assignedByUser ? (
+                          <span className="text-gray-700">
+                            {task.assignedByUser.firstName} {task.assignedByUser.lastName}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 italic">System</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${getUrgencyBadge(task.priority)}`}>
+                          {task.priority}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {task.dueDate ? (
+                          <span className={`text-sm ${
+                            new Date(task.dueDate) < new Date() && task.status !== 'COMPLETED' 
+                              ? 'text-red-500 font-medium' 
+                              : 'text-gray-700'
+                          }`}>
+                            {new Date(task.dueDate).toLocaleDateString()}
+                            {new Date(task.dueDate) < new Date() && task.status !== 'COMPLETED' && (
+                              <span className="block text-red-500 text-xs">⚠️ Overdue</span>
+                            )}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusBadge(task.status)}`}>
+                          {task.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          {task.status === 'PENDING_APPROVAL' && (
+                            <button
+                              onClick={() => { setTaskApproval(task); setShowApprovalModal(true); }}
+                              className="bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors flex items-center"
+                            >
+                              <i className="fas fa-check-double mr-1"></i>Review
+                            </button>
+                          )}
+                          {task.status === 'PENDING' && (
+                            <button
+                              onClick={() => handleTaskStatusUpdate(task.id, 'IN_PROGRESS')}
+                              className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors flex items-center"
+                            >
+                              <i className="fas fa-play mr-1"></i>Start
+                            </button>
+                          )}
+                          {task.status === 'IN_PROGRESS' && (
+                            <button
+                              onClick={() => handleTaskStatusUpdate(task.id, 'COMPLETED')}
+                              className="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors flex items-center"
+                            >
+                              <i className="fas fa-check mr-1"></i>Complete
+                            </button>
+                          )}
+                          {task.status !== 'COMPLETED' && task.status !== 'REJECTED' && (
+                            <button
+                              onClick={() => openEditModal(task, 'task')}
+                              className="bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors flex items-center"
+                            >
+                              <i className="fas fa-edit mr-1"></i>Edit
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              if (window.confirm(`Are you sure you want to delete the task "${task.title}"?`)) {
+                                handleDeleteTask(task.id);
+                              }
+                            }}
+                            className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors flex items-center"
+                          >
+                            <i className="fas fa-trash mr-1"></i>Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          
+          <div className="p-3 bg-gray-50 border-t flex flex-wrap justify-between items-center text-xs text-gray-500">
+            <div className="flex flex-wrap gap-4">
+              <span>📋 Total: <span className="font-medium">{tasks.length}</span></span>
+              <span>⏳ Pending: <span className="font-medium">{tasks.filter(t => t.status === 'PENDING').length}</span></span>
+              <span>🔄 In Progress: <span className="font-medium">{tasks.filter(t => t.status === 'IN_PROGRESS').length}</span></span>
+              <span>⏳ Pending Approval: <span className="font-medium text-purple-600">{tasks.filter(t => t.status === 'PENDING_APPROVAL').length}</span></span>
+              <span>✅ Completed: <span className="font-medium text-green-600">{tasks.filter(t => t.status === 'COMPLETED').length}</span></span>
+            </div>
+            <div>
+              {tasks.filter(t => new Date(t.dueDate) < new Date() && t.status !== 'COMPLETED').length > 0 && (
+                <span className="text-red-500">
+                  ⚠️ {tasks.filter(t => new Date(t.dueDate) < new Date() && t.status !== 'COMPLETED').length} overdue
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== MY TASKS TAB ===== */}
+      {activeTab === 'mytasks' && (
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+          <div className="p-4 bg-gray-50 border-b flex justify-between items-center">
+            <h3 className="font-semibold text-lg flex items-center gap-2">
+              <i className="fas fa-tasks text-indigo-600"></i>
+              My Tasks
+              <span className="text-sm font-normal text-gray-500">
+                ({myTasks.length} tasks)
+              </span>
+            </h3>
+            <button 
+              onClick={fetchMyData} 
+              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
+            >
+              <i className="fas fa-sync-alt mr-2"></i>Refresh
+            </button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Task</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Assigned By</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Due Date</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Priority</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Status</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {myTasks.length === 0 ? (
+                  <tr>
+                    <td colSpan="6" className="px-4 py-12 text-center text-gray-500">
+                      <i className="fas fa-check-circle text-5xl text-green-300 mb-3 block"></i>
+                      <p className="text-lg">No tasks assigned to you!</p>
+                      <p className="text-sm text-gray-400 mt-1">Enjoy your free time 🎉</p>
+                    </td>
+                  </tr>
+                ) : (
+                  myTasks.map(task => {
+                    const isAssignedByMe = task.assignedBy === user.id;
+                    const isPendingApproval = task.status === 'PENDING_APPROVAL';
+                    
+                    return (
+                      <tr key={task.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-4 py-3">
+                          <div className="font-medium text-gray-800">{task.title}</div>
+                          {task.requiresApproval && task.status !== 'APPROVED' && task.status !== 'REJECTED' && (
+                            <span className="inline-block mt-1 px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">
+                              <i className="fas fa-check-double mr-1"></i>Requires Approval
+                            </span>
+                          )}
+                          {task.description && (
+                            <div className="text-xs text-gray-400 mt-1 truncate max-w-xs">{task.description}</div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {task.assignedByUser ? (
+                            <span className="font-medium text-gray-700">
+                              {task.assignedByUser.firstName} {task.assignedByUser.lastName}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400 italic">Unknown</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {task.dueDate ? (
+                            <span className="text-sm">
+                              {new Date(task.dueDate).toLocaleDateString()}
+                              {new Date(task.dueDate) < new Date() && task.status !== 'COMPLETED' && (
+                                <span className="ml-1 text-red-500 text-xs">(Overdue)</span>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${getUrgencyBadge(task.priority)}`}>
+                            {task.priority}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusBadge(task.status)}`}>
+                            {task.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-1">
+                            {task.status === 'PENDING' && (
+                              <>
+                                <button
+                                  onClick={() => handleTaskStatusUpdate(task.id, 'IN_PROGRESS')}
+                                  className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors"
+                                >
+                                  <i className="fas fa-play mr-1"></i>Start
+                                </button>
+                                {task.requiresApproval && isAssignedByMe && (
+                                  <button
+                                    onClick={() => handleSubmitForApproval(task.id)}
+                                    className="bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors"
+                                  >
+                                    <i className="fas fa-check-double mr-1"></i>Submit
+                                  </button>
+                                )}
+                                {!task.requiresApproval && (
+                                  <button
+                                    onClick={() => handleTaskStatusUpdate(task.id, 'COMPLETED')}
+                                    className="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors"
+                                  >
+                                    <i className="fas fa-check mr-1"></i>Complete
+                                  </button>
+                                )}
+                              </>
+                            )}
+
+                            {task.status === 'IN_PROGRESS' && (
+                              <>
+                                {task.requiresApproval && isAssignedByMe && (
+                                  <button
+                                    onClick={() => handleSubmitForApproval(task.id)}
+                                    className="bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors"
+                                  >
+                                    <i className="fas fa-check-double mr-1"></i>Submit
+                                  </button>
+                                )}
+                                {!task.requiresApproval && (
+                                  <button
+                                    onClick={() => handleTaskStatusUpdate(task.id, 'COMPLETED')}
+                                    className="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors"
+                                  >
+                                    <i className="fas fa-check mr-1"></i>Complete
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleTaskStatusUpdate(task.id, 'PENDING')}
+                                  className="bg-gray-400 hover:bg-gray-500 text-white px-3 py-1 rounded text-xs font-medium transition-colors"
+                                >
+                                  <i className="fas fa-undo mr-1"></i>Revert
+                                </button>
+                              </>
+                            )}
+
+                            {task.status === 'PENDING_APPROVAL' && (
+                              <>
+                                <span className="text-purple-600 text-xs font-medium px-2 py-1">
+                                  <i className="fas fa-clock mr-1"></i>Awaiting Approval
+                                </span>
+                                {isAssignedByMe && (
+                                  <button
+                                    onClick={() => { setTaskApproval(task); setShowApprovalModal(true); }}
+                                    className="bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors"
+                                  >
+                                    <i className="fas fa-check-double mr-1"></i>Review
+                                  </button>
+                                )}
+                              </>
+                            )}
+
+                            {task.status === 'APPROVED' && (
+                              <>
+                                <span className="text-green-600 text-xs font-medium px-2 py-1">
+                                  <i className="fas fa-check-circle mr-1"></i>Approved
+                                </span>
+                                <button
+                                  onClick={() => handleTaskStatusUpdate(task.id, 'COMPLETED')}
+                                  className="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-xs font-medium transition-colors"
+                                >
+                                  <i className="fas fa-check mr-1"></i>Complete
+                                </button>
+                              </>
+                            )}
+
+                            {task.status === 'REJECTED' && (
+                              <span className="text-red-600 text-xs font-medium px-2 py-1">
+                                <i className="fas fa-times-circle mr-1"></i>Rejected
+                                {task.approvalComments && (
+                                  <span className="ml-1 text-gray-500">({task.approvalComments})</span>
+                                )}
+                              </span>
+                            )}
+
+                            {task.status === 'COMPLETED' && (
+                              <span className="text-green-600 text-xs font-medium px-2 py-1">
+                                <i className="fas fa-check-circle mr-1"></i>Done ✓
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ===== MY APPOINTMENTS TAB ===== */}
+      {activeTab === 'myappointments' && (
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+          <div className="p-4 bg-gray-50 border-b flex justify-between items-center">
+            <h3 className="font-semibold text-lg flex items-center gap-2">
+              <i className="fas fa-calendar-check text-purple-600"></i>
+              My Appointments
+              <span className="text-sm font-normal text-gray-500">
+                ({myAppointments.length} appointments)
+              </span>
+            </h3>
+            <button onClick={fetchMyData} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">
+              <i className="fas fa-sync-alt mr-2"></i>Refresh
+            </button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left">Title</th>
+                  <th className="px-4 py-3 text-left">Type</th>
+                  <th className="px-4 py-3 text-left">Date</th>
+                  <th className="px-4 py-3 text-left">Time</th>
+                  <th className="px-4 py-3 text-left">With</th>
+                  <th className="px-4 py-3 text-left">Status</th>
+                  <th className="px-4 py-3 text-left">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {myAppointments.length === 0 ? (
+                  <tr>
+                    <td colSpan="7" className="px-4 py-8 text-center text-gray-500">
+                      <i className="fas fa-calendar-plus text-4xl text-gray-400 mb-2"></i>
+                      <p>No appointments scheduled for you</p>
+                      <button 
+                        onClick={() => { 
+                          setModalType('appointment'); 
+                          setShowModal(true);
+                          setAppointmentForm({
+                            title: '', description: '', parentId: '', staffId: '', studentId: '',
+                            date: '', time: '', duration: 30, status: 'SCHEDULED', type: 'PARENT_TEACHER'
+                          });
+                        }} 
+                        className="mt-2 text-purple-600 hover:text-purple-800"
+                      >
+                        Schedule one now
+                      </button>
+                    </td>
+                  </tr>
+                ) : (
+                  myAppointments.map(appointment => (
+                    <tr key={appointment.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 font-medium">{appointment.title}</td>
+                      <td className="px-4 py-3">{appointment.type}</td>
+                      <td className="px-4 py-3">{new Date(appointment.date).toLocaleDateString()}</td>
+                      <td className="px-4 py-3">{appointment.time}</td>
+                      <td className="px-4 py-3">
+                        {appointment.parent?.firstName ? 
+                          `${appointment.parent.firstName} ${appointment.parent.lastName} (Parent)` : 
+                          appointment.staff?.firstName ? 
+                          `${appointment.staff.firstName} ${appointment.staff.lastName} (Staff)` : 
+                          '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(appointment.status)}`}>
+                          {appointment.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {appointment.status === 'SCHEDULED' && (
+                          <>
+                            <button 
+                              onClick={() => handleUpdateAppointmentStatus(appointment.id, 'COMPLETED')} 
+                              className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700"
+                            >
+                              <i className="fas fa-check mr-1"></i>Complete
+                            </button>
+                            <button 
+                              onClick={() => handleUpdateAppointmentStatus(appointment.id, 'CANCELLED')} 
+                              className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700"
+                            >
+                              <i className="fas fa-times mr-1"></i>Cancel
+                            </button>
+                          </>
+                        )}
+                        {appointment.status === 'COMPLETED' && (
+                          <span className="text-green-600 text-sm">
+                            <i className="fas fa-check-circle mr-1"></i>Done
+                          </span>
+                        )}
+                        {appointment.status === 'CANCELLED' && (
+                          <span className="text-red-600 text-sm">
+                            <i className="fas fa-times-circle mr-1"></i>Cancelled
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
@@ -40882,325 +44817,244 @@ const handleDeleteTask = async (taskId) => {
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold">Review Task</h3>
-              <button onClick={() => { setShowApprovalModal(false); setTaskApproval(null); }} className="text-gray-500 hover:text-gray-700"><i className="fas fa-times"></i></button>
+              <button onClick={() => { setShowApprovalModal(false); setTaskApproval(null); }} className="text-gray-500 hover:text-gray-700">
+                <i className="fas fa-times"></i>
+              </button>
             </div>
             <div className="mb-4 p-3 bg-gray-50 rounded-lg">
               <p className="font-medium">{taskApproval.title}</p>
               <p className="text-sm text-gray-500">{taskApproval.description}</p>
-              <div className="mt-2 text-sm"><span className="text-gray-500">Assigned to:</span><span className="font-medium ml-2">{taskApproval.assignedToUser?.firstName} {taskApproval.assignedToUser?.lastName}</span></div>
-            </div>
-            <div className="space-y-4">
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">Decision</label><div className="flex space-x-4"><label className="flex items-center space-x-2"><input type="radio" name="approval" value="approve" checked={approvalForm.status === 'approve'} onChange={(e) => setApprovalForm({...approvalForm, status: 'approve'})} className="rounded" /><span className="text-green-600">Approve</span></label><label className="flex items-center space-x-2"><input type="radio" name="approval" value="reject" checked={approvalForm.status === 'reject'} onChange={(e) => setApprovalForm({...approvalForm, status: 'reject'})} className="rounded" /><span className="text-red-600">Reject</span></label></div></div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">Comments</label><textarea value={approvalForm.comments} onChange={(e) => setApprovalForm({...approvalForm, comments: e.target.value})} className="w-full px-3 py-2 border rounded-lg" rows="3" placeholder="Add your comments..." /></div>
-              <div className="flex space-x-2 pt-4">
-                <button onClick={() => handleApproveTask(taskApproval.id, approvalForm.status, approvalForm.comments)} disabled={!approvalForm.status || loading} className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 disabled:opacity-50">{loading ? 'Processing...' : 'Submit Decision'}</button>
-                <button onClick={() => { setShowApprovalModal(false); setTaskApproval(null); setApprovalForm({ status: '', comments: '' }); }} className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">Cancel</button>
+              <div className="mt-2 text-sm">
+                <span className="text-gray-500">Assigned to:</span>
+                <span className="font-medium ml-2">
+                  {taskApproval.assignedToUser?.firstName} {taskApproval.assignedToUser?.lastName}
+                </span>
               </div>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ===== CREATE MODALS (Visitor, Call, Complaint, Appointment, Task) ===== */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold">
-                {modalType === 'visitor' && 'Check In Visitor'}
-                {modalType === 'call' && 'Log Call'}
-                {modalType === 'complaint' && 'Log Complaint'}
-                {modalType === 'appointment' && 'Schedule Appointment'}
-                {modalType === 'task' && 'Assign Task'}
-              </h3>
-              <button onClick={() => setShowModal(false)} className="text-gray-500 hover:text-gray-700"><i className="fas fa-times"></i></button>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Decision</label>
+                <div className="flex space-x-4">
+                  <label className="flex items-center space-x-2">
+                    <input type="radio" name="approval" value="approve" checked={approvalForm.status === 'approve'} onChange={(e) => setApprovalForm({...approvalForm, status: 'approve'})} className="rounded" />
+                    <span className="text-green-600">Approve</span>
+                  </label>
+                  <label className="flex items-center space-x-2">
+                    <input type="radio" name="approval" value="reject" checked={approvalForm.status === 'reject'} onChange={(e) => setApprovalForm({...approvalForm, status: 'reject'})} className="rounded" />
+                    <span className="text-red-600">Reject</span>
+                  </label>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Comments</label>
+                <textarea
+                  value={approvalForm.comments}
+                  onChange={(e) => setApprovalForm({...approvalForm, comments: e.target.value})}
+                  className="w-full px-3 py-2 border rounded-lg"
+                  rows="3"
+                  placeholder="Add your comments..."
+                />
+              </div>
+              <div className="flex space-x-2 pt-4">
+                <button
+                  onClick={() => handleApproveTask(taskApproval.id, approvalForm.status, approvalForm.comments)}
+                  disabled={!approvalForm.status || loading}
+                  className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                >
+                  {loading ? 'Processing...' : 'Submit Decision'}
+                </button>
+                <button
+                  onClick={() => { setShowApprovalModal(false); setTaskApproval(null); setApprovalForm({ status: '', comments: '' }); }}
+                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
-
-            {/* Visitor Form */}
-            {modalType === 'visitor' && (
-              <form onSubmit={handleVisitorCheckIn} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Full Name *</label><input type="text" value={visitorForm.name} onChange={(e) => setVisitorForm({...visitorForm, name: e.target.value})} className="w-full px-3 py-2 border rounded-lg" required /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Phone</label><input type="text" value={visitorForm.phone} onChange={(e) => setVisitorForm({...visitorForm, phone: e.target.value})} className="w-full px-3 py-2 border rounded-lg" /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Email</label><input type="email" value={visitorForm.email} onChange={(e) => setVisitorForm({...visitorForm, email: e.target.value})} className="w-full px-3 py-2 border rounded-lg" /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Purpose *</label><input type="text" value={visitorForm.purpose} onChange={(e) => setVisitorForm({...visitorForm, purpose: e.target.value})} className="w-full px-3 py-2 border rounded-lg" required /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Person to See *</label><input type="text" value={visitorForm.personToSee} onChange={(e) => setVisitorForm({...visitorForm, personToSee: e.target.value})} className="w-full px-3 py-2 border rounded-lg" required /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">ID Number</label><input type="text" value={visitorForm.idNumber} onChange={(e) => setVisitorForm({...visitorForm, idNumber: e.target.value})} className="w-full px-3 py-2 border rounded-lg" /></div>
-                  <div className="col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Vehicle Number</label><input type="text" value={visitorForm.vehicleNumber} onChange={(e) => setVisitorForm({...visitorForm, vehicleNumber: e.target.value})} className="w-full px-3 py-2 border rounded-lg" /></div>
-                </div>
-                <div className="flex space-x-2 pt-4"><button type="submit" className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700" disabled={loading}>{loading ? 'Processing...' : 'Check In Visitor'}</button><button type="button" onClick={() => setShowModal(false)} className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">Cancel</button></div>
-              </form>
-            )}
-
-            {/* Call Form */}
-            {modalType === 'call' && (
-              <form onSubmit={handleAddCall} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Caller Name *</label><input type="text" value={callForm.callerName} onChange={(e) => setCallForm({...callForm, callerName: e.target.value})} className="w-full px-3 py-2 border rounded-lg" required /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Caller Phone</label><input type="text" value={callForm.callerPhone} onChange={(e) => setCallForm({...callForm, callerPhone: e.target.value})} className="w-full px-3 py-2 border rounded-lg" /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Recipient</label><input type="text" value={callForm.recipient} onChange={(e) => setCallForm({...callForm, recipient: e.target.value})} className="w-full px-3 py-2 border rounded-lg" /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Purpose</label><input type="text" value={callForm.purpose} onChange={(e) => setCallForm({...callForm, purpose: e.target.value})} className="w-full px-3 py-2 border rounded-lg" /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Duration</label><input type="number" value={callForm.duration} onChange={(e) => setCallForm({...callForm, duration: e.target.value})} className="w-full px-3 py-2 border rounded-lg" /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Status</label><select value={callForm.status} onChange={(e) => setCallForm({...callForm, status: e.target.value})} className="w-full px-3 py-2 border rounded-lg"><option value="INCOMING">Incoming</option><option value="OUTGOING">Outgoing</option><option value="MISSED">Missed</option></select></div>
-                  <div className="col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Notes</label><textarea value={callForm.notes} onChange={(e) => setCallForm({...callForm, notes: e.target.value})} className="w-full px-3 py-2 border rounded-lg" rows="2" /></div>
-                </div>
-                <div className="flex space-x-2 pt-4"><button type="submit" className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700" disabled={loading}>{loading ? 'Processing...' : 'Log Call'}</button><button type="button" onClick={() => setShowModal(false)} className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">Cancel</button></div>
-              </form>
-            )}
-
-            {/* Complaint Form */}
-            {modalType === 'complaint' && (
-              <form onSubmit={handleAddComplaint} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Complainant *</label><input type="text" value={complaintForm.complainant} onChange={(e) => setComplaintForm({...complaintForm, complainant: e.target.value})} className="w-full px-3 py-2 border rounded-lg" required /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Type</label><select value={complaintForm.complainantType} onChange={(e) => setComplaintForm({...complaintForm, complainantType: e.target.value})} className="w-full px-3 py-2 border rounded-lg"><option value="PARENT">Parent</option><option value="STUDENT">Student</option><option value="STAFF">Staff</option><option value="VISITOR">Visitor</option><option value="OTHER">Other</option></select></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Category</label><select value={complaintForm.category} onChange={(e) => setComplaintForm({...complaintForm, category: e.target.value})} className="w-full px-3 py-2 border rounded-lg"><option value="GENERAL">General</option><option value="ACADEMIC">Academic</option><option value="FINANCE">Finance</option><option value="FACILITIES">Facilities</option><option value="STAFF">Staff</option><option value="TRANSPORT">Transport</option><option value="FOOD">Food</option><option value="DISCIPLINE">Discipline</option><option value="OTHER">Other</option></select></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Urgency</label><select value={complaintForm.urgency} onChange={(e) => setComplaintForm({...complaintForm, urgency: e.target.value})} className="w-full px-3 py-2 border rounded-lg"><option value="LOW">Low</option><option value="NORMAL">Normal</option><option value="HIGH">High</option><option value="URGENT">Urgent</option></select></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Assign To</label><select value={complaintForm.assignedTo} onChange={(e) => setComplaintForm({...complaintForm, assignedTo: e.target.value})} className="w-full px-3 py-2 border rounded-lg"><option value="">Unassigned</option>{staff.map(s => (<option key={s.id} value={s.id}>{s.User?.firstName} {s.User?.lastName}</option>))}</select></div>
-                  <div className="col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Description *</label><textarea value={complaintForm.description} onChange={(e) => setComplaintForm({...complaintForm, description: e.target.value})} className="w-full px-3 py-2 border rounded-lg" rows="3" required /></div>
-                </div>
-                <div className="flex space-x-2 pt-4"><button type="submit" className="flex-1 bg-red-600 text-white py-2 rounded-lg hover:bg-red-700" disabled={loading}>{loading ? 'Processing...' : 'Log Complaint'}</button><button type="button" onClick={() => setShowModal(false)} className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">Cancel</button></div>
-              </form>
-            )}
-
-            {/* Appointment Form */}
-            {modalType === 'appointment' && (
-              <form onSubmit={handleAddAppointment} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Title *</label><input type="text" value={appointmentForm.title} onChange={(e) => setAppointmentForm({...appointmentForm, title: e.target.value})} className="w-full px-3 py-2 border rounded-lg" required /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Type</label><select value={appointmentForm.type} onChange={(e) => setAppointmentForm({...appointmentForm, type: e.target.value})} className="w-full px-3 py-2 border rounded-lg"><option value="PARENT_TEACHER">Parent-Teacher</option><option value="PARENT_PRINCIPAL">Parent-Principal</option><option value="STAFF_PRINCIPAL">Staff-Principal</option><option value="STUDENT_COUNSELOR">Student-Counselor</option><option value="OTHER">Other</option></select></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Date *</label><input type="date" value={appointmentForm.date} onChange={(e) => setAppointmentForm({...appointmentForm, date: e.target.value})} className="w-full px-3 py-2 border rounded-lg" required /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Time *</label><input type="time" value={appointmentForm.time} onChange={(e) => setAppointmentForm({...appointmentForm, time: e.target.value})} className="w-full px-3 py-2 border rounded-lg" required /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Duration</label><input type="number" min="5" max="120" value={appointmentForm.duration} onChange={(e) => setAppointmentForm({...appointmentForm, duration: e.target.value})} className="w-full px-3 py-2 border rounded-lg" /></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Parent (Optional)</label><select value={appointmentForm.parentId} onChange={(e) => setAppointmentForm({...appointmentForm, parentId: e.target.value})} className="w-full px-3 py-2 border rounded-lg"><option value="">-- Select Parent --</option>{parents.map(p => (<option key={p.id} value={p.id}>{p.User?.firstName} {p.User?.lastName}</option>))}</select></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Staff (Optional)</label><select value={appointmentForm.staffId} onChange={(e) => setAppointmentForm({...appointmentForm, staffId: e.target.value})} className="w-full px-3 py-2 border rounded-lg"><option value="">-- Select Staff --</option>{staff.map(s => (<option key={s.id} value={s.id}>{s.User?.firstName} {s.User?.lastName}</option>))}</select></div>
-                  <div><label className="block text-sm font-medium text-gray-700 mb-1">Student (Optional)</label><select value={appointmentForm.studentId} onChange={(e) => setAppointmentForm({...appointmentForm, studentId: e.target.value})} className="w-full px-3 py-2 border rounded-lg"><option value="">-- Select Student --</option>{students.map(s => (<option key={s.id} value={s.id}>{s.firstName} {s.lastName} ({s.admissionNumber})</option>))}</select></div>
-                  <div className="col-span-2"><label className="block text-sm font-medium text-gray-700 mb-1">Description</label><textarea value={appointmentForm.description} onChange={(e) => setAppointmentForm({...appointmentForm, description: e.target.value})} className="w-full px-3 py-2 border rounded-lg" rows="2" /></div>
-                </div>
-                <div className="flex space-x-2 pt-4"><button type="submit" className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700" disabled={loading}>{loading ? 'Processing...' : 'Schedule Appointment'}</button><button type="button" onClick={() => setShowModal(false)} className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">Cancel</button></div>
-              </form>
-            )}
-
-          {/* ===== TASK FORM ===== */}
-{modalType === 'task' && (
-  <form onSubmit={handleAddTask} className="space-y-4">
-    <div className="grid grid-cols-2 gap-4">
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
-        <input
-          type="text"
-          value={taskForm.title}
-          onChange={(e) => setTaskForm({...taskForm, title: e.target.value})}
-          className="w-full px-3 py-2 border rounded-lg"
-          required
-        />
-      </div>
-      
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
-        <select
-          value={taskForm.priority}
-          onChange={(e) => setTaskForm({...taskForm, priority: e.target.value})}
-          className="w-full px-3 py-2 border rounded-lg"
-        >
-          <option value="LOW">🟢 Low</option>
-          <option value="NORMAL">🔵 Normal</option>
-          <option value="HIGH">🟠 High</option>
-          <option value="URGENT">🔴 Urgent</option>
-        </select>
-      </div>
-      
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Assign To</label>
-        <select
-          value={taskForm.assignedTo}
-          onChange={(e) => setTaskForm({...taskForm, assignedTo: e.target.value})}
-          className="w-full px-3 py-2 border rounded-lg"
-        >
-          <option value="">-- Select Staff --</option>
-          {staff && staff.length > 0 ? (
-            staff.map(s => (
-              <option key={s.userId} value={s.userId}>  {/* ✅ CRITICAL: Use userId */}
-                {s.User?.firstName} {s.User?.lastName} ({s.jobTitle || 'Staff'})
-              </option>
-            ))
-          ) : (
-            <option value="" disabled>No staff available</option>
-          )}
-        </select>
-        <p className="text-xs text-gray-500 mt-1">Leave empty to assign to yourself</p>
-      </div>
-      
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Due Date</label>
-        <input
-          type="date"
-          value={taskForm.dueDate}
-          onChange={(e) => setTaskForm({...taskForm, dueDate: e.target.value})}
-          className="w-full px-3 py-2 border rounded-lg"
-        />
-      </div>
-      
-      <div className="col-span-2">
-        <label className="block text-sm font-medium text-gray-700 mb-1">Requires Approval</label>
-        <div className="flex items-center space-x-2">
-          <input
-            type="checkbox"
-            checked={taskForm.requiresApproval}
-            onChange={(e) => setTaskForm({...taskForm, requiresApproval: e.target.checked})}
-            className="rounded"
-          />
-          <span className="text-sm text-gray-600">Task requires approval from assigner</span>
-        </div>
-      </div>
-      
-      <div className="col-span-2">
-        <label className="block text-sm font-medium text-gray-700 mb-1">Description *</label>
-        <textarea
-          value={taskForm.description}
-          onChange={(e) => setTaskForm({...taskForm, description: e.target.value})}
-          className="w-full px-3 py-2 border rounded-lg"
-          rows="3"
-          required
-        />
-      </div>
-    </div>
-    
-    <div className="flex space-x-2 pt-4">
-      <button
-        type="submit"
-        className="flex-1 bg-yellow-600 text-white py-2 rounded-lg hover:bg-yellow-700"
-        disabled={loading}
-      >
-        {loading ? 'Processing...' : 'Assign Task'}
-      </button>
-      <button
-        type="button"
-        onClick={() => setShowModal(false)}
-        className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
-      >
-        Cancel
-      </button>
-    </div>
-  </form>
-)}
-        
           </div>
         </div>
       )}
     </div>
   );
 };
-
-
-
-// ==================== CARD MANAGEMENT MODULE - COMPLETE ====================
-const CardManagementModule = ({ students, staff, currentSchool, user }) => {
+const CardManagementModule = ({ 
+  students, 
+  staff, 
+  currentSchool, 
+  user,
+  programs = [], 
+  courses = [], 
+  classes = [],
+  departments = []
+}) => {
   // ==================== STATE ====================
   const [activeTab, setActiveTab] = useState('students');
-  const [selectedPerson, setSelectedPerson] = useState(null);
-  const [personType, setPersonType] = useState('student');
   const [loading, setLoading] = useState(false);
   const [cards, setCards] = useState([]);
   const [showDesignModal, setShowDesignModal] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [generatedCard, setGeneratedCard] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterType, setFilterType] = useState('');
+  const [showValidityModal, setShowValidityModal] = useState(false);
+  const [validUntilDate, setValidUntilDate] = useState('');
+  const [pendingGenerate, setPendingGenerate] = useState(null);
+  const [livePreviewData, setLivePreviewData] = useState({
+    name: 'John Doe',
+    id: 'ADM-2024-001',
+    entity: 'Mechanical Engineering',
+    module: 'Module 1',
+    year: 'Year 1',
+    semester: 'Sem 1',
+    dob: '01/01/2010',
+    gender: 'Male',
+    phone: '0712345678',
+    email: 'student@school.com',
+    bloodGroup: 'O+',
+    nationality: 'Kenyan',
+    address: '123 School Road, Nairobi',
+    parentName: 'Jane Doe',
+    department: 'Engineering',
+    jobTitle: 'Senior Lecturer',
+    staffType: 'Full Time',
+    validUntil: '12/31/2025'
+  });
   
-  // ==================== COMPLETE CARD TEMPLATE WITH ALL FIELDS ====================
+  // ==================== SCHOOL TYPE DETECTION ====================
+  const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
+  const isTVET = schoolCategory === 'COLLEGE_TVET';
+  const isUniversity = schoolCategory === 'UNIVERSITY';
+  const isPrimarySecondary = !isTVET && !isUniversity;
+  
+  // ==================== SCHOOL-SPECIFIC CONFIGURATION ====================
+  const getEntityLabel = () => {
+    if (isTVET) return 'Program';
+    if (isUniversity) return 'Course';
+    return 'Class';
+  };
+
+  // ==================== GET DYNAMIC FIELDS BY SCHOOL TYPE ====================
+  const getDynamicFields = () => {
+    const baseFields = {
+      fullName: { label: 'Full Name', category: 'Student & Staff', default: true },
+      dateOfBirth: { label: 'Date of Birth', category: 'Student & Staff', default: true },
+      gender: { label: 'Gender', category: 'Student & Staff', default: true },
+      phone: { label: 'Phone', category: 'Student & Staff', default: true },
+      email: { label: 'Email', category: 'Student & Staff', default: true },
+      address: { label: 'Address', category: 'Student & Staff', default: false },
+      nationality: { label: 'Nationality', category: 'Student & Staff', default: false },
+      religion: { label: 'Religion', category: 'Student & Staff', default: false },
+      bloodGroup: { label: 'Blood Group', category: 'Student & Staff', default: false },
+      validUntil: { label: 'Valid Until', category: 'Student & Staff', default: true },
+      issueDate: { label: 'Issue Date', category: 'Student & Staff', default: false },
+    };
+
+    let studentFields = {};
+    
+    if (isTVET) {
+      studentFields = {
+        admissionNumber: { label: 'Admission Number', category: 'Student', default: true },
+        programName: { label: 'Program Name', category: 'Student', default: true },
+        currentModule: { label: 'Current Module', category: 'Student', default: true },
+        currentYear: { label: 'Current Year', category: 'Student', default: true },
+        currentSemester: { label: 'Current Semester', category: 'Student', default: false },
+      };
+    } else if (isUniversity) {
+      studentFields = {
+        admissionNumber: { label: 'Admission Number', category: 'Student', default: true },
+        courseName: { label: 'Course Name', category: 'Student', default: true },
+        currentYear: { label: 'Current Year', category: 'Student', default: true },
+        currentSemester: { label: 'Current Semester', category: 'Student', default: true },
+      };
+    } else {
+      studentFields = {
+        admissionNumber: { label: 'Admission Number', category: 'Student', default: true },
+        className: { label: 'Class Name', category: 'Student', default: true },
+      };
+    }
+
+    const staffFields = {
+      employeeId: { label: 'Employee ID', category: 'Staff', default: true },
+      department: { label: 'Department', category: 'Staff', default: true },
+      jobTitle: { label: 'Job Title', category: 'Staff', default: false },
+      staffType: { label: 'Staff Type', category: 'Staff', default: false },
+    };
+
+    const parentFields = {
+      parentName: { label: 'Parent/Guardian Name', category: 'Parent', default: false },
+      parentPhone: { label: 'Parent/Guardian Phone', category: 'Parent', default: false },
+      emergencyContact: { label: 'Emergency Contact', category: 'Parent', default: false },
+    };
+
+    return {
+      ...baseFields,
+      ...studentFields,
+      ...staffFields,
+      ...parentFields
+    };
+  };
+
+  // ==================== GET DEFAULT FIELD STATE ====================
+  const getDefaultFieldState = () => {
+    const dynamicFields = getDynamicFields();
+    const fieldState = {};
+    Object.keys(dynamicFields).forEach(key => {
+      fieldState[key] = dynamicFields[key].default;
+    });
+    return fieldState;
+  };
+
+  // ==================== CARD TEMPLATE ====================
   const [cardTemplate, setCardTemplate] = useState({
-    // ===== SCHOOL INFORMATION =====
     schoolName: currentSchool?.name || 'School Name',
-    schoolMotto: currentSchool?.motto || 'Excellence in Education',
+    schoolMotto: currentSchool?.motto || '',
     schoolAddress: currentSchool?.contact?.address || '',
     schoolPhone: currentSchool?.contact?.phone || '',
     schoolEmail: currentSchool?.contact?.email || '',
     schoolLogo: currentSchool?.contact?.logo || '',
-    
-    // ===== CARD COLORS =====
     primaryColor: '#4f46e5',
     secondaryColor: '#818cf8',
     textColor: '#ffffff',
     backgroundColor: '#ffffff',
     accentColor: '#f59e0b',
-    
-    // ===== LAYOUT =====
-    layout: 'horizontal', // 'horizontal' | 'vertical'
-    cardSize: 'standard', // 'standard' | 'large' | 'compact'
-    cardShape: 'rounded', // 'rounded' | 'square' | 'circle'
-    
-    // ===== ELEMENTS TO SHOW =====
+    layout: 'horizontal',
+    cardSize: 'standard',
+    cardShape: 'rounded',
     showSchoolLogo: true,
     showSchoolName: true,
     showSchoolMotto: true,
     showSchoolAddress: false,
     showStudentPhoto: true,
-    showQRCode: true,
+    showQRCode: false,
     showBarcode: false,
     showWatermark: false,
     showBorder: true,
     showShadow: true,
-    
-    // ===== STUDENT/STAFF FIELDS =====
-    fields: {
-      fullName: true,
-      admissionNumber: true,
-      className: true,
-      department: true,
-      dateOfBirth: true,
-      gender: true,
-      phone: true,
-      email: true,
-      address: true,
-      nationality: true,
-      religion: true,
-      bloodGroup: true,
-      parentName: true,
-      parentPhone: true,
-      emergencyContact: true,
-      validUntil: true,
-      issueDate: true,
-      idNumber: true,
-      studentId: true,
-      staffId: true,
-      employeeId: true,
-      jobTitle: true,
-      staffType: true
-    },
-    
-    // ===== CARD TEXT =====
-    cardTitle: 'IDENTITY CARD',
+    fields: getDefaultFieldState(),
+    cardTitle: 'ID CARD',
     cardSubtitle: 'Official School Identification',
     footerText: 'This card is the property of the school',
     validityText: 'Valid until',
     issuedText: 'Issued on',
-    
-    // ===== TYPOGRAPHY =====
     fontFamily: 'Arial, sans-serif',
     fontSize: '14px',
     titleFontSize: '18px',
     nameFontSize: '20px',
     labelFontSize: '10px',
     valueFontSize: '12px',
-    
-    // ===== BORDER =====
     borderStyle: 'solid',
     borderWidth: '2px',
     borderRadius: '12px',
     borderColor: '#4f46e5',
-    
-    // ===== WATERMARK =====
     watermarkText: 'SCHOOL AID',
     watermarkOpacity: 0.1,
-    
-    // ===== STATUS =====
     showStatusBadge: true,
     activeStatusText: 'ACTIVE',
     inactiveStatusText: 'INACTIVE',
-    
-    // ===== ADDITIONAL =====
     showCardNumber: true,
     showGeneratedDate: true,
-    showPrintButton: true
+    showPrintButton: true,
   });
 
   // ==================== API INSTANCE ====================
@@ -41215,6 +45069,23 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
     return config;
   });
 
+  // ==================== UPDATE TEMPLATE WHEN SCHOOL CHANGES ====================
+  useEffect(() => {
+    if (currentSchool) {
+      const newFields = getDefaultFieldState();
+      setCardTemplate(prev => ({
+        ...prev,
+        schoolName: currentSchool.name || 'School Name',
+        schoolMotto: currentSchool.motto || '',
+        schoolAddress: currentSchool.contact?.address || '',
+        schoolPhone: currentSchool.contact?.phone || '',
+        schoolEmail: currentSchool.contact?.email || '',
+        schoolLogo: currentSchool.contact?.logo || '',
+        fields: newFields
+      }));
+    }
+  }, [currentSchool]);
+
   // ==================== FETCH CARDS ====================
   const fetchCards = async () => {
     setLoading(true);
@@ -41228,8 +45099,84 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
     }
   };
 
+  // ==================== GET ENTITY NAME ====================
+  const getEntityName = (person, type) => {
+    if (!person) return 'N/A';
+    
+    if (type === 'staff') {
+      return person.department || person.User?.department || 'N/A';
+    }
+    
+    if (isTVET) {
+      if (person.programId && programs && programs.length > 0) {
+        const program = programs.find(p => p.id === person.programId);
+        return program?.name || 'N/A';
+      }
+      return person.program?.name || 'N/A';
+    }
+    
+    if (isUniversity) {
+      if (person.courseId && courses && courses.length > 0) {
+        const course = courses.find(c => c.id === person.courseId);
+        return course?.name || 'N/A';
+      }
+      return person.course?.name || 'N/A';
+    }
+    
+    if (person.classId && classes && classes.length > 0) {
+      const classObj = classes.find(c => c.id === person.classId);
+      return classObj?.name || 'N/A';
+    }
+    return person.class?.name || 'N/A';
+  };
+
+  // ==================== GET PERSON BY ID ====================
+  const getStudentById = (id) => {
+    return students?.find(s => s.id === id);
+  };
+
+  const getStaffById = (id) => {
+    return staff?.find(s => s.id === id);
+  };
+
+  const getEntityById = (id) => {
+    if (!id) return null;
+    if (isTVET) {
+      return programs?.find(p => p.id === id);
+    }
+    if (isUniversity) {
+      return courses?.find(c => c.id === id);
+    }
+    return classes?.find(c => c.id === id);
+  };
+
+  // ==================== OPEN VALIDITY MODAL ====================
+  const openValidityModal = (person, type) => {
+    setPendingGenerate({ person, type });
+    // Set default to 1 year from now
+    const oneYearFromNow = new Date();
+    oneYearFromNow.setFullYear(oneYearFromNow.getFullYear() + 1);
+    setValidUntilDate(oneYearFromNow.toISOString().split('T')[0]);
+    setShowValidityModal(true);
+  };
+
+  // ==================== GENERATE CARD WITH VALIDITY ====================
+  const generateCardWithValidity = async () => {
+    if (!pendingGenerate) return;
+    
+    if (!validUntilDate) {
+      alert('Please select a valid until date');
+      return;
+    }
+
+    const { person, type } = pendingGenerate;
+    setShowValidityModal(false);
+    await generateCard(person, type, validUntilDate);
+    setPendingGenerate(null);
+  };
+
   // ==================== GENERATE CARD ====================
-  const generateCard = async (person, type) => {
+  const generateCard = async (person, type, customValidUntil = null) => {
     if (!person) {
       alert('Please select a person');
       return;
@@ -41240,27 +45187,90 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
       const payload = {
         personId: person.id,
         type: type,
-        template: cardTemplate
+        template: cardTemplate,
+        validUntil: customValidUntil
       };
-
-      console.log('📝 Generating card with template:', cardTemplate);
 
       const res = await api.post('/cards/generate', payload);
       
       if (res.data.success) {
-        // Build card data with all fields
+        let entityName = 'N/A';
+        let moduleInfo = '';
+        let yearInfo = '';
+        let semesterInfo = '';
+        let entityId = null;
+        
+        if (type === 'student') {
+          if (isTVET) {
+            entityId = person.programId;
+            if (entityId && programs && programs.length > 0) {
+              const program = programs.find(p => p.id === entityId);
+              entityName = program?.name || 'N/A';
+            }
+            if (person.currentModule) {
+              moduleInfo = `Module ${person.currentModule}`;
+            }
+            if (person.currentYear) {
+              yearInfo = `Year ${person.currentYear}`;
+            }
+            if (person.currentSemester) {
+              semesterInfo = `Sem ${person.currentSemester}`;
+            }
+          }
+          else if (isUniversity) {
+            entityId = person.courseId;
+            if (entityId && courses && courses.length > 0) {
+              const course = courses.find(c => c.id === entityId);
+              entityName = course?.name || 'N/A';
+            }
+            if (person.currentYear) {
+              yearInfo = `Year ${person.currentYear}`;
+            }
+            if (person.currentSemester) {
+              semesterInfo = `Sem ${person.currentSemester}`;
+            }
+          }
+          else {
+            entityId = person.classId;
+            if (entityId && classes && classes.length > 0) {
+              const classObj = classes.find(c => c.id === entityId);
+              entityName = classObj?.name || 'N/A';
+            }
+          }
+        } else {
+          entityName = person.department || person.User?.department || 'N/A';
+        }
+        
+        // Format the valid until date
+        let validUntilFormatted = 'N/A';
+        if (customValidUntil) {
+          const date = new Date(customValidUntil);
+          validUntilFormatted = date.toLocaleDateString();
+        } else if (person.validUntil) {
+          const date = new Date(person.validUntil);
+          validUntilFormatted = date.toLocaleDateString();
+        } else {
+          const oneYearFromNow = new Date();
+          oneYearFromNow.setFullYear(oneYearFromNow.getFullYear() + 1);
+          validUntilFormatted = oneYearFromNow.toLocaleDateString();
+        }
+        
         const cardData = {
           ...res.data.card,
+          schoolName: currentSchool?.name || 'School Name',
+          schoolMotto: currentSchool?.motto || '',
+          schoolLogo: currentSchool?.contact?.logo || '',
           personName: type === 'student' 
-            ? `${person.firstName} ${person.lastName}`
-            : `${person.User?.firstName} ${person.User?.lastName}`,
+            ? `${person.firstName || ''} ${person.lastName || ''}`.trim() || 'Unknown'
+            : `${person.User?.firstName || ''} ${person.User?.lastName || ''}`.trim() || 'Unknown',
           idNumber: type === 'student' 
-            ? person.admissionNumber 
+            ? person.admissionNumber || 'N/A'
             : person.employeeId || 'N/A',
-          className: type === 'student' 
-            ? person.Class?.name || 'N/A'
-            : person.department || 'N/A',
-          // Additional fields
+          entityName: entityName,
+          entityId: entityId,
+          moduleInfo: moduleInfo,
+          yearInfo: yearInfo,
+          semesterInfo: semesterInfo,
           dateOfBirth: person.dateOfBirth ? new Date(person.dateOfBirth).toLocaleDateString() : 'N/A',
           gender: person.gender || 'N/A',
           phone: person.phone || person.User?.phone || 'N/A',
@@ -41272,12 +45282,23 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
           parentName: person.parent?.firstName ? `${person.parent.firstName} ${person.parent.lastName}` : 'N/A',
           parentPhone: person.parent?.phone || 'N/A',
           emergencyContact: person.emergencyContact?.name || 'N/A',
-          validUntil: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toLocaleDateString(),
+          validUntil: validUntilFormatted,
           issueDate: new Date().toLocaleDateString(),
           jobTitle: person.jobTitle || 'N/A',
           staffType: person.staffType || 'N/A',
-          employeeId: person.employeeId || 'N/A'
+          employeeId: person.employeeId || 'N/A',
+          currentModule: person.currentModule || 'N/A',
+          currentYear: person.currentYear || 'N/A',
+          currentSemester: person.currentSemester || 'N/A',
+          className: entityName,
+          programName: entityName,
+          courseName: entityName,
+          department: type === 'staff' ? (person.department || 'N/A') : 'N/A',
+          personId: person.id,
+          personType: type === 'student' ? 'STUDENT' : 'STAFF'
         };
+        
+        console.log('📝 Card Data:', cardData);
         
         setGeneratedCard(cardData);
         setShowPreviewModal(true);
@@ -41294,38 +45315,420 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
   };
 
   // ==================== PRINT CARD ====================
-  const printCard = async (card) => {
-    if (!card || !card.id) {
-      alert('❌ Invalid card');
+  const printCard = (card) => {
+    let cardData = generatedCard || null;
+    
+    if (!cardData && card) {
+      let person = null;
+      let personType = card.personType || 'STUDENT';
+      
+      if (personType === 'STUDENT') {
+        person = getStudentById(card.personId);
+      } else if (personType === 'STAFF') {
+        person = getStaffById(card.personId);
+      }
+      
+      if (person) {
+        const isStudent = personType === 'STUDENT';
+        const entityName = getEntityName(person, isStudent ? 'student' : 'staff');
+        
+        let moduleInfo = card.moduleInfo || (isTVET && person.currentModule ? `Module ${person.currentModule}` : '');
+        let yearInfo = card.yearInfo || (person.currentYear ? `Year ${person.currentYear}` : '');
+        let semesterInfo = card.semesterInfo || (person.currentSemester ? `Sem ${person.currentSemester}` : '');
+        
+        // Get valid until from card or person
+        let validUntilValue = card.validUntil || card.expiryDate;
+        if (!validUntilValue || validUntilValue === 'N/A' || validUntilValue === 'undefined' || validUntilValue === undefined) {
+          const oneYearFromNow = new Date();
+          oneYearFromNow.setFullYear(oneYearFromNow.getFullYear() + 1);
+          validUntilValue = oneYearFromNow.toLocaleDateString();
+        }
+        
+        cardData = {
+          ...card,
+          personName: isStudent 
+            ? `${person.firstName || ''} ${person.lastName || ''}`.trim() || 'Unknown'
+            : `${person.User?.firstName || ''} ${person.User?.lastName || ''}`.trim() || 'Unknown',
+          idNumber: isStudent 
+            ? person.admissionNumber || 'N/A'
+            : person.employeeId || 'N/A',
+          entityName: entityName,
+          entityId: isStudent ? person.programId || person.courseId || person.classId : null,
+          moduleInfo: moduleInfo,
+          yearInfo: yearInfo,
+          semesterInfo: semesterInfo,
+          dateOfBirth: person.dateOfBirth ? new Date(person.dateOfBirth).toLocaleDateString() : 'N/A',
+          gender: person.gender || 'N/A',
+          phone: person.phone || person.User?.phone || 'N/A',
+          email: person.email || person.User?.email || 'N/A',
+          schoolName: card.schoolName || currentSchool?.name || 'School Name',
+          schoolLogo: card.schoolLogo || currentSchool?.contact?.logo || '',
+          validUntil: validUntilValue,
+          cardNumber: card.cardNumber || 'N/A',
+          status: card.status || 'ACTIVE',
+          currentModule: person.currentModule || 'N/A',
+          currentYear: person.currentYear || 'N/A',
+          currentSemester: person.currentSemester || 'N/A',
+          department: isStudent ? 'N/A' : (person.department || 'N/A'),
+          jobTitle: isStudent ? 'N/A' : (person.jobTitle || 'N/A'),
+          staffType: isStudent ? 'N/A' : (person.staffType || 'N/A'),
+          personType: card.personType || 'STUDENT'
+        };
+      } else {
+        let entityName = card.entityName || card.programName || card.courseName || card.className || 'N/A';
+        
+        if (entityName === 'N/A' && card.entityId) {
+          const entity = getEntityById(card.entityId);
+          entityName = entity?.name || 'N/A';
+        }
+        
+        let validUntilValue = card.validUntil || card.expiryDate;
+        if (!validUntilValue || validUntilValue === 'N/A' || validUntilValue === 'undefined' || validUntilValue === undefined) {
+          const oneYearFromNow = new Date();
+          oneYearFromNow.setFullYear(oneYearFromNow.getFullYear() + 1);
+          validUntilValue = oneYearFromNow.toLocaleDateString();
+        }
+        
+        cardData = {
+          ...card,
+          personName: card.personName || card.name || 'Unknown',
+          idNumber: card.idNumber || card.admissionNumber || card.employeeId || 'N/A',
+          entityName: entityName,
+          schoolName: card.schoolName || currentSchool?.name || 'School Name',
+          schoolLogo: card.schoolLogo || currentSchool?.contact?.logo || '',
+          validUntil: validUntilValue,
+          cardNumber: card.cardNumber || 'N/A',
+          status: card.status || 'ACTIVE',
+          personType: card.personType || 'STUDENT'
+        };
+      }
+    }
+    
+    if (!cardData) {
+      alert('❌ No card data to print');
       return;
     }
 
-    setLoading(true);
-    try {
-      const res = await api.get(`/cards/${card.id}/print`);
-      
-      if (res.data.success && res.data.html) {
-        const printWindow = window.open('', '_blank', 'width=800,height=600');
-        if (!printWindow) {
-          alert('❌ Please allow popups for this site');
-          setLoading(false);
-          return;
-        }
-        
-        printWindow.document.write(res.data.html);
-        printWindow.document.close();
-        
-        setTimeout(() => {
-          printWindow.focus();
-          printWindow.print();
-        }, 500);
-      }
-    } catch (error) {
-      console.error('❌ Print error:', error);
-      alert('❌ Failed to print card');
-    } finally {
-      setLoading(false);
+    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    if (!printWindow) {
+      alert('❌ Please allow popups for this site');
+      return;
     }
+    
+    const entityLabel = getEntityLabel();
+    const personName = cardData.personName || 'Unknown';
+    const idNumber = cardData.idNumber || 'N/A';
+    const entityName = cardData.entityName || cardData.programName || cardData.courseName || cardData.className || 'N/A';
+    const moduleInfo = cardData.moduleInfo || (isTVET && cardData.currentModule && cardData.currentModule !== 'N/A' ? `Module ${cardData.currentModule}` : '');
+    const yearInfo = cardData.yearInfo || (cardData.currentYear && cardData.currentYear !== 'N/A' ? `Year ${cardData.currentYear}` : '');
+    const semesterInfo = cardData.semesterInfo || (cardData.currentSemester && cardData.currentSemester !== 'N/A' ? `Sem ${cardData.currentSemester}` : '');
+    const gender = cardData.gender || '';
+    const cardNumber = cardData.cardNumber || 'N/A';
+    const validUntil = cardData.validUntil || 'N/A';
+    const schoolName = cardData.schoolName || currentSchool?.name || 'School Name';
+    const schoolLogo = cardData.schoolLogo || currentSchool?.contact?.logo || '';
+    const primaryColor = cardTemplate.primaryColor || '#4f46e5';
+    const textColor = cardTemplate.textColor || '#ffffff';
+    const status = cardData.status || 'ACTIVE';
+    const firstLetter = personName ? personName.charAt(0).toUpperCase() : '👤';
+    const dateOfBirth = cardData.dateOfBirth || 'N/A';
+    const phone = cardData.phone || 'N/A';
+    const email = cardData.email || 'N/A';
+    const address = cardData.address || 'N/A';
+    const nationality = cardData.nationality || 'N/A';
+    const bloodGroup = cardData.bloodGroup || 'N/A';
+    const parentName = cardData.parentName || 'N/A';
+    const isStudent = cardData.personType === 'STUDENT';
+    
+    let detailsHtml = `
+      <div class="detail">📋 ID: <span>${idNumber}</span></div>
+    `;
+    
+    // Only show entity if checkbox is checked and person is student
+    if (isStudent) {
+      if (isTVET && cardTemplate.fields.programName) {
+        detailsHtml += `<div class="detail">${entityLabel}: <span>${entityName}</span></div>`;
+      } else if (isUniversity && cardTemplate.fields.courseName) {
+        detailsHtml += `<div class="detail">${entityLabel}: <span>${entityName}</span></div>`;
+      } else if (!isTVET && !isUniversity && cardTemplate.fields.className) {
+        detailsHtml += `<div class="detail">${entityLabel}: <span>${entityName}</span></div>`;
+      }
+    }
+    
+    // TVET specific fields - ONLY for students
+    if (isTVET && isStudent) {
+      if (cardTemplate.fields.currentModule && moduleInfo && moduleInfo !== 'N/A' && moduleInfo !== '') {
+        detailsHtml += `<div class="detail">📚 <span>${moduleInfo}</span></div>`;
+      }
+      if (cardTemplate.fields.currentYear && yearInfo && yearInfo !== 'N/A' && yearInfo !== '') {
+        detailsHtml += `<div class="detail">📅 <span>${yearInfo}</span></div>`;
+      }
+      if (cardTemplate.fields.currentSemester && semesterInfo && semesterInfo !== 'N/A' && semesterInfo !== '') {
+        detailsHtml += `<div class="detail">📅 <span>${semesterInfo}</span></div>`;
+      }
+    }
+    
+    // University specific fields - ONLY for students
+    if (isUniversity && isStudent) {
+      if (cardTemplate.fields.currentYear && yearInfo && yearInfo !== 'N/A' && yearInfo !== '') {
+        detailsHtml += `<div class="detail">📅 <span>${yearInfo}</span></div>`;
+      }
+      if (cardTemplate.fields.currentSemester && semesterInfo && semesterInfo !== 'N/A' && semesterInfo !== '') {
+        detailsHtml += `<div class="detail">📅 <span>${semesterInfo}</span></div>`;
+      }
+    }
+    
+    // Common fields based on checkbox selection
+    if (cardTemplate.fields.gender && gender && gender !== 'N/A' && gender !== '') {
+      detailsHtml += `<div class="detail">⚤ <span>${gender}</span></div>`;
+    }
+    if (cardTemplate.fields.dateOfBirth && dateOfBirth && dateOfBirth !== 'N/A') {
+      detailsHtml += `<div class="detail">📅 DOB: <span>${dateOfBirth}</span></div>`;
+    }
+    if (cardTemplate.fields.phone && phone && phone !== 'N/A') {
+      detailsHtml += `<div class="detail">📱 <span>${phone}</span></div>`;
+    }
+    if (cardTemplate.fields.email && email && email !== 'N/A') {
+      detailsHtml += `<div class="detail">✉️ <span>${email}</span></div>`;
+    }
+    if (cardTemplate.fields.bloodGroup && bloodGroup && bloodGroup !== 'N/A') {
+      detailsHtml += `<div class="detail">🩸 <span>${bloodGroup}</span></div>`;
+    }
+    if (cardTemplate.fields.nationality && nationality && nationality !== 'N/A') {
+      detailsHtml += `<div class="detail">🌍 <span>${nationality}</span></div>`;
+    }
+    if (cardTemplate.fields.parentName && parentName && parentName !== 'N/A') {
+      detailsHtml += `<div class="detail">👨‍👩‍👦 <span>${parentName}</span></div>`;
+    }
+    if (cardTemplate.fields.address && address && address !== 'N/A') {
+      detailsHtml += `<div class="detail">📍 <span>${address}</span></div>`;
+    }
+    if (cardTemplate.fields.validUntil && validUntil && validUntil !== 'N/A') {
+      detailsHtml += `<div class="detail">📅 Valid Until: <span>${validUntil}</span></div>`;
+    }
+    
+    // Staff fields - ONLY for staff
+    if (!isStudent) {
+      if (cardTemplate.fields.department && cardData.department && cardData.department !== 'N/A') {
+        detailsHtml += `<div class="detail">🏢 <span>${cardData.department}</span></div>`;
+      }
+      if (cardTemplate.fields.jobTitle && cardData.jobTitle && cardData.jobTitle !== 'N/A') {
+        detailsHtml += `<div class="detail">💼 <span>${cardData.jobTitle}</span></div>`;
+      }
+      if (cardTemplate.fields.staffType && cardData.staffType && cardData.staffType !== 'N/A') {
+        detailsHtml += `<div class="detail">📋 <span>${cardData.staffType}</span></div>`;
+      }
+    }
+    
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>ID Card - ${personName}</title>
+          <meta charset="UTF-8">
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { 
+              font-family: 'Arial', sans-serif; 
+              display: flex; 
+              justify-content: center; 
+              align-items: center; 
+              min-height: 100vh; 
+              background: #f0f0f0;
+              padding: 20px;
+            }
+            .card {
+              width: 85mm;
+              height: 54mm;
+              background: ${primaryColor};
+              border-radius: ${cardTemplate.borderRadius || '12px'};
+              padding: 15px;
+              color: ${textColor};
+              position: relative;
+              overflow: hidden;
+              box-shadow: ${cardTemplate.showShadow ? '0 8px 32px rgba(0,0,0,0.2)' : 'none'};
+              border: ${cardTemplate.showBorder ? `${cardTemplate.borderWidth} ${cardTemplate.borderStyle} ${cardTemplate.borderColor}` : 'none'};
+            }
+            .card::before {
+              content: '';
+              position: absolute;
+              top: -50%;
+              right: -30%;
+              width: 200px;
+              height: 200px;
+              background: rgba(255,255,255,0.05);
+              border-radius: 50%;
+            }
+            ${cardTemplate.showWatermark ? `
+              .watermark {
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%) rotate(-45deg);
+                font-size: 40px;
+                font-weight: bold;
+                opacity: ${cardTemplate.watermarkOpacity};
+                color: ${textColor};
+                white-space: nowrap;
+                pointer-events: none;
+              }
+            ` : ''}
+            .card-header {
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-bottom: 10px;
+              border-bottom: 2px solid rgba(255,255,255,0.2);
+              padding-bottom: 8px;
+            }
+            .school-name {
+              font-size: 14px;
+              font-weight: bold;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+            }
+            .school-motto {
+              font-size: 8px;
+              opacity: 0.7;
+              font-style: italic;
+            }
+            .logo {
+              width: 40px;
+              height: 40px;
+              border-radius: 50%;
+              background: white;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 20px;
+              font-weight: bold;
+              color: ${primaryColor};
+              overflow: hidden;
+            }
+            .logo img {
+              width: 100%;
+              height: 100%;
+              object-fit: cover;
+            }
+            .card-body {
+              display: flex;
+              flex-direction: ${cardTemplate.layout === 'vertical' ? 'column' : 'row'};
+              gap: 12px;
+              align-items: center;
+            }
+            .photo {
+              width: 70px;
+              height: 70px;
+              border-radius: 50%;
+              background: rgba(255,255,255,0.2);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 28px;
+              font-weight: bold;
+              border: 3px solid rgba(255,255,255,0.4);
+              flex-shrink: 0;
+            }
+            .info {
+              flex: 1;
+              width: 100%;
+            }
+            .info .name {
+              font-size: 16px;
+              font-weight: bold;
+              margin-bottom: 4px;
+            }
+            .info .detail {
+              font-size: 11px;
+              opacity: 0.9;
+              margin-bottom: 2px;
+            }
+            .info .detail span {
+              opacity: 0.7;
+            }
+            .card-footer {
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-top: 10px;
+              padding-top: 8px;
+              border-top: 1px solid rgba(255,255,255,0.2);
+              font-size: 8px;
+              opacity: 0.8;
+            }
+            .status-badge {
+              position: absolute;
+              top: 10px;
+              right: 10px;
+              background: rgba(255,255,255,0.2);
+              padding: 2px 10px;
+              border-radius: 20px;
+              font-size: 8px;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+            }
+            @media print {
+              body { background: white; padding: 0; }
+              .card { box-shadow: none; border: 1px solid #ddd; }
+            }
+            .card-title {
+              text-align: center;
+              font-size: 10px;
+              font-weight: bold;
+              text-transform: uppercase;
+              letter-spacing: 2px;
+              opacity: 0.8;
+              margin-bottom: 8px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            ${cardTemplate.showStatusBadge ? `<div class="status-badge">${status}</div>` : ''}
+            ${cardTemplate.showWatermark ? `<div class="watermark">${cardTemplate.watermarkText}</div>` : ''}
+            
+            <div class="card-header">
+              <div>
+                <div class="school-name">${schoolName}</div>
+                ${cardTemplate.showSchoolMotto && schoolName ? `<div class="school-motto">${schoolName}</div>` : ''}
+              </div>
+              ${cardTemplate.showSchoolLogo ? `
+                <div class="logo">
+                  ${schoolLogo ? `<img src="${schoolLogo}" alt="Logo">` : '🏫'}
+                </div>
+              ` : ''}
+            </div>
+            
+            <div class="card-title">${cardTemplate.cardTitle}</div>
+            
+            <div class="card-body">
+              ${cardTemplate.showStudentPhoto ? `
+                <div class="photo">${firstLetter}</div>
+              ` : ''}
+              <div class="info">
+                <div class="name">${personName}</div>
+                ${detailsHtml}
+              </div>
+            </div>
+            
+            <div class="card-footer">
+              <div>${cardTemplate.validityText}: ${validUntil}</div>
+              ${cardTemplate.showCardNumber ? `<div>🆔 ${cardNumber}</div>` : ''}
+            </div>
+          </div>
+          <script>
+            window.onload = function() {
+              setTimeout(function() {
+                window.print();
+              }, 500);
+            };
+          </script>
+        </body>
+      </html>
+    `;
+    
+    printWindow.document.write(html);
+    printWindow.document.close();
   };
 
   // ==================== DELETE CARD ====================
@@ -41346,7 +45749,10 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
 
   // ==================== TEMPLATE FUNCTIONS ====================
   const saveTemplate = () => {
-    localStorage.setItem('cardTemplate', JSON.stringify(cardTemplate));
+    const templateToSave = {
+      ...cardTemplate,
+    };
+    localStorage.setItem('cardTemplate', JSON.stringify(templateToSave));
     alert('✅ Template saved successfully!');
     setShowDesignModal(false);
   };
@@ -41355,7 +45761,15 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
     const saved = localStorage.getItem('cardTemplate');
     if (saved) {
       try {
-        setCardTemplate(JSON.parse(saved));
+        const parsed = JSON.parse(saved);
+        const currentFields = getDefaultFieldState();
+        setCardTemplate({
+          ...parsed,
+          fields: {
+            ...currentFields,
+            ...parsed.fields
+          }
+        });
         alert('✅ Template loaded successfully!');
       } catch (error) {
         alert('❌ Failed to load template');
@@ -41367,9 +45781,10 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
 
   const resetTemplate = () => {
     if (!window.confirm('Reset template to default?')) return;
+    const newFields = getDefaultFieldState();
     setCardTemplate({
       schoolName: currentSchool?.name || 'School Name',
-      schoolMotto: currentSchool?.motto || 'Excellence in Education',
+      schoolMotto: currentSchool?.motto || '',
       schoolAddress: currentSchool?.contact?.address || '',
       schoolPhone: currentSchool?.contact?.phone || '',
       schoolEmail: currentSchool?.contact?.email || '',
@@ -41387,37 +45802,13 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
       showSchoolMotto: true,
       showSchoolAddress: false,
       showStudentPhoto: true,
-      showQRCode: true,
+      showQRCode: false,
       showBarcode: false,
       showWatermark: false,
       showBorder: true,
       showShadow: true,
-      fields: {
-        fullName: true,
-        admissionNumber: true,
-        className: true,
-        department: true,
-        dateOfBirth: true,
-        gender: true,
-        phone: true,
-        email: true,
-        address: true,
-        nationality: true,
-        religion: true,
-        bloodGroup: true,
-        parentName: true,
-        parentPhone: true,
-        emergencyContact: true,
-        validUntil: true,
-        issueDate: true,
-        idNumber: true,
-        studentId: true,
-        staffId: true,
-        employeeId: true,
-        jobTitle: true,
-        staffType: true
-      },
-      cardTitle: 'IDENTITY CARD',
+      fields: newFields,
+      cardTitle: 'ID CARD',
       cardSubtitle: 'Official School Identification',
       footerText: 'This card is the property of the school',
       validityText: 'Valid until',
@@ -41439,7 +45830,7 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
       inactiveStatusText: 'INACTIVE',
       showCardNumber: true,
       showGeneratedDate: true,
-      showPrintButton: true
+      showPrintButton: true,
     });
     alert('✅ Template reset to default');
   };
@@ -41475,13 +45866,35 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
   };
 
   const getPersonName = (card) => {
+    if (!card) return 'Unknown';
     if (card.personType === 'STUDENT') {
-      const student = students.find(s => s.id === card.personId);
+      const student = students?.find(s => s.id === card.personId);
       return student ? `${student.firstName} ${student.lastName}` : 'Unknown';
-    } else {
-      const staffMember = staff.find(s => s.id === card.personId);
-      return staffMember ? `${staffMember.User?.firstName} ${staffMember.User?.lastName}` : 'Unknown';
     }
+    const staffMember = staff?.find(s => s.id === card.personId);
+    return staffMember ? `${staffMember.User?.firstName} ${staffMember.User?.lastName}` : 'Unknown';
+  };
+
+  const getEntityDisplay = (card) => {
+    if (!card) return 'N/A';
+    if (card.personType === 'STUDENT') {
+      let entity = card.programName || card.courseName || card.className || card.entityName;
+      
+      if ((!entity || entity === 'N/A') && card.personId) {
+        const student = students?.find(s => s.id === card.personId);
+        if (student) {
+          entity = getEntityName(student, 'student');
+        }
+      }
+      
+      if ((!entity || entity === 'N/A') && card.entityId) {
+        const entityObj = getEntityById(card.entityId);
+        entity = entityObj?.name || 'N/A';
+      }
+      
+      return entity || 'N/A';
+    }
+    return card.department || card.entityName || 'N/A';
   };
 
   // ==================== LOAD DATA ====================
@@ -41490,10 +45903,242 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
     const saved = localStorage.getItem('cardTemplate');
     if (saved) {
       try {
-        setCardTemplate(JSON.parse(saved));
+        const parsed = JSON.parse(saved);
+        const currentFields = getDefaultFieldState();
+        setCardTemplate({
+          ...parsed,
+          fields: {
+            ...currentFields,
+            ...parsed.fields
+          }
+        });
       } catch (error) {}
     }
   }, []);
+
+  // ==================== FILTER CARDS ====================
+  const filteredCards = cards.filter(card => {
+    const name = getPersonName(card).toLowerCase();
+    const search = searchTerm.toLowerCase();
+    const matchesSearch = name.includes(search);
+    const matchesStatus = !filterStatus || card.status === filterStatus;
+    const matchesType = !filterType || card.personType === filterType;
+    return matchesSearch && matchesStatus && matchesType;
+  });
+
+  // ==================== GET DYNAMIC FIELD GROUPS ====================
+  const getFieldGroups = () => {
+    const dynamicFields = getDynamicFields();
+    const groups = {
+      'Student & Staff': [],
+      'Student': [],
+      'Staff': [],
+      'Parent': []
+    };
+    
+    Object.keys(dynamicFields).forEach(key => {
+      const field = dynamicFields[key];
+      if (groups[field.category]) {
+        groups[field.category].push({ key, ...field });
+      }
+    });
+    
+    return groups;
+  };
+
+  // ==================== RENDER LIVE PREVIEW CARD ====================
+  const renderLivePreview = () => {
+    const entityLabel = getEntityLabel();
+    const name = livePreviewData.name || 'John Doe';
+    const id = livePreviewData.id || 'ADM-2024-001';
+    const entity = livePreviewData.entity || 'Mechanical Engineering';
+    const module = livePreviewData.module || 'Module 1';
+    const year = livePreviewData.year || 'Year 1';
+    const semester = livePreviewData.semester || 'Sem 1';
+    const dob = livePreviewData.dob || '01/01/2010';
+    const gender = livePreviewData.gender || 'Male';
+    const phone = livePreviewData.phone || '0712345678';
+    const email = livePreviewData.email || 'student@school.com';
+    const bloodGroup = livePreviewData.bloodGroup || 'O+';
+    const nationality = livePreviewData.nationality || 'Kenyan';
+    const address = livePreviewData.address || '123 School Road, Nairobi';
+    const parentName = livePreviewData.parentName || 'Jane Doe';
+    const validUntil = livePreviewData.validUntil || '12/31/2025';
+    const firstLetter = name ? name.charAt(0).toUpperCase() : '👤';
+    const isStudent = true; // For preview we show student view
+
+    let detailsHtml = [];
+    
+    // Always show ID
+    detailsHtml.push(
+      <div key="id" className="text-[10px] opacity-80">📋 ID: <span className="opacity-60">{id}</span></div>
+    );
+    
+    // Entity - ONLY show if checkbox is checked
+    if (isTVET && cardTemplate.fields.programName) {
+      detailsHtml.push(
+        <div key="entity" className="text-[10px] opacity-80 font-medium">{entityLabel}: <span className="opacity-60">{entity}</span></div>
+      );
+    } else if (isUniversity && cardTemplate.fields.courseName) {
+      detailsHtml.push(
+        <div key="entity" className="text-[10px] opacity-80 font-medium">{entityLabel}: <span className="opacity-60">{entity}</span></div>
+      );
+    } else if (!isTVET && !isUniversity && cardTemplate.fields.className) {
+      detailsHtml.push(
+        <div key="entity" className="text-[10px] opacity-80 font-medium">{entityLabel}: <span className="opacity-60">{entity}</span></div>
+      );
+    }
+    
+    // TVET specific fields
+    if (isTVET) {
+      if (cardTemplate.fields.currentModule) {
+        detailsHtml.push(<div key="module" className="text-[10px] opacity-80">📚 <span className="opacity-60">{module}</span></div>);
+      }
+      if (cardTemplate.fields.currentYear) {
+        detailsHtml.push(<div key="year" className="text-[10px] opacity-80">📅 <span className="opacity-60">{year}</span></div>);
+      }
+      if (cardTemplate.fields.currentSemester) {
+        detailsHtml.push(<div key="semester" className="text-[10px] opacity-80">📅 <span className="opacity-60">{semester}</span></div>);
+      }
+    }
+    
+    // University specific fields
+    if (isUniversity) {
+      if (cardTemplate.fields.currentYear) {
+        detailsHtml.push(<div key="year" className="text-[10px] opacity-80">📅 <span className="opacity-60">{year}</span></div>);
+      }
+      if (cardTemplate.fields.currentSemester) {
+        detailsHtml.push(<div key="semester" className="text-[10px] opacity-80">📅 <span className="opacity-60">{semester}</span></div>);
+      }
+    }
+    
+    // Common fields based on checkbox selection
+    if (cardTemplate.fields.gender) {
+      detailsHtml.push(<div key="gender" className="text-[10px] opacity-80">⚤ <span className="opacity-60">{gender}</span></div>);
+    }
+    if (cardTemplate.fields.dateOfBirth) {
+      detailsHtml.push(<div key="dob" className="text-[10px] opacity-80">📅 DOB: <span className="opacity-60">{dob}</span></div>);
+    }
+    if (cardTemplate.fields.phone) {
+      detailsHtml.push(<div key="phone" className="text-[10px] opacity-80">📱 <span className="opacity-60">{phone}</span></div>);
+    }
+    if (cardTemplate.fields.email) {
+      detailsHtml.push(<div key="email" className="text-[10px] opacity-80">✉️ <span className="opacity-60">{email}</span></div>);
+    }
+    if (cardTemplate.fields.bloodGroup) {
+      detailsHtml.push(<div key="blood" className="text-[10px] opacity-80">🩸 <span className="opacity-60">{bloodGroup}</span></div>);
+    }
+    if (cardTemplate.fields.nationality) {
+      detailsHtml.push(<div key="nationality" className="text-[10px] opacity-80">🌍 <span className="opacity-60">{nationality}</span></div>);
+    }
+    if (cardTemplate.fields.address) {
+      detailsHtml.push(<div key="address" className="text-[10px] opacity-80">📍 <span className="opacity-60">{address}</span></div>);
+    }
+    if (cardTemplate.fields.parentName) {
+      detailsHtml.push(<div key="parent" className="text-[10px] opacity-80">👨‍👩‍👦 <span className="opacity-60">{parentName}</span></div>);
+    }
+    if (cardTemplate.fields.validUntil) {
+      detailsHtml.push(<div key="validUntil" className="text-[10px] opacity-80">📅 Valid Until: <span className="opacity-60">{validUntil}</span></div>);
+    }
+
+    return (
+      <div 
+        className="p-4 rounded-lg mx-auto"
+        style={{
+          width: cardTemplate.cardSize === 'large' ? '320px' : cardTemplate.cardSize === 'compact' ? '240px' : '280px',
+          background: cardTemplate.primaryColor,
+          color: cardTemplate.textColor,
+          borderRadius: cardTemplate.cardShape === 'circle' ? '50%' : cardTemplate.borderRadius,
+          border: cardTemplate.showBorder ? `${cardTemplate.borderWidth} ${cardTemplate.borderStyle} ${cardTemplate.borderColor}` : 'none',
+          boxShadow: cardTemplate.showShadow ? '0 8px 32px rgba(0,0,0,0.2)' : 'none',
+          position: 'relative',
+          overflow: 'hidden',
+          margin: '0 auto',
+          transition: 'all 0.3s ease'
+        }}
+      >
+        {cardTemplate.showWatermark && (
+          <div 
+            style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%) rotate(-45deg)',
+              fontSize: '40px',
+              fontWeight: 'bold',
+              opacity: cardTemplate.watermarkOpacity,
+              color: cardTemplate.textColor,
+              whiteSpace: 'nowrap',
+              pointerEvents: 'none'
+            }}
+          >
+            {cardTemplate.watermarkText}
+          </div>
+        )}
+
+        {cardTemplate.showSchoolLogo && (
+          <div className="flex justify-center mb-2">
+            <div className="w-14 h-14 bg-white/20 rounded-full flex items-center justify-center text-3xl font-bold">
+              {cardTemplate.schoolLogo ? (
+                <img src={cardTemplate.schoolLogo} alt="Logo" className="w-full h-full object-cover rounded-full" />
+              ) : (
+                '🏫'
+              )}
+            </div>
+          </div>
+        )}
+
+        {cardTemplate.showSchoolName && (
+          <div className="text-center">
+            <div className="text-sm font-bold uppercase tracking-wider">
+              {cardTemplate.schoolName}
+            </div>
+            {cardTemplate.showSchoolMotto && cardTemplate.schoolMotto && (
+              <div className="text-[8px] opacity-70 italic">{cardTemplate.schoolMotto}</div>
+            )}
+          </div>
+        )}
+
+        <div className="border-t border-white/20 my-2"></div>
+
+        <div className="text-center text-[10px] font-bold uppercase tracking-wider opacity-80">
+          {cardTemplate.cardTitle || 'ID CARD'}
+        </div>
+
+        <div className={`flex ${cardTemplate.layout === 'vertical' ? 'flex-col' : 'flex-row'} gap-3 items-center my-2`}>
+          {cardTemplate.showStudentPhoto && (
+            <div className={`${cardTemplate.layout === 'vertical' ? 'w-20 h-20' : 'w-16 h-16'} bg-white/20 rounded-full flex items-center justify-center text-3xl font-bold flex-shrink-0 border-2 border-white/30`}>
+              {firstLetter}
+            </div>
+          )}
+          <div className={`${cardTemplate.layout === 'vertical' ? 'text-center' : 'flex-1'} w-full`}>
+            <div className={`font-bold ${cardTemplate.layout === 'vertical' ? 'text-lg' : 'text-base'}`}>{name}</div>
+            <div className="flex flex-col gap-0.5 mt-1">
+              {detailsHtml}
+            </div>
+          </div>
+        </div>
+
+        {cardTemplate.showStatusBadge && (
+          <div className="mt-2 text-center">
+            <span className="px-3 py-0.5 bg-green-500 text-white text-[8px] rounded-full font-bold uppercase">
+              {cardTemplate.activeStatusText || 'ACTIVE'}
+            </span>
+          </div>
+        )}
+
+        <div className="mt-2 pt-1 border-t border-white/20 text-center text-[8px] opacity-70">
+          {cardTemplate.footerText || 'This card is the property of the school'}
+        </div>
+
+        {cardTemplate.showCardNumber && (
+          <div className="text-center text-[6px] opacity-50 font-mono mt-1">
+            CARD-2024-0001
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // ==================== RENDER ====================
   return (
@@ -41501,33 +46146,33 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
       {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
 
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex flex-wrap justify-between items-center gap-2">
         <h2 className="text-2xl font-bold flex items-center gap-2">
           🏛️ Card Management
           <span className="text-sm font-normal text-gray-500">| {currentSchool?.name}</span>
         </h2>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setShowDesignModal(true)}
-            className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors flex items-center"
+            className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 text-sm"
           >
             <i className="fas fa-palette mr-2"></i>Design Template
           </button>
           <button
             onClick={loadTemplate}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm"
           >
             <i className="fas fa-upload mr-2"></i>Load Template
           </button>
           <button
             onClick={resetTemplate}
-            className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center"
+            className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 text-sm"
           >
             <i className="fas fa-undo mr-2"></i>Reset
           </button>
           <button
             onClick={fetchCards}
-            className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors flex items-center"
+            className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 text-sm"
           >
             <i className="fas fa-sync-alt mr-2"></i>Refresh
           </button>
@@ -41535,7 +46180,7 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white">
           <p className="text-sm opacity-90">Total Cards</p>
           <p className="text-3xl font-bold">{cards.length}</p>
@@ -41555,25 +46200,25 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
       </div>
 
       {/* Tabs */}
-      <div className="flex space-x-2 border-b">
+      <div className="flex flex-wrap space-x-2 border-b">
         <button
-          onClick={() => { setActiveTab('students'); setPersonType('student'); }}
+          onClick={() => { setActiveTab('students'); setFilterType(''); }}
           className={`px-4 py-2 font-medium transition-colors ${
             activeTab === 'students' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
           }`}
         >
-          <i className="fas fa-user-graduate mr-2"></i>Students ({students.length})
+          <i className="fas fa-user-graduate mr-2"></i>Students ({students?.length || 0})
         </button>
         <button
-          onClick={() => { setActiveTab('staff'); setPersonType('staff'); }}
+          onClick={() => { setActiveTab('staff'); setFilterType(''); }}
           className={`px-4 py-2 font-medium transition-colors ${
             activeTab === 'staff' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
           }`}
         >
-          <i className="fas fa-chalkboard-teacher mr-2"></i>Staff ({staff.length})
+          <i className="fas fa-chalkboard-teacher mr-2"></i>Staff ({staff?.length || 0})
         </button>
         <button
-          onClick={() => { setActiveTab('cards'); setPersonType('all'); }}
+          onClick={() => { setActiveTab('cards'); setFilterType(''); }}
           className={`px-4 py-2 font-medium transition-colors ${
             activeTab === 'cards' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
           }`}
@@ -41585,57 +46230,78 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
       {/* ===== STUDENTS TAB ===== */}
       {activeTab === 'students' && (
         <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <p className="text-sm text-gray-500">{students.length} students • Click "Generate" to create ID card</p>
+          <div className="flex flex-wrap justify-between items-center gap-2">
+            <p className="text-sm text-gray-500">{students?.length || 0} students • Click "Generate" to create ID card</p>
             <button
               onClick={() => bulkGenerate('students')}
-              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
+              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 text-sm"
             >
               <i className="fas fa-file-pdf mr-2"></i>Bulk Generate
             </button>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {students.slice(0, 30).map(student => {
-              const existingCard = cards.find(c => c.personId === student.id && c.personType === 'STUDENT');
-              return (
-                <div key={student.id} className="bg-white rounded-xl shadow-sm border p-4 hover:shadow-md transition-shadow">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center">
-                        <span className="text-xl font-bold text-indigo-600">{student.firstName?.[0]}{student.lastName?.[0]}</span>
+            {students && students.length > 0 ? (
+              students.slice(0, 30).map(student => {
+                const existingCard = cards.find(c => c.personId === student.id && c.personType === 'STUDENT');
+                const entityName = getEntityName(student, 'student');
+                const entityLabel = getEntityLabel();
+                
+                return (
+                  <div key={student.id} className="bg-white rounded-xl shadow-sm border p-4 hover:shadow-md transition-shadow">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center">
+                          <span className="text-xl font-bold text-indigo-600">
+                            {student.firstName?.[0]}{student.lastName?.[0]}
+                          </span>
+                        </div>
+                        <div>
+                          <h4 className="font-bold">{student.firstName} {student.lastName}</h4>
+                          <p className="text-sm text-gray-500">{student.admissionNumber}</p>
+                          <p className="text-xs text-gray-400">{entityLabel}: {entityName}</p>
+                          {isTVET && student.currentModule && (
+                            <p className="text-xs text-purple-500">Module {student.currentModule}</p>
+                          )}
+                          {isTVET && student.currentYear && (
+                            <p className="text-xs text-blue-500">Year {student.currentYear}</p>
+                          )}
+                          {isUniversity && student.currentYear && (
+                            <p className="text-xs text-green-500">Year {student.currentYear}</p>
+                          )}
+                        </div>
                       </div>
-                      <div>
-                        <h4 className="font-bold">{student.firstName} {student.lastName}</h4>
-                        <p className="text-sm text-gray-500">{student.admissionNumber}</p>
-                        <p className="text-xs text-gray-400">{student.Class?.name || 'No Class'}</p>
-                      </div>
+                      {existingCard && (
+                        <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(existingCard.status)}`}>
+                          {existingCard.status}
+                        </span>
+                      )}
                     </div>
-                    {existingCard && (
-                      <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(existingCard.status)}`}>
-                        {existingCard.status}
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-4 flex gap-2">
-                    <button
-                      onClick={() => generateCard(student, 'student')}
-                      className="flex-1 bg-indigo-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-indigo-700 transition-colors"
-                      disabled={loading}
-                    >
-                      <i className="fas fa-id-card mr-1"></i>Generate
-                    </button>
-                    {existingCard && (
+                    <div className="mt-4 flex gap-2">
                       <button
-                        onClick={() => printCard(existingCard)}
-                        className="bg-green-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-green-700 transition-colors"
+                        onClick={() => openValidityModal(student, 'student')}
+                        className="flex-1 bg-indigo-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-indigo-700"
+                        disabled={loading}
                       >
-                        <i className="fas fa-print"></i>
+                        <i className="fas fa-id-card mr-1"></i>Generate
                       </button>
-                    )}
+                      {existingCard && (
+                        <button
+                          onClick={() => printCard(existingCard)}
+                          className="bg-green-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-green-700"
+                        >
+                          <i className="fas fa-print"></i>
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            ) : (
+              <div className="col-span-3 text-center py-8 text-gray-500">
+                <i className="fas fa-users text-4xl text-gray-300 mb-2"></i>
+                <p>No students found</p>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -41643,57 +46309,66 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
       {/* ===== STAFF TAB ===== */}
       {activeTab === 'staff' && (
         <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <p className="text-sm text-gray-500">{staff.length} staff members</p>
+          <div className="flex flex-wrap justify-between items-center gap-2">
+            <p className="text-sm text-gray-500">{staff?.length || 0} staff members</p>
             <button
               onClick={() => bulkGenerate('staff')}
-              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
+              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 text-sm"
             >
               <i className="fas fa-file-pdf mr-2"></i>Bulk Generate
             </button>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {staff.map(member => {
-              const existingCard = cards.find(c => c.personId === member.id && c.personType === 'STAFF');
-              return (
-                <div key={member.id} className="bg-white rounded-xl shadow-sm border p-4 hover:shadow-md transition-shadow">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
-                        <span className="text-xl font-bold text-purple-600">{member.User?.firstName?.[0]}{member.User?.lastName?.[0]}</span>
+            {staff && staff.length > 0 ? (
+              staff.map(member => {
+                const existingCard = cards.find(c => c.personId === member.id && c.personType === 'STAFF');
+                return (
+                  <div key={member.id} className="bg-white rounded-xl shadow-sm border p-4 hover:shadow-md transition-shadow">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
+                          <span className="text-xl font-bold text-purple-600">
+                            {member.User?.firstName?.[0]}{member.User?.lastName?.[0]}
+                          </span>
+                        </div>
+                        <div>
+                          <h4 className="font-bold">{member.User?.firstName} {member.User?.lastName}</h4>
+                          <p className="text-sm text-gray-500">{member.employeeId || 'N/A'}</p>
+                          <p className="text-xs text-gray-400">{member.department || 'No Department'}</p>
+                        </div>
                       </div>
-                      <div>
-                        <h4 className="font-bold">{member.User?.firstName} {member.User?.lastName}</h4>
-                        <p className="text-sm text-gray-500">{member.employeeId || 'N/A'}</p>
-                        <p className="text-xs text-gray-400">{member.department || 'No Department'}</p>
-                      </div>
+                      {existingCard && (
+                        <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(existingCard.status)}`}>
+                          {existingCard.status}
+                        </span>
+                      )}
                     </div>
-                    {existingCard && (
-                      <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(existingCard.status)}`}>
-                        {existingCard.status}
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-4 flex gap-2">
-                    <button
-                      onClick={() => generateCard(member, 'staff')}
-                      className="flex-1 bg-indigo-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-indigo-700 transition-colors"
-                      disabled={loading}
-                    >
-                      <i className="fas fa-id-card mr-1"></i>Generate
-                    </button>
-                    {existingCard && (
+                    <div className="mt-4 flex gap-2">
                       <button
-                        onClick={() => printCard(existingCard)}
-                        className="bg-green-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-green-700 transition-colors"
+                        onClick={() => openValidityModal(member, 'staff')}
+                        className="flex-1 bg-indigo-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-indigo-700"
+                        disabled={loading}
                       >
-                        <i className="fas fa-print"></i>
+                        <i className="fas fa-id-card mr-1"></i>Generate
                       </button>
-                    )}
+                      {existingCard && (
+                        <button
+                          onClick={() => printCard(existingCard)}
+                          className="bg-green-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-green-700"
+                        >
+                          <i className="fas fa-print"></i>
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            ) : (
+              <div className="col-span-3 text-center py-8 text-gray-500">
+                <i className="fas fa-users text-4xl text-gray-300 mb-2"></i>
+                <p>No staff found</p>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -41701,18 +46376,31 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
       {/* ===== ALL CARDS TAB ===== */}
       {activeTab === 'cards' && (
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-          <div className="p-4 bg-gray-50 border-b flex justify-between items-center">
-            <h3 className="font-semibold text-lg">All Cards</h3>
-            <div className="flex gap-2">
-              <input type="text" placeholder="Search by name..." className="px-3 py-2 border rounded-lg text-sm" />
-              <select className="px-3 py-2 border rounded-lg text-sm">
+          <div className="p-4 bg-gray-50 border-b">
+            <div className="flex flex-wrap gap-2">
+              <input
+                type="text"
+                placeholder="Search by name..."
+                className="flex-1 px-3 py-2 border rounded-lg text-sm min-w-[200px]"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+              <select
+                className="px-3 py-2 border rounded-lg text-sm"
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+              >
                 <option value="">All Status</option>
                 <option value="ACTIVE">Active</option>
                 <option value="INACTIVE">Inactive</option>
                 <option value="SUSPENDED">Suspended</option>
                 <option value="EXPIRED">Expired</option>
               </select>
-              <select className="px-3 py-2 border rounded-lg text-sm">
+              <select
+                className="px-3 py-2 border rounded-lg text-sm"
+                value={filterType}
+                onChange={(e) => setFilterType(e.target.value)}
+              >
                 <option value="">All Types</option>
                 <option value="STUDENT">Student</option>
                 <option value="STAFF">Staff</option>
@@ -41726,6 +46414,7 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Card #</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Holder</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Type</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Entity</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Issued</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Expires</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">Status</th>
@@ -41733,16 +46422,16 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {cards.length === 0 ? (
+                {filteredCards.length === 0 ? (
                   <tr>
-                    <td colSpan="7" className="px-4 py-12 text-center text-gray-500">
+                    <td colSpan="8" className="px-4 py-12 text-center text-gray-500">
                       <i className="fas fa-id-card text-4xl text-gray-300 mb-3 block"></i>
-                      <p className="text-lg">No cards generated yet</p>
-                      <p className="text-sm text-gray-400 mt-1">Go to Students or Staff tab to generate</p>
+                      <p className="text-lg">No cards found</p>
+                      <p className="text-sm text-gray-400 mt-1">Go to Students or Staff tab to generate cards</p>
                     </td>
                   </tr>
                 ) : (
-                  cards.map(card => (
+                  filteredCards.map(card => (
                     <tr key={card.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-4 py-3 font-mono text-sm">{card.cardNumber || 'N/A'}</td>
                       <td className="px-4 py-3 font-medium">{getPersonName(card)}</td>
@@ -41753,6 +46442,7 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
                           {card.personType}
                         </span>
                       </td>
+                      <td className="px-4 py-3 text-sm">{getEntityDisplay(card)}</td>
                       <td className="px-4 py-3">{new Date(card.issuedDate).toLocaleDateString()}</td>
                       <td className="px-4 py-3">{card.expiryDate ? new Date(card.expiryDate).toLocaleDateString() : 'N/A'}</td>
                       <td className="px-4 py-3">
@@ -41764,13 +46454,13 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
                         <div className="flex gap-2">
                           <button
                             onClick={() => printCard(card)}
-                            className="bg-indigo-600 text-white px-3 py-1 rounded text-sm hover:bg-indigo-700 transition-colors"
+                            className="bg-indigo-600 text-white px-3 py-1 rounded text-sm hover:bg-indigo-700"
                           >
                             <i className="fas fa-print mr-1"></i>Print
                           </button>
                           <button
                             onClick={() => deleteCard(card.id)}
-                            className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700 transition-colors"
+                            className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700"
                           >
                             <i className="fas fa-trash mr-1"></i>
                           </button>
@@ -41781,6 +46471,53 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== VALIDITY DATE MODAL ==================== */}
+      {showValidityModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold">Set Card Validity</h3>
+              <button onClick={() => { setShowValidityModal(false); setPendingGenerate(null); }} className="text-gray-500 hover:text-gray-700">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">
+                Set the expiry date for this ID card. 
+              </p>
+              
+              <div>
+                <label className="block text-sm font-medium mb-1">Valid Until Date</label>
+                <input
+                  type="date"
+                  value={validUntilDate}
+                  onChange={(e) => setValidUntilDate(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg"
+                  min={new Date().toISOString().split('T')[0]}
+                />
+              </div>
+              
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={generateCardWithValidity}
+                  className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700"
+                  disabled={!validUntilDate}
+                >
+                  <i className="fas fa-check mr-2"></i>Generate Card
+                </button>
+                <button
+                  onClick={() => { setShowValidityModal(false); setPendingGenerate(null); }}
+                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -41798,8 +46535,8 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Left - Controls */}
-              <div className="space-y-4">
-                {/* ===== SCHOOL INFORMATION ===== */}
+              <div className="space-y-4 overflow-auto max-h-[80vh]">
+                {/* School Information */}
                 <div className="border-b pb-3">
                   <h4 className="font-semibold text-lg mb-3">🏫 School Information</h4>
                   <div className="grid grid-cols-2 gap-3">
@@ -41822,36 +46559,19 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
                       />
                     </div>
                     <div className="col-span-2">
-                      <label className="block text-sm font-medium mb-1">School Address</label>
+                      <label className="block text-sm font-medium mb-1">School Logo URL</label>
                       <input
                         type="text"
-                        value={cardTemplate.schoolAddress}
-                        onChange={(e) => setCardTemplate({...cardTemplate, schoolAddress: e.target.value})}
+                        value={cardTemplate.schoolLogo}
+                        onChange={(e) => setCardTemplate({...cardTemplate, schoolLogo: e.target.value})}
                         className="w-full px-3 py-2 border rounded-lg"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-1">Phone</label>
-                      <input
-                        type="text"
-                        value={cardTemplate.schoolPhone}
-                        onChange={(e) => setCardTemplate({...cardTemplate, schoolPhone: e.target.value})}
-                        className="w-full px-3 py-2 border rounded-lg"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-1">Email</label>
-                      <input
-                        type="text"
-                        value={cardTemplate.schoolEmail}
-                        onChange={(e) => setCardTemplate({...cardTemplate, schoolEmail: e.target.value})}
-                        className="w-full px-3 py-2 border rounded-lg"
+                        placeholder="https://example.com/logo.png"
                       />
                     </div>
                   </div>
                 </div>
 
-                {/* ===== COLORS ===== */}
+                {/* Colors */}
                 <div className="border-b pb-3">
                   <h4 className="font-semibold text-lg mb-3">🎨 Colors</h4>
                   <div className="grid grid-cols-2 gap-3">
@@ -41883,24 +46603,6 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium mb-1">Background</label>
-                      <input
-                        type="color"
-                        value={cardTemplate.backgroundColor}
-                        onChange={(e) => setCardTemplate({...cardTemplate, backgroundColor: e.target.value})}
-                        className="w-full h-10 border rounded-lg cursor-pointer"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-1">Accent</label>
-                      <input
-                        type="color"
-                        value={cardTemplate.accentColor}
-                        onChange={(e) => setCardTemplate({...cardTemplate, accentColor: e.target.value})}
-                        className="w-full h-10 border rounded-lg cursor-pointer"
-                      />
-                    </div>
-                    <div>
                       <label className="block text-sm font-medium mb-1">Border</label>
                       <input
                         type="color"
@@ -41912,7 +46614,7 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
                   </div>
                 </div>
 
-                {/* ===== LAYOUT & ELEMENTS ===== */}
+                {/* Layout */}
                 <div className="border-b pb-3">
                   <h4 className="font-semibold text-lg mb-3">📐 Layout & Elements</h4>
                   <div className="grid grid-cols-2 gap-3">
@@ -41934,9 +46636,9 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
                         onChange={(e) => setCardTemplate({...cardTemplate, cardSize: e.target.value})}
                         className="w-full px-3 py-2 border rounded-lg"
                       >
-                        <option value="standard">Standard (86x54mm)</option>
-                        <option value="large">Large (100x70mm)</option>
-                        <option value="compact">Compact (70x45mm)</option>
+                        <option value="standard">Standard</option>
+                        <option value="large">Large</option>
+                        <option value="compact">Compact</option>
                       </select>
                     </div>
                     <div>
@@ -41967,7 +46669,7 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
                   </div>
                 </div>
 
-                {/* ===== ELEMENTS TO SHOW ===== */}
+                {/* Elements */}
                 <div className="border-b pb-3">
                   <h4 className="font-semibold text-lg mb-3">👁️ Elements to Show</h4>
                   <div className="grid grid-cols-2 gap-2">
@@ -41984,20 +46686,8 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
                       <span className="text-sm">School Motto</span>
                     </label>
                     <label className="flex items-center space-x-2">
-                      <input type="checkbox" checked={cardTemplate.showSchoolAddress} onChange={(e) => setCardTemplate({...cardTemplate, showSchoolAddress: e.target.checked})} className="rounded" />
-                      <span className="text-sm">School Address</span>
-                    </label>
-                    <label className="flex items-center space-x-2">
                       <input type="checkbox" checked={cardTemplate.showStudentPhoto} onChange={(e) => setCardTemplate({...cardTemplate, showStudentPhoto: e.target.checked})} className="rounded" />
-                      <span className="text-sm">Student/Staff Photo</span>
-                    </label>
-                    <label className="flex items-center space-x-2">
-                      <input type="checkbox" checked={cardTemplate.showQRCode} onChange={(e) => setCardTemplate({...cardTemplate, showQRCode: e.target.checked})} className="rounded" />
-                      <span className="text-sm">QR Code</span>
-                    </label>
-                    <label className="flex items-center space-x-2">
-                      <input type="checkbox" checked={cardTemplate.showBarcode} onChange={(e) => setCardTemplate({...cardTemplate, showBarcode: e.target.checked})} className="rounded" />
-                      <span className="text-sm">Barcode</span>
+                      <span className="text-sm">Photo</span>
                     </label>
                     <label className="flex items-center space-x-2">
                       <input type="checkbox" checked={cardTemplate.showWatermark} onChange={(e) => setCardTemplate({...cardTemplate, showWatermark: e.target.checked})} className="rounded" />
@@ -42019,35 +46709,41 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
                       <input type="checkbox" checked={cardTemplate.showCardNumber} onChange={(e) => setCardTemplate({...cardTemplate, showCardNumber: e.target.checked})} className="rounded" />
                       <span className="text-sm">Card Number</span>
                     </label>
-                    <label className="flex items-center space-x-2">
-                      <input type="checkbox" checked={cardTemplate.showGeneratedDate} onChange={(e) => setCardTemplate({...cardTemplate, showGeneratedDate: e.target.checked})} className="rounded" />
-                      <span className="text-sm">Generated Date</span>
-                    </label>
                   </div>
                 </div>
 
-                {/* ===== FIELDS TO DISPLAY ===== */}
+                {/* Dynamic Fields */}
                 <div className="border-b pb-3">
                   <h4 className="font-semibold text-lg mb-3">📋 Fields to Display</h4>
-                  <div className="grid grid-cols-2 gap-1">
-                    {Object.entries(cardTemplate.fields).map(([key, value]) => (
-                      <label key={key} className="flex items-center space-x-2">
-                        <input
-                          type="checkbox"
-                          checked={value}
-                          onChange={(e) => setCardTemplate({
-                            ...cardTemplate,
-                            fields: { ...cardTemplate.fields, [key]: e.target.checked }
-                          })}
-                          className="rounded"
-                        />
-                        <span className="text-sm capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}</span>
-                      </label>
-                    ))}
+                  <div className="space-y-3">
+                    {Object.entries(getFieldGroups()).map(([category, fields]) => {
+                      if (fields.length === 0) return null;
+                      return (
+                        <div key={category}>
+                          <h5 className="text-sm font-medium text-gray-600 mb-1">{category}</h5>
+                          <div className="grid grid-cols-2 gap-1 pl-2">
+                            {fields.map(({ key, label }) => (
+                              <label key={key} className="flex items-center space-x-2">
+                                <input
+                                  type="checkbox"
+                                  checked={cardTemplate.fields[key] || false}
+                                  onChange={(e) => setCardTemplate({
+                                    ...cardTemplate,
+                                    fields: { ...cardTemplate.fields, [key]: e.target.checked }
+                                  })}
+                                  className="rounded"
+                                />
+                                <span className="text-sm">{label}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
-                {/* ===== TEXT ===== */}
+                {/* Card Text */}
                 <div className="border-b pb-3">
                   <h4 className="font-semibold text-lg mb-3">✏️ Card Text</h4>
                   <div className="grid grid-cols-2 gap-3">
@@ -42057,15 +46753,6 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
                         type="text"
                         value={cardTemplate.cardTitle}
                         onChange={(e) => setCardTemplate({...cardTemplate, cardTitle: e.target.value})}
-                        className="w-full px-3 py-2 border rounded-lg"
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <label className="block text-sm font-medium mb-1">Card Subtitle</label>
-                      <input
-                        type="text"
-                        value={cardTemplate.cardSubtitle}
-                        onChange={(e) => setCardTemplate({...cardTemplate, cardSubtitle: e.target.value})}
                         className="w-full px-3 py-2 border rounded-lg"
                       />
                     </div>
@@ -42088,52 +46775,6 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium mb-1">Issued Text</label>
-                      <input
-                        type="text"
-                        value={cardTemplate.issuedText}
-                        onChange={(e) => setCardTemplate({...cardTemplate, issuedText: e.target.value})}
-                        className="w-full px-3 py-2 border rounded-lg"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* ===== WATERMARK ===== */}
-                {cardTemplate.showWatermark && (
-                  <div className="border-b pb-3">
-                    <h4 className="font-semibold text-lg mb-3">💧 Watermark</h4>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-sm font-medium mb-1">Watermark Text</label>
-                        <input
-                          type="text"
-                          value={cardTemplate.watermarkText}
-                          onChange={(e) => setCardTemplate({...cardTemplate, watermarkText: e.target.value})}
-                          className="w-full px-3 py-2 border rounded-lg"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium mb-1">Opacity</label>
-                        <input
-                          type="range"
-                          min="0"
-                          max="30"
-                          value={cardTemplate.watermarkOpacity * 100}
-                          onChange={(e) => setCardTemplate({...cardTemplate, watermarkOpacity: e.target.value / 100})}
-                          className="w-full"
-                        />
-                        <span className="text-xs text-gray-500">{Math.round(cardTemplate.watermarkOpacity * 100)}%</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* ===== STATUS ===== */}
-                <div className="border-b pb-3">
-                  <h4 className="font-semibold text-lg mb-3">🏷️ Status</h4>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
                       <label className="block text-sm font-medium mb-1">Active Status Text</label>
                       <input
                         type="text"
@@ -42142,29 +46783,180 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
                         className="w-full px-3 py-2 border rounded-lg"
                       />
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-1">Inactive Status Text</label>
+                  </div>
+                </div>
+
+                {/* Preview Data */}
+                <div className="border-b pb-3">
+                  <h4 className="font-semibold text-lg mb-3">📝 Preview Data (Edit to see changes)</h4>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="col-span-2">
+                      <label className="block text-sm font-medium mb-1">Full Name</label>
                       <input
                         type="text"
-                        value={cardTemplate.inactiveStatusText}
-                        onChange={(e) => setCardTemplate({...cardTemplate, inactiveStatusText: e.target.value})}
+                        value={livePreviewData.name}
+                        onChange={(e) => setLivePreviewData({...livePreviewData, name: e.target.value})}
                         className="w-full px-3 py-2 border rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">ID Number</label>
+                      <input
+                        type="text"
+                        value={livePreviewData.id}
+                        onChange={(e) => setLivePreviewData({...livePreviewData, id: e.target.value})}
+                        className="w-full px-3 py-2 border rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">{getEntityLabel()} Name</label>
+                      <input
+                        type="text"
+                        value={livePreviewData.entity}
+                        onChange={(e) => setLivePreviewData({...livePreviewData, entity: e.target.value})}
+                        className="w-full px-3 py-2 border rounded-lg"
+                      />
+                    </div>
+                    {isTVET && (
+                      <>
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Module</label>
+                          <input
+                            type="text"
+                            value={livePreviewData.module}
+                            onChange={(e) => setLivePreviewData({...livePreviewData, module: e.target.value})}
+                            className="w-full px-3 py-2 border rounded-lg"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Year</label>
+                          <input
+                            type="text"
+                            value={livePreviewData.year}
+                            onChange={(e) => setLivePreviewData({...livePreviewData, year: e.target.value})}
+                            className="w-full px-3 py-2 border rounded-lg"
+                          />
+                        </div>
+                      </>
+                    )}
+                    {isUniversity && (
+                      <>
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Year</label>
+                          <input
+                            type="text"
+                            value={livePreviewData.year}
+                            onChange={(e) => setLivePreviewData({...livePreviewData, year: e.target.value})}
+                            className="w-full px-3 py-2 border rounded-lg"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Semester</label>
+                          <input
+                            type="text"
+                            value={livePreviewData.semester}
+                            onChange={(e) => setLivePreviewData({...livePreviewData, semester: e.target.value})}
+                            className="w-full px-3 py-2 border rounded-lg"
+                          />
+                        </div>
+                      </>
+                    )}
+                    <div>
+                      <label className="block text-sm font-medium mb-1">DOB</label>
+                      <input
+                        type="text"
+                        value={livePreviewData.dob}
+                        onChange={(e) => setLivePreviewData({...livePreviewData, dob: e.target.value})}
+                        className="w-full px-3 py-2 border rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Gender</label>
+                      <input
+                        type="text"
+                        value={livePreviewData.gender}
+                        onChange={(e) => setLivePreviewData({...livePreviewData, gender: e.target.value})}
+                        className="w-full px-3 py-2 border rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Phone</label>
+                      <input
+                        type="text"
+                        value={livePreviewData.phone}
+                        onChange={(e) => setLivePreviewData({...livePreviewData, phone: e.target.value})}
+                        className="w-full px-3 py-2 border rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Email</label>
+                      <input
+                        type="text"
+                        value={livePreviewData.email}
+                        onChange={(e) => setLivePreviewData({...livePreviewData, email: e.target.value})}
+                        className="w-full px-3 py-2 border rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Blood Group</label>
+                      <input
+                        type="text"
+                        value={livePreviewData.bloodGroup}
+                        onChange={(e) => setLivePreviewData({...livePreviewData, bloodGroup: e.target.value})}
+                        className="w-full px-3 py-2 border rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">Nationality</label>
+                      <input
+                        type="text"
+                        value={livePreviewData.nationality}
+                        onChange={(e) => setLivePreviewData({...livePreviewData, nationality: e.target.value})}
+                        className="w-full px-3 py-2 border rounded-lg"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-sm font-medium mb-1">Address</label>
+                      <input
+                        type="text"
+                        value={livePreviewData.address}
+                        onChange={(e) => setLivePreviewData({...livePreviewData, address: e.target.value})}
+                        className="w-full px-3 py-2 border rounded-lg"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-sm font-medium mb-1">Parent/Guardian Name</label>
+                      <input
+                        type="text"
+                        value={livePreviewData.parentName}
+                        onChange={(e) => setLivePreviewData({...livePreviewData, parentName: e.target.value})}
+                        className="w-full px-3 py-2 border rounded-lg"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-sm font-medium mb-1">Valid Until</label>
+                      <input
+                        type="text"
+                        value={livePreviewData.validUntil}
+                        onChange={(e) => setLivePreviewData({...livePreviewData, validUntil: e.target.value})}
+                        className="w-full px-3 py-2 border rounded-lg"
+                        placeholder="12/31/2025"
                       />
                     </div>
                   </div>
                 </div>
 
-                {/* ===== BUTTONS ===== */}
-                <div className="flex gap-2 pt-4">
+                {/* Buttons */}
+                <div className="flex flex-wrap gap-2 pt-4">
                   <button
                     onClick={saveTemplate}
-                    className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 transition-colors"
+                    className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700"
                   >
                     <i className="fas fa-save mr-2"></i>Save Template
                   </button>
                   <button
                     onClick={() => setShowDesignModal(false)}
-                    className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600 transition-colors"
+                    className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
                   >
                     Close
                   </button>
@@ -42174,125 +46966,10 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
               {/* Right - Live Preview */}
               <div className="border rounded-lg p-4 bg-gray-50">
                 <h4 className="font-semibold text-center mb-3">🎯 Live Preview</h4>
-                <div 
-                  className="p-4 rounded-lg mx-auto"
-                  style={{
-                    width: cardTemplate.cardSize === 'large' ? '280px' : cardTemplate.cardSize === 'compact' ? '200px' : '240px',
-                    background: cardTemplate.primaryColor,
-                    color: cardTemplate.textColor,
-                    borderRadius: cardTemplate.cardShape === 'circle' ? '50%' : cardTemplate.borderRadius,
-                    border: cardTemplate.showBorder ? `${cardTemplate.borderWidth} ${cardTemplate.borderStyle} ${cardTemplate.borderColor}` : 'none',
-                    boxShadow: cardTemplate.showShadow ? '0 8px 32px rgba(0,0,0,0.2)' : 'none',
-                    position: 'relative',
-                    overflow: 'hidden',
-                    margin: '0 auto'
-                  }}
-                >
-                  {/* Watermark */}
-                  {cardTemplate.showWatermark && (
-                    <div 
-                      style={{
-                        position: 'absolute',
-                        top: '50%',
-                        left: '50%',
-                        transform: 'translate(-50%, -50%) rotate(-45deg)',
-                        fontSize: '40px',
-                        fontWeight: 'bold',
-                        opacity: cardTemplate.watermarkOpacity,
-                        color: cardTemplate.textColor,
-                        whiteSpace: 'nowrap',
-                        pointerEvents: 'none'
-                      }}
-                    >
-                      {cardTemplate.watermarkText}
-                    </div>
-                  )}
-
-                  {/* School Logo */}
-                  {cardTemplate.showSchoolLogo && (
-                    <div className="flex justify-center mb-2">
-                      <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center text-2xl">
-                        🏫
-                      </div>
-                    </div>
-                  )}
-
-                  {/* School Name */}
-                  {cardTemplate.showSchoolName && (
-                    <div className="text-center">
-                      <div className="text-sm font-bold uppercase tracking-wider">
-                        {cardTemplate.schoolName}
-                      </div>
-                      {cardTemplate.showSchoolMotto && (
-                        <div className="text-[8px] opacity-70 italic">{cardTemplate.schoolMotto}</div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Divider */}
-                  <div className="border-t border-white/20 my-2"></div>
-
-                  {/* Card Title */}
-                  <div className="text-center text-[10px] font-bold uppercase tracking-wider opacity-80">
-                    {cardTemplate.cardTitle}
-                  </div>
-
-                  {/* Photo & Name */}
-                  <div className={`flex ${cardTemplate.layout === 'horizontal' ? 'flex-row' : 'flex-col'} gap-2 items-center my-2`}>
-                    {cardTemplate.showStudentPhoto && (
-                      <div className="w-14 h-14 bg-white/20 rounded-full flex items-center justify-center text-2xl font-bold flex-shrink-0">
-                        👤
-                      </div>
-                    )}
-                    <div className="text-center flex-1">
-                      <div className="font-bold text-base">John Doe</div>
-                      <div className="text-[10px] opacity-80">ADM-2024-001</div>
-                      <div className="text-[10px] opacity-80">Grade 7</div>
-                    </div>
-                  </div>
-
-                  {/* Fields */}
-                  <div className="grid grid-cols-2 gap-1 text-[9px] mt-2">
-                    {cardTemplate.fields.dateOfBirth && <div className="opacity-80">📅 01/01/2010</div>}
-                    {cardTemplate.fields.gender && <div className="opacity-80">⚤ Male</div>}
-                    {cardTemplate.fields.phone && <div className="opacity-80">📱 0712345678</div>}
-                    {cardTemplate.fields.email && <div className="opacity-80">✉️ student@school.com</div>}
-                    {cardTemplate.fields.bloodGroup && <div className="opacity-80">🩸 O+</div>}
-                    {cardTemplate.fields.nationality && <div className="opacity-80">🇰🇪 Kenyan</div>}
-                  </div>
-
-                  {/* Status Badge */}
-                  {cardTemplate.showStatusBadge && (
-                    <div className="mt-2 text-center">
-                      <span className="px-3 py-0.5 bg-green-500 text-white text-[8px] rounded-full font-bold uppercase">
-                        {cardTemplate.activeStatusText}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* QR Code */}
-                  {cardTemplate.showQRCode && (
-                    <div className="mt-2 flex justify-center">
-                      <div className="w-10 h-10 bg-white/10 rounded flex items-center justify-center text-[8px] border border-white/20">
-                        QR
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Footer */}
-                  <div className="mt-2 pt-1 border-t border-white/20 text-center text-[8px] opacity-70">
-                    {cardTemplate.footerText}
-                  </div>
-
-                  {/* Card Number */}
-                  {cardTemplate.showCardNumber && (
-                    <div className="text-center text-[6px] opacity-50 font-mono mt-1">
-                      CARD-2024-0001
-                    </div>
-                  )}
-                </div>
-                <div className="mt-3 text-xs text-gray-500 text-center">
-                  Preview updates in real-time • {cardTemplate.layout} • {cardTemplate.cardSize} • {cardTemplate.cardShape}
+                {renderLivePreview()}
+                <div className="mt-4 text-xs text-gray-500 text-center space-y-1">
+                  <div>{cardTemplate.layout} • {cardTemplate.cardSize} • {cardTemplate.cardShape}</div>
+                  <div>Checking/Unchecking fields updates preview in real-time</div>
                 </div>
               </div>
             </div>
@@ -42325,7 +47002,6 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
                   overflow: 'hidden'
                 }}
               >
-                {/* Watermark */}
                 {cardTemplate.showWatermark && (
                   <div style={{
                     position: 'absolute',
@@ -42343,23 +47019,23 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
                   </div>
                 )}
 
-                {/* School Logo */}
                 {cardTemplate.showSchoolLogo && (
                   <div className="flex justify-center mb-2">
                     <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center text-2xl">
-                      🏫
+                      {generatedCard.schoolLogo ? (
+                        <img src={generatedCard.schoolLogo} alt="School Logo" className="w-full h-full object-cover rounded-full" />
+                      ) : '🏫'}
                     </div>
                   </div>
                 )}
 
-                {/* School Name */}
                 {cardTemplate.showSchoolName && (
                   <div className="text-center">
                     <div className="text-sm font-bold uppercase tracking-wider">
-                      {cardTemplate.schoolName}
+                      {generatedCard.schoolName || 'School Name'}
                     </div>
-                    {cardTemplate.showSchoolMotto && (
-                      <div className="text-[8px] opacity-70 italic">{cardTemplate.schoolMotto}</div>
+                    {cardTemplate.showSchoolMotto && generatedCard.schoolMotto && (
+                      <div className="text-[8px] opacity-70 italic">{generatedCard.schoolMotto}</div>
                     )}
                   </div>
                 )}
@@ -42370,7 +47046,7 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
                   {cardTemplate.cardTitle}
                 </div>
 
-                <div className={`flex ${cardTemplate.layout === 'horizontal' ? 'flex-row' : 'flex-col'} gap-2 items-center my-2`}>
+                <div className="flex flex-col gap-1 items-center my-2">
                   {cardTemplate.showStudentPhoto && (
                     <div className="w-14 h-14 bg-white/20 rounded-full flex items-center justify-center text-2xl font-bold flex-shrink-0">
                       {generatedCard.personName?.charAt(0) || '👤'}
@@ -42379,17 +47055,64 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
                   <div className="text-center flex-1">
                     <div className="font-bold text-base">{generatedCard.personName || 'Unknown'}</div>
                     <div className="text-[10px] opacity-80">ID: {generatedCard.idNumber || 'N/A'}</div>
-                    <div className="text-[10px] opacity-80">{generatedCard.className || 'N/A'}</div>
+                    
+                    {generatedCard.personType === 'STUDENT' && (
+                      <>
+                        {isTVET && cardTemplate.fields.programName && (
+                          <div className="text-[10px] opacity-80 font-medium">{getEntityLabel()}: {generatedCard.entityName || 'N/A'}</div>
+                        )}
+                        {isUniversity && cardTemplate.fields.courseName && (
+                          <div className="text-[10px] opacity-80 font-medium">{getEntityLabel()}: {generatedCard.entityName || 'N/A'}</div>
+                        )}
+                        {!isTVET && !isUniversity && cardTemplate.fields.className && (
+                          <div className="text-[10px] opacity-80 font-medium">{getEntityLabel()}: {generatedCard.entityName || 'N/A'}</div>
+                        )}
+                        
+                        {isTVET && cardTemplate.fields.currentModule && generatedCard.moduleInfo && generatedCard.moduleInfo !== 'N/A' && (
+                          <div className="text-[10px] opacity-80">{generatedCard.moduleInfo}</div>
+                        )}
+                        {cardTemplate.fields.currentYear && generatedCard.yearInfo && generatedCard.yearInfo !== 'N/A' && (
+                          <div className="text-[10px] opacity-80">{generatedCard.yearInfo}</div>
+                        )}
+                        {isUniversity && cardTemplate.fields.currentSemester && generatedCard.semesterInfo && generatedCard.semesterInfo !== 'N/A' && (
+                          <div className="text-[10px] opacity-80">{generatedCard.semesterInfo}</div>
+                        )}
+                      </>
+                    )}
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-1 text-[9px] mt-2">
-                  {cardTemplate.fields.dateOfBirth && <div className="opacity-80">📅 {generatedCard.dateOfBirth || 'N/A'}</div>}
-                  {cardTemplate.fields.gender && <div className="opacity-80">⚤ {generatedCard.gender || 'N/A'}</div>}
-                  {cardTemplate.fields.phone && <div className="opacity-80">📱 {generatedCard.phone || 'N/A'}</div>}
-                  {cardTemplate.fields.email && <div className="opacity-80">✉️ {generatedCard.email || 'N/A'}</div>}
-                  {cardTemplate.fields.bloodGroup && <div className="opacity-80">🩸 {generatedCard.bloodGroup || 'N/A'}</div>}
-                  {cardTemplate.fields.nationality && <div className="opacity-80">🇰🇪 {generatedCard.nationality || 'Kenyan'}</div>}
+                  {cardTemplate.fields.dateOfBirth && generatedCard.dateOfBirth && generatedCard.dateOfBirth !== 'N/A' && (
+                    <div className="opacity-80">📅 {generatedCard.dateOfBirth}</div>
+                  )}
+                  {cardTemplate.fields.gender && generatedCard.gender && generatedCard.gender !== 'N/A' && (
+                    <div className="opacity-80">⚤ {generatedCard.gender}</div>
+                  )}
+                  {cardTemplate.fields.phone && generatedCard.phone && generatedCard.phone !== 'N/A' && (
+                    <div className="opacity-80">📱 {generatedCard.phone}</div>
+                  )}
+                  {cardTemplate.fields.email && generatedCard.email && generatedCard.email !== 'N/A' && (
+                    <div className="opacity-80">✉️ {generatedCard.email}</div>
+                  )}
+                  {cardTemplate.fields.bloodGroup && generatedCard.bloodGroup && generatedCard.bloodGroup !== 'N/A' && (
+                    <div className="opacity-80">🩸 {generatedCard.bloodGroup}</div>
+                  )}
+                  {cardTemplate.fields.nationality && generatedCard.nationality && generatedCard.nationality !== 'N/A' && (
+                    <div className="opacity-80">🇰🇪 {generatedCard.nationality}</div>
+                  )}
+                  {isTVET && cardTemplate.fields.currentModule && generatedCard.currentModule && generatedCard.currentModule !== 'N/A' && (
+                    <div className="opacity-80">📚 Module {generatedCard.currentModule}</div>
+                  )}
+                  {cardTemplate.fields.currentYear && generatedCard.currentYear && generatedCard.currentYear !== 'N/A' && (
+                    <div className="opacity-80">📅 Year {generatedCard.currentYear}</div>
+                  )}
+                  {isUniversity && cardTemplate.fields.currentSemester && generatedCard.currentSemester && generatedCard.currentSemester !== 'N/A' && (
+                    <div className="opacity-80">📅 Sem {generatedCard.currentSemester}</div>
+                  )}
+                  {cardTemplate.fields.validUntil && generatedCard.validUntil && generatedCard.validUntil !== 'N/A' && (
+                    <div className="opacity-80">📅 Valid: {generatedCard.validUntil}</div>
+                  )}
                 </div>
 
                 {cardTemplate.showStatusBadge && (
@@ -42397,14 +47120,6 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
                     <span className="px-3 py-0.5 bg-green-500 text-white text-[8px] rounded-full font-bold uppercase">
                       {cardTemplate.activeStatusText}
                     </span>
-                  </div>
-                )}
-
-                {cardTemplate.showQRCode && (
-                  <div className="mt-2 flex justify-center">
-                    <div className="w-10 h-10 bg-white/10 rounded flex items-center justify-center text-[8px] border border-white/20">
-                      QR
-                    </div>
                   </div>
                 )}
 
@@ -42440,6 +47155,7 @@ const CardManagementModule = ({ students, staff, currentSchool, user }) => {
     </div>
   );
 };
+
 // ==================== CERTIFICATE MODULE - FULLY CORRECTED ====================
 const CertificateModule = ({ students, staff, currentSchool, user }) => {
   const [certificates, setCertificates] = useState([]);
@@ -45165,8 +49881,8 @@ const handleBulkMarkAll = async (eventId, status) => {
   );
 };
 
-// ==================== LIVE CLASSROOM MODULE ====================
-const LiveClassroomModule = ({ currentSchool, user, students = [] }) => {
+// ==================== LIVE CLASSROOM MODULE - COMPLETE REWRITE ====================
+const LiveClassroomModule = ({ currentSchool, user, students = [], staff = [], users = [] }) => {
   // ==================== STATE ====================
   const [liveClasses, setLiveClasses] = useState([]);
   const [filteredClasses, setFilteredClasses] = useState([]);
@@ -45521,13 +50237,103 @@ const LiveClassroomModule = ({ currentSchool, user, students = [] }) => {
     }
   };
 
-  // ==================== GET STUDENT NAME ====================
+  // ==================== GET USER DISPLAY NAME - FIXED ====================
+  const getUserDisplayName = (record) => {
+    // If it's a student with studentId, get from students list
+    if (record.studentId) {
+      const student = students.find(s => s.id === record.studentId);
+      if (student) {
+        return {
+          name: `${student.firstName} ${student.lastName}`,
+          admission: student.admissionNumber || 'N/A',
+          role: 'Student'
+        };
+      }
+    }
+    
+    // If we have userId, try to find the user
+    if (record.userId) {
+      // Check if user is a student
+      const studentByUser = students.find(s => s.userId === record.userId);
+      if (studentByUser) {
+        return {
+          name: `${studentByUser.firstName} ${studentByUser.lastName}`,
+          admission: studentByUser.admissionNumber || 'N/A',
+          role: 'Student'
+        };
+      }
+      
+      // Check if user is staff
+      const staffMember = staff?.find(s => s.userId === record.userId);
+      if (staffMember?.User) {
+        const roleLabel = staffMember.jobTitle || staffMember.staffType || 'Staff';
+        return {
+          name: `${staffMember.User.firstName} ${staffMember.User.lastName}`,
+          admission: staffMember.employeeId || 'N/A',
+          role: roleLabel
+        };
+      }
+      
+      // Check in users list
+      const userRecord = users?.find(u => u.id === record.userId);
+      if (userRecord) {
+        return {
+          name: `${userRecord.firstName} ${userRecord.lastName}`,
+          admission: userRecord.email || 'N/A',
+          role: userRecord.role || 'User'
+        };
+      }
+      
+      // If we have userType from the record
+      if (record.userType) {
+        const roleLabels = {
+          'STUDENT': 'Student',
+          'TEACHER': 'Teacher',
+          'ADMIN': 'Admin',
+          'STAFF': 'Staff'
+        };
+        return {
+          name: `${record.userType} ${record.userId?.substring(0, 8) || 'Unknown'}`,
+          admission: 'N/A',
+          role: roleLabels[record.userType] || record.userType
+        };
+      }
+    }
+    
+    // Fallback: use remarks if available
+    if (record.remarks) {
+      // Try to extract name from remarks like "ADMIN joined: ALICE KAARI (SCHOOL_ADMIN)"
+      const nameMatch = record.remarks.match(/joined:\s*([^(]+)/);
+      if (nameMatch) {
+        return {
+          name: nameMatch[1].trim(),
+          admission: 'N/A',
+          role: record.userType || 'User'
+        };
+      }
+      return {
+        name: record.remarks.substring(0, 30),
+        admission: 'N/A',
+        role: 'User'
+      };
+    }
+    
+    return {
+      name: 'Unknown User',
+      admission: 'N/A',
+      role: 'User'
+    };
+  };
+
+  // ==================== GET STUDENT NAME (Legacy) ====================
   const getStudentName = (studentId) => {
+    if (!studentId) return 'Unknown User';
     const student = students.find(s => s.id === studentId);
     return student ? `${student.firstName} ${student.lastName}` : `User ${studentId?.substring(0, 8) || 'Unknown'}`;
   };
 
   const getStudentAdmission = (studentId) => {
+    if (!studentId) return 'N/A';
     const student = students.find(s => s.id === studentId);
     return student?.admissionNumber || 'N/A';
   };
@@ -46120,7 +50926,7 @@ const LiveClassroomModule = ({ currentSchool, user, students = [] }) => {
         </div>
       )}
 
-      {/* ==================== ATTENDANCE MODAL ==================== */}
+      {/* ==================== ATTENDANCE MODAL - FIXED ==================== */}
       {showAttendanceModal && selectedClass && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl p-6 max-h-[90vh] overflow-auto">
@@ -46139,7 +50945,7 @@ const LiveClassroomModule = ({ currentSchool, user, students = [] }) => {
                 <p className="text-2xl font-bold text-blue-600">
                   {classAttendance.length}
                 </p>
-                <p className="text-xs text-gray-500">Total Students</p>
+                <p className="text-xs text-gray-500">Total Attendees</p>
               </div>
               <div className="bg-green-50 p-3 rounded-lg text-center">
                 <p className="text-2xl font-bold text-green-600">
@@ -46163,56 +50969,66 @@ const LiveClassroomModule = ({ currentSchool, user, students = [] }) => {
               </div>
             </div>
 
-            {/* Attendance List */}
+            {/* Attendance List - FIXED with proper user display */}
             <div className="space-y-2 max-h-96 overflow-auto">
               {classAttendance.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">
                   <i className="fas fa-users text-4xl text-gray-300 mb-2 block"></i>
                   <p>No attendance records yet</p>
-                  <p className="text-xs text-gray-400 mt-1">Students need to join the class first</p>
+                  <p className="text-xs text-gray-400 mt-1">Participants need to join the class first</p>
                 </div>
               ) : (
-                classAttendance.map(record => (
-                  <div key={record.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                    <div>
-                      <p className="font-medium text-gray-800">
-                        {getStudentName(record.studentId)}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        Admission: {getStudentAdmission(record.studentId)}
-                      </p>
+                classAttendance.map(record => {
+                  // ✅ Get user display info using the fixed function
+                  const userInfo = getUserDisplayName(record);
+                  
+                  return (
+                    <div key={record.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-gray-800">{userInfo.name}</p>
+                          {record.userType && record.userType !== 'STUDENT' && (
+                            <span className="text-xs font-medium text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-full">
+                              {userInfo.role}
+                            </span>
+                          )}
+                          {record.remarks && (
+                            <span className="text-xs text-gray-400 italic ml-1">
+                              ({record.remarks})
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-500">
+                          {record.studentId ? `Admission: ${userInfo.admission}` : `User ID: ${record.userId?.substring(0, 8) || 'N/A'}`}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3 text-sm flex-wrap">
+                        <span className={`px-2 py-1 rounded-full text-xs ${
+                          record.status === 'PRESENT' ? 'bg-green-100 text-green-800' :
+                          record.status === 'LATE' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-red-100 text-red-800'
+                        }`}>
+                          {record.status}
+                        </span>
+                        {record.joinTime && (
+                          <span className="text-xs text-gray-500">
+                            Joined: {new Date(record.joinTime).toLocaleTimeString()}
+                          </span>
+                        )}
+                        {record.duration && (
+                          <span className="text-xs text-gray-500">
+                            ⏱️ {record.duration}m
+                          </span>
+                        )}
+                        {record.leaveTime && (
+                          <span className="text-xs text-gray-500">
+                            Left: {new Date(record.leaveTime).toLocaleTimeString()}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3 text-sm flex-wrap">
-                      <span className={`px-2 py-1 rounded-full text-xs ${
-                        record.status === 'PRESENT' ? 'bg-green-100 text-green-800' :
-                        record.status === 'LATE' ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-red-100 text-red-800'
-                      }`}>
-                        {record.status}
-                      </span>
-                      {record.joinTime && (
-                        <span className="text-xs text-gray-500">
-                          Joined: {new Date(record.joinTime).toLocaleTimeString()}
-                        </span>
-                      )}
-                      {record.duration && (
-                        <span className="text-xs text-gray-500">
-                          ⏱️ {record.duration}m
-                        </span>
-                      )}
-                      {record.leaveTime && (
-                        <span className="text-xs text-gray-500">
-                          Left: {new Date(record.leaveTime).toLocaleTimeString()}
-                        </span>
-                      )}
-                      {record.remarks && (
-                        <span className="text-xs text-gray-400 italic">
-                          {record.remarks}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
@@ -46222,8 +51038,7 @@ const LiveClassroomModule = ({ currentSchool, user, students = [] }) => {
   );
 };
 
-
-// ==================== ONLINE EXAMS MODULE - CLEAN VERSION ====================
+// ==================== ONLINE EXAMS MODULE - COMPLETE WITH FIXED OVERNIGHT EXAM SUPPORT ====================
 const OnlineExamsModule = ({ 
   currentSchool, 
   user, 
@@ -46233,8 +51048,7 @@ const OnlineExamsModule = ({
   courses, 
   programs, 
   units,
-  setActiveModule,
-  setActiveTab  
+  setActiveModule  
 }) => {
   // ==================== STATE ====================
   const [exams, setExams] = useState([]);
@@ -46263,51 +51077,236 @@ const OnlineExamsModule = ({
   const [showMyResults, setShowMyResults] = useState(false);
   const [resultEntries, setResultEntries] = useState([]);
   const [selectedExamForResults, setSelectedExamForResults] = useState(null);
-  const [redirectMessage, setRedirectMessage] = useState('');
-  const [showRedirectNotification, setShowRedirectNotification] = useState(false);
   const [searchStudentTerm, setSearchStudentTerm] = useState('');
   const [filteredStudentList, setFilteredStudentList] = useState([]);
+  const [filterUnit, setFilterUnit] = useState('');
+  const [filterProgram, setFilterProgram] = useState('');
+  const [filterCourse, setFilterCourse] = useState('');
+  const [filterClass, setFilterClass] = useState('');
+  const [filterSubject, setFilterSubject] = useState('');
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  // ==================== SCHOOL TYPE ====================
+  // ==================== SCHOOL TYPE DETECTION ====================
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
   const isUniversity = schoolCategory === 'UNIVERSITY';
   const isTVET = schoolCategory === 'COLLEGE_TVET';
+  const isRegularSchool = !isUniversity && !isTVET;
 
-  // ==================== FORM STATES ====================
-  const [examForm, setExamForm] = useState({
-    title: '',
-    description: '',
-    subjectId: '',
-    classId: '',
-    courseId: '',
-    programId: '',
-    unitId: '',
-    date: '',
-    startTime: '',
-    endTime: '',
-    duration: 60,
-    totalMarks: 100,
-    passingMarks: 40,
-    examType: 'MAIN_EXAM',
-    term: '',
-    semester: '',
-    year: '',
-    module: '',
-    academicYear: '',
-    allowMultipleAttempts: false,
-    maxAttempts: 1,
-    showAnswersAfterSubmission: false,
-    allowRetake: false,
-    selectedStudents: []
-  });
+  // ==================== KENYAN TIME HELPERS ====================
+  const getKenyaTime = () => {
+    const now = new Date();
+    const kenyaTimeStr = now.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' });
+    return new Date(kenyaTimeStr);
+  };
 
-  const [questionForm, setQuestionForm] = useState({
-    type: 'MCQ',
-    question: '',
-    options: ['', '', '', ''],
-    correctAnswer: '',
-    marks: 5
-  });
+  const getKenyaDateStr = () => {
+    const now = new Date();
+    return now.toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' });
+  };
+
+  const getKenyaTimeMinutes = () => {
+    const now = new Date();
+    const kenyaTimeStr = now.toLocaleString('en-US', { timeZone: 'Africa/Nairobi' });
+    const kenyaTime = new Date(kenyaTimeStr);
+    return kenyaTime.getHours() * 60 + kenyaTime.getMinutes();
+  };
+
+  const getKenyaTimeDisplay = () => {
+    const now = new Date();
+    return now.toLocaleTimeString('en-KE', { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      hour12: true,
+      timeZone: 'Africa/Nairobi'
+    });
+  };
+
+  const getKenyaDateDisplay = (dateStr) => {
+    if (!dateStr) return 'N/A';
+    const date = new Date(dateStr + 'T00:00:00');
+    return date.toLocaleDateString('en-KE', { 
+      timeZone: 'Africa/Nairobi',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  };
+
+  // ==================== CHECK EXAM AVAILABILITY - FIXED FOR OVERNIGHT EXAMS ====================
+  const getExamAvailability = (exam) => {
+    if (!exam) return { available: false, message: 'Not Available', canTake: false };
+    
+    const kenyaDateStr = getKenyaDateStr();
+    const examDateStr = exam.date;
+    const currentTimeMinutes = getKenyaTimeMinutes();
+    
+    // Check if exam is published or ongoing
+    if (!['PUBLISHED', 'ONGOING'].includes(exam.status)) {
+      return { available: false, message: `Status: ${exam.status}`, canTake: false };
+    }
+    
+    // Parse times
+    let startTimeMinutes = null;
+    let endTimeMinutes = null;
+    
+    if (exam.startTime) {
+      const [startHours, startMinutes] = exam.startTime.split(':').map(Number);
+      startTimeMinutes = startHours * 60 + startMinutes;
+    }
+    
+    if (exam.endTime) {
+      const [endHours, endMinutes] = exam.endTime.split(':').map(Number);
+      endTimeMinutes = endHours * 60 + endMinutes;
+    }
+    
+    // Check if the exam is currently available based on date and time
+    let canTake = false;
+    let message = '';
+    
+    // Convert dates to comparable numbers (YYYYMMDD)
+    const examDateNum = parseInt(examDateStr.replace(/-/g, ''));
+    const currentDateNum = parseInt(kenyaDateStr.replace(/-/g, ''));
+    
+    // Case 1: Exam is on a future date
+    if (examDateNum > currentDateNum) {
+      return { 
+        available: false, 
+        message: `📅 Starts on ${getKenyaDateDisplay(examDateStr)}`, 
+        canTake: false 
+      };
+    }
+    
+    // Case 2: Exam is on a past date (before today)
+    if (examDateNum < currentDateNum) {
+      // Check if this is an overnight exam (ended after midnight)
+      // If exam ended after midnight and we're still before the end time, it should still be available
+      if (endTimeMinutes !== null && endTimeMinutes < 180) { // End time is before 3 AM (overnight exam)
+        // The exam started yesterday and ends early morning today
+        // Check if current time is before the end time
+        if (currentTimeMinutes <= endTimeMinutes) {
+          canTake = true;
+          message = 'Available';
+        } else {
+          canTake = false;
+          message = '🔒 Exam ended';
+        }
+      } else {
+        // Regular exam on a past date - ended
+        canTake = false;
+        message = '🔒 Exam ended';
+      }
+    }
+    
+    // Case 3: Exam is today
+    if (examDateNum === currentDateNum) {
+      // Check start time
+      if (startTimeMinutes !== null) {
+        if (currentTimeMinutes < startTimeMinutes) {
+          const minsUntil = startTimeMinutes - currentTimeMinutes;
+          canTake = false;
+          message = `⏰ Starts in ${minsUntil} min`;
+          return { available: canTake, message, canTake };
+        }
+      }
+      
+      // Check end time
+      if (endTimeMinutes !== null) {
+        if (currentTimeMinutes > endTimeMinutes) {
+          canTake = false;
+          message = '🔒 Exam ended';
+        } else {
+          canTake = true;
+          message = 'Available';
+        }
+      } else {
+        canTake = true;
+        message = 'Available';
+      }
+    }
+    
+    // Check attempts
+    if (canTake && exam.examResults && exam.examResults.length > 0) {
+      const attemptsUsed = exam.examResults.length;
+      if (attemptsUsed >= exam.maxAttempts && !exam.allowMultipleAttempts) {
+        canTake = false;
+        message = `📝 Attempts used (${attemptsUsed}/${exam.maxAttempts})`;
+      }
+    }
+    
+    return { available: canTake, message, canTake };
+  };
+
+  // ==================== HELPER FUNCTIONS ====================
+  const getItemLabel = () => {
+    if (isUniversity) return 'Course Unit';
+    if (isTVET) return 'Module';
+    if (isRegularSchool) return 'Subject';
+    return 'Item';
+  };
+
+  const getEntityLabel = () => {
+    if (isUniversity) return 'Course';
+    if (isTVET) return 'Program';
+    if (isRegularSchool) return 'Class';
+    return 'Entity';
+  };
+
+  const getItemName = (exam) => {
+    if (isUniversity) {
+      const unit = units?.find(u => u.id === exam.unitId);
+      return unit?.name || 'Unknown Course Unit';
+    } else if (isTVET) {
+      const unit = units?.find(u => u.id === exam.unitId);
+      const moduleInfo = exam.module ? ` (Module ${exam.module})` : '';
+      return unit?.name ? `${unit.name}${moduleInfo}` : 'Unknown Module';
+    } else {
+      const subject = subjects?.find(s => s.id === exam.subjectId);
+      return subject?.name || 'Unknown Subject';
+    }
+  };
+
+  const getEntityName = (exam) => {
+    if (isUniversity) {
+      const course = courses?.find(c => c.id === exam.courseId);
+      return course?.name || 'Unknown Course';
+    } else if (isTVET) {
+      const program = programs?.find(p => p.id === exam.programId);
+      return program?.name || 'Unknown Program';
+    } else {
+      const classObj = classes?.find(c => c.id === exam.classId);
+      return classObj?.name || 'Unknown Class';
+    }
+  };
+
+  const getModuleLevelDisplay = (exam) => {
+    if (isTVET && exam.module) {
+      return `Module ${exam.module}`;
+    }
+    if (isUniversity && exam.semester) {
+      return `Semester ${exam.semester}`;
+    }
+    if (isRegularSchool && exam.term) {
+      return exam.term;
+    }
+    return 'N/A';
+  };
+
+  // ==================== EXTRACT NUMERIC VALUE ====================
+  const extractNumber = (value) => {
+    if (!value) return null;
+    if (typeof value === 'number') return value;
+    
+    const str = String(value);
+    const match = str.match(/\d+/);
+    if (match) {
+      return parseInt(match[0]);
+    }
+    const num = parseInt(str);
+    if (!isNaN(num)) {
+      return num;
+    }
+    return null;
+  };
 
   // ==================== API INSTANCE ====================
   const api = axios.create({
@@ -46331,10 +51330,9 @@ const OnlineExamsModule = ({
 
   const isStudent = () => user?.role === 'STUDENT';
 
-  // ==================== HELPER: GET STUDENT BY ANY ID ====================
+  // ==================== HELPER FUNCTIONS ====================
   const getStudentById = (id) => {
     if (!id) return null;
-    
     if (!students || students.length === 0) return null;
     
     let student = students.find(s => s && s.id === id);
@@ -46349,39 +51347,16 @@ const OnlineExamsModule = ({
     return null;
   };
 
-  // ==================== HELPER: RESOLVE STUDENT ID ====================
-  const resolveStudentId = (id) => {
-    if (!id) return null;
-    
-    if (!students || students.length === 0) return null;
-    
-    if (students.some(s => s && s.id === id)) {
-      return id;
-    }
-    
-    const studentByUserId = students.find(s => s && s.userId === id);
-    if (studentByUserId) {
-      return studentByUserId.id;
-    }
-    
-    const studentByAdmission = students.find(s => s && s.admissionNumber === id);
-    if (studentByAdmission) {
-      return studentByAdmission.id;
-    }
-    
-    return null;
-  };
-
-  // ==================== HELPER: GET GRADE FOR SYSTEM ====================
+  // ==================== GRADE FUNCTIONS ====================
   const getGradeForSystem = (percentage, gradingSystem) => {
-    if (gradingSystem === 'CBC') {
+    if (gradingSystem === 'CBC' || gradingSystem === 'ECDE_PRIMARY_JSS') {
       if (percentage >= 80) return { grade: 'Exceeding Expectations', points: 4 };
       if (percentage >= 65) return { grade: 'Meeting Expectations', points: 3 };
       if (percentage >= 50) return { grade: 'Approaching Expectations', points: 2 };
       if (percentage >= 30) return { grade: 'Below Expectations', points: 1 };
       return { grade: 'Needs Improvement', points: 0 };
     } 
-    else if (gradingSystem === '844' || gradingSystem === 'KENYA_844') {
+    else if (gradingSystem === '844' || gradingSystem === 'KENYA_844' || gradingSystem === 'SENIOR_SECONDARY') {
       if (percentage >= 80) return { grade: 'A', points: 12 };
       if (percentage >= 75) return { grade: 'A-', points: 11 };
       if (percentage >= 70) return { grade: 'B+', points: 10 };
@@ -46402,7 +51377,7 @@ const OnlineExamsModule = ({
       if (percentage >= 40) return { grade: 'D', points: 2.0 };
       return { grade: 'E', points: 1.0 };
     } 
-    else if (gradingSystem === 'TVET') {
+    else if (gradingSystem === 'TVET' || gradingSystem === 'COLLEGE_TVET') {
       if (percentage >= 80) return { grade: 'DISTINCTION', points: 5 };
       if (percentage >= 65) return { grade: 'CREDIT', points: 4 };
       if (percentage >= 50) return { grade: 'MERIT', points: 3 };
@@ -46413,7 +51388,6 @@ const OnlineExamsModule = ({
     return { grade: 'N/A', points: 0 };
   };
 
-  // ==================== GRADE FORMAT FUNCTION ====================
   const formatGradeDisplay = (grade, points) => {
     if (!grade) return { display: 'N/A', color: 'bg-gray-100 text-gray-800' };
     
@@ -46469,7 +51443,16 @@ const OnlineExamsModule = ({
   const fetchExams = async () => {
     setLoading(true);
     try {
-      const res = await api.get('/online-exams');
+      const params = {};
+      
+      if (isUniversity && filterCourse) params.courseId = filterCourse;
+      if (isUniversity && filterUnit) params.unitId = filterUnit;
+      if (isTVET && filterProgram) params.programId = filterProgram;
+      if (isTVET && filterUnit) params.unitId = filterUnit;
+      if (isRegularSchool && filterClass) params.classId = filterClass;
+      if (isRegularSchool && filterSubject) params.subjectId = filterSubject;
+      
+      const res = await api.get('/online-exams', { params });
       setExams(res.data.exams || []);
       if (isStudent()) {
         setExamFilter('published');
@@ -46558,6 +51541,17 @@ const OnlineExamsModule = ({
     if (isStudent()) {
       fetchMyExamResults();
     }
+  }, [refreshTrigger]);
+
+  // ==================== AUTO-REFRESH EVERY 30 SECONDS ====================
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (isStudent()) {
+        setRefreshTrigger(prev => prev + 1);
+      }
+    }, 30000);
+    
+    return () => clearInterval(interval);
   }, []);
 
   // ==================== FILTER STUDENTS FOR SELECTION ====================
@@ -46575,6 +51569,42 @@ const OnlineExamsModule = ({
       setFilteredStudentList(students);
     }
   }, [searchStudentTerm, students]);
+
+  // ==================== FORM STATES ====================
+  const [examForm, setExamForm] = useState({
+    title: '',
+    description: '',
+    subjectId: '',
+    classId: '',
+    courseId: '',
+    programId: '',
+    unitId: '',
+    date: '',
+    startTime: '',
+    endTime: '',
+    duration: 60,
+    totalMarks: 100,
+    passingMarks: 40,
+    examType: 'MAIN_EXAM',
+    term: '',
+    semester: '',
+    year: '',
+    module: '',
+    academicYear: '',
+    allowMultipleAttempts: false,
+    maxAttempts: 1,
+    showAnswersAfterSubmission: false,
+    allowRetake: false,
+    selectedStudents: []
+  });
+
+  const [questionForm, setQuestionForm] = useState({
+    type: 'MCQ',
+    question: '',
+    options: ['', '', '', ''],
+    correctAnswer: '',
+    marks: 5
+  });
 
   // ==================== EXAM CRUD FUNCTIONS ====================
   const resetExamForm = () => {
@@ -46622,31 +51652,34 @@ const OnlineExamsModule = ({
       return;
     }
 
-    const schoolCategory = currentSchool?.category;
-    
-    if (schoolCategory === 'UNIVERSITY') {
+    // School-specific validation
+    if (isUniversity) {
       if (!examForm.courseId) {
         alert('Please select a course');
         return;
       }
       if (!examForm.unitId) {
-        alert('Please select a unit');
+        alert('Please select a course unit');
         return;
       }
       if (!examForm.semester) {
-        alert('Please select a semester');
+        alert('Please enter a semester');
         return;
       }
-    } else if (schoolCategory === 'COLLEGE_TVET') {
+    } else if (isTVET) {
       if (!examForm.programId) {
         alert('Please select a program');
         return;
       }
-      if (!examForm.module) {
+      if (!examForm.unitId) {
         alert('Please select a module');
         return;
       }
-    } else {
+      if (!examForm.module) {
+        alert('Please enter a module level');
+        return;
+      }
+    } else if (isRegularSchool) {
       if (!examForm.classId) {
         alert('Please select a class');
         return;
@@ -46667,12 +51700,65 @@ const OnlineExamsModule = ({
 
     setLoading(true);
     try {
+      const moduleNumber = extractNumber(examForm.module);
+      const semesterNumber = extractNumber(examForm.semester);
+      const yearNumber = extractNumber(examForm.year);
+      const termNumber = extractNumber(examForm.term);
+
       const examData = {
-        ...examForm,
+        title: examForm.title,
+        description: examForm.description || '',
+        date: examForm.date,
+        startTime: examForm.startTime || null,
+        endTime: examForm.endTime || null,
+        duration: parseInt(examForm.duration) || 60,
+        totalMarks: parseInt(examForm.totalMarks) || 100,
+        passingMarks: parseInt(examForm.passingMarks) || 40,
+        examType: examForm.examType || 'MAIN_EXAM',
+        academicYear: examForm.academicYear || null,
+        allowMultipleAttempts: examForm.allowMultipleAttempts || false,
+        maxAttempts: parseInt(examForm.maxAttempts) || 1,
+        showAnswersAfterSubmission: examForm.showAnswersAfterSubmission || false,
+        allowRetake: examForm.allowRetake || false,
         selectedStudents: studentIds,
         schoolId: currentSchool?.id,
-        createdBy: user?.id
+        createdBy: user?.id,
+        schoolCategory: schoolCategory
       };
+
+      if (isUniversity) {
+        examData.courseId = examForm.courseId;
+        examData.unitId = examForm.unitId;
+        examData.semester = semesterNumber;
+        examData.subjectId = null;
+        examData.classId = null;
+        examData.programId = null;
+        examData.module = null;
+        examData.term = null;
+        examData.year = null;
+      } else if (isTVET) {
+        examData.programId = examForm.programId;
+        examData.unitId = examForm.unitId;
+        examData.module = moduleNumber;
+        examData.subjectId = null;
+        examData.classId = null;
+        examData.courseId = null;
+        examData.semester = null;
+        examData.term = null;
+        examData.year = null;
+      } else if (isRegularSchool) {
+        examData.classId = examForm.classId;
+        examData.subjectId = examForm.subjectId;
+        examData.term = termNumber;
+        examData.year = yearNumber;
+        examData.courseId = null;
+        examData.unitId = null;
+        examData.programId = null;
+        examData.module = null;
+        examData.semester = null;
+      }
+
+      console.log('📝 Creating exam with data:', examData);
 
       const res = await api.post('/online-exams', examData);
       setExams([res.data.exam, ...exams]);
@@ -46700,10 +51786,65 @@ const OnlineExamsModule = ({
 
     setLoading(true);
     try {
+      const moduleNumber = extractNumber(examForm.module);
+      const semesterNumber = extractNumber(examForm.semester);
+      const yearNumber = extractNumber(examForm.year);
+      const termNumber = extractNumber(examForm.term);
+
       const examData = {
-        ...examForm,
-        selectedStudents: studentIds
+        title: examForm.title,
+        description: examForm.description || '',
+        date: examForm.date,
+        startTime: examForm.startTime || null,
+        endTime: examForm.endTime || null,
+        duration: parseInt(examForm.duration) || 60,
+        totalMarks: parseInt(examForm.totalMarks) || 100,
+        passingMarks: parseInt(examForm.passingMarks) || 40,
+        examType: examForm.examType || 'MAIN_EXAM',
+        academicYear: examForm.academicYear || null,
+        allowMultipleAttempts: examForm.allowMultipleAttempts || false,
+        maxAttempts: parseInt(examForm.maxAttempts) || 1,
+        showAnswersAfterSubmission: examForm.showAnswersAfterSubmission || false,
+        allowRetake: examForm.allowRetake || false,
+        selectedStudents: studentIds,
+        schoolId: currentSchool?.id,
+        createdBy: user?.id,
+        schoolCategory: schoolCategory
       };
+
+      if (isUniversity) {
+        examData.courseId = examForm.courseId;
+        examData.unitId = examForm.unitId;
+        examData.semester = semesterNumber;
+        examData.subjectId = null;
+        examData.classId = null;
+        examData.programId = null;
+        examData.module = null;
+        examData.term = null;
+        examData.year = null;
+      } else if (isTVET) {
+        examData.programId = examForm.programId;
+        examData.unitId = examForm.unitId;
+        examData.module = moduleNumber;
+        examData.subjectId = null;
+        examData.classId = null;
+        examData.courseId = null;
+        examData.semester = null;
+        examData.term = null;
+        examData.year = null;
+      } else if (isRegularSchool) {
+        examData.classId = examForm.classId;
+        examData.subjectId = examForm.subjectId;
+        examData.term = termNumber;
+        examData.year = yearNumber;
+        examData.courseId = null;
+        examData.unitId = null;
+        examData.programId = null;
+        examData.module = null;
+        examData.semester = null;
+      }
+
+      console.log('📝 Updating exam with data:', examData);
 
       const res = await api.patch(`/online-exams/${selectedExam.id}`, examData);
       setExams(exams.map(e => e.id === selectedExam.id ? res.data.exam : e));
@@ -46740,8 +51881,7 @@ const OnlineExamsModule = ({
     setLoading(true);
     try {
       await api.patch(`/online-exams/${examId}/publish`);
-      const res = await api.get('/online-exams');
-      setExams(res.data.exams || []);
+      await fetchExams();
       alert('✅ Exam published successfully!');
     } catch (error) {
       console.error('Publish exam error:', error);
@@ -46757,8 +51897,7 @@ const OnlineExamsModule = ({
     setLoading(true);
     try {
       await api.patch(`/online-exams/${examId}/close`);
-      const res = await api.get('/online-exams');
-      setExams(res.data.exams || []);
+      await fetchExams();
       alert('✅ Exam closed successfully!');
     } catch (error) {
       console.error('Close exam error:', error);
@@ -46774,8 +51913,7 @@ const OnlineExamsModule = ({
     setLoading(true);
     try {
       await api.patch(`/online-exams/${examId}/reopen`);
-      const res = await api.get('/online-exams');
-      setExams(res.data.exams || []);
+      await fetchExams();
       alert('✅ Exam reopened successfully!');
     } catch (error) {
       console.error('Reopen exam error:', error);
@@ -46915,8 +52053,8 @@ const OnlineExamsModule = ({
       setSubmissionData(result);
       setShowSubmissionModal(true);
       
-      fetchExams();
-      fetchMyExamResults();
+      await fetchExams();
+      await fetchMyExamResults();
     } catch (error) {
       console.error('Submit exam error:', error);
       alert('❌ Failed to submit exam: ' + (error.response?.data?.message || error.message));
@@ -46925,55 +52063,8 @@ const OnlineExamsModule = ({
     }
   };
 
-  // ==================== CHECK EXAM AVAILABILITY ====================
-  const getExamAvailability = (exam) => {
-    if (!exam) return { available: false, message: '', canTake: false };
-    
-    const now = new Date();
-    const examDate = new Date(exam.date);
-    let canTake = true;
-    let message = '';
-    
-    if (!['PUBLISHED', 'ONGOING'].includes(exam.status)) {
-      return { available: false, message: 'Not Available', canTake: false };
-    }
-    
-    if (exam.startTime) {
-      const [startHours, startMinutes] = exam.startTime.split(':').map(Number);
-      examDate.setHours(startHours, startMinutes, 0, 0);
-      if (now < examDate) {
-        const minsUntil = Math.ceil((examDate - now) / 60000);
-        if (minsUntil > 0) {
-          canTake = false;
-          message = `⏰ Starts in ${minsUntil} min`;
-        }
-      }
-    }
-    
-    if (exam.endTime && canTake) {
-      const [endHours, endMinutes] = exam.endTime.split(':').map(Number);
-      examDate.setHours(endHours, endMinutes, 0, 0);
-      if (now > examDate) {
-        canTake = false;
-        message = '🔒 Exam ended';
-      }
-    }
-    
-    if (canTake && exam.examResults && exam.examResults.length > 0) {
-      const attemptsUsed = exam.examResults.length;
-      if (attemptsUsed >= exam.maxAttempts && !exam.allowMultipleAttempts) {
-        canTake = false;
-        message = `📝 Attempts used (${attemptsUsed}/${exam.maxAttempts})`;
-      }
-    }
-    
-    return { available: true, message, canTake };
-  };
-
-  // ==================== LOAD STUDENTS FOR ADD RESULTS ====================
+  // ==================== RESULTS FUNCTIONS ====================
   const loadStudentsForAddResults = async (examId) => {
-    console.log('📊 loadStudentsForAddResults called with examId:', examId);
-    
     if (!examId) {
       alert('No exam selected');
       return;
@@ -46995,41 +52086,28 @@ const OnlineExamsModule = ({
         return;
       }
       
-      console.log('📋 Exam found:', exam.title);
-      
-      // Get existing results
       let existingResults = [];
       try {
         const res = await api.get(`/online-exams/${examId}/results`);
         existingResults = res.data.results || [];
-        console.log(`📊 Found ${existingResults.length} existing results`);
       } catch (err) {
         console.log('No existing results');
       }
       
-      // Get the student IDs that already have results
       const existingStudentIds = existingResults.map(r => r.studentId);
       
-      // Build the list of students to add (only those WITHOUT results)
       const studentsToAdd = [];
       
       for (const id of exam.selectedStudents || []) {
-        // Check if this student already has a result
-        if (existingStudentIds.includes(id)) {
-          console.log(`⏭️ Student ${id} already has a result, skipping`);
-          continue;
-        }
+        if (existingStudentIds.includes(id)) continue;
         
         const student = getStudentById(id);
         if (student) {
           if (!studentsToAdd.find(s => s.id === student.id)) {
             studentsToAdd.push(student);
-            console.log(`✅ Added student: ${student.firstName} ${student.lastName}`);
           }
         }
       }
-      
-      console.log(`📋 Students to add: ${studentsToAdd.length}`);
       
       if (studentsToAdd.length === 0) {
         alert('All assigned students already have results. Use "Edit Results" to modify existing results.');
@@ -47057,10 +52135,7 @@ const OnlineExamsModule = ({
     }
   };
 
-  // ==================== LOAD STUDENTS FOR EDIT RESULTS ====================
   const loadStudentsForEditResults = async (examId) => {
-    console.log('📊 loadStudentsForEditResults called with examId:', examId);
-    
     if (!examId) {
       alert('No exam selected');
       return;
@@ -47082,14 +52157,10 @@ const OnlineExamsModule = ({
         return;
       }
       
-      console.log('📋 Exam found:', exam.title);
-      
-      // Get existing results
       let existingResults = [];
       try {
         const res = await api.get(`/online-exams/${examId}/results`);
         existingResults = res.data.results || [];
-        console.log(`📊 Found ${existingResults.length} existing results`);
       } catch (err) {
         alert('No results found for this exam. Use "Add Results" to create new results.');
         setLoading(false);
@@ -47128,7 +52199,6 @@ const OnlineExamsModule = ({
     }
   };
 
-  // ==================== SAVE ADD RESULTS ====================
   const saveAddResults = async () => {
     if (!canManageExams()) {
       alert('You do not have permission to add results');
@@ -47210,7 +52280,6 @@ const OnlineExamsModule = ({
     }
   };
 
-  // ==================== SAVE EDIT RESULTS ====================
   const saveEditResults = async () => {
     if (!canManageExams()) {
       alert('You do not have permission to edit results');
@@ -47359,6 +52428,7 @@ const OnlineExamsModule = ({
         <h2 className="text-2xl font-bold flex items-center gap-2">
           📝 Online Exams
           <span className="text-sm font-normal text-gray-500">| {currentSchool?.name}</span>
+          <span className="text-xs text-gray-400">({getKenyaTimeDisplay()} EAT)</span>
         </h2>
         <div className="flex gap-2">
           {canManageExams() && (
@@ -47373,7 +52443,7 @@ const OnlineExamsModule = ({
             </button>
           )}
           <button
-            onClick={fetchExams}
+            onClick={() => setRefreshTrigger(prev => prev + 1)}
             className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors flex items-center"
           >
             <i className="fas fa-sync-alt mr-2"></i>Refresh
@@ -47468,7 +52538,7 @@ const OnlineExamsModule = ({
                     return (
                       <tr key={index} className="hover:bg-gray-50">
                         <td className="px-4 py-3 font-medium">{result.exam?.title || 'Unknown Exam'}</td>
-                        <td className="px-4 py-3">{result.exam?.date ? new Date(result.exam.date).toLocaleDateString() : 'N/A'}</td>
+                        <td className="px-4 py-3">{result.exam?.date ? getKenyaDateDisplay(result.exam.date) : 'N/A'}</td>
                         <td className="px-4 py-3 font-bold">{result.score}/{result.totalMarks}</td>
                         <td className="px-4 py-3">
                           <span className={`px-2 py-1 rounded-full text-xs ${gradeInfo.color}`}>
@@ -47521,9 +52591,13 @@ const OnlineExamsModule = ({
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Exam</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Subject/Unit</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Class/Course</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Date</th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">
+                  {isUniversity ? 'Course Unit' : isTVET ? 'Module' : 'Subject'}
+                </th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">
+                  {isUniversity ? 'Course' : isTVET ? 'Program' : 'Class'}
+                </th>
+                <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Date & Time</th>
                 <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Duration</th>
                 <th className="px-4 py-3 text-center text-sm font-medium text-gray-600">Questions</th>
                 <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Status</th>
@@ -47561,16 +52635,19 @@ const OnlineExamsModule = ({
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        {exam.subject?.name || exam.courseUnit?.name || 'N/A'}
+                        {getItemName(exam)}
+                        {getModuleLevelDisplay(exam) && (
+                          <div className="text-xs text-gray-400">{getModuleLevelDisplay(exam)}</div>
+                        )}
                       </td>
                       <td className="px-4 py-3">
-                        {exam.class?.name || exam.course?.name || exam.program?.name || 'N/A'}
+                        {getEntityName(exam)}
                       </td>
                       <td className="px-4 py-3 text-sm">
-                        {new Date(exam.date).toLocaleDateString()}
+                        {getKenyaDateDisplay(exam.date)}
                         {exam.startTime && exam.endTime && (
                           <div className="text-xs text-gray-400">
-                            {exam.startTime.substring(0, 5)} - {exam.endTime.substring(0, 5)}
+                            {exam.startTime.substring(0, 5)} - {exam.endTime.substring(0, 5)} EAT
                           </div>
                         )}
                       </td>
@@ -47585,7 +52662,6 @@ const OnlineExamsModule = ({
                         <div className="flex gap-1 flex-wrap">
                           {canManageExams() ? (
                             <>
-                              {/* View Results Button */}
                               <button
                                 onClick={() => {
                                   fetchResults(exam.id);
@@ -47597,7 +52673,6 @@ const OnlineExamsModule = ({
                                 <i className="fas fa-chart-bar"></i>
                               </button>
                               
-                              {/* Add Results Button - Only if no results exist */}
                               {!hasResults && (
                                 <button
                                   onClick={() => loadStudentsForAddResults(exam.id)}
@@ -47608,7 +52683,6 @@ const OnlineExamsModule = ({
                                 </button>
                               )}
                               
-                              {/* Edit Results Button - Only if results exist */}
                               {hasResults && (
                                 <button
                                   onClick={() => loadStudentsForEditResults(exam.id)}
@@ -47619,7 +52693,6 @@ const OnlineExamsModule = ({
                                 </button>
                               )}
                               
-                              {/* Draft exam actions */}
                               {exam.status === 'DRAFT' && (
                                 <>
                                   <button
@@ -47660,7 +52733,8 @@ const OnlineExamsModule = ({
                                         allowMultipleAttempts: exam.allowMultipleAttempts || false,
                                         maxAttempts: exam.maxAttempts || 1,
                                         showAnswersAfterSubmission: exam.showAnswersAfterSubmission || false,
-                                        allowRetake: exam.allowRetake || false
+                                        allowRetake: exam.allowRetake || false,
+                                        selectedStudents: []
                                       });
                                       const studentIds = (exam.selectedStudents || []).map(id => {
                                         const student = students.find(s => s.id === id || s.userId === id);
@@ -47684,7 +52758,6 @@ const OnlineExamsModule = ({
                                 </>
                               )}
                               
-                              {/* Close/Reopen buttons */}
                               {(exam.status === 'PUBLISHED' || exam.status === 'ONGOING') && (
                                 <button
                                   onClick={() => handleCloseExam(exam.id)}
@@ -47990,91 +53063,91 @@ const OnlineExamsModule = ({
           </div>
         </div>
       )}
-{/* ==================== RESULTS MODAL (View Only) ==================== */}
-{showResultsModal && selectedResults.length > 0 && (
-  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
-    <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl p-6 max-h-[90vh] overflow-auto">
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="text-xl font-bold">📊 Exam Results</h3>
-        <button onClick={() => setShowResultsModal(false)} className="text-gray-500 hover:text-gray-700">
-          <i className="fas fa-times"></i>
-        </button>
-      </div>
 
-      <div className="grid grid-cols-2 gap-3 mb-4">
-        <div className="bg-blue-50 p-3 rounded-lg text-center">
-          <p className="text-2xl font-bold text-blue-600">{selectedResults.length}</p>
-          <p className="text-xs text-gray-500">Total Students</p>
+      {/* ==================== RESULTS MODAL (View Only) ==================== */}
+      {showResultsModal && selectedResults.length > 0 && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl p-6 max-h-[90vh] overflow-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold">📊 Exam Results</h3>
+              <button onClick={() => setShowResultsModal(false)} className="text-gray-500 hover:text-gray-700">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div className="bg-blue-50 p-3 rounded-lg text-center">
+                <p className="text-2xl font-bold text-blue-600">{selectedResults.length}</p>
+                <p className="text-xs text-gray-500">Total Students</p>
+              </div>
+              <div className="bg-purple-50 p-3 rounded-lg text-center">
+                <p className="text-2xl font-bold text-purple-600">
+                  {examStats?.averageScore ? examStats.averageScore.toFixed(1) : 0}%
+                </p>
+                <p className="text-xs text-gray-500">Avg Score</p>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">#</th>
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Student</th>
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Admission</th>
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Score</th>
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Grade</th>
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Points</th>
+                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Attempt</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {selectedResults.map((result, index) => {
+                    const gradeInfo = formatGradeDisplay(result.grade, result.points);
+                    return (
+                      <tr key={result.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-sm">{index + 1}</td>
+                        <td className="px-4 py-3 font-medium">
+                          {result.Student?.firstName} {result.Student?.lastName}
+                        </td>
+                        <td className="px-4 py-3 text-sm">{result.Student?.admissionNumber || 'N/A'}</td>
+                        <td className="px-4 py-3 text-sm font-bold">{result.score}/{result.totalMarks}</td>
+                        <td className="px-4 py-3">
+                          <span className={`px-2 py-1 rounded-full text-xs ${gradeInfo.color}`}>
+                            {gradeInfo.display}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm">{result.points || 0}</td>
+                        <td className="px-4 py-3 text-sm">Attempt {result.attemptNumber || 1}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-4 pt-4 border-t flex gap-2 flex-wrap">
+              <button
+                onClick={() => {
+                  if (setActiveModule) {
+                    setActiveModule('results');
+                  }
+                  setShowResultsModal(false);
+                }}
+                className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 text-sm flex items-center"
+              >
+                <i className="fas fa-external-link-alt mr-2"></i>View in Results Module
+              </button>
+              <button
+                onClick={() => setShowResultsModal(false)}
+                className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 text-sm flex items-center"
+              >
+                <i className="fas fa-times mr-2"></i>Close
+              </button>
+            </div>
+          </div>
         </div>
-        <div className="bg-purple-50 p-3 rounded-lg text-center">
-          <p className="text-2xl font-bold text-purple-600">
-            {examStats?.averageScore ? examStats.averageScore.toFixed(1) : 0}%
-          </p>
-          <p className="text-xs text-gray-500">Avg Score</p>
-        </div>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">#</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Student</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Admission</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Score</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Grade</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Points</th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Attempt</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {selectedResults.map((result, index) => {
-              const gradeInfo = formatGradeDisplay(result.grade, result.points);
-              return (
-                <tr key={result.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 text-sm">{index + 1}</td>
-                  <td className="px-4 py-3 font-medium">
-                    {result.Student?.firstName} {result.Student?.lastName}
-                  </td>
-                  <td className="px-4 py-3 text-sm">{result.Student?.admissionNumber || 'N/A'}</td>
-                  <td className="px-4 py-3 text-sm font-bold">{result.score}/{result.totalMarks}</td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-1 rounded-full text-xs ${gradeInfo.color}`}>
-                      {gradeInfo.display}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-sm">{result.points || 0}</td>
-                  <td className="px-4 py-3 text-sm">Attempt {result.attemptNumber || 1}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="mt-4 pt-4 border-t flex gap-2 flex-wrap">
-        <button
-          onClick={() => {
-            // Navigate to Results module
-            if (setActiveModule) {
-              setActiveModule('results');
-            }
-            setShowResultsModal(false);
-          }}
-          className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 text-sm flex items-center"
-        >
-          <i className="fas fa-external-link-alt mr-2"></i>View in Results Module
-        </button>
-        <button
-          onClick={() => setShowResultsModal(false)}
-          className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 text-sm flex items-center"
-        >
-          <i className="fas fa-times mr-2"></i>Close
-        </button>
-      </div>
-    </div>
-  </div>
-)}
+      )}
 
       {/* ==================== SUBMISSION RESULT MODAL ==================== */}
       {showSubmissionModal && submissionData && (
@@ -48214,7 +53287,7 @@ const OnlineExamsModule = ({
               <div className="grid grid-cols-2 gap-4">
                 {/* Start Time */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Time (EAT)</label>
                   <input
                     type="time"
                     value={examForm.startTime}
@@ -48225,7 +53298,7 @@ const OnlineExamsModule = ({
 
                 {/* End Time */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">End Time</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">End Time (EAT)</label>
                   <input
                     type="time"
                     value={examForm.endTime}
@@ -48275,8 +53348,10 @@ const OnlineExamsModule = ({
                 </div>
               </div>
 
-              {/* School-specific fields */}
-              {isUniversity ? (
+              {/* ==================== SCHOOL-SPECIFIC FIELDS ==================== */}
+              
+              {/* UNIVERSITY FIELDS */}
+              {isUniversity && (
                 <>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
@@ -48292,14 +53367,14 @@ const OnlineExamsModule = ({
                       </select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Unit *</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Course Unit *</label>
                       <select
                         value={examForm.unitId}
                         onChange={(e) => setExamForm({...examForm, unitId: e.target.value})}
                         className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                         required
                       >
-                        <option value="">Select Unit</option>
+                        <option value="">Select Course Unit</option>
                         {units?.filter(u => u.courseId === examForm.courseId || !examForm.courseId).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                       </select>
                     </div>
@@ -48307,14 +53382,18 @@ const OnlineExamsModule = ({
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Semester *</label>
-                      <input
-                        type="text"
-                        value={examForm.semester}
-                        onChange={(e) => setExamForm({...examForm, semester: e.target.value})}
-                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                        placeholder="e.g., Semester 1"
-                        required
-                      />
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          value={examForm.semester}
+                          onChange={(e) => setExamForm({...examForm, semester: e.target.value})}
+                          className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          placeholder="e.g., 1"
+                          min="1"
+                          required
+                        />
+                        <span className="text-sm text-gray-500 self-center">(Enter semester number)</span>
+                      </div>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Academic Year</label>
@@ -48328,7 +53407,10 @@ const OnlineExamsModule = ({
                     </div>
                   </div>
                 </>
-              ) : isTVET ? (
+              )}
+
+              {/* TVET FIELDS */}
+              {isTVET && (
                 <>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
@@ -48345,29 +53427,49 @@ const OnlineExamsModule = ({
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Module *</label>
+                      <select
+                        value={examForm.unitId}
+                        onChange={(e) => setExamForm({...examForm, unitId: e.target.value})}
+                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                        required
+                      >
+                        <option value="">Select Module</option>
+                        {units?.filter(u => u.programId === examForm.programId || !examForm.programId).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Module Level *</label>
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          value={examForm.module}
+                          onChange={(e) => setExamForm({...examForm, module: e.target.value})}
+                          className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          placeholder="e.g., 1"
+                          min="1"
+                          required
+                        />
+                        <span className="text-sm text-gray-500 self-center">(Enter module number)</span>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Academic Year</label>
                       <input
                         type="text"
-                        value={examForm.module}
-                        onChange={(e) => setExamForm({...examForm, module: e.target.value})}
+                        value={examForm.academicYear}
+                        onChange={(e) => setExamForm({...examForm, academicYear: e.target.value})}
                         className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                        placeholder="e.g., Module 1"
-                        required
+                        placeholder="e.g., 2024"
                       />
                     </div>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
-                    <select
-                      value={examForm.subjectId}
-                      onChange={(e) => setExamForm({...examForm, subjectId: e.target.value})}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                    >
-                      <option value="">Select Subject</option>
-                      {subjects?.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                  </div>
                 </>
-              ) : (
+              )}
+
+              {/* PRIMARY/SECONDARY FIELDS */}
+              {isRegularSchool && (
                 <>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
@@ -48398,23 +53500,31 @@ const OnlineExamsModule = ({
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Term</label>
-                      <input
-                        type="text"
-                        value={examForm.term}
-                        onChange={(e) => setExamForm({...examForm, term: e.target.value})}
-                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                        placeholder="e.g., Term 1"
-                      />
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          value={examForm.term}
+                          onChange={(e) => setExamForm({...examForm, term: e.target.value})}
+                          className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          placeholder="e.g., 1"
+                          min="1"
+                        />
+                        <span className="text-sm text-gray-500 self-center">(Enter term number)</span>
+                      </div>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Year</label>
-                      <input
-                        type="text"
-                        value={examForm.year}
-                        onChange={(e) => setExamForm({...examForm, year: e.target.value})}
-                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                        placeholder="e.g., 2024"
-                      />
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          value={examForm.year}
+                          onChange={(e) => setExamForm({...examForm, year: e.target.value})}
+                          className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          placeholder="e.g., 2024"
+                          min="2000"
+                        />
+                        <span className="text-sm text-gray-500 self-center">(Enter year)</span>
+                      </div>
                     </div>
                   </div>
                 </>
@@ -48836,7 +53946,6 @@ const OnlineExamsModule = ({
     </div>
   );
 };
-
 // ==================== MAIN APP COMPONENT ====================
 function App() {
   // ===== 1. ALL useState DECLARATIONS FIRST =====
@@ -48994,6 +54103,7 @@ function App() {
     userId: '', 
     employeeId: '', 
     tscNumber: '', 
+      departmentId: '', 
     department: '', 
     jobTitle: '',
     employmentDate: new Date().toISOString().split('T')[0],
@@ -49280,6 +54390,22 @@ useEffect(() => {
   }
 }, []); // ← EMPTY ARRAY - Runs ONLY ONCE on mount!
 
+
+// Add this useEffect in your App component
+useEffect(() => {
+  const handleSwitchModule = (event) => {
+    const moduleId = event.detail;
+    if (moduleId === 'unit-registration') {
+      setActiveModule('unit-registration');
+    }
+  };
+  
+  window.addEventListener('switchModule', handleSwitchModule);
+  
+  return () => {
+    window.removeEventListener('switchModule', handleSwitchModule);
+  };
+}, []);
   // ===== 4. HELPER FUNCTIONS =====
   const getFilteredSchools = () => {
     if (!filterCategory) return schools;
@@ -49292,633 +54418,594 @@ useEffect(() => {
     }
     return currentSchool?.id;
   };
+// ===== 5. GET FILTERED DASHBOARD SECTIONS =====
+const getFilteredDashboardSections = (user, schoolCategory) => {
+  if (!user) return [];
+  
+  const isUniversity = schoolCategory === 'UNIVERSITY';
+  const isTVET = schoolCategory === 'COLLEGE_TVET';
+  const isPrimary = schoolCategory === 'ECDE_PRIMARY_JSS';
+  const isSecondary = schoolCategory === 'SENIOR_SECONDARY';
+  const isSecondaryOrPrimary = isPrimary || isSecondary;
+  const showCourseAndUnitMenus = isUniversity || isTVET;
+  
+  const dashboardSection = {
+    title: "MAIN",
+    items: [
+      { icon: "tachometer-alt", label: "Dashboard", id: 'dashboard' }
+    ]
+  };
 
-  // ===== 5. GET FILTERED DASHBOARD SECTIONS =====
-  const getFilteredDashboardSections = (user, schoolCategory) => {
-    if (!user) return [];
+  // ============================================
+  // STUDENT VIEW
+  // ============================================
+  if (user.role === 'STUDENT') {
+    const studentItems = [
+      { icon: "file-alt", label: "My Results", id: 'results' },
+      { icon: "calendar-check", label: "My Attendance", id: 'attendance' },
+      { icon: "id-card", label: "Exam Card", id: 'exam-cards' },
+      { icon: "clock", label: "Timetable", id: 'timetable' },
+      { icon: "money-bill", label: "Fee Statement", id: 'fee-statement' },
+      { icon: "book-open", label: "Library", id: 'library' },
+      { icon: "calendar-alt", label: "Events", id: 'events' },
+      { icon: "bullhorn", label: "Announcements", id: 'announcements' },
+      { icon: "video", label: "Live Classroom", id: 'live-classroom' },
+      { icon: "laptop", label: "Online Exams", id: 'online-exams' },
+      { icon: "cog", label: "Settings", id: 'settings' }
+    ];
     
-    const isUniversity = schoolCategory === 'UNIVERSITY';
-    const isTVET = schoolCategory === 'COLLEGE_TVET';
-    const showCourseAndUnitMenus = isUniversity || isTVET;
+    // For University/TVET - add enrollment and unit registration
+    if (showCourseAndUnitMenus) {
+      studentItems.unshift(
+        { icon: "user-plus", label: "Course Enrollment", id: 'course-enrollment' },
+        { icon: "book", label: "Unit Registration", id: 'unit-registration' }
+      );
+      // Add "My Units/Modules" after Timetable
+      studentItems.splice(4, 0, { 
+        icon: "book-open", 
+        label: isTVET ? "My Modules" : "My Units", 
+        id: 'course-units' 
+      });
+    } else if (isSecondaryOrPrimary) {
+      // For Primary/Secondary - add Subjects after Timetable
+      studentItems.splice(4, 0, { icon: "book", label: "My Subjects", id: 'subjects' });
+    }
     
-    const dashboardSection = {
-      title: "MAIN",
-      items: [
-        { icon: "tachometer-alt", label: "Dashboard", id: 'dashboard' }
-      ]
-    };
+    return [
+      dashboardSection,
+      { title: "MY ACADEMICS", items: studentItems }
+    ];
+  }
 
-    // Student View
-    if (user.role === 'STUDENT') {
-      const studentItems = [
-        { icon: "file-alt", label: "My Results", id: 'results' },
-        { icon: "calendar-check", label: "My Attendance", id: 'attendance' },
-        { icon: "id-card", label: "Exam Card", id: 'exam-cards' },
-        { icon: "clock", label: "Timetable", id: 'timetable' },
-        { icon: "book-open", label: "My Units", id: 'course-units' },
-        { icon: "money-bill", label: "Fee Statement", id: 'fee-statement' },
-        { icon: "book-open", label: "Library", id: 'library' },
-        { icon: "calendar-alt", label: "Events", id: 'events' },
-        { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-        { icon: "video", label: "Live Classroom", id: 'live-classroom' },
-        { icon: "laptop", label: "Online Exams", id: 'online-exams' },
-        { icon: "cog", label: "Settings", id: 'settings' }
-      ];
-      
-      if (showCourseAndUnitMenus) {
-        studentItems.unshift(
+  // ============================================
+  // PARENT VIEW
+  // ============================================
+  if (user.role === 'PARENT') {
+    const parentItems = [
+      { icon: "child", label: "My Children", id: 'students' },
+      { icon: "calendar-check", label: "Attendance", id: 'attendance' },
+      { icon: "file-alt", label: "Results", id: 'results' },
+      { icon: "id-card", label: "Exam Cards", id: 'exam-cards' },
+      { icon: "money-bill", label: "Fee Statement", id: 'fee-statement' },
+      { icon: "book-open", label: "Library", id: 'library' },
+      { icon: "clock", label: "Timetable", id: 'timetable' },
+      { icon: "calendar-alt", label: "Events", id: 'events' },
+      { icon: "bullhorn", label: "Announcements", id: 'announcements' },
+      { icon: "cog", label: "Settings", id: 'settings' }
+    ];
+
+    if (isSecondaryOrPrimary) {
+      parentItems.splice(5, 0, { icon: "book", label: "Subjects", id: 'subjects' });
+    }
+
+    return [
+      dashboardSection,
+      { title: "MY CHILDREN", items: parentItems }
+    ];
+  }
+
+  // ============================================
+  // TEACHER VIEW
+  // ============================================
+  if (['TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER', 'SENIOR_TEACHER'].includes(user.role)) {
+    let teacherItems = [
+      { icon: "users", label: "My Students", id: 'students' },
+      { icon: "calendar-check", label: "Take Attendance", id: 'attendance' },
+      { icon: "edit", label: "Enter Results", id: 'results' },
+      { icon: "file-alt", label: "Exams", id: 'exams' },
+      { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' },
+      { icon: "clock", label: "My Timetable", id: 'timetable' },
+      { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
+      { icon: "video", label: "Live Classroom", id: 'live-classroom' },
+      { icon: "laptop", label: "Online Exams", id: 'online-exams' },
+      { icon: "users", label: "Alumni", id: 'alumni' },
+      { icon: "concierge", label: "Receptionist", id: 'receptionist' },
+      { icon: "calendar-alt", label: "Events", id: 'events' },
+      { icon: "bullhorn", label: "Announcements", id: 'announcements' },
+      { icon: "cog", label: "Settings", id: 'settings' }
+    ];
+    
+    // Only show Subjects/Classes for Primary/Secondary
+    if (isSecondaryOrPrimary) {
+      teacherItems.unshift({ icon: "school", label: "My Classes", id: 'classes' });
+      teacherItems.splice(6, 0, { icon: "book", label: "My Subjects", id: 'subjects' });
+    }
+    
+    // For University/TVET - add Unit Registration
+    if (showCourseAndUnitMenus) {
+      teacherItems.push({ icon: "book", label: "Unit Registration", id: 'unit-registration' });
+    }
+    
+    return [
+      dashboardSection,
+      { title: "TEACHING", items: teacherItems }
+    ];
+  }
+
+  // ============================================
+  // LECTURER VIEW (University only)
+  // ============================================
+  if (['LECTURER', 'SENIOR_LECTURER', 'PROFESSOR'].includes(user.role)) {
+    const lecturerItems = [
+      { icon: "users", label: "My Students", id: 'students' },
+      { icon: "calendar-check", label: "Take Attendance", id: 'attendance' },
+      { icon: "edit", label: "Enter Results", id: 'results' },
+      { icon: "file-alt", label: "Exams", id: 'exams' },
+      { icon: "clock", label: "My Timetable", id: 'timetable' },
+      { icon: "book-open", label: "My Units", id: 'course-units' },
+      { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' },
+      { icon: "user-plus", label: "Course Enrollment", id: 'course-enrollment' },
+      { icon: "book", label: "Unit Registration", id: 'unit-registration' },
+      { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
+      { icon: "flask", label: "Research", id: 'research' },
+      { icon: "video", label: "Live Classroom", id: 'live-classroom' },
+      { icon: "laptop", label: "Online Exams", id: 'online-exams' },
+      { icon: "users", label: "Alumni", id: 'alumni' },
+      { icon: "concierge", label: "Receptionist", id: 'receptionist' },
+      { icon: "calendar-alt", label: "Events", id: 'events' },
+      { icon: "bullhorn", label: "Announcements", id: 'announcements' },
+      { icon: "cog", label: "Settings", id: 'settings' }
+    ];
+    
+    return [
+      dashboardSection,
+      { title: "TEACHING", items: lecturerItems }
+    ];
+  }
+
+  // ============================================
+  // DEAN VIEW (University)
+  // ============================================
+  if (user.role === 'DEAN') {
+    return [
+      dashboardSection,
+      {
+        title: "FACULTY MANAGEMENT",
+        items: [
+          { icon: "building", label: "Faculties", id: 'faculties' },
+          { icon: "layer-group", label: "Departments", id: 'departments' },
+          { icon: "graduation-cap", label: "Courses", id: 'courses' },
+          { icon: "book-open", label: "Units", id: 'course-units' },
+          { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' },
+          { icon: "flask", label: "Research", id: 'research' }
+        ]
+      },
+      {
+        title: "STUDENTS & STAFF",
+        items: [
+          { icon: "users", label: "Students", id: 'students' },
+          { icon: "chalkboard-teacher", label: "Staff", id: 'staff' },
+          { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
           { icon: "user-plus", label: "Course Enrollment", id: 'course-enrollment' },
           { icon: "book", label: "Unit Registration", id: 'unit-registration' }
-        );
+        ]
+      },
+      {
+        title: "ACADEMICS",
+        items: [
+          { icon: "file-alt", label: "Exams", id: 'exams' },
+          { icon: "chart-line", label: "Results", id: 'results' },
+          { icon: "clock", label: "Timetable", id: 'timetable' },
+          { icon: "calendar-check", label: "Attendance", id: 'attendance' },
+          { icon: "arrow-up", label: "Promotion", id: 'promotion' },
+          { icon: "video", label: "Live Classroom", id: 'live-classroom' },
+          { icon: "laptop", label: "Online Exams", id: 'online-exams' }
+        ]
+      },
+      {
+        title: "ADVANCED TOOLS",
+        items: [
+          { icon: "id-card", label: "Card Management", id: 'card-management' },
+          { icon: "certificate", label: "Certificates", id: 'certificates' },
+          { icon: "users", label: "Alumni", id: 'alumni' }
+        ]
+      },
+      {
+        title: "RECEPTION",
+        items: [
+          { icon: "concierge", label: "Receptionist", id: 'receptionist' },
+          { icon: "calendar-alt", label: "Events", id: 'events' },
+          { icon: "bullhorn", label: "Announcements", id: 'announcements' },
+          { icon: "cog", label: "Settings", id: 'settings' }
+        ]
       }
-      
-      return [
-        dashboardSection,
-        { title: "MY ACADEMICS", items: studentItems }
-      ];
-    }
+    ];
+  }
 
-    // Parent View
-    if (user.role === 'PARENT') {
-      return [
-        dashboardSection,
-        {
-          title: "MY CHILDREN",
-          items: [
-            { icon: "child", label: "My Children", id: 'students' },
-            { icon: "calendar-check", label: "Attendance", id: 'attendance' },
-            { icon: "file-alt", label: "Results", id: 'results' },
-            { icon: "id-card", label: "Exam Cards", id: 'exam-cards' },
-            { icon: "money-bill", label: "Fee Statement", id: 'fee-statement' },
-            { icon: "book-open", label: "Library", id: 'library' },
-            { icon: "clock", label: "Timetable", id: 'timetable' },
-            { icon: "calendar-alt", label: "Events", id: 'events' },
-            { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-            { icon: "cog", label: "Settings", id: 'settings' }
-          ]
-        }
-      ];
+  // ============================================
+  // HOD VIEW (University/TVET)
+  // ============================================
+  if (user.role === 'HOD' || user.role === 'HEAD_OF_DEPARTMENT') {
+    const hodItems = [
+      { icon: "users", label: "Students", id: 'students' },
+      { icon: "chalkboard-teacher", label: "Staff", id: 'staff' },
+      { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
+      { icon: "user-plus", label: "Course Enrollment", id: 'course-enrollment' },
+      { icon: "book", label: "Unit Registration", id: 'unit-registration' }
+    ];
+    
+    if (isUniversity) {
+      hodItems.unshift(
+        { icon: "graduation-cap", label: "Courses", id: 'courses' },
+        { icon: "book-open", label: "Units", id: 'course-units' }
+      );
+    } else if (isTVET) {
+      hodItems.unshift(
+        { icon: "graduation-cap", label: "Programs", id: 'programs' },
+        { icon: "book-open", label: "Modules", id: 'course-units' }
+      );
     }
-
-    // Teacher View
-    if (['TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER', 'SENIOR_TEACHER'].includes(user.role)) {
-      const teacherItems = [
-        { icon: "users", label: "My Students", id: 'students' },
-        { icon: "calendar-check", label: "Take Attendance", id: 'attendance' },
-        { icon: "edit", label: "Enter Results", id: 'results' },
-        { icon: "file-alt", label: "Exams", id: 'exams' },
-        { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' },
-        { icon: "clock", label: "My Timetable", id: 'timetable' },
-        { icon: "book", label: "My Subjects", id: 'subjects' },
-        { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
-        { icon: "video", label: "Live Classroom", id: 'live-classroom' },
-        { icon: "laptop", label: "Online Exams", id: 'online-exams' },
-        { icon: "users", label: "Alumni", id: 'alumni' },
-        { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-        { icon: "calendar-alt", label: "Events", id: 'events' },
-        { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-        { icon: "cog", label: "Settings", id: 'settings' }
-      ];
-      
-      if (showCourseAndUnitMenus) {
-        teacherItems.push({ icon: "book", label: "Unit Registration", id: 'unit-registration' });
+    
+    return [
+      dashboardSection,
+      {
+        title: "DEPARTMENT MANAGEMENT",
+        items: hodItems
+      },
+      {
+        title: "ACADEMICS",
+        items: [
+          { icon: "file-alt", label: "Exams", id: 'exams' },
+          { icon: "chart-line", label: "Results", id: 'results' },
+          { icon: "clock", label: "Timetable", id: 'timetable' },
+          { icon: "calendar-check", label: "Attendance", id: 'attendance' },
+          { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' },
+          { icon: "arrow-up", label: "Promotion", id: 'promotion' }
+        ]
+      },
+      {
+        title: "ADVANCED TOOLS",
+        items: [
+          { icon: "id-card", label: "Card Management", id: 'card-management' },
+          { icon: "certificate", label: "Certificates", id: 'certificates' },
+          { icon: "users", label: "Alumni", id: 'alumni' },
+          { icon: "video", label: "Live Classroom", id: 'live-classroom' },
+          { icon: "laptop", label: "Online Exams", id: 'online-exams' }
+        ]
+      },
+      {
+        title: "RECEPTION",
+        items: [
+          { icon: "concierge", label: "Receptionist", id: 'receptionist' },
+          { icon: "calendar-alt", label: "Events", id: 'events' },
+          { icon: "bullhorn", label: "Announcements", id: 'announcements' },
+          { icon: "cog", label: "Settings", id: 'settings' }
+        ]
       }
-      
-      return [
-        dashboardSection,
-        { title: "TEACHING", items: teacherItems }
-      ];
-    }
+    ];
+  }
 
-    // Lecturer View
-    if (['LECTURER', 'SENIOR_LECTURER', 'PROFESSOR'].includes(user.role)) {
-      const lecturerItems = [
-        { icon: "users", label: "My Students", id: 'students' },
-        { icon: "calendar-check", label: "Take Attendance", id: 'attendance' },
-        { icon: "edit", label: "Enter Results", id: 'results' },
-        { icon: "file-alt", label: "Exams", id: 'exams' },
-        { icon: "clock", label: "My Timetable", id: 'timetable' },
-        { icon: "book-open", label: "My Units", id: 'course-units' },
-        { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' },
-        { icon: "user-plus", label: "Course Enrollment", id: 'course-enrollment' },
-        { icon: "book", label: "Unit Registration", id: 'unit-registration' },
-        { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
-        { icon: "flask", label: "Research", id: 'research' },
-        { icon: "video", label: "Live Classroom", id: 'live-classroom' },
-        { icon: "laptop", label: "Online Exams", id: 'online-exams' },
-        { icon: "users", label: "Alumni", id: 'alumni' },
-        { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-        { icon: "calendar-alt", label: "Events", id: 'events' },
-        { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-        { icon: "cog", label: "Settings", id: 'settings' }
-      ];
-      
-      return [
-        dashboardSection,
-        { title: "TEACHING", items: lecturerItems }
-      ];
-    }
-
-    // Dean View
-    if (user.role === 'DEAN') {
-      return [
-        dashboardSection,
-        {
-          title: "FACULTY MANAGEMENT",
-          items: [
-            { icon: "building", label: "Faculties", id: 'faculties' },
-            { icon: "layer-group", label: "Departments", id: 'departments' },
-            { icon: "graduation-cap", label: "Courses", id: 'courses' },
-            { icon: "book-open", label: "Units", id: 'course-units' },
-            { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' },
-            { icon: "flask", label: "Research", id: 'research' }
-          ]
-        },
-        {
-          title: "STUDENTS & STAFF",
-          items: [
-            { icon: "users", label: "Students", id: 'students' },
-            { icon: "chalkboard-teacher", label: "Staff", id: 'staff' },
-            { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
-            { icon: "user-plus", label: "Course Enrollment", id: 'course-enrollment' },
-            { icon: "book", label: "Unit Registration", id: 'unit-registration' }
-          ]
-        },
-        {
-          title: "ACADEMICS",
-          items: [
-            { icon: "file-alt", label: "Exams", id: 'exams' },
-            { icon: "chart-line", label: "Results", id: 'results' },
-            { icon: "clock", label: "Timetable", id: 'timetable' },
-            { icon: "calendar-check", label: "Attendance", id: 'attendance' },
-            { icon: "arrow-up", label: "Promotion", id: 'promotion' },
-            { icon: "video", label: "Live Classroom", id: 'live-classroom' },
-            { icon: "laptop", label: "Online Exams", id: 'online-exams' }
-          ]
-        },
-        {
-          title: "ADVANCED TOOLS",
-          items: [
-            { icon: "id-card", label: "Card Management", id: 'card-management' },
-            { icon: "certificate", label: "Certificates", id: 'certificates' },
-            { icon: "users", label: "Alumni", id: 'alumni' }
-          ]
-        },
-        {
-          title: "RECEPTION",
-          items: [
-            { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-            { icon: "calendar-alt", label: "Events", id: 'events' },
-            { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-            { icon: "cog", label: "Settings", id: 'settings' }
-          ]
-        }
-      ];
-    }
-
-    // HOD View
-    if (user.role === 'HOD' || user.role === 'HEAD_OF_DEPARTMENT') {
-      return [
-        dashboardSection,
-        {
-          title: "DEPARTMENT MANAGEMENT",
-          items: [
-            { icon: "graduation-cap", label: "Courses", id: 'courses' },
-            { icon: "book-open", label: "Units", id: 'course-units' },
-            { icon: "users", label: "Students", id: 'students' },
-            { icon: "chalkboard-teacher", label: "Staff", id: 'staff' },
-            { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
-            { icon: "user-plus", label: "Course Enrollment", id: 'course-enrollment' },
-            { icon: "book", label: "Unit Registration", id: 'unit-registration' }
-          ]
-        },
-        {
-          title: "ACADEMICS",
-          items: [
-            { icon: "file-alt", label: "Exams", id: 'exams' },
-            { icon: "chart-line", label: "Results", id: 'results' },
-            { icon: "clock", label: "Timetable", id: 'timetable' },
-            { icon: "calendar-check", label: "Attendance", id: 'attendance' },
-            { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' },
-            { icon: "arrow-up", label: "Promotion", id: 'promotion' }
-          ]
-        },
-        {
-          title: "ADVANCED TOOLS",
-          items: [
-            { icon: "id-card", label: "Card Management", id: 'card-management' },
-            { icon: "certificate", label: "Certificates", id: 'certificates' },
-            { icon: "users", label: "Alumni", id: 'alumni' },
-            { icon: "video", label: "Live Classroom", id: 'live-classroom' },
-            { icon: "laptop", label: "Online Exams", id: 'online-exams' }
-          ]
-        },
-        {
-          title: "RECEPTION",
-          items: [
-            { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-            { icon: "calendar-alt", label: "Events", id: 'events' },
-            { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-            { icon: "cog", label: "Settings", id: 'settings' }
-          ]
-        }
-      ];
-    }
-
-    // Principal View
-    if (user.role === 'PRINCIPAL') {
-      return [
-        dashboardSection,
-        {
-          title: "SCHOOL OVERVIEW",
-          items: [
-            { icon: "school", label: "Classes", id: 'classes' },
-            { icon: "book", label: "Subjects", id: 'subjects' },
-            { icon: "users", label: "Students", id: 'students' },
-            { icon: "chalkboard-teacher", label: "Staff", id: 'staff' }
-          ]
-        },
-        {
-          title: "ACADEMICS",
-          items: [
-            { icon: "file-alt", label: "Exams", id: 'exams' },
-            { icon: "chart-line", label: "Results", id: 'results' },
-            { icon: "clock", label: "Timetable", id: 'timetable' },
-            { icon: "calendar-check", label: "Attendance", id: 'attendance' },
-            { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' },
-            { icon: "book-open", label: "Course Units", id: 'course-units' },
-            { icon: "arrow-up", label: "Promotion", id: 'promotion' },
-            { icon: "id-card", label: "Exam Cards", id: 'exam-cards' }
-          ]
-        },
-        {
-          title: "STUDENT MANAGEMENT",
-          items: [
-            { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
-            { icon: "stethoscope", label: "Health Records", id: 'health' },
-            { icon: "bed", label: "Sick Bay", id: 'sickbay' }
-          ]
-        },
-        {
-          title: "FINANCE",
-          items: [
-            { icon: "money-bill", label: "Fee Management", id: 'fees' },
-            { icon: "hand-holding-usd", label: "Fee Allocation", id: 'fee-allocation' },
-            { icon: "credit-card", label: "Fee Collection", id: 'fee-collection' },
-            { icon: "receipt", label: "Receipt History", id: 'receipt-history' },
-            { icon: "file-invoice", label: "Reports", id: 'reports' },
-            { icon: "bell", label: "Fee Reminders", id: 'fee-reminders' }
-          ]
-        },
-        {
-          title: "STAFF",
-          items: [
-            { icon: "clipboard-list", label: "Staff Attendance", id: 'staff-attendance' },
-            { icon: "money-bill-wave", label: "Payroll", id: 'payroll' }
-          ]
-        },
-        {
-          title: "ADVANCED TOOLS",
-          items: [
-            { icon: "id-card", label: "Card Management", id: 'card-management' },
-            { icon: "certificate", label: "Certificates", id: 'certificates' },
-            { icon: "users", label: "Alumni", id: 'alumni' },
-            { icon: "video", label: "Live Classroom", id: 'live-classroom' },
-            { icon: "laptop", label: "Online Exams", id: 'online-exams' }
-          ]
-        },
-        {
-          title: "RECEPTION",
-          items: [
-            { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-            { icon: "calendar-alt", label: "Events", id: 'events' },
-            { icon: "bullhorn", label: "Announcements", id: 'announcements' }
-          ]
-        },
-        {
-          title: "COMMUNICATION",
-          items: [
-            { icon: "envelope", label: "Messages", id: 'messages' },
-            { icon: "cog", label: "Settings", id: 'settings' }
-          ]
-        }
-      ];
-    }
-
-    // Deputy Principal View
-    if (user.role === 'DEPUTY_PRINCIPAL') {
-      return [
-        dashboardSection,
-        {
-          title: "STUDENT AFFAIRS",
-          items: [
-            { icon: "users", label: "Students", id: 'students' },
-            { icon: "calendar-check", label: "Attendance", id: 'attendance' },
-            { icon: "clock", label: "Timetable", id: 'timetable' },
-            { icon: "id-card", label: "Exam Cards", id: 'exam-cards' },
-            { icon: "user-check", label: "Student Arrival", id: 'student-arrival' }
-          ]
-        },
-        {
-          title: "ACADEMICS",
-          items: [
-            { icon: "file-alt", label: "Exams", id: 'exams' },
-            { icon: "chart-line", label: "Results", id: 'results' },
-            { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' },
-            { icon: "arrow-up", label: "Promotion", id: 'promotion' }
-          ]
-        },
-        {
-          title: "ADVANCED TOOLS",
-          items: [
-            { icon: "id-card", label: "Card Management", id: 'card-management' },
-            { icon: "certificate", label: "Certificates", id: 'certificates' },
-            { icon: "users", label: "Alumni", id: 'alumni' },
-            { icon: "video", label: "Live Classroom", id: 'live-classroom' },
-            { icon: "laptop", label: "Online Exams", id: 'online-exams' }
-          ]
-        },
-        {
-          title: "RECEPTION",
-          items: [
-            { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-            { icon: "calendar-alt", label: "Events", id: 'events' },
-            { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-            { icon: "cog", label: "Settings", id: 'settings' }
-          ]
-        }
-      ];
-    }
-
-    // Accountant View
-    if (user.role === 'ACCOUNTANT') {
-      return [
-        dashboardSection,
-        {
-          title: "FINANCE",
-          items: [
-            { icon: "money-bill", label: "Fee Management", id: 'fees' },
-            { icon: "hand-holding-usd", label: "Fee Allocation", id: 'fee-allocation' },
-            { icon: "credit-card", label: "Fee Collection", id: 'fee-collection' },
-            { icon: "receipt", label: "Receipt History", id: 'receipt-history' },
-            { icon: "plus-circle", label: "Other Income", id: 'other-income' },
-            { icon: "minus-circle", label: "Expenses", id: 'expenses' },
-            { icon: "file-invoice", label: "Reports", id: 'reports' },
-            { icon: "bell", label: "Fee Reminders", id: 'fee-reminders' },
-            { icon: "money-bill-wave", label: "Payroll", id: 'payroll' }
-          ]
-        },
-        {
-          title: "RECEPTION",
-          items: [
-            { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-            { icon: "calendar-alt", label: "Events", id: 'events' },
-            { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-            { icon: "cog", label: "Settings", id: 'settings' }
-          ]
-        }
-      ];
-    }
-
-    // Librarian View
-    if (user.role === 'LIBRARIAN') {
-      return [
-        dashboardSection,
-        {
-          title: "LIBRARY",
-          items: [
-            { icon: "book", label: "Books", id: 'library' },
-            { icon: "hand-holding", label: "Borrow Books", id: 'library' },
-            { icon: "undo-alt", label: "Return Books", id: 'library' },
-            { icon: "users", label: "Students", id: 'students' }
-          ]
-        },
-        {
-          title: "RECEPTION",
-          items: [
-            { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-            { icon: "calendar-alt", label: "Events", id: 'events' },
-            { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-            { icon: "cog", label: "Settings", id: 'settings' }
-          ]
-        }
-      ];
-    }
-
-    // Nurse View
-    if (user.role === 'NURSE') {
-      return [
-        dashboardSection,
-        {
-          title: "HEALTH MANAGEMENT",
-          items: [
-            { icon: "users", label: "Students", id: 'students' },
-            { icon: "stethoscope", label: "Health Records", id: 'health' },
-            { icon: "bed", label: "Sick Bay", id: 'sickbay' },
-            { icon: "calendar-check", label: "Attendance", id: 'attendance' }
-          ]
-        },
-        {
-          title: "RECEPTION",
-          items: [
-            { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-            { icon: "calendar-alt", label: "Events", id: 'events' },
-            { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-            { icon: "cog", label: "Settings", id: 'settings' }
-          ]
-        }
-      ];
-    }
-
-    // Matron View
-    if (user.role === 'MATRON') {
-      return [
-        dashboardSection,
-        {
-          title: "HOSTEL MANAGEMENT",
-          items: [
-            { icon: "bed", label: "Hostels", id: 'hostel' },
-            { icon: "users", label: "Students", id: 'students' },
-            { icon: "bed", label: "Sick Bay", id: 'sickbay' },
-            { icon: "calendar-check", label: "Attendance", id: 'attendance' },
-            { icon: "box", label: "Inventory", id: 'inventory' }
-          ]
-        },
-        {
-          title: "RECEPTION",
-          items: [
-            { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-            { icon: "calendar-alt", label: "Events", id: 'events' },
-            { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-            { icon: "cog", label: "Settings", id: 'settings' }
-          ]
-        }
-      ];
-    }
-
-    // Transport Manager View
-    if (user.role === 'TRANSPORT_MANAGER') {
-      return [
-        dashboardSection,
-        {
-          title: "FLEET MANAGEMENT",
-          items: [
-            { icon: "bus", label: "Vehicles", id: 'transport' },
-            { icon: "route", label: "Routes", id: 'transport' },
-            { icon: "users", label: "Students on Transport", id: 'students' },
-            { icon: "calendar-check", label: "Attendance", id: 'attendance' }
-          ]
-        },
-        {
-          title: "RECEPTION",
-          items: [
-            { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-            { icon: "calendar-alt", label: "Events", id: 'events' },
-            { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-            { icon: "cog", label: "Settings", id: 'settings' }
-          ]
-        }
-      ];
-    }
-
-    // HR Manager View
-    if (user.role === 'HR_MANAGER' || user.role === 'HR') {
-      return [
-        dashboardSection,
-        {
-          title: "HUMAN RESOURCES",
-          items: [
-            { icon: "users", label: "Staff", id: 'staff' },
-            { icon: "clipboard-list", label: "Staff Attendance", id: 'staff-attendance' },
-            { icon: "money-bill-wave", label: "Payroll", id: 'payroll' },
-            { icon: "file-invoice", label: "Reports", id: 'reports' }
-          ]
-        },
-        {
-          title: "RECEPTION",
-          items: [
-            { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-            { icon: "calendar-alt", label: "Events", id: 'events' },
-            { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-            { icon: "cog", label: "Settings", id: 'settings' }
-          ]
-        }
-      ];
-    }
-
-    // School Admin View
-    if (user.role === 'SCHOOL_ADMIN') {
-      const sections = [
-        dashboardSection,
-        {
-          title: "ACADEMICS",
-          items: [
-            { icon: "school", label: "Classes", id: 'classes' },
-            { icon: "book", label: "Subjects", id: 'subjects' },
-            { icon: "file-alt", label: "Exams", id: 'exams' },
-            { icon: "chart-line", label: "Results", id: 'results' },
-            { icon: "clock", label: "Timetable", id: 'timetable' },
-            { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' },
-            { icon: "book-open", label: "Course Units", id: 'course-units' }
-          ]
-        },
-        {
-          title: "STUDENT MANAGEMENT",
-          items: [
-            { icon: "user-graduate", label: "Students", id: 'students' },
-            { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
-            { icon: "calendar-check", label: "Attendance", id: 'attendance' },
-            { icon: "id-card", label: "Exam Cards", id: 'exam-cards' },
-            { icon: "arrow-up", label: "Promotion", id: 'promotion' },
-            { icon: "stethoscope", label: "Health Records", id: 'health' },
-            { icon: "bed", label: "Sick Bay", id: 'sickbay' }
-          ]
-        },
-        {
-          title: "FINANCE",
-          items: [
-            { icon: "money-bill", label: "Fee Management", id: 'fees' },
-            { icon: "hand-holding-usd", label: "Fee Allocation", id: 'fee-allocation' },
-            { icon: "credit-card", label: "Fee Collection", id: 'fee-collection' },
-            { icon: "receipt", label: "Receipt History", id: 'receipt-history' },
-            { icon: "plus-circle", label: "Other Income", id: 'other-income' },
-            { icon: "minus-circle", label: "Expenses", id: 'expenses' },
-            { icon: "file-invoice", label: "Reports", id: 'reports' },
-            { icon: "bell", label: "Fee Reminders", id: 'fee-reminders' }
-          ]
-        },
-        {
-          title: "HUMAN RESOURCES",
-          items: [
-            { icon: "chalkboard-teacher", label: "Staff", id: 'staff' },
-            { icon: "clipboard-list", label: "Staff Attendance", id: 'staff-attendance' },
-            { icon: "money-bill-wave", label: "Payroll", id: 'payroll' },
-            { icon: "users", label: "Users", id: 'users' }
-          ]
-        },
-        {
-          title: "RESOURCES",
-          items: [
-            { icon: "book-open", label: "Library", id: 'library' },
-            { icon: "bus", label: "Transport", id: 'transport' },
-            { icon: "bed", label: "Hostel", id: 'hostel' },
-            { icon: "box", label: "Inventory", id: 'inventory' }
-          ]
-        },
-        {
-          title: "ADVANCED TOOLS",
-          items: [
-            { icon: "id-card", label: "Card Management", id: 'card-management' },
-            { icon: "certificate", label: "Certificates", id: 'certificates' },
-            { icon: "users", label: "Alumni", id: 'alumni' },
-            { icon: "video", label: "Live Classroom", id: 'live-classroom' },
-            { icon: "laptop", label: "Online Exams", id: 'online-exams' }
-          ]
-        },
-        {
-          title: "RECEPTION",
-          items: [
-            { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-            { icon: "calendar-alt", label: "Events", id: 'events' },
-            { icon: "bullhorn", label: "Announcements", id: 'announcements' }
-          ]
-        },
-        {
-          title: "COMMUNICATION",
-          items: [
-            { icon: "envelope", label: "SMS & Email", id: 'messages' }
-          ]
-        },
-        {
-          title: "ADMIN",
-          items: [
-            { icon: "user-shield", label: "Roles", id: 'roles' },
-            { icon: "cog", label: "Settings", id: 'settings' }
-          ]
-        }
-      ];
-
-      // University specific sections
-      if (isUniversity) {
-        sections.splice(1, 0, {
-          title: "UNIVERSITY",
-          items: [
-            { icon: "building", label: "Faculties", id: 'faculties' },
-            { icon: "layer-group", label: "Departments", id: 'departments' },
-            { icon: "graduation-cap", label: "Courses", id: 'courses' },
-            { icon: "flask", label: "Research", id: 'research' },
-            { icon: "microscope", label: "Labs", id: 'labs' },
-            { icon: "user-plus", label: "Course Enrollment", id: 'course-enrollment' },
-            { icon: "book", label: "Unit Registration", id: 'unit-registration' }
-          ]
-        });
+  // ============================================
+  // PRINCIPAL VIEW (Primary/Secondary)
+  // ============================================
+  if (user.role === 'PRINCIPAL') {
+    return [
+      dashboardSection,
+      {
+        title: "SCHOOL OVERVIEW",
+        items: [
+          { icon: "school", label: "Classes", id: 'classes' },
+          { icon: "book", label: "Subjects", id: 'subjects' },
+          { icon: "users", label: "Students", id: 'students' },
+          { icon: "chalkboard-teacher", label: "Staff", id: 'staff' }
+        ]
+      },
+      {
+        title: "ACADEMICS",
+        items: [
+          { icon: "file-alt", label: "Exams", id: 'exams' },
+          { icon: "chart-line", label: "Results", id: 'results' },
+          { icon: "clock", label: "Timetable", id: 'timetable' },
+          { icon: "calendar-check", label: "Attendance", id: 'attendance' },
+          { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' },
+          { icon: "arrow-up", label: "Promotion", id: 'promotion' },
+          { icon: "id-card", label: "Exam Cards", id: 'exam-cards' }
+        ]
+      },
+      {
+        title: "STUDENT MANAGEMENT",
+        items: [
+          { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
+          { icon: "stethoscope", label: "Health Records", id: 'health' },
+          { icon: "bed", label: "Sick Bay", id: 'sickbay' }
+        ]
+      },
+      {
+        title: "FINANCE",
+        items: [
+          { icon: "money-bill", label: "Fee Management", id: 'fees' },
+          { icon: "hand-holding-usd", label: "Fee Allocation", id: 'fee-allocation' },
+          { icon: "credit-card", label: "Fee Collection", id: 'fee-collection' },
+          { icon: "receipt", label: "Receipt History", id: 'receipt-history' },
+          { icon: "file-invoice", label: "Reports", id: 'reports' },
+          { icon: "bell", label: "Fee Reminders", id: 'fee-reminders' }
+        ]
+      },
+      {
+        title: "STAFF",
+        items: [
+          { icon: "clipboard-list", label: "Staff Attendance", id: 'staff-attendance' },
+          { icon: "money-bill-wave", label: "Payroll", id: 'payroll' }
+        ]
+      },
+      {
+        title: "ADVANCED TOOLS",
+        items: [
+          { icon: "id-card", label: "Card Management", id: 'card-management' },
+          { icon: "certificate", label: "Certificates", id: 'certificates' },
+          { icon: "users", label: "Alumni", id: 'alumni' },
+          { icon: "video", label: "Live Classroom", id: 'live-classroom' },
+          { icon: "laptop", label: "Online Exams", id: 'online-exams' }
+        ]
+      },
+      {
+        title: "RECEPTION",
+        items: [
+          { icon: "concierge", label: "Receptionist", id: 'receptionist' },
+          { icon: "calendar-alt", label: "Events", id: 'events' },
+          { icon: "bullhorn", label: "Announcements", id: 'announcements' }
+        ]
+      },
+      {
+        title: "COMMUNICATION",
+        items: [
+          { icon: "envelope", label: "Messages", id: 'messages' },
+          { icon: "cog", label: "Settings", id: 'settings' }
+        ]
       }
+    ];
+  }
 
-      // TVET specific sections
-      if (isTVET) {
-        sections.splice(1, 0, {
+  // ============================================
+  // DEPUTY PRINCIPAL VIEW (Primary/Secondary)
+  // ============================================
+  if (user.role === 'DEPUTY_PRINCIPAL') {
+    return [
+      dashboardSection,
+      {
+        title: "STUDENT AFFAIRS",
+        items: [
+          { icon: "users", label: "Students", id: 'students' },
+          { icon: "calendar-check", label: "Attendance", id: 'attendance' },
+          { icon: "clock", label: "Timetable", id: 'timetable' },
+          { icon: "id-card", label: "Exam Cards", id: 'exam-cards' },
+          { icon: "user-check", label: "Student Arrival", id: 'student-arrival' }
+        ]
+      },
+      {
+        title: "ACADEMICS",
+        items: [
+          { icon: "file-alt", label: "Exams", id: 'exams' },
+          { icon: "chart-line", label: "Results", id: 'results' },
+          { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' },
+          { icon: "arrow-up", label: "Promotion", id: 'promotion' }
+        ]
+      },
+      {
+        title: "ADVANCED TOOLS",
+        items: [
+          { icon: "id-card", label: "Card Management", id: 'card-management' },
+          { icon: "certificate", label: "Certificates", id: 'certificates' },
+          { icon: "users", label: "Alumni", id: 'alumni' },
+          { icon: "video", label: "Live Classroom", id: 'live-classroom' },
+          { icon: "laptop", label: "Online Exams", id: 'online-exams' }
+        ]
+      },
+      {
+        title: "RECEPTION",
+        items: [
+          { icon: "concierge", label: "Receptionist", id: 'receptionist' },
+          { icon: "calendar-alt", label: "Events", id: 'events' },
+          { icon: "bullhorn", label: "Announcements", id: 'announcements' },
+          { icon: "cog", label: "Settings", id: 'settings' }
+        ]
+      }
+    ];
+  }
+
+  // ============================================
+  // ACCOUNTANT VIEW
+  // ============================================
+  if (user.role === 'ACCOUNTANT') {
+    return [
+      dashboardSection,
+      {
+        title: "FINANCE",
+        items: [
+          { icon: "money-bill", label: "Fee Management", id: 'fees' },
+          { icon: "hand-holding-usd", label: "Fee Allocation", id: 'fee-allocation' },
+          { icon: "credit-card", label: "Fee Collection", id: 'fee-collection' },
+          { icon: "receipt", label: "Receipt History", id: 'receipt-history' },
+          { icon: "plus-circle", label: "Other Income", id: 'other-income' },
+          { icon: "minus-circle", label: "Expenses", id: 'expenses' },
+          { icon: "file-invoice", label: "Reports", id: 'reports' },
+          { icon: "bell", label: "Fee Reminders", id: 'fee-reminders' },
+          { icon: "money-bill-wave", label: "Payroll", id: 'payroll' }
+        ]
+      },
+      {
+        title: "RECEPTION",
+        items: [
+          { icon: "concierge", label: "Receptionist", id: 'receptionist' },
+          { icon: "calendar-alt", label: "Events", id: 'events' },
+          { icon: "bullhorn", label: "Announcements", id: 'announcements' },
+          { icon: "cog", label: "Settings", id: 'settings' }
+        ]
+      }
+    ];
+  }
+
+  // ============================================
+  // LIBRARIAN VIEW
+  // ============================================
+  if (user.role === 'LIBRARIAN') {
+    return [
+      dashboardSection,
+      {
+        title: "LIBRARY",
+        items: [
+          { icon: "book", label: "Books", id: 'library' },
+          { icon: "hand-holding", label: "Borrow Books", id: 'library' },
+          { icon: "undo-alt", label: "Return Books", id: 'library' },
+          { icon: "users", label: "Students", id: 'students' }
+        ]
+      },
+      {
+        title: "RECEPTION",
+        items: [
+          { icon: "concierge", label: "Receptionist", id: 'receptionist' },
+          { icon: "calendar-alt", label: "Events", id: 'events' },
+          { icon: "bullhorn", label: "Announcements", id: 'announcements' },
+          { icon: "cog", label: "Settings", id: 'settings' }
+        ]
+      }
+    ];
+  }
+
+  // ============================================
+  // NURSE VIEW
+  // ============================================
+  if (user.role === 'NURSE') {
+    return [
+      dashboardSection,
+      {
+        title: "HEALTH MANAGEMENT",
+        items: [
+          { icon: "users", label: "Students", id: 'students' },
+          { icon: "stethoscope", label: "Health Records", id: 'health' },
+          { icon: "bed", label: "Sick Bay", id: 'sickbay' },
+          { icon: "calendar-check", label: "Attendance", id: 'attendance' }
+        ]
+      },
+      {
+        title: "RECEPTION",
+        items: [
+          { icon: "concierge", label: "Receptionist", id: 'receptionist' },
+          { icon: "calendar-alt", label: "Events", id: 'events' },
+          { icon: "bullhorn", label: "Announcements", id: 'announcements' },
+          { icon: "cog", label: "Settings", id: 'settings' }
+        ]
+      }
+    ];
+  }
+
+  // ============================================
+  // MATRON VIEW
+  // ============================================
+  if (user.role === 'MATRON') {
+    return [
+      dashboardSection,
+      {
+        title: "HOSTEL MANAGEMENT",
+        items: [
+          { icon: "bed", label: "Hostels", id: 'hostel' },
+          { icon: "users", label: "Students", id: 'students' },
+          { icon: "bed", label: "Sick Bay", id: 'sickbay' },
+          { icon: "calendar-check", label: "Attendance", id: 'attendance' },
+          { icon: "box", label: "Inventory", id: 'inventory' }
+        ]
+      },
+      {
+        title: "RECEPTION",
+        items: [
+          { icon: "concierge", label: "Receptionist", id: 'receptionist' },
+          { icon: "calendar-alt", label: "Events", id: 'events' },
+          { icon: "bullhorn", label: "Announcements", id: 'announcements' },
+          { icon: "cog", label: "Settings", id: 'settings' }
+        ]
+      }
+    ];
+  }
+
+  // ============================================
+  // TRANSPORT MANAGER VIEW
+  // ============================================
+  if (user.role === 'TRANSPORT_MANAGER') {
+    return [
+      dashboardSection,
+      {
+        title: "FLEET MANAGEMENT",
+        items: [
+          { icon: "bus", label: "Vehicles", id: 'transport' },
+          { icon: "route", label: "Routes", id: 'transport' },
+          { icon: "users", label: "Students on Transport", id: 'students' },
+          { icon: "calendar-check", label: "Attendance", id: 'attendance' }
+        ]
+      },
+      {
+        title: "RECEPTION",
+        items: [
+          { icon: "concierge", label: "Receptionist", id: 'receptionist' },
+          { icon: "calendar-alt", label: "Events", id: 'events' },
+          { icon: "bullhorn", label: "Announcements", id: 'announcements' },
+          { icon: "cog", label: "Settings", id: 'settings' }
+        ]
+      }
+    ];
+  }
+
+  // ============================================
+  // HR MANAGER VIEW
+  // ============================================
+  if (user.role === 'HR_MANAGER' || user.role === 'HR') {
+    return [
+      dashboardSection,
+      {
+        title: "HUMAN RESOURCES",
+        items: [
+          { icon: "users", label: "Staff", id: 'staff' },
+          { icon: "clipboard-list", label: "Staff Attendance", id: 'staff-attendance' },
+          { icon: "money-bill-wave", label: "Payroll", id: 'payroll' },
+          { icon: "file-invoice", label: "Reports", id: 'reports' }
+        ]
+      },
+      {
+        title: "RECEPTION",
+        items: [
+          { icon: "concierge", label: "Receptionist", id: 'receptionist' },
+          { icon: "calendar-alt", label: "Events", id: 'events' },
+          { icon: "bullhorn", label: "Announcements", id: 'announcements' },
+          { icon: "cog", label: "Settings", id: 'settings' }
+        ]
+      }
+    ];
+  }
+
+  // ============================================
+  // SCHOOL ADMIN VIEW (COMPLETE - WITH TVET SUPPORT)
+  // ============================================
+  if (user.role === 'SCHOOL_ADMIN') {
+    const sections = [
+      dashboardSection
+    ];
+
+    // ===== TVET SECTIONS =====
+    if (isTVET) {
+      sections.push(
+        {
           title: "TVET",
           items: [
+            { icon: "building", label: "Faculties", id: 'faculties' },
             { icon: "layer-group", label: "Departments", id: 'departments' },
             { icon: "graduation-cap", label: "Programs", id: 'programs' },
             { icon: "book-open", label: "Modules", id: 'course-units' },
@@ -49926,46 +55013,172 @@ useEffect(() => {
             { icon: "user-plus", label: "Course Enrollment", id: 'course-enrollment' },
             { icon: "book", label: "Unit Registration", id: 'unit-registration' }
           ]
-        });
-      }
-
-      return sections;
+        }
+      );
     }
 
-    // Super Admin View
-    if (user.role === 'SUPER_ADMIN') {
-      return [
-        dashboardSection,
+    // ===== UNIVERSITY SECTIONS =====
+    if (isUniversity) {
+      sections.push(
         {
-          title: "SYSTEM MANAGEMENT",
+          title: "UNIVERSITY",
           items: [
-            { icon: "university", label: "Schools", id: 'schools' },
-            { icon: "users", label: "Users", id: 'users' },
-            { icon: "user-shield", label: "Roles", id: 'roles' },
-            { icon: "cog", label: "Settings", id: 'settings' }
-          ]
-        },
-        {
-          title: "SYSTEM REPORTS",
-          items: [
-            { icon: "chart-line", label: "Reports", id: 'reports' },
-            { icon: "history", label: "Audit Logs", id: 'audit-logs' }
+            { icon: "building", label: "Faculties", id: 'faculties' },
+            { icon: "layer-group", label: "Departments", id: 'departments' },
+            { icon: "graduation-cap", label: "Courses", id: 'courses' },
+            { icon: "book-open", label: "Units", id: 'course-units' },
+            { icon: "flask", label: "Research", id: 'research' },
+            { icon: "microscope", label: "Labs", id: 'labs' },
+            { icon: "user-plus", label: "Course Enrollment", id: 'course-enrollment' },
+            { icon: "book", label: "Unit Registration", id: 'unit-registration' }
           ]
         }
-      ];
+      );
     }
 
-    // Fallback
-    return [
+    // ===== ACADEMICS - Different for TVET vs Primary/Secondary =====
+    const academicsItems = [];
+    
+    // For TVET/University - NO Classes or Subjects
+    if (isTVET || isUniversity) {
+      academicsItems.push(
+        { icon: "file-alt", label: "Exams", id: 'exams' },
+        { icon: "chart-line", label: "Results", id: 'results' },
+        { icon: "clock", label: "Timetable", id: 'timetable' },
+        { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' }
+      );
+    } else {
+      // For Primary/Secondary - WITH Classes and Subjects
+      academicsItems.push(
+        { icon: "school", label: "Classes", id: 'classes' },
+        { icon: "book", label: "Subjects", id: 'subjects' },
+        { icon: "file-alt", label: "Exams", id: 'exams' },
+        { icon: "chart-line", label: "Results", id: 'results' },
+        { icon: "clock", label: "Timetable", id: 'timetable' },
+        { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' }
+      );
+    }
+    
+    sections.push({ title: "ACADEMICS", items: academicsItems });
+
+    // ===== COMMON SECTIONS (All school types) =====
+    sections.push(
       {
-        title: "MAIN",
+        title: "STUDENT MANAGEMENT",
         items: [
-          { icon: "tachometer-alt", label: "Dashboard", id: 'dashboard' }
+          { icon: "user-graduate", label: "Students", id: 'students' },
+          { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
+          { icon: "calendar-check", label: "Attendance", id: 'attendance' },
+          { icon: "id-card", label: "Exam Cards", id: 'exam-cards' },
+          { icon: "arrow-up", label: "Promotion", id: 'promotion' },
+          { icon: "stethoscope", label: "Health Records", id: 'health' },
+          { icon: "bed", label: "Sick Bay", id: 'sickbay' }
+        ]
+      },
+      {
+        title: "FINANCE",
+        items: [
+          { icon: "money-bill", label: "Fee Management", id: 'fees' },
+          { icon: "hand-holding-usd", label: "Fee Allocation", id: 'fee-allocation' },
+          { icon: "credit-card", label: "Fee Collection", id: 'fee-collection' },
+          { icon: "receipt", label: "Receipt History", id: 'receipt-history' },
+          { icon: "plus-circle", label: "Other Income", id: 'other-income' },
+          { icon: "minus-circle", label: "Expenses", id: 'expenses' },
+          { icon: "file-invoice", label: "Reports", id: 'reports' },
+          { icon: "bell", label: "Fee Reminders", id: 'fee-reminders' }
+        ]
+      },
+      {
+        title: "HUMAN RESOURCES",
+        items: [
+          { icon: "chalkboard-teacher", label: "Staff", id: 'staff' },
+          { icon: "clipboard-list", label: "Staff Attendance", id: 'staff-attendance' },
+          { icon: "money-bill-wave", label: "Payroll", id: 'payroll' },
+          { icon: "users", label: "Users", id: 'users' }
+        ]
+      },
+      {
+        title: "RESOURCES",
+        items: [
+          { icon: "book-open", label: "Library", id: 'library' },
+          { icon: "bus", label: "Transport", id: 'transport' },
+          { icon: "bed", label: "Hostel", id: 'hostel' },
+          { icon: "box", label: "Inventory", id: 'inventory' }
+        ]
+      },
+      {
+        title: "ADVANCED TOOLS",
+        items: [
+          { icon: "id-card", label: "Card Management", id: 'card-management' },
+          { icon: "certificate", label: "Certificates", id: 'certificates' },
+          { icon: "users", label: "Alumni", id: 'alumni' },
+          { icon: "video", label: "Live Classroom", id: 'live-classroom' },
+          { icon: "laptop", label: "Online Exams", id: 'online-exams' }
+        ]
+      },
+      {
+        title: "RECEPTION",
+        items: [
+          { icon: "concierge", label: "Receptionist", id: 'receptionist' },
+          { icon: "calendar-alt", label: "Events", id: 'events' },
+          { icon: "bullhorn", label: "Announcements", id: 'announcements' }
+        ]
+      },
+      {
+        title: "COMMUNICATION",
+        items: [
+          { icon: "envelope", label: "SMS & Email", id: 'messages' }
+        ]
+      },
+      {
+        title: "ADMIN",
+        items: [
+          { icon: "user-shield", label: "Roles", id: 'roles' },
+          { icon: "cog", label: "Settings", id: 'settings' }
+        ]
+      }
+    );
+
+    return sections;
+  }
+
+  // ============================================
+  // SUPER ADMIN VIEW
+  // ============================================
+  if (user.role === 'SUPER_ADMIN') {
+    return [
+      dashboardSection,
+      {
+        title: "SYSTEM MANAGEMENT",
+        items: [
+          { icon: "university", label: "Schools", id: 'schools' },
+          { icon: "users", label: "Users", id: 'users' },
+          { icon: "user-shield", label: "Roles", id: 'roles' },
+          { icon: "cog", label: "Settings", id: 'settings' }
+        ]
+      },
+      {
+        title: "SYSTEM REPORTS",
+        items: [
+          { icon: "chart-line", label: "Reports", id: 'reports' },
+          { icon: "history", label: "Audit Logs", id: 'audit-logs' }
         ]
       }
     ];
-  };
+  }
 
+  // ============================================
+  // FALLBACK
+  // ============================================
+  return [
+    {
+      title: "MAIN",
+      items: [
+        { icon: "tachometer-alt", label: "Dashboard", id: 'dashboard' }
+      ]
+    }
+  ];
+};
   // ===== 6. fetchUser =====
   const fetchUser = async () => {
     try {
@@ -50041,13 +55254,19 @@ useEffect(() => {
           setSchools(allSchools);
           console.log('✅ Schools loaded:', allSchools.length);
           
-          if (user?.role !== 'SUPER_ADMIN' && user?.schoolId) {
-            const userSchool = allSchools.find(s => s.id === user.schoolId);
-            if (userSchool) {
-              setCurrentSchool(userSchool);
-              console.log('✅ Current school set to:', userSchool.name);
-            }
-          }
+     if (user?.role !== 'SUPER_ADMIN' && user?.schoolId) {
+  const userSchool = allSchools.find(s => s.id === user.schoolId);
+  if (userSchool) {
+    setCurrentSchool(userSchool);
+    // ✅ Add this line:
+    setSchoolSettings({ 
+      logo: userSchool.contact?.logo || '', 
+      name: userSchool.name, 
+      category: userSchool.category 
+    });
+    console.log('✅ Current school set to:', userSchool.name);
+  }
+}
         }
       } catch (error) {
         console.error('❌ Error fetching schools:', error);
@@ -50594,44 +55813,73 @@ useEffect(() => {
     }
   };
 
-  const handleSendMessage = async (e) => {
-    e.preventDefault();
-    setLoading(true); 
-    setError('');
-    try {
-      let recipients = [];
-      if (messageForm.recipientType === 'ALL') {
-        recipients = [...students.map(s => ({ type: 'student', id: s.id })), ...users.filter(u => u.role !== 'STUDENT').map(u => ({ type: 'user', id: u.id }))];
-      } else if (messageForm.recipientType === 'STUDENTS') {
-        recipients = students.map(s => ({ type: 'student', id: s.id }));
-      } else if (messageForm.recipientType === 'PARENTS') {
-        const parents = users.filter(u => u.role === 'PARENT');
-        recipients = parents.map(p => ({ type: 'user', id: p.id }));
-      } else if (messageForm.recipientType === 'STAFF') {
-        const staffUsers = users.filter(u => ['TEACHER', 'ACCOUNTANT', 'LIBRARIAN'].includes(u.role));
-        recipients = staffUsers.map(s => ({ type: 'user', id: s.id }));
-      } else if (messageForm.recipientType === 'CLASS' && messageForm.classId) {
-        const classStudents = students.filter(s => s.classId === messageForm.classId);
-        recipients = classStudents.map(s => ({ type: 'student', id: s.id }));
-      }
-
-      await api.post('/messages', {
-        type: messageForm.type,
-        subject: messageForm.subject,
-        content: messageForm.content,
-        recipients: recipients,
-        sendNow: messageForm.sendNow,
-        schoolId: user?.schoolId || currentSchool?.id
-      });
-
-      setSuccess(`Message sent to ${recipients.length} recipients`);
-      setTimeout(() => setSuccess(''), 5000);
-    } catch (err) {
-      setError(err.response?.data?.message || 'Failed to send message');
-    } finally { 
-      setLoading(false); 
+const handleSendMessage = async (e, messageData) => {
+  e.preventDefault();
+  setLoading(true);
+  setError('');
+  setSuccess('');
+  
+  try {
+    console.log('📤 Sending message with data:', messageData);
+    
+    // Validate that we have recipients
+    if (!messageData.recipients || messageData.recipients.length === 0) {
+      setError('No recipients found. Please select a valid group.');
+      setLoading(false);
+      return;
     }
-  };
+
+    // Build the payload for the backend
+    const payload = {
+      type: messageData.type,
+      subject: messageData.subject || '',
+      content: messageData.content,
+      recipients: messageData.recipients.map(r => ({
+        id: r.id,
+        type: r.type,
+        name: r.name,
+        email: r.email || '',
+        phone: r.phone || ''
+      })),
+      recipientType: messageData.recipientType,
+      classId: messageData.classId || null,
+      sendNow: true,
+      schoolId: currentSchool?.id
+    };
+
+    console.log('📤 Final payload:', {
+      type: payload.type,
+      recipientCount: payload.recipients.length,
+      firstRecipient: payload.recipients[0]
+    });
+
+    const res = await api.post('/messages', payload);
+    
+    if (res.data.success) {
+      setSuccess(`✅ ${res.data.message || `Message sent to ${messageData.recipients.length} recipients!`}`);
+      setTimeout(() => setSuccess(''), 5000);
+      
+      // Reset form
+      setMessageForm({
+        type: 'SMS',
+        subject: '',
+        content: '',
+        recipientType: 'ALL',
+        classId: null,
+        sendNow: true
+      });
+    } else {
+      throw new Error(res.data.message || 'Failed to send message');
+    }
+    
+  } catch (err) {
+    console.error('❌ Send message error:', err);
+    console.error('❌ Error details:', err.response?.data);
+    setError(err.response?.data?.message || err.message || 'Failed to send message');
+  } finally {
+    setLoading(false);
+  }
+};
   // ==================== CHANGE PASSWORD HANDLER ====================
 const handleChangePassword = async (e) => {
   e.preventDefault();
@@ -51003,8 +56251,10 @@ const handleChangePassword = async (e) => {
               courses={courses}
               programs={programs}
               units={units}
+               departments={departments}
               currentSchool={currentSchool}
               user={user}
+            
             />
           )}
 
@@ -51031,23 +56281,40 @@ const handleChangePassword = async (e) => {
             />
           )}
 
-          {activeModule === 'unit-registration' && canAccessModule(user, 'unit-registration') && (
-            <UnitRegistrationModule 
-              students={students}
-              units={units}
-              courses={courses}
-              programs={programs}
-              currentSchool={currentSchool}
-              user={user}
-              fees={fees}
-              payments={payments}
-              exams={exams}
-              unitRegistrations={unitRegistrations}
-              courseEnrollments={courseEnrollments}
-              setUnitRegistrations={setUnitRegistrations}
-            />
-          )}
+    {/* ==================== COURSE ENROLLMENT MODULE ==================== */}
+{activeModule === 'course-enrollment' && canAccessModule(user, 'course-enrollment') && (
+  <CourseEnrollmentModule 
+    students={students}
+    courses={courses}
+    programs={programs}
+    currentSchool={currentSchool}
+    user={user}
+    fees={fees}
+    payments={payments}
+    classes={classes}
+    setUnitRegistrations={setUnitRegistrations}
+      setActiveModule={setActiveModule}  
+  />
+)}
 
+{/* ==================== UNIT REGISTRATION MODULE ==================== */}
+{activeModule === 'unit-registration' && canAccessModule(user, 'unit-registration') && (
+  <UnitRegistrationModule 
+    students={students}
+    units={units}
+    courses={courses}
+    programs={programs}
+    currentSchool={currentSchool}
+    user={user}
+    fees={fees}
+    payments={payments}
+    exams={exams}
+    unitRegistrations={unitRegistrations}
+    courseEnrollments={courseEnrollments}
+    setUnitRegistrations={setUnitRegistrations}
+      setActiveModule={setActiveModule}  
+  />
+)}
           {user?.role === 'SUPER_ADMIN' && activeModule === 'schools' && (
             <SchoolModule 
               schools={getFilteredSchools()} 
@@ -51143,7 +56410,9 @@ const handleChangePassword = async (e) => {
               onDelete={(id) => handleDelete('/staff', id, setStaff, staff)} 
               currentSchool={currentSchool}
               user={user}
+                departments={departments}
             />
+
           )}
 
           {activeModule === 'payroll' && canAccessModule(user, 'payroll') && (
@@ -51402,15 +56671,20 @@ const handleChangePassword = async (e) => {
             />
           )}
 
-          {activeModule === 'messages' && canAccessModule(user, 'messages') && (
-            <MessageModule 
-              form={messageForm} 
-              setForm={setMessageForm} 
-              onSubmit={handleSendMessage} 
-              classes={classes} 
-              user={user} 
-            />
-          )}
+       {activeModule === 'messages' && canAccessModule(user, 'messages') && (
+  <MessageModule 
+    form={messageForm} 
+    setForm={setMessageForm} 
+    onSubmit={handleSendMessage} 
+    classes={classes}
+    user={user}
+    students={students}      
+    staff={staff}           
+    parents={parents}       
+    users={users}           
+    currentSchool={currentSchool}  
+  />
+)}
 
           {activeModule === 'settings' && canAccessModule(user, 'settings') && (
             <SettingsModule 
@@ -51706,14 +56980,18 @@ const handleChangePassword = async (e) => {
             />
           )}
 
-          {activeModule === 'card-management' && canAccessModule(user, 'card-management') && (
-            <CardManagementModule
-              students={students}
-              staff={staff}
-              currentSchool={currentSchool}
-              user={user}
-            />
-          )}
+       {activeModule === 'card-management' && canAccessModule(user, 'card-management') && (
+  <CardManagementModule
+    students={students}
+    staff={staff}
+    currentSchool={currentSchool}
+    user={user}
+    programs={programs}
+    courses={courses}
+    classes={classes}
+    departments={departments}
+  />
+)}
 
           {activeModule === 'certificates' && canAccessModule(user, 'certificates') && (
             <CertificateModule
