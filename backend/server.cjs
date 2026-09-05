@@ -1752,17 +1752,53 @@ const Program = sequelize.define('Program', {
   level: DataTypes.STRING,
   schoolId: { type: DataTypes.UUID, allowNull: false }
 });
-
 const Lab = sequelize.define('Lab', {
-  id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-  name: { type: DataTypes.STRING, allowNull: false },
-  departmentId: { type: DataTypes.UUID, allowNull: false },
-  incharge: DataTypes.STRING,
-  capacity: DataTypes.INTEGER,
-  location: DataTypes.STRING,
-  schoolId: { type: DataTypes.UUID, allowNull: false }
+  id: { 
+    type: DataTypes.UUID, 
+    defaultValue: DataTypes.UUIDV4, 
+    primaryKey: true 
+  },
+  name: { 
+    type: DataTypes.STRING, 
+    allowNull: false 
+  },
+  departmentId: { 
+    type: DataTypes.STRING,  // Keep as STRING
+    allowNull: true,         // ← CHANGE THIS to true
+    // REMOVE the references property if it exists
+  },
+  departmentType: {
+    type: DataTypes.STRING,
+    defaultValue: 'CLASS'
+  },
+  incharge: { 
+    type: DataTypes.STRING, 
+    allowNull: true 
+  },
+  inchargeId: { 
+    type: DataTypes.UUID, 
+    allowNull: true 
+  },
+  capacity: { 
+    type: DataTypes.INTEGER, 
+    defaultValue: 30 
+  },
+  location: { 
+    type: DataTypes.STRING, 
+    allowNull: true 
+  },
+  equipment: { 
+    type: DataTypes.JSONB, 
+    defaultValue: [] 
+  },
+  schoolId: { 
+    type: DataTypes.UUID, 
+    allowNull: false 
+  }
+}, {
+  timestamps: true,
+  tableName: 'Labs'
 });
-
 const Research = sequelize.define('Research', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
   title: { type: DataTypes.STRING, allowNull: false },
@@ -2923,8 +2959,7 @@ Course.hasMany(CourseUnit, { foreignKey: 'courseId' });
 CourseUnit.belongsTo(Course, { foreignKey: 'courseId' });
 Exam.belongsTo(Program, { foreignKey: 'programId' });
 Program.hasMany(Exam, { foreignKey: 'programId' });
-Department.hasMany(Lab, { foreignKey: 'departmentId' });
-Lab.belongsTo(Department, { foreignKey: 'departmentId' });
+
 Faculty.hasMany(Research, { foreignKey: 'facultyId' });
 Research.belongsTo(Faculty, { foreignKey: 'facultyId' });
 
@@ -3856,13 +3891,6 @@ const sendEmail = async (to, subject, html) => {
 
 
 const createAuditLog = async (req, action, entity, entityId, oldValue = null, newValue = null) => {
-  // SKIP ALL AUDIT LOGS to prevent recursive calls and resource exhaustion
-  console.log(`⏭️ SKIPPING audit log: ${action} ${entity} (disabled to prevent resource exhaustion)`);
-  
-  // Don't do anything - this stops the endless loop
-  return;
-  
-  /* ORIGINAL CODE COMMENTED OUT - UNCOMMENT AFTER FIXING THE LOOP
   try {
     let userId = null;
     let userEmail = 'System';
@@ -3870,10 +3898,6 @@ const createAuditLog = async (req, action, entity, entityId, oldValue = null, ne
     if (req && req.user) {
       userId = req.user.id;
       userEmail = req.user.email || 'System';
-      
-      console.log(`📝 Creating audit log for user: ${req.user.firstName} ${req.user.lastName} (${req.user.email})`);
-    } else {
-      console.log('⚠️ No user found in request for audit log');
     }
 
     const logData = {
@@ -3889,14 +3913,11 @@ const createAuditLog = async (req, action, entity, entityId, oldValue = null, ne
       timestamp: new Date()
     };
 
-    console.log(`📝 Creating audit log: ${action} ${entity} by ${userEmail}`);
-
     await AuditLog.create(logData);
     console.log('✅ Audit log created successfully');
   } catch (error) {
     console.error('❌ Audit log error:', error);
   }
-  */
 };
 const checkStudentAccess = async (studentId, user) => {
   if (user.role === 'SUPER_ADMIN') return true;
@@ -4161,49 +4182,217 @@ app.post('/api/auth/change-password', [
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
-
 app.post('/api/auth/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
-    const user = await User.findOne({ where: { email } });
+    console.log('🔐 Forgot password request for:', email);
     
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    const user = await User.findOne({ where: { email } });
+    if (!user) {
+      // Don't reveal if user exists or not for security
+      return res.json({ 
+        success: true, 
+        message: 'If your email is registered, you will receive a reset link.' 
+      });
+    }
 
+    // Generate reset token
     const resetToken = jwt.sign(
       { userId: user.id },
-      process.env.JWT_SECRET + user.password,
+      process.env.JWT_SECRET,
       { expiresIn: '1h' }
     );
 
     await user.update({ resetToken });
 
+    // Create reset link
     const resetLink = `http://localhost:5173/reset-password?token=${resetToken}`;
-    console.log('Reset link:', resetLink);
+    console.log('🔗 Reset link generated:', resetLink);
 
-    res.json({ message: 'Password reset email sent' });
+    // ========== SEND EMAIL ==========
+    try {
+      // Import nodemailer
+      const nodemailer = require('nodemailer');
+      
+      // Create transporter with your Gmail settings
+      const transporter = nodemailer.createTransport({
+        host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+        port: parseInt(process.env.EMAIL_PORT) || 587,
+        secure: process.env.EMAIL_SECURE === 'true' || false,
+        auth: {
+          user: process.env.EMAIL_USER,
+          pass: process.env.EMAIL_PASS
+        },
+        tls: {
+          rejectUnauthorized: false
+        }
+      });
+
+      // Email content
+      const schoolName = 'SchoolAid';
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; background: #f4f4f4; padding: 40px; }
+            .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; padding: 40px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+            .header { text-align: center; border-bottom: 2px solid #4f46e5; padding-bottom: 20px; margin-bottom: 30px; }
+            .header h1 { color: #4f46e5; margin: 0; font-size: 28px; }
+            .content { color: #333; line-height: 1.6; }
+            .button { display: inline-block; background: #4f46e5; color: white; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: bold; margin: 20px 0; }
+            .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; text-align: center; color: #666; font-size: 12px; }
+            .warning { background: #fef3c7; padding: 12px; border-radius: 8px; margin: 20px 0; color: #92400e; font-size: 14px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>🔐 ${schoolName}</h1>
+              <p style="color: #666; margin: 5px 0;">Password Reset Request</p>
+            </div>
+            <div class="content">
+              <p>Hello <strong>${user.firstName || 'User'}</strong>,</p>
+              <p>We received a request to reset the password for your ${schoolName} account associated with <strong>${email}</strong>.</p>
+              
+              <div style="text-align: center;">
+                <a href="${resetLink}" class="button">Reset Password</a>
+              </div>
+              
+              <p style="font-size: 14px; color: #666;">Or copy and paste this link into your browser:</p>
+              <p style="font-size: 12px; color: #999; word-break: break-all; background: #f9fafb; padding: 10px; border-radius: 4px;">${resetLink}</p>
+              
+              <div class="warning">
+                ⚠️ This link will expire in <strong>1 hour</strong>. If you didn't request this, please ignore this email.
+              </div>
+            </div>
+            <div class="footer">
+              <p>&copy; ${new Date().getFullYear()} ${schoolName}. All rights reserved.</p>
+              <p>This is an automated message, please do not reply.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      // Send email
+      const info = await transporter.sendMail({
+        from: `"${schoolName}" <${process.env.EMAIL_USER}>`,
+        to: email,
+        subject: `🔐 Password Reset Request - ${schoolName}`,
+        text: `Hello ${user.firstName || 'User'},\n\nWe received a request to reset your password.\n\nClick this link to reset your password:\n${resetLink}\n\nThis link will expire in 1 hour.\n\nIf you didn't request this, please ignore this email.\n\n- ${schoolName} Team`,
+        html: htmlContent
+      });
+
+      console.log('✅ Password reset email sent to:', email);
+      console.log('📧 Message ID:', info.messageId);
+
+      res.json({ 
+        success: true, 
+        message: 'Password reset link sent to your email.' 
+      });
+
+    } catch (emailError) {
+      console.error('❌ Email send error:', emailError);
+      
+      // Still return success to the user, but log the error
+      res.json({ 
+        success: true, 
+        message: 'Password reset link generated. (Email delivery failed, but link is available in logs)',
+        resetLink: process.env.NODE_ENV === 'development' ? resetLink : undefined
+      });
+    }
+
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('❌ Forgot password error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error. Please try again.' 
+    });
   }
 });
-
 app.post('/api/auth/reset-password', async (req, res) => {
   try {
     const { token, newPassword } = req.body;
     
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findByPk(decoded.userId);
+    console.log('🔐 Reset password attempt');
+    console.log('📝 Token received:', token ? token.substring(0, 30) + '...' : 'No token');
     
-    if (!user) return res.status(400).json({ message: 'Invalid or expired token' });
+    if (!token) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Reset token is required' 
+      });
+    }
+    
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Password must be at least 6 characters' 
+      });
+    }
 
+    // ✅ FIXED: Verify with JUST the JWT_SECRET
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+      console.log('✅ Token verified successfully for user:', decoded.userId);
+    } catch (jwtError) {
+      console.error('❌ JWT Verification failed:', jwtError.message);
+      
+      if (jwtError.name === 'JsonWebTokenError') {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Invalid reset token. Please request a new one.' 
+        });
+      }
+      if (jwtError.name === 'TokenExpiredError') {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Reset token has expired. Please request a new one.' 
+        });
+      }
+      throw jwtError;
+    }
+
+    // Find the user with the matching reset token
+    const user = await User.findOne({ 
+      where: { 
+        id: decoded.userId,
+        resetToken: token 
+      } 
+    });
+    
+    if (!user) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Invalid or expired reset token.' 
+      });
+    }
+
+    // Hash the new password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await user.update({ password: hashedPassword, resetToken: null });
+    
+    // Update user and clear reset token
+    await user.update({ 
+      password: hashedPassword, 
+      resetToken: null 
+    });
 
-    res.json({ message: 'Password reset successful' });
+    console.log('✅ Password reset successful for:', user.email);
+    
+    res.json({ 
+      success: true, 
+      message: 'Password reset successful! You can now login with your new password.' 
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('❌ Reset password error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error. Please try again.' 
+    });
   }
 });
-
 // ==================== CREATE SCHOOL WITH AUTO-SEEDING ====================
 app.post('/api/schools', authenticate, requireSuperAdmin, async (req, res) => {
   try {
@@ -16296,49 +16485,226 @@ app.post('/api/course-units/bulk', authenticate, requireSchoolAdmin, async (req,
     });
   }
 });
+
+app.post('/api/labs', authenticate, async (req, res) => {
+  try {
+    const { 
+      name, 
+      departmentId, 
+      departmentType,
+      incharge, 
+      inchargeId, 
+      capacity, 
+      location, 
+      equipment 
+    } = req.body;
+    
+    console.log('📝 Creating lab with data:', req.body);
+    
+    // ✅ Only name is required
+    if (!name) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Lab name is required' 
+      });
+    }
+    
+    // ✅ Get school to determine category
+    const school = await School.findByPk(req.user.schoolId);
+    const isUniversity = school?.category === 'UNIVERSITY';
+    const isTVET = school?.category === 'COLLEGE_TVET';
+    const isPrimary = school?.category === 'ECDE_PRIMARY_JSS';
+    const isSecondary = school?.category === 'SENIOR_SECONDARY';
+    
+    let finalDepartmentId = null;
+    let finalDepartmentType = departmentType || 'NONE';
+    
+    // ✅ If departmentId is provided, validate based on school type
+    if (departmentId) {
+      // For University - check in Courses
+      if (isUniversity) {
+        const course = await Course.findOne({
+          where: { id: departmentId, schoolId: req.user.schoolId }
+        });
+        if (course) {
+          finalDepartmentId = departmentId;
+          finalDepartmentType = 'COURSE';
+        }
+      }
+      // For TVET - check in Programs
+      else if (isTVET) {
+        const program = await Program.findOne({
+          where: { id: departmentId, schoolId: req.user.schoolId }
+        });
+        if (program) {
+          finalDepartmentId = departmentId;
+          finalDepartmentType = 'PROGRAM';
+        }
+      }
+      // For Primary/Secondary - check in Classes
+      else if (isPrimary || isSecondary) {
+        const classObj = await Class.findOne({
+          where: { id: departmentId, schoolId: req.user.schoolId }
+        });
+        if (classObj) {
+          finalDepartmentId = departmentId;
+          finalDepartmentType = 'CLASS';
+        }
+      }
+      
+      // If none of the above matched but we have a departmentId, store it anyway
+      if (!finalDepartmentId) {
+        finalDepartmentId = departmentId;
+        finalDepartmentType = departmentType || 'OTHER';
+        console.log('⚠️ Department ID not validated, storing as-is:', departmentId);
+      }
+    }
+    
+    // ✅ Create the lab
+    const lab = await Lab.create({
+      name: name.trim(),
+      departmentId: finalDepartmentId,
+      departmentType: finalDepartmentType,
+      incharge: incharge || null,
+      inchargeId: inchargeId || null,
+      capacity: capacity ? parseInt(capacity) : 30,
+      location: location || null,
+      equipment: equipment || [],
+      schoolId: req.user.schoolId
+    });
+    
+    console.log('✅ Lab created:', lab.id);
+    
+    const createdLab = await Lab.findByPk(lab.id);
+    
+    res.status(201).json({ 
+      success: true, 
+      lab: createdLab 
+    });
+  } catch (error) {
+    console.error('❌ Create lab error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error', 
+      error: error.message 
+    });
+  }
+});
 app.get('/api/labs', authenticate, async (req, res) => {
   try {
     const where = { schoolId: req.user.schoolId };
     const labs = await Lab.findAll({ 
       where,
-      include: [{ model: Department }]
+      order: [['name', 'ASC']]
     });
-    res.json({ success: true, labs });
+    
+    // Enrich with department/class names
+    const enrichedLabs = await Promise.all(labs.map(async (lab) => {
+      const labData = lab.toJSON();
+      
+      // If it's a class type, try to find the class name
+      if (lab.departmentType === 'CLASS') {
+        const classObj = await Class.findByPk(lab.departmentId, {
+          attributes: ['id', 'name']
+        });
+        if (classObj) {
+          labData.departmentName = classObj.name;
+        }
+      } 
+      // If it's a department type
+      else if (lab.departmentType === 'DEPARTMENT') {
+        const dept = await Department.findByPk(lab.departmentId, {
+          attributes: ['id', 'name']
+        });
+        if (dept) {
+          labData.departmentName = dept.name;
+        }
+      }
+      // If it's a course type
+      else if (lab.departmentType === 'COURSE') {
+        const course = await Course.findByPk(lab.departmentId, {
+          attributes: ['id', 'name']
+        });
+        if (course) {
+          labData.departmentName = course.name;
+        }
+      }
+      // If it's a program type
+      else if (lab.departmentType === 'PROGRAM') {
+        const program = await Program.findByPk(lab.departmentId, {
+          attributes: ['id', 'name']
+        });
+        if (program) {
+          labData.departmentName = program.name;
+        }
+      }
+      
+      return labData;
+    }));
+    
+    console.log(`✅ Found ${enrichedLabs.length} labs`);
+    res.json({ success: true, labs: enrichedLabs });
   } catch (error) {
-    console.error('Get labs error:', error);
-    res.status(500).json({ message: error.message });
+    console.error('❌ Get labs error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error', 
+      error: error.message 
+    });
   }
 });
 
-app.post('/api/labs', authenticate, requireSchoolAdmin, async (req, res) => {
+app.put('/api/labs/:id', authenticate, async (req, res) => {
   try {
-    const { name, departmentId, incharge, capacity, location } = req.body;
+    const { 
+      name, 
+      departmentId, 
+      departmentType,
+      incharge, 
+      inchargeId, 
+      capacity, 
+      location, 
+      equipment 
+    } = req.body;
     
-    const department = await Department.findOne({
-      where: { id: departmentId, schoolId: req.user.schoolId }
+    const lab = await Lab.findOne({
+      where: { 
+        id: req.params.id, 
+        schoolId: req.user.schoolId 
+      }
     });
     
-    if (!department) {
-      return res.status(400).json({ message: 'Department not found' });
+    if (!lab) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Lab not found' 
+      });
     }
     
-    const lab = await Lab.create({
-      name,
-      departmentId,
-      incharge,
-      capacity,
-      location,
-      schoolId: req.user.schoolId
+    await lab.update({
+      name: name || lab.name,
+      departmentId: departmentId || lab.departmentId,
+      departmentType: departmentType || lab.departmentType,
+      incharge: incharge !== undefined ? incharge : lab.incharge,
+      inchargeId: inchargeId !== undefined ? inchargeId : lab.inchargeId,
+      capacity: capacity ? parseInt(capacity) : lab.capacity,
+      location: location !== undefined ? location : lab.location,
+      equipment: equipment !== undefined ? equipment : lab.equipment
     });
     
-    const createdLab = await Lab.findByPk(lab.id, {
-      include: [{ model: Department }]
-    });
+    const updatedLab = await Lab.findByPk(lab.id);
     
-    res.status(201).json({ success: true, lab: createdLab });
+    res.json({ 
+      success: true, 
+      lab: updatedLab 
+    });
   } catch (error) {
-    console.error('Create lab error:', error);
-    res.status(500).json({ message: error.message });
+    console.error('❌ Update lab error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error', 
+      error: error.message 
+    });
   }
 });
 
