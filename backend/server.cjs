@@ -13,16 +13,22 @@ require('dotenv').config();
 const app = express();
 const emailService = require('./emailService');
 const smsService = require('./smsService');
-
 // ==================== CONFIGURATION ====================
 app.use(cors({
   origin: [
     'http://localhost:5173', 
     'http://localhost:3000',
-    'https://schoolaid.zyphra.co.ke'  // ← ADD THIS LINE
+    'https://schoolaid.zyphra.co.ke',
+    'https://school-management-system-92g5.vercel.app',  // Your Vercel URL
+    'https://school-management-system-hna5.onrender.com'  // Your Render URL
   ],
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+// Also add this to handle pre-flight requests
+app.options('*', cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 // Create uploads directory
