@@ -24840,7 +24840,7 @@ const FacultiesModule = ({
     </div>
   );
 };
-// ==================== FIXED DEPARTMENTS MODULE WITH SEARCHABLE SELECTS ====================
+// ==================== FIXED DEPARTMENTS MODULE ====================
 const DepartmentsModule = ({ 
   departments, 
   setDepartments, 
@@ -24852,8 +24852,8 @@ const DepartmentsModule = ({
   handleDelete, 
   user, 
   currentSchool,
-  staff = [], // Add staff prop
-  users = [] // Add users prop
+  staff = [],
+  users = []
 }) => {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -24870,163 +24870,152 @@ const DepartmentsModule = ({
     phone: '',
     programs: []
   });
-const SearchableSelect = ({ label, value, onChange, options, placeholder, disabled, required, className }) => {
-  const [search, setSearch] = useState('');
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef(null);
-  const inputRef = useRef(null);
-  const isSelectingRef = useRef(false);
 
-  const filteredOptions = useMemo(() => {
-    if (!search.trim()) return options;
-    const searchLower = search.toLowerCase();
-    return options.filter(opt => 
-      opt.label?.toLowerCase().includes(searchLower) ||
-      opt.subLabel?.toLowerCase().includes(searchLower) ||
-      opt.value?.toString().toLowerCase().includes(searchLower)
-    );
-  }, [options, search]);
+  // ==================== SIMPLIFIED SEARCHABLE SELECT - NO FOCUS STEALING ====================
+  const SearchableSelect = ({ label, value, onChange, options, placeholder, disabled, required, className }) => {
+    const [search, setSearch] = useState('');
+    const [isOpen, setIsOpen] = useState(false);
+    const wrapperRef = useRef(null);
+    const inputRef = useRef(null);
 
-  const selectedOption = options.find(opt => opt.value === value);
+    const filteredOptions = useMemo(() => {
+      if (!search.trim()) return options;
+      const searchLower = search.toLowerCase();
+      return options.filter(opt => 
+        opt.label?.toLowerCase().includes(searchLower) ||
+        opt.subLabel?.toLowerCase().includes(searchLower) ||
+        opt.value?.toString().toLowerCase().includes(searchLower)
+      );
+    }, [options, search]);
 
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setIsOpen(false);
-        if (selectedOption) {
-          setSearch(selectedOption.label);
-        } else {
-          setSearch('');
+    const selectedOption = options.find(opt => opt.value === value);
+
+    // Close dropdown when clicking outside
+    useEffect(() => {
+      const handleClickOutside = (event) => {
+        if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+          setIsOpen(false);
         }
+      };
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    // Update search when selected option changes
+    useEffect(() => {
+      if (selectedOption) {
+        setSearch(selectedOption.label);
+      } else {
+        setSearch('');
+      }
+    }, [selectedOption]);
+
+    const handleInputChange = (e) => {
+      const newValue = e.target.value;
+      setSearch(newValue);
+      setIsOpen(true);
+      if (newValue === '') {
+        onChange({ target: { value: '' } });
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [selectedOption]);
 
-  const handleSelect = (selectedValue) => {
-    isSelectingRef.current = true;
-    onChange({ target: { value: selectedValue } });
-    const selected = options.find(opt => opt.value === selectedValue);
-    setSearch(selected ? selected.label : '');
-    setIsOpen(false);
-    setTimeout(() => {
-      isSelectingRef.current = false;
-    }, 200);
-  };
+    const handleSelect = (selectedValue) => {
+      onChange({ target: { value: selectedValue } });
+      const selected = options.find(opt => opt.value === selectedValue);
+      setSearch(selected ? selected.label : '');
+      setIsOpen(false);
+    };
 
-  const handleInputChange = (e) => {
-    const newValue = e.target.value;
-    setSearch(newValue);
-    setIsOpen(true);
-    if (newValue === '') {
-      onChange({ target: { value: '' } });
-    }
-  };
-
-  const handleFocus = () => {
-    if (!isSelectingRef.current) {
+    const handleFocus = () => {
       setIsOpen(true);
-      if (selectedOption && !search) {
-        setSearch(selectedOption.label);
-      }
-    }
-  };
+    };
 
-  const handleBlur = () => {
-    // Use longer timeout and check if we're selecting
-    setTimeout(() => {
-      if (!isSelectingRef.current) {
+    const handleBlur = () => {
+      setTimeout(() => {
         setIsOpen(false);
-        if (selectedOption) {
-          setSearch(selectedOption.label);
-        } else {
-          setSearch('');
-        }
-      }
-    }, 250);
-  };
+      }, 150);
+    };
 
-  const handleClear = (e) => {
-    e.stopPropagation();
-    onChange({ target: { value: '' } });
-    setSearch('');
-    setIsOpen(false);
-    if (inputRef.current) {
-      inputRef.current.focus();
-    }
-  };
-
-  return (
-    <div className="relative" ref={dropdownRef}>
-      {label && (
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
-        </label>
-      )}
-      <div className="relative">
-        <input
-          ref={inputRef}
-          type="text"
-          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-            disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
-          } ${className || ''}`}
-          value={search}
-          onChange={handleInputChange}
-          onFocus={handleFocus}
-          onBlur={handleBlur}
-          placeholder={placeholder || ''}
-          disabled={disabled}
-          autoComplete="off"
-        />
-        {value && !disabled && (
-          <button
-            type="button"
-            onClick={handleClear}
-            className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+    return (
+      <div className="relative" ref={wrapperRef}>
+        {label && (
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            {label}
+            {required && <span className="text-red-500 ml-1">*</span>}
+          </label>
         )}
-        <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-          <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </div>
-      </div>
-      {isOpen && !disabled && (
-        <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-          {filteredOptions.length > 0 ? (
-            filteredOptions.map((opt) => (
-              <div
-                key={opt.value || Math.random().toString()}
-                className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
-                  opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
-                }`}
-                onMouseDown={(e) => {
-                  e.preventDefault(); // Prevent blur
-                }}
-                onClick={() => handleSelect(opt.value)}
-              >
-                <div className="font-medium">{opt.label}</div>
-                {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
-              </div>
-            ))
-          ) : (
-            <div className="px-3 py-4 text-center text-gray-500 text-sm">
-              {search.trim() ? 'No results found' : 'Type to search...'}
-            </div>
+        <div className="relative">
+          <input
+            ref={inputRef}
+            type="text"
+            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
+              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
+            } ${className || ''}`}
+            value={search}
+            onChange={handleInputChange}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            placeholder={placeholder || ''}
+            disabled={disabled}
+            autoComplete="off"
+          />
+          {value && !disabled && (
+            <button
+              type="button"
+              onClick={() => {
+                onChange({ target: { value: '' } });
+                setSearch('');
+                setIsOpen(false);
+                if (inputRef.current) {
+                  inputRef.current.focus();
+                }
+              }}
+              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           )}
+          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
+            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
         </div>
-      )}
-    </div>
-  );
-};
+        {isOpen && !disabled && (
+          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
+            {filteredOptions.length > 0 ? (
+              filteredOptions.map((opt) => (
+                <div
+                  key={opt.value || Math.random().toString()}
+                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
+                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
+                  }`}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => handleSelect(opt.value)}
+                >
+                  <div className="font-medium">{opt.label}</div>
+                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+                </div>
+              ))
+            ) : (
+              <div className="px-3 py-4 text-center text-gray-500 text-sm">
+                {search.trim() ? 'No results found' : 'Type to search...'}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
- 
+  // ==================== API INSTANCE ====================
+  const api = axios.create({
+    baseURL: 'http://localhost:5000/api',
+    headers: { 'Content-Type': 'application/json' }
+  });
+
   api.interceptors.request.use(config => {
     const token = localStorage.getItem('token');
     if (token) config.headers.Authorization = `Bearer ${token}`;
@@ -25048,7 +25037,6 @@ const SearchableSelect = ({ label, value, onChange, options, placeholder, disabl
       { value: '', label: '' }
     ];
 
-    // Get staff from staff array
     (staff || []).forEach(s => {
       const userData = s.User || {};
       const name = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Unknown Staff';
@@ -25062,7 +25050,6 @@ const SearchableSelect = ({ label, value, onChange, options, placeholder, disabl
       });
     });
 
-    // If no staff in staff array, get from users with staff roles
     if (options.length <= 1 && users) {
       const staffRoles = ['TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER', 'SENIOR_TEACHER', 
                           'ACCOUNTANT', 'LIBRARIAN', 'NURSE', 'MATRON', 'TRANSPORT_MANAGER', 
@@ -25140,7 +25127,6 @@ const SearchableSelect = ({ label, value, onChange, options, placeholder, disabl
     }
     setLoading(true);
     try {
-      // Get the head name from selected staff
       const selectedStaff = staffOptions.find(opt => opt.value === deptForm.headId);
       const headName = selectedStaff ? selectedStaff.label : deptForm.head;
 
@@ -25353,15 +25339,22 @@ const SearchableSelect = ({ label, value, onChange, options, placeholder, disabl
           <h3 className="text-lg font-semibold mb-4">{editingId ? 'Edit' : 'Add New'} Department</h3>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-              <InputField 
-                label="Department Name" 
-                value={deptForm.name} 
-                onChange={(e) => setDeptForm({...deptForm, name: e.target.value})} 
-                required 
-                disabled={loading} 
-                placeholder="e.g., Computer Science"
-              />
+              {/* ✅ Department Name - Simple Input (NOT SearchableSelect) */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Department Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={deptForm.name}
+                  onChange={(e) => setDeptForm({...deptForm, name: e.target.value})}
+                  placeholder="e.g., Computer Science"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                  disabled={loading}
+                />
+              </div>
               
+              {/* ✅ Faculty - SearchableSelect (dropdown) */}
               <SearchableSelect
                 label="Faculty"
                 value={deptForm.facultyId}
@@ -25372,7 +25365,6 @@ const SearchableSelect = ({ label, value, onChange, options, placeholder, disabl
                 disabled={loading || faculties?.length === 0}
               />
               
-              {/* Show message if no faculties */}
               {faculties?.length === 0 && !loading && (
                 <div className="col-span-2 text-sm text-amber-600 bg-amber-50 p-3 rounded">
                   <i className="fas fa-exclamation-triangle mr-2"></i>
@@ -25380,7 +25372,7 @@ const SearchableSelect = ({ label, value, onChange, options, placeholder, disabl
                 </div>
               )}
               
-              {/* Head of Department - Searchable Select from Staff */}
+              {/* ✅ Head of Department - SearchableSelect (dropdown from staff) */}
               <SearchableSelect
                 label="Head of Department"
                 value={deptForm.headId}
@@ -25398,7 +25390,6 @@ const SearchableSelect = ({ label, value, onChange, options, placeholder, disabl
                 disabled={loading}
               />
               
-              {/* Show selected head info */}
               {deptForm.headId && (
                 <div className="col-span-2 bg-green-50 p-2 rounded-lg border border-green-200 text-sm text-green-700">
                   <i className="fas fa-check-circle mr-2"></i>
@@ -25406,21 +25397,31 @@ const SearchableSelect = ({ label, value, onChange, options, placeholder, disabl
                 </div>
               )}
               
-              <InputField 
-                label="Email" 
-                type="email" 
-                value={deptForm.email} 
-                onChange={(e) => setDeptForm({...deptForm, email: e.target.value})} 
-                disabled={loading} 
-                placeholder="dept@school.edu"
-              />
-              <InputField 
-                label="Phone" 
-                value={deptForm.phone} 
-                onChange={(e) => setDeptForm({...deptForm, phone: e.target.value})} 
-                disabled={loading} 
-                placeholder="+254 700 000000"
-              />
+              {/* ✅ Email - Simple Input */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <input
+                  type="email"
+                  value={deptForm.email}
+                  onChange={(e) => setDeptForm({...deptForm, email: e.target.value})}
+                  placeholder="dept@school.edu"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                  disabled={loading}
+                />
+              </div>
+              
+              {/* ✅ Phone - Simple Input */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                <input
+                  type="text"
+                  value={deptForm.phone}
+                  onChange={(e) => setDeptForm({...deptForm, phone: e.target.value})}
+                  placeholder="+254 700 000000"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                  disabled={loading}
+                />
+              </div>
             </div>
             <div className="flex space-x-2">
               <button type="submit" className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50" disabled={loading}>
@@ -25512,7 +25513,6 @@ const SearchableSelect = ({ label, value, onChange, options, placeholder, disabl
           </table>
         </div>
         
-        {/* Footer Stats */}
         {departments && departments.length > 0 && (
           <div className="px-6 py-3 bg-gray-50 border-t flex flex-wrap justify-between items-center text-sm text-gray-500">
             <div className="flex flex-wrap gap-4">
@@ -26283,12 +26283,22 @@ const CoursesModule = ({
     </div>
   );
 };
-// ==================== FIXED PROGRAMS MODULE WITH SEARCHABLE SELECTS ====================
+// ==================== FIXED PROGRAMS MODULE ====================
 const ProgramsModule = ({ 
-  programs, setPrograms, departments, form, setForm, 
-  handleCreate, handleUpdate, handleDelete, user, currentSchool,
+  programs, 
+  setPrograms, 
+  departments, 
+  form, 
+  setForm, 
+  handleCreate, 
+  handleUpdate, 
+  handleDelete, 
+  user, 
+  currentSchool,
   staff = [],
-  users = []
+  users = [],
+  showFilters,        // ← Added from parent
+  setShowFilters      // ← Added from parent
 }) => {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -26308,11 +26318,11 @@ const ProgramsModule = ({
   const [filterDepartment, setFilterDepartment] = useState('');
   const [filterLevel, setFilterLevel] = useState('');
 
-  // ==================== SEARCHABLE SELECT COMPONENT ====================
+  // ==================== SIMPLIFIED SEARCHABLE SELECT - NO FOCUS STEALING ====================
   const SearchableSelect = ({ label, value, onChange, options, placeholder, disabled, required, className }) => {
     const [search, setSearch] = useState('');
     const [isOpen, setIsOpen] = useState(false);
-    const dropdownRef = useRef(null);
+    const wrapperRef = useRef(null);
     const inputRef = useRef(null);
 
     const filteredOptions = useMemo(() => {
@@ -26327,32 +26337,25 @@ const ProgramsModule = ({
 
     const selectedOption = options.find(opt => opt.value === value);
 
+    // Close dropdown when clicking outside
     useEffect(() => {
       const handleClickOutside = (event) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
           setIsOpen(false);
-          if (selectedOption) {
-            setSearch(selectedOption.label);
-          } else {
-            setSearch('');
-          }
         }
       };
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [selectedOption]);
+    }, []);
 
-    const handleSelect = (selectedValue) => {
-      onChange({ target: { value: selectedValue } });
-      const selected = options.find(opt => opt.value === selectedValue);
-      setSearch(selected ? selected.label : '');
-      setIsOpen(false);
-      setTimeout(() => {
-        if (inputRef.current) {
-          inputRef.current.focus();
-        }
-      }, 0);
-    };
+    // Update search when selected option changes
+    useEffect(() => {
+      if (selectedOption) {
+        setSearch(selectedOption.label);
+      } else {
+        setSearch('');
+      }
+    }, [selectedOption]);
 
     const handleInputChange = (e) => {
       const newValue = e.target.value;
@@ -26363,42 +26366,25 @@ const ProgramsModule = ({
       }
     };
 
-    const handleFocus = () => {
-      setIsOpen(true);
-      if (selectedOption && !search) {
-        setSearch(selectedOption.label);
-      }
+    const handleSelect = (selectedValue) => {
+      onChange({ target: { value: selectedValue } });
+      const selected = options.find(opt => opt.value === selectedValue);
+      setSearch(selected ? selected.label : '');
+      setIsOpen(false);
     };
 
-    const handleBlur = (e) => {
-      const relatedTarget = e.relatedTarget;
-      if (dropdownRef.current && dropdownRef.current.contains(relatedTarget)) {
-        return;
-      }
+    const handleFocus = () => {
+      setIsOpen(true);
+    };
+
+    const handleBlur = () => {
       setTimeout(() => {
-        if (document.activeElement !== inputRef.current) {
-          setIsOpen(false);
-          if (selectedOption) {
-            setSearch(selectedOption.label);
-          } else {
-            setSearch('');
-          }
-        }
+        setIsOpen(false);
       }, 150);
     };
 
-    const handleClear = (e) => {
-      e.stopPropagation();
-      onChange({ target: { value: '' } });
-      setSearch('');
-      setIsOpen(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
-    };
-
     return (
-      <div className="relative" ref={dropdownRef}>
+      <div className="relative" ref={wrapperRef}>
         {label && (
           <label className="block text-sm font-medium text-gray-700 mb-1">
             {label}
@@ -26410,20 +26396,27 @@ const ProgramsModule = ({
             ref={inputRef}
             type="text"
             className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
+              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
             } ${className || ''}`}
             value={search}
             onChange={handleInputChange}
             onFocus={handleFocus}
             onBlur={handleBlur}
-            placeholder=""
+            placeholder={placeholder || ''}
             disabled={disabled}
             autoComplete="off"
           />
           {value && !disabled && (
             <button
               type="button"
-              onClick={handleClear}
+              onClick={() => {
+                onChange({ target: { value: '' } });
+                setSearch('');
+                setIsOpen(false);
+                if (inputRef.current) {
+                  inputRef.current.focus();
+                }
+              }}
               className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -26464,16 +26457,21 @@ const ProgramsModule = ({
     );
   };
 
-  // ==================== PERMISSIONS ====================
-  const canEdit = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
-  const canDelete = ['SCHOOL_ADMIN', 'PRINCIPAL'].includes(user?.role);
-
+  // ==================== API INSTANCE ====================
+  const api = axios.create({
+    baseURL: 'http://localhost:5000/api',
+    headers: { 'Content-Type': 'application/json' }
+  });
 
   api.interceptors.request.use(config => {
     const token = localStorage.getItem('token');
     if (token) config.headers.Authorization = `Bearer ${token}`;
     return config;
   });
+
+  // ==================== PERMISSIONS ====================
+  const canEdit = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
+  const canDelete = ['SCHOOL_ADMIN', 'PRINCIPAL'].includes(user?.role);
 
   // ==================== DEPARTMENT OPTIONS ====================
   const departmentOptions = useMemo(() => {
@@ -26566,17 +26564,6 @@ const ProgramsModule = ({
     return options;
   }, [staff, users]);
 
-  // ==================== AUTO-LOAD PROGRAMS ====================
-  useEffect(() => {
-    fetchPrograms();
-  }, []);
-
-  useEffect(() => {
-    if (currentSchool?.id) {
-      fetchPrograms();
-    }
-  }, [currentSchool?.id]);
-
   // ==================== FETCH PROGRAMS ====================
   const fetchPrograms = async () => {
     setLoading(true);
@@ -26595,6 +26582,17 @@ const ProgramsModule = ({
       setLoading(false);
     }
   };
+
+  // ==================== AUTO-LOAD PROGRAMS ====================
+  useEffect(() => {
+    fetchPrograms();
+  }, []);
+
+  useEffect(() => {
+    if (currentSchool?.id) {
+      fetchPrograms();
+    }
+  }, [currentSchool?.id]);
 
   // ==================== UPDATE LOCAL PROGRAMS ====================
   useEffect(() => {
@@ -26905,23 +26903,37 @@ const ProgramsModule = ({
           <h3 className="text-lg font-semibold mb-4">{editingId ? 'Edit' : 'Add New'} Program</h3>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-              <InputField 
-                label="Program Name *" 
-                value={localForm.name} 
-                onChange={(e) => setLocalForm({...localForm, name: e.target.value})} 
-                required 
-                disabled={loading} 
-                placeholder="e.g., Computer Science"
-              />
-              <InputField 
-                label="Program Code *" 
-                value={localForm.code} 
-                onChange={(e) => setLocalForm({...localForm, code: e.target.value})} 
-                required 
-                disabled={loading} 
-                placeholder="e.g., CS123"
-              />
+              {/* ✅ Program Name - Simple Input */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Program Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={localForm.name}
+                  onChange={(e) => setLocalForm({...localForm, name: e.target.value})}
+                  placeholder="e.g., Computer Science"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                  disabled={loading}
+                />
+              </div>
               
+              {/* ✅ Program Code - Simple Input */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Program Code <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={localForm.code}
+                  onChange={(e) => setLocalForm({...localForm, code: e.target.value})}
+                  placeholder="e.g., CS123"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                  disabled={loading}
+                />
+              </div>
+              
+              {/* ✅ Department - SearchableSelect (dropdown) */}
               <SearchableSelect
                 label="Department *"
                 value={localForm.departmentId}
@@ -26939,17 +26951,23 @@ const ProgramsModule = ({
                 </div>
               )}
               
-              <InputField 
-                label="Duration (Years)" 
-                type="number" 
-                value={localForm.duration} 
-                onChange={(e) => setLocalForm({...localForm, duration: parseInt(e.target.value) || 3})} 
-                min="1" 
-                max="6" 
-                required 
-                disabled={loading} 
-              />
+              {/* ✅ Duration - Simple Input */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Duration (Years) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  value={localForm.duration}
+                  onChange={(e) => setLocalForm({...localForm, duration: parseInt(e.target.value) || 3})}
+                  min="1"
+                  max="6"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                  disabled={loading}
+                />
+              </div>
               
+              {/* ✅ Level - SearchableSelect (dropdown) */}
               <SearchableSelect
                 label="Level"
                 value={localForm.level}
@@ -26960,6 +26978,7 @@ const ProgramsModule = ({
                 disabled={loading}
               />
 
+              {/* ✅ Program Coordinator - SearchableSelect (dropdown from staff) */}
               <SearchableSelect
                 label="Program Coordinator"
                 value={localForm.coordinatorId}
@@ -26985,14 +27004,18 @@ const ProgramsModule = ({
               </div>
             )}
             
-            <InputField 
-              label="Description (Optional)" 
-              value={localForm.description} 
-              onChange={(e) => setLocalForm({...localForm, description: e.target.value})} 
-              textarea 
-              rows="2" 
-              disabled={loading} 
-            />
+            {/* ✅ Description - Textarea */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Description (Optional)</label>
+              <textarea
+                rows="2"
+                value={localForm.description}
+                onChange={(e) => setLocalForm({...localForm, description: e.target.value})}
+                placeholder="Enter program description..."
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                disabled={loading}
+              />
+            </div>
             
             <div className="flex space-x-2">
               <button 
@@ -27157,7 +27180,6 @@ const ProgramsModule = ({
     </div>
   );
 };
-
 // ==================== LABS MODULE - FIXED VERSION ====================
 const LabsModule = ({ 
   labs, 
@@ -61088,6 +61110,7 @@ function App() {
   const [classes, setClasses] = useState([]);
   const [students, setStudents] = useState([]);
   const [subjects, setSubjects] = useState([]);
+   const [showFilters, setShowFilters] = useState(false);
   const [exams, setExams] = useState([]);
   const [results, setResults] = useState([]);
   const [attendance, setAttendance] = useState([]);
