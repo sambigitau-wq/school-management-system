@@ -27,8 +27,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Also add this to handle pre-flight requests
-app.options('*', cors());
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 // Create uploads directory
