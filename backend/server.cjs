@@ -23385,7 +23385,7 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 
-sequelize.sync({ alter: true })
+sequelize.sync({ force: false })
   .then(() => {
     console.log('✅ Database synced successfully');
     console.log('📊 Grading Systems Loaded:');
