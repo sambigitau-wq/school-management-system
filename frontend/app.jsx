@@ -14,11 +14,6 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' }
 });
 
-api.interceptors.request.use(config => {
-  const token = localStorage.getItem('token');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
 
 // Add response interceptor for better error handling
 api.interceptors.response.use(
@@ -589,16 +584,8 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
 
 
   const canManageRoles = user?.role === 'SUPER_ADMIN' || user?.role === 'SCHOOL_ADMIN';
-// ==================== API INSTANCE ====================
-const api = axios.create({
-  baseURL: 'https://school-management-system-hna5.onrender.com/api',
-  headers: { 'Content-Type': 'application/json' }
-});
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
+
+
 
   // ==================== PERMISSION CATEGORIES WITH EMOJIS ====================
   const permissionCategories = {
@@ -2069,49 +2056,43 @@ const DashboardModule = ({
         </div>
       );
     }
-    
     if (!studentData || studentError) {
-      return (
-        <div className="bg-white rounded-xl shadow-sm p-12 text-center">
-          <i className="fas fa-user-graduate text-6xl text-gray-300 mb-4"></i>
-          <h2 className="text-2xl font-bold text-gray-700 mb-2">Student Dashboard</h2>
-          <p className="text-gray-500">{studentError || 'No student record found for your account.'}</p>
-          <p className="text-sm text-gray-400 mt-2">Please enter your admission number to continue.</p>
-          <button 
-            onClick={async () => {
-              const admission = prompt('Please enter your admission number:');
-              if (admission) {
-                try {
-                 
-                  api.interceptors.request.use(config => {
-                    const token = localStorage.getItem('token');
-                    if (token) config.headers.Authorization = `Bearer ${token}`;
-                    return config;
-                  });
-                  const response = await api.get(`/students/by-admission/${admission.toUpperCase()}`);
-                  if (response.data.student) {
-                    const student = response.data.student;
-                    localStorage.setItem('studentAdmissionNumber', admission.toUpperCase());
-                    localStorage.setItem('studentData', JSON.stringify(student));
-                    hasFetchedStudent.current = false;  // ✅ Reset so it can fetch again
-                    window.location.reload();
-                  } else {
-                    alert('Student not found with that admission number');
-                  }
-                } catch (err) {
-                  console.error('Error fetching student:', err);
-                  alert('Error fetching student: ' + (err.response?.data?.message || 'Server error'));
-                }
+  return (
+    <div className="bg-white rounded-xl shadow-sm p-12 text-center">
+      <i className="fas fa-user-graduate text-6xl text-gray-300 mb-4"></i>
+      <h2 className="text-2xl font-bold text-gray-700 mb-2">Student Dashboard</h2>
+      <p className="text-gray-500">{studentError || 'No student record found for your account.'}</p>
+      <p className="text-sm text-gray-400 mt-2">Please enter your admission number to continue.</p>
+      <button 
+        onClick={async () => {
+          const admission = prompt('Please enter your admission number:');
+          if (admission) {
+            try {
+              // ✅ REMOVED the interceptor - it's already in api.js
+              // Just call the API directly
+              const response = await api.get(`/students/by-admission/${admission.toUpperCase()}`);
+              if (response.data.student) {
+                const student = response.data.student;
+                localStorage.setItem('studentAdmissionNumber', admission.toUpperCase());
+                localStorage.setItem('studentData', JSON.stringify(student));
+                hasFetchedStudent.current = false;  // ✅ Reset so it can fetch again
+                window.location.reload();
+              } else {
+                alert('Student not found with that admission number');
               }
-            }}
-            className="mt-4 bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700"
-          >
-            Enter Admission Number
-          </button>
-        </div>
-      );
-    }
-    
+            } catch (err) {
+              console.error('Error fetching student:', err);
+              alert('Error fetching student: ' + (err.response?.data?.message || 'Server error'));
+            }
+          }
+        }}
+        className="mt-4 bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 transition-colors"
+      >
+        <i className="fas fa-search mr-2"></i> Enter Admission Number
+      </button>
+    </div>
+  );
+}
     // Get student-specific data
     const myResults = results?.filter(r => r.studentId === studentData.id) || [];
     const myAttendance = attendance?.filter(a => a.studentId === studentData.id) || [];
@@ -4455,13 +4436,6 @@ const StudentModule = ({
     phone: ''
   });
 
-
-
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   // ==================== LOAD STUDENT'S OWN DATA ====================
   useEffect(() => {
@@ -7765,11 +7739,6 @@ const CourseUnitsModule = ({
   const [apiError, setApiError] = useState('');
 
 
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   // ==================== SCHOOL TYPE DETECTION ====================
   const schoolCategory = currentSchool?.category || 'UNIVERSITY';
@@ -8878,11 +8847,7 @@ const ExamModule = ({
   const [selectAllForMessage, setSelectAllForMessage] = useState(false);
 
 
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
+
 
   // ============================================================
   // SCHOOL TYPE DETECTION
@@ -10936,11 +10901,6 @@ const ResultsModule = ({
   console.log('📝 propAdmissionNumber:', propAdmissionNumber);
   
 
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   // ==================== SCHOOL TYPE DETECTION ====================
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
@@ -15906,12 +15866,6 @@ const StaffAttendanceReportsModule = ({ staff, currentSchool, user }) => {
   };
 
 
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
-
   // ==================== FILTER STAFF TO CURRENT SCHOOL ====================
   const schoolStaff = useMemo(() => {
     if (!currentSchool?.id) return [];
@@ -16521,13 +16475,6 @@ const StaffModule = ({
       </div>
     );
   };
-
-
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   // ==================== PERMISSIONS ====================
   const canEdit = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
@@ -17596,12 +17543,6 @@ const LibraryModule = ({
   const [myStudentRecord, setMyStudentRecord] = useState(null);
 
 
-
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   const isStudent = user?.role === 'STUDENT';
   const isParent = user?.role === 'PARENT';
@@ -18835,11 +18776,6 @@ const HostelModule = ({
   const isTVET = schoolCategory === 'COLLEGE_TVET';
 
 
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   // ==================== FETCH HOSTELS ====================
   useEffect(() => {
@@ -19876,11 +19812,6 @@ const InventoryModule = ({
   const [localInventory, setLocalInventory] = useState([]);
 
 
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   // ==================== PERMISSIONS ====================
   const canAdd = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
@@ -21332,11 +21263,6 @@ const AnnouncementModule = ({
     );
   };
 
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   // ==================== PERMISSIONS ====================
   const canAddAnnouncement = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER'].includes(user?.role);
@@ -22226,13 +22152,6 @@ const AccountingModule = ({ payments, expenses, dateRange, setDateRange, showInc
     );
   };
 
-
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
-
   // ==================== INPUT FIELD ====================
   const InputField = ({ label, type, value, onChange, placeholder, required, disabled, min, step, textarea, rows, maxLength }) => {
     if (textarea) {
@@ -23008,13 +22927,6 @@ const OtherIncomeModule = ({ payments, setPayments, dateRange, setDateRange, use
       </div>
     );
   };
-
-
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   // ==================== INPUT FIELD ====================
   const InputField = ({ label, type, value, onChange, placeholder, required, disabled, min, step, textarea, rows, maxLength }) => {
@@ -24473,12 +24385,6 @@ const FacultiesModule = ({
     );
   };
 
- 
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   // ==================== PERMISSIONS ====================
   const canEdit = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
@@ -25009,18 +24915,6 @@ const DepartmentsModule = ({
       </div>
     );
   };
-
-  // ==================== API INSTANCE ====================
-  const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
-    headers: { 'Content-Type': 'application/json' }
-  });
-
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   // ==================== SCHOOL TYPE DETECTION ====================
   const schoolCategory = currentSchool?.category || 'UNIVERSITY';
@@ -25718,13 +25612,6 @@ const CoursesModule = ({
     );
   };
 
-  
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
-
   // ==================== PERMISSIONS ====================
   const canEdit = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
   const canDelete = ['SCHOOL_ADMIN', 'PRINCIPAL'].includes(user?.role);
@@ -26283,7 +26170,7 @@ const CoursesModule = ({
     </div>
   );
 };
-// ==================== FIXED PROGRAMS MODULE ====================
+
 const ProgramsModule = ({ 
   programs, 
   setPrograms, 
@@ -26297,8 +26184,8 @@ const ProgramsModule = ({
   currentSchool,
   staff = [],
   users = [],
-  showFilters,        // ← Added from parent
-  setShowFilters      // ← Added from parent
+  showFilters,
+  setShowFilters
 }) => {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -26309,7 +26196,7 @@ const ProgramsModule = ({
     code: '',
     departmentId: '',
     duration: 3,
-    level: 'Diploma',
+    level: '',
     description: '',
     coordinator: '',
     coordinatorId: ''
@@ -26318,7 +26205,7 @@ const ProgramsModule = ({
   const [filterDepartment, setFilterDepartment] = useState('');
   const [filterLevel, setFilterLevel] = useState('');
 
-  // ==================== SIMPLIFIED SEARCHABLE SELECT - NO FOCUS STEALING ====================
+  // ==================== SIMPLIFIED SEARCHABLE SELECT ====================
   const SearchableSelect = ({ label, value, onChange, options, placeholder, disabled, required, className }) => {
     const [search, setSearch] = useState('');
     const [isOpen, setIsOpen] = useState(false);
@@ -26337,7 +26224,6 @@ const ProgramsModule = ({
 
     const selectedOption = options.find(opt => opt.value === value);
 
-    // Close dropdown when clicking outside
     useEffect(() => {
       const handleClickOutside = (event) => {
         if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
@@ -26348,7 +26234,6 @@ const ProgramsModule = ({
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    // Update search when selected option changes
     useEffect(() => {
       if (selectedOption) {
         setSearch(selectedOption.label);
@@ -26457,18 +26342,6 @@ const ProgramsModule = ({
     );
   };
 
-  // ==================== API INSTANCE ====================
-  const api = axios.create({
-    baseURL: 'http://localhost:5000/api',
-    headers: { 'Content-Type': 'application/json' }
-  });
-
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
-
   // ==================== PERMISSIONS ====================
   const canEdit = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
   const canDelete = ['SCHOOL_ADMIN', 'PRINCIPAL'].includes(user?.role);
@@ -26512,7 +26385,7 @@ const ProgramsModule = ({
 
   // ==================== LEVEL OPTIONS ====================
   const levelOptions = [
-    { value: '', label: '' },
+    { value: '', label: 'Select Level' },
     { value: 'Certificate', label: 'Certificate' },
     { value: 'Diploma', label: 'Diploma' },
     { value: 'Higher Diploma', label: 'Higher Diploma' },
@@ -26521,7 +26394,7 @@ const ProgramsModule = ({
 
   // ==================== LEVEL FILTER OPTIONS ====================
   const levelFilterOptions = [
-    { value: '', label: '' },
+    { value: '', label: 'All Levels' },
     { value: 'Certificate', label: 'Certificate' },
     { value: 'Diploma', label: 'Diploma' },
     { value: 'Higher Diploma', label: 'Higher Diploma' },
@@ -26659,7 +26532,7 @@ const ProgramsModule = ({
         code: '',
         departmentId: '',
         duration: 3,
-        level: 'Diploma',
+        level: '',
         description: '',
         coordinator: '',
         coordinatorId: ''
@@ -26693,7 +26566,7 @@ const ProgramsModule = ({
       code: program.code || '',
       departmentId: program.departmentId || '',
       duration: program.duration || 3,
-      level: program.level || 'Diploma',
+      level: program.level || '',
       description: program.description || '',
       coordinator: program.coordinator || '',
       coordinatorId: program.coordinatorId || ''
@@ -26761,46 +26634,6 @@ const ProgramsModule = ({
     }));
   }, [localPrograms, departments]);
 
-  // ==================== INPUT FIELD ====================
-  const InputField = ({ label, type, value, onChange, placeholder, required, disabled, min, step, textarea, rows }) => {
-    if (textarea) {
-      return (
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-          <textarea
-            rows={rows || 3}
-            value={value || ''}
-            onChange={onChange}
-            placeholder={placeholder}
-            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-            disabled={disabled}
-          />
-        </div>
-      );
-    }
-    return (
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
-        </label>
-        <input
-          type={type || 'text'}
-          value={value !== undefined && value !== null ? value : ''}
-          onChange={onChange}
-          placeholder={placeholder}
-          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-          disabled={disabled}
-          min={min}
-          step={step}
-        />
-      </div>
-    );
-  };
-
   // ==================== RENDER ====================
   return (
     <div className="space-y-6">
@@ -26827,7 +26660,7 @@ const ProgramsModule = ({
           {canEdit && (
             <button 
               onClick={() => { 
-                setLocalForm({ name: '', code: '', departmentId: '', duration: 3, level: 'Diploma', description: '', coordinator: '', coordinatorId: '' }); 
+                setLocalForm({ name: '', code: '', departmentId: '', duration: 3, level: '', description: '', coordinator: '', coordinatorId: '' }); 
                 setEditingId(null); 
                 setShowForm(true); 
               }} 
@@ -26866,7 +26699,7 @@ const ProgramsModule = ({
                 value={filterDepartment}
                 onChange={(e) => setFilterDepartment(e.target.value)}
                 options={departmentFilterOptions}
-                placeholder=""
+                placeholder="All Departments"
               />
             </div>
             <div>
@@ -26875,7 +26708,7 @@ const ProgramsModule = ({
                 value={filterLevel}
                 onChange={(e) => setFilterLevel(e.target.value)}
                 options={levelFilterOptions}
-                placeholder=""
+                placeholder="All Levels"
               />
             </div>
           </div>
@@ -26903,7 +26736,7 @@ const ProgramsModule = ({
           <h3 className="text-lg font-semibold mb-4">{editingId ? 'Edit' : 'Add New'} Program</h3>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-              {/* ✅ Program Name - Simple Input */}
+              {/* Program Name - Simple Input */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Program Name <span className="text-red-500">*</span>
@@ -26918,7 +26751,7 @@ const ProgramsModule = ({
                 />
               </div>
               
-              {/* ✅ Program Code - Simple Input */}
+              {/* Program Code - Simple Input */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Program Code <span className="text-red-500">*</span>
@@ -26933,13 +26766,13 @@ const ProgramsModule = ({
                 />
               </div>
               
-              {/* ✅ Department - SearchableSelect (dropdown) */}
+              {/* Department - SearchableSelect */}
               <SearchableSelect
                 label="Department *"
                 value={localForm.departmentId}
                 onChange={(e) => setLocalForm({...localForm, departmentId: e.target.value})}
                 options={departmentOptions}
-                placeholder=""
+                placeholder="Select Department"
                 required
                 disabled={loading || !departments?.length}
               />
@@ -26951,7 +26784,7 @@ const ProgramsModule = ({
                 </div>
               )}
               
-              {/* ✅ Duration - Simple Input */}
+              {/* Duration - Simple Input */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Duration (Years) <span className="text-red-500">*</span>
@@ -26967,18 +26800,18 @@ const ProgramsModule = ({
                 />
               </div>
               
-              {/* ✅ Level - SearchableSelect (dropdown) */}
+              {/* Level - SearchableSelect with empty initial state */}
               <SearchableSelect
-                label="Level"
+                label="Level *"
                 value={localForm.level}
                 onChange={(e) => setLocalForm({...localForm, level: e.target.value})}
                 options={levelOptions}
-                placeholder=""
+                placeholder="Select Level"
                 required
                 disabled={loading}
               />
 
-              {/* ✅ Program Coordinator - SearchableSelect (dropdown from staff) */}
+              {/* Program Coordinator - SearchableSelect */}
               <SearchableSelect
                 label="Program Coordinator"
                 value={localForm.coordinatorId}
@@ -26992,7 +26825,7 @@ const ProgramsModule = ({
                   });
                 }}
                 options={staffOptions}
-                placeholder=""
+                placeholder="Select Coordinator"
                 disabled={loading}
               />
             </div>
@@ -27004,7 +26837,7 @@ const ProgramsModule = ({
               </div>
             )}
             
-            {/* ✅ Description - Textarea */}
+            {/* Description - Textarea */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Description (Optional)</label>
               <textarea
@@ -27030,7 +26863,7 @@ const ProgramsModule = ({
                 onClick={() => {
                   setShowForm(false);
                   setEditingId(null);
-                  setLocalForm({ name: '', code: '', departmentId: '', duration: 3, level: 'Diploma', description: '', coordinator: '', coordinatorId: '' });
+                  setLocalForm({ name: '', code: '', departmentId: '', duration: 3, level: '', description: '', coordinator: '', coordinatorId: '' });
                 }} 
                 className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600" 
                 disabled={loading}
@@ -27106,9 +26939,10 @@ const ProgramsModule = ({
                           program.level === 'Certificate' ? 'bg-yellow-100 text-yellow-800' :
                           program.level === 'Diploma' ? 'bg-blue-100 text-blue-800' :
                           program.level === 'Higher Diploma' ? 'bg-purple-100 text-purple-800' :
-                          'bg-green-100 text-green-800'
+                          program.level === 'Degree' ? 'bg-green-100 text-green-800' :
+                          'bg-gray-100 text-gray-600'
                         }`}>
-                          {program.level}
+                          {program.level || 'Not Set'}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -27384,11 +27218,6 @@ const LabsModule = ({
 
 
 
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   // ==================== PERMISSIONS ====================
   const canEdit = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
@@ -28327,12 +28156,6 @@ const ResearchModule = ({ research, setResearch, faculties, form, setForm, handl
     );
   };
 
-
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   // ==================== FACULTY OPTIONS ====================
   const facultyOptions = useMemo(() => {
@@ -30194,12 +30017,6 @@ const FeesModule = ({
 
   
 
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
-
   // ==================== 7. PERMISSIONS ====================
   const isStudent = user?.role === 'STUDENT';
   const isParent = user?.role === 'PARENT';
@@ -30995,11 +30812,6 @@ const FeeAllocationModule = ({
   const [studentSearch, setStudentSearch] = useState('');
   const [loading, setLoading] = useState(false);
 
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   const canAllocate = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
   const canView = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
@@ -31759,11 +31571,6 @@ const FeeRemindersModule = ({
   const [sending, setSending] = useState(false);
   const [apiError, setApiError] = useState('');
 
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
   const isUniversity = schoolCategory === 'UNIVERSITY';
@@ -32847,13 +32654,6 @@ const PromotionModule = ({
   const [regSourceClass, setRegSourceClass] = useState('');
   const [regTargetClass, setRegTargetClass] = useState('');
 
-
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
-
   // ==================== SCHOOL TYPE DETECTION ====================
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
   const isUniversity = schoolCategory === 'UNIVERSITY';
@@ -33881,12 +33681,6 @@ const ExamCardsModule = ({
 }) => {
   console.log('🎫 ExamCardsModule INITIALIZED');
   console.log('🏫 School category:', currentSchool?.category);
-
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   // ==================== SCHOOL TYPE DETECTION ====================
   const schoolCategory = currentSchool?.category || 'SENIOR_SECONDARY';
@@ -35275,13 +35069,6 @@ const SettingsModule = ({
   const [testEmailLoading, setTestEmailLoading] = useState(false);
   const [testSMSLoading, setTestSMSLoading] = useState(false);
 
-
-
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   // ==================== PERMISSIONS ====================
   const canViewAudit = user?.role === 'SUPER_ADMIN' || user?.role === 'SCHOOL_ADMIN';
@@ -36936,12 +36723,6 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
 
 
 
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
-
   // ==================== SEARCHABLE SELECT COMPONENT ====================
   const SearchableSelect = ({ 
     label, 
@@ -38441,12 +38222,6 @@ const AttendanceModule = ({
   const [loadingChildren, setLoadingChildren] = useState(false);
 
 
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
-
   // ==================== SCHOOL TYPE DETECTION ====================
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
   const isUniversity = schoolCategory === 'UNIVERSITY';
@@ -39498,12 +39273,6 @@ const FeeStatementModule = ({
   }, [myChildren]);
 
 
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
-
   // ==================== LOAD STUDENT FEE STATEMENT ====================
   const loadFeeStatement = async (studentId, studentAdmissionNumber = null) => {
     setLoading(true);
@@ -40317,12 +40086,6 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
     referralReason: ''
   });
 
-
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   const isNurse = user?.role === 'NURSE';
   const isAdmin = ['SCHOOL_ADMIN', 'PRINCIPAL', 'SUPER_ADMIN'].includes(user?.role);
@@ -41562,13 +41325,6 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
   const canManagePatients = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'MATRON', 'NURSE'].includes(user?.role);
   const isNurse = user?.role === 'NURSE';
 
-
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
-
   const SearchableSelect = ({ 
     label, 
     value, 
@@ -42621,12 +42377,6 @@ const SchemesOfWorkModule = ({
     template: ''
   });
   
-
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   const SearchableSelect = ({ 
     label, 
@@ -43985,12 +43735,6 @@ const CourseEnrollmentModule = ({
 
 
 
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
-
   const schoolCategory = currentSchool?.category || 'COLLEGE_TVET';
   const isTVET = schoolCategory === 'COLLEGE_TVET';
   const isUniversity = schoolCategory === 'UNIVERSITY';
@@ -45225,17 +44969,6 @@ const UnitRegistrationModule = ({
     };
   }, [currentSchool, isUniversity, isTVET, isRegularSchool]);
 
-  const api = React.useMemo(() => {
- 
-    axiosInstance.interceptors.request.use(config => {
-      const token = localStorage.getItem('token');
-      if (token) config.headers.Authorization = `Bearer ${token}`;
-      return config;
-    });
-
-    return axiosInstance;
-  }, []);
-
   const studentOptions = useMemo(() => {
     const opts = [{ value: '', label: '' }];
     (students || []).forEach(s => {
@@ -46352,12 +46085,6 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
   });
 
 
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
-
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-KE', { 
       style: 'currency', 
@@ -46762,13 +46489,6 @@ const FeeCollectionModule = ({ students, fees, payments, setPayments, classes, c
   const [showReceipt, setShowReceipt] = useState(false);
   const [lastReceipt, setLastReceipt] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-
-
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-KE', { 
@@ -47355,12 +47075,6 @@ const StudentArrivalModule = ({
   });
 
 
-
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   const SearchableSelect = ({ 
     label, 
@@ -48305,14 +48019,6 @@ const ReceptionistModule = ({
 
   const [approvalForm, setApprovalForm] = useState({
     status: '', comments: '', approvedBy: ''
-  });
-
-
-
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
   });
 
   // ==================== PERMISSIONS ====================
@@ -51933,13 +51639,6 @@ const CardManagementModule = ({
     }));
   };
 
-
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
-
   // ==================== UPDATE TEMPLATE WHEN SCHOOL CHANGES ====================
   useEffect(() => {
     if (currentSchool) {
@@ -54160,12 +53859,6 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
     colorScheme: 'gold'
   });
 
- 
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   const certTypes = [
     { value: 'student_of_year', label: '🏆 Student of the Year' },
@@ -55112,12 +54805,6 @@ const AlumniModule = ({ students, currentSchool, user, parents }) => {
       <div className="text-xs text-gray-500">{option.subLabel}</div>
     </div>
   );
-
-  api.interceptors.request.use(config => {
-    const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  });
 
   // ==================== CHECK PERMISSIONS ====================
   const canManageEvents = () => {
@@ -57216,18 +56903,7 @@ const LiveClassroomModule = ({ currentSchool, user, students = [], staff = [], u
     teacherId: user?.id
   });
 
-  // ==================== API INSTANCE ====================
-  const api = useMemo(() => {
-
-    instance.interceptors.request.use(config => {
-      const token = localStorage.getItem('token');
-      if (token) config.headers.Authorization = `Bearer ${token}`;
-      return config;
-    });
-
-    return instance;
-  }, []);
-
+  
   // ==================== SEARCHABLE SELECT COMPONENT ====================
   const SearchableSelect = useCallback(({ 
     options = [], 
@@ -58953,19 +58629,7 @@ const OnlineExamsModule = ({
     return gradeMap[grade] || { display: `${grade} (${points || 0} pts)`, color: 'bg-gray-100 text-gray-800' };
   }, [isUniversity]);
 
-  // ==================== API INSTANCE ====================
-  const api = useMemo(() => {
-   
-
-    instance.interceptors.request.use(config => {
-      const token = localStorage.getItem('token');
-      if (token) config.headers.Authorization = `Bearer ${token}`;
-      return config;
-    });
-
-    return instance;
-  }, []);
-
+  
   // ==================== FETCH FUNCTIONS ====================
   const fetchExams = useCallback(async () => {
     setLoading(true);
@@ -61082,6 +60746,7 @@ const OnlineExamsModule = ({
     </div>
   );
 };
+
 // ==================== MAIN APP COMPONENT ====================
 function App() {
   // ===== RESET PASSWORD ROUTE =====
@@ -62263,7 +61928,7 @@ if (user.role === 'SCHOOL_ADMIN') {
         { icon: "bus", label: "Transport", id: 'transport' },
         { icon: "bed", label: "Hostel", id: 'hostel' },
         { icon: "box", label: "Inventory", id: 'inventory' },
-        { icon: "microscope", label: "Labs", id: 'labs' }  // ✅ Added labs here
+        { icon: "microscope", label: "Labs", id: 'labs' }
       ]
     },
     {
@@ -63174,442 +62839,181 @@ const response = await fetch('https://school-management-system-hna5.onrender.com
       setLoading(false); 
     }
   };
-// ===== 10. RENDER =====
+
+// ===== 10. RENDER - LOGIN PAGE =====
 if (!token) {
   return (
     <div className="min-h-screen bg-white overflow-hidden relative">
-
-      {/* ================= BACKGROUND ================= */}
+      {/* BACKGROUND */}
       <div className="absolute inset-0 pointer-events-none">
-
-        {/* Right gradient panel */}
         <div className="absolute top-0 right-0 w-[46%] h-full bg-gradient-to-br from-indigo-700 via-violet-700 to-purple-900" />
-
-        {/* Decorative circles */}
         <div className="absolute -top-32 -left-32 w-96 h-96 rounded-full bg-violet-100 opacity-60" />
-
         <div className="absolute bottom-[-180px] left-[30%] w-[500px] h-[500px] rounded-full bg-purple-100 opacity-50" />
-
         <div className="absolute top-20 right-20 w-64 h-64 rounded-full border border-white/10" />
-
         <div className="absolute top-32 right-32 w-40 h-40 rounded-full border border-white/10" />
-
       </div>
 
-
-      {/* ================= MAIN CONTENT ================= */}
+      {/* MAIN CONTENT */}
       <div className="relative z-10 min-h-screen flex">
-
-        {/* ==================================================
-            LEFT BRANDING SECTION
-        ================================================== */}
+        {/* LEFT BRANDING SECTION */}
         <div className="w-full lg:w-[58%] px-8 sm:px-12 lg:px-20 xl:px-28 py-10 flex flex-col justify-between">
-
-          {/* ================= LOGO ================= */}
+          {/* LOGO */}
           <div>
             <div className="flex items-center gap-4">
-
-              {/* SchoolAid Logo */}
               <div className="relative">
-
                 <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-700 flex items-center justify-center shadow-lg shadow-indigo-200">
-
-                  <svg
-                    viewBox="0 0 64 64"
-                    className="w-11 h-11 text-white"
-                    fill="none"
-                  >
-                    {/* Open book */}
-                    <path
-                      d="M10 17C18 14 25 16 32 21V51C25 46 18 44 10 47V17Z"
-                      fill="white"
-                      opacity="0.95"
-                    />
-
-                    <path
-                      d="M54 17C46 14 39 16 32 21V51C39 46 46 44 54 47V17Z"
-                      fill="white"
-                      opacity="0.75"
-                    />
-
-                    {/* Graduation star */}
-                    <path
-                      d="M32 7L35 13L42 14L37 19L38 26L32 23L26 26L27 19L22 14L29 13L32 7Z"
-                      fill="#FBBF24"
-                    />
-
+                  <svg viewBox="0 0 64 64" className="w-11 h-11 text-white" fill="none">
+                    <path d="M10 17C18 14 25 16 32 21V51C25 46 18 44 10 47V17Z" fill="white" opacity="0.95" />
+                    <path d="M54 17C46 14 39 16 32 21V51C39 46 46 44 54 47V17Z" fill="white" opacity="0.75" />
+                    <path d="M32 7L35 13L42 14L37 19L38 26L32 23L26 26L27 19L22 14L29 13L32 7Z" fill="#FBBF24" />
                   </svg>
-
                 </div>
-
               </div>
-
               <div>
                 <h1 className="text-4xl font-extrabold tracking-tight text-slate-900">
                   School<span className="text-violet-600">Aid</span>
                 </h1>
-
                 <p className="text-sm font-medium text-slate-500 tracking-wide">
                   Smart School Management System
                 </p>
-
               </div>
-
             </div>
           </div>
 
-
-          {/* ================= HERO ================= */}
+          {/* HERO */}
           <div className="max-w-2xl mt-16 lg:mt-0">
-
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-violet-50 border border-violet-100 text-violet-700 text-sm font-semibold mb-7">
-
               <span className="w-2 h-2 rounded-full bg-violet-600 animate-pulse" />
-
               Smarter schools. Better outcomes.
-
             </div>
-
-
             <h2 className="text-5xl sm:text-6xl xl:text-7xl font-black tracking-tight leading-[1.02] text-slate-950">
-
-              Manage.
-
-              <br />
-
-              Educate.
-
-              <br />
-
+              Manage.<br />
+              Educate.<br />
               <span className="bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 bg-clip-text text-transparent">
                 Inspire.
               </span>
-
             </h2>
-
-
             <p className="mt-7 text-lg sm:text-xl text-slate-600 leading-relaxed max-w-xl">
-
               Everything your school needs to manage students,
               empower teachers, track performance and build a
               better learning experience — all in one intelligent platform.
-
             </p>
 
-
-            {/* ================= FEATURES ================= */}
+            {/* FEATURES */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-10">
-
-              {/* Student */}
               <div className="group bg-white rounded-2xl p-4 border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all">
-
                 <div className="w-11 h-11 rounded-xl bg-violet-100 text-violet-600 flex items-center justify-center mb-3">
-
-                  <svg
-                    className="w-6 h-6"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M12 14l9-5-9-5-9 5 9 5z"
-                    />
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M5 12v5c3 2 6 3 7 3s4-1 7-3v-5"
-                    />
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 14l9-5-9-5-9 5 9 5z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 12v5c3 2 6 3 7 3s4-1 7-3v-5" />
                   </svg>
-
                 </div>
-
-                <h3 className="font-bold text-slate-900 text-sm">
-                  Students
-                </h3>
-
-                <p className="text-xs text-slate-500 mt-1">
-                  Records & performance
-                </p>
-
+                <h3 className="font-bold text-slate-900 text-sm">Students</h3>
+                <p className="text-xs text-slate-500 mt-1">Records & performance</p>
               </div>
-
-
-              {/* Teachers */}
               <div className="group bg-white rounded-2xl p-4 border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all">
-
                 <div className="w-11 h-11 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center mb-3">
-
-                  <svg
-                    className="w-6 h-6"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M12 14l9-5-9-5-9 5 9 5z"
-                    />
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M12 22V14"
-                    />
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 14l9-5-9-5-9 5 9 5z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 22V14" />
                   </svg>
-
                 </div>
-
-                <h3 className="font-bold text-slate-900 text-sm">
-                  Teachers
-                </h3>
-
-                <p className="text-xs text-slate-500 mt-1">
-                  Smart management
-                </p>
-
+                <h3 className="font-bold text-slate-900 text-sm">Teachers</h3>
+                <p className="text-xs text-slate-500 mt-1">Smart management</p>
               </div>
-
-
-              {/* Attendance */}
               <div className="group bg-white rounded-2xl p-4 border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all">
-
                 <div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center mb-3">
-
-                  <svg
-                    className="w-6 h-6"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M9 11l3 3L22 4"
-                    />
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"
-                    />
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 11l3 3L22 4" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
                   </svg>
-
                 </div>
-
-                <h3 className="font-bold text-slate-900 text-sm">
-                  Attendance
-                </h3>
-
-                <p className="text-xs text-slate-500 mt-1">
-                  Real-time tracking
-                </p>
-
+                <h3 className="font-bold text-slate-900 text-sm">Attendance</h3>
+                <p className="text-xs text-slate-500 mt-1">Real-time tracking</p>
               </div>
-
-
-              {/* Reports */}
               <div className="group bg-white rounded-2xl p-4 border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all">
-
                 <div className="w-11 h-11 rounded-xl bg-pink-100 text-pink-600 flex items-center justify-center mb-3">
-
-                  <svg
-                    className="w-6 h-6"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M4 19V5M4 19h16M8 16v-5M12 16V7M16 16v-9M20 16V3"
-                    />
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 19V5M4 19h16M8 16v-5M12 16V7M16 16v-9M20 16V3" />
                   </svg>
-
                 </div>
-
-                <h3 className="font-bold text-slate-900 text-sm">
-                  Analytics
-                </h3>
-
-                <p className="text-xs text-slate-500 mt-1">
-                  Powerful reports
-                </p>
-
+                <h3 className="font-bold text-slate-900 text-sm">Analytics</h3>
+                <p className="text-xs text-slate-500 mt-1">Powerful reports</p>
               </div>
-
             </div>
 
-
-            {/* ================= TRUST ================= */}
+            {/* TRUST */}
             <div className="flex flex-wrap items-center gap-6 mt-10">
-
               <div className="flex items-center gap-3">
-
                 <div className="w-10 h-10 rounded-full bg-violet-100 flex items-center justify-center text-violet-600">
-
-                  <svg
-                    className="w-5 h-5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z"
-                    />
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M9 12l2 2 4-4"
-                    />
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4" />
                   </svg>
-
                 </div>
-
                 <div>
-                  <p className="text-sm font-bold text-slate-900">
-                    Secure
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    Built for schools
-                  </p>
+                  <p className="text-sm font-bold text-slate-900">Secure</p>
+                  <p className="text-xs text-slate-500">Built for schools</p>
                 </div>
-
               </div>
-
-
               <div className="hidden sm:block h-8 w-px bg-slate-200" />
-
-
               <div>
-
                 <p className="text-sm font-bold text-slate-900">
-                  Simple.
-                  <span className="text-violet-600"> Powerful.</span>
+                  Simple. <span className="text-violet-600">Powerful.</span>
                 </p>
-
-                <p className="text-xs text-slate-500">
-                  Everything in one place.
-                </p>
-
+                <p className="text-xs text-slate-500">Everything in one place.</p>
               </div>
-
             </div>
-
           </div>
 
-
-          {/* ================= FOOTER ================= */}
+          {/* FOOTER */}
           <div className="mt-12 lg:mt-0">
-
             <p className="text-xs text-slate-400">
               © {new Date().getFullYear()} SchoolAid. Smart technology for better schools.
             </p>
-
           </div>
-
         </div>
 
-
-        {/* ==================================================
-            RIGHT LOGIN SECTION
-        ================================================== */}
+        {/* RIGHT LOGIN SECTION */}
         <div className="hidden lg:flex w-[42%] relative items-center justify-center px-12">
-
-          {/* Decorative education pattern */}
           <div className="absolute inset-0 overflow-hidden">
-
-            <div className="absolute top-20 right-20 text-white/10 text-9xl font-black">
-              +
-            </div>
-
-            <div className="absolute bottom-32 right-20 text-white/10 text-8xl font-black">
-              ×
-            </div>
-
+            <div className="absolute top-20 right-20 text-white/10 text-9xl font-black">+</div>
+            <div className="absolute bottom-32 right-20 text-white/10 text-8xl font-black">×</div>
             <div className="absolute top-1/2 right-10 w-72 h-72 border border-white/10 rounded-full" />
-
             <div className="absolute bottom-10 left-10 w-40 h-40 border border-white/10 rounded-full" />
-
           </div>
 
-
           <div className="relative w-full max-w-xl">
-
-            {/* ================= LOGIN CARD ================= */}
+            {/* LOGIN CARD */}
             <div className="bg-white rounded-[2rem] shadow-2xl shadow-black/20 p-8 xl:p-10">
-
               {/* Header */}
               <div className="flex items-start justify-between mb-8">
-
                 <div>
-
-                  <p className="text-sm font-semibold text-violet-600 mb-2">
-                    SCHOOLAID PORTAL
-                  </p>
-
-                  <h3 className="text-3xl font-extrabold text-slate-900">
-                    Welcome back.
-                  </h3>
-
-                  <p className="text-sm text-slate-500 mt-2">
-                    Sign in to continue to your dashboard.
-                  </p>
-
+                  <p className="text-sm font-semibold text-violet-600 mb-2">SCHOOLAID PORTAL</p>
+                  <h3 className="text-3xl font-extrabold text-slate-900">Welcome back.</h3>
+                  <p className="text-sm text-slate-500 mt-2">Sign in to continue to your dashboard.</p>
                 </div>
-
-
                 <div className="w-12 h-12 rounded-2xl bg-violet-50 flex items-center justify-center">
-
-                  <svg
-                    className="w-6 h-6 text-violet-600"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M12 15v2m-6 4h12a2 2 0 002-2v-5a2 2 0 00-2-2H6a2 2 0 00-2 2v5a2 2 0 002 2zm10-9V7a4 4 0 00-8 0v3h8z"
-                    />
+                  <svg className="w-6 h-6 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-5a2 2 0 00-2-2H6a2 2 0 00-2 2v5a2 2 0 002 2zm10-9V7a4 4 0 00-8 0v3h8z" />
                   </svg>
-
                 </div>
-
               </div>
 
-
-              {/* ================= ERROR ================= */}
+              {/* ERROR & SUCCESS */}
               {error && (
                 <div className="mb-5 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
                   ❌ {error}
                 </div>
               )}
-
-
-              {/* ================= SUCCESS ================= */}
               {success && (
                 <div className="mb-5 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-xl text-sm">
                   ✅ {success}
                 </div>
               )}
 
-
-              {/* ================= TABS ================= */}
+              {/* TABS */}
               <div className="flex bg-slate-100 rounded-xl p-1 mb-7">
-
                 <button
                   onClick={() => setActiveTab('login')}
                   className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
@@ -63620,7 +63024,6 @@ if (!token) {
                 >
                   Sign In
                 </button>
-
                 <button
                   onClick={() => setActiveTab('forgot')}
                   className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
@@ -63631,75 +63034,41 @@ if (!token) {
                 >
                   Reset Password
                 </button>
-
               </div>
 
-
-              {/* ==================================================
-                  LOGIN
-              ================================================== */}
+              {/* LOGIN FORM */}
               {activeTab === 'login' && (
-
                 <form onSubmit={handleLogin} className="space-y-5">
-
-                  {/* Email */}
                   <div>
-
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Email Address
-                    </label>
-
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">Email Address</label>
                     <div className="relative">
-
                       <input
                         type="email"
                         value={loginForm.email}
-                        onChange={(e) =>
-                          setLoginForm({
-                            ...loginForm,
-                            email: e.target.value
-                          })
-                        }
+                        onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
                         className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition"
                         placeholder="Enter your email"
                         required
                         autoComplete="email"
                       />
-
                     </div>
-
                   </div>
 
-
-                  {/* Password */}
                   <div>
-
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Password
-                    </label>
-
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">Password</label>
                     <div className="relative">
-
                       <input
                         type={showLoginPassword ? "text" : "password"}
                         value={loginForm.password}
-                        onChange={(e) =>
-                          setLoginForm({
-                            ...loginForm,
-                            password: e.target.value
-                          })
-                        }
+                        onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
                         className="w-full px-4 py-3.5 pr-12 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition"
                         placeholder="Enter your password"
                         required
                         autoComplete="current-password"
                       />
-
                       <button
                         type="button"
-                        onClick={() =>
-                          setShowLoginPassword(!showLoginPassword)
-                        }
+                        onClick={() => setShowLoginPassword(!showLoginPassword)}
                         className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-violet-600 transition"
                         tabIndex="-1"
                       >
@@ -63714,30 +63083,14 @@ if (!token) {
                           </svg>
                         )}
                       </button>
-
                     </div>
-
                   </div>
 
-
-                  {/* Options */}
                   <div className="flex items-center justify-between">
-
                     <label className="flex items-center gap-2 cursor-pointer">
-
-                      <input
-                        id="remember-me"
-                        type="checkbox"
-                        className="h-4 w-4 text-violet-600 focus:ring-violet-500 border-slate-300 rounded"
-                      />
-
-                      <span className="text-sm text-slate-600">
-                        Remember me
-                      </span>
-
+                      <input id="remember-me" type="checkbox" className="h-4 w-4 text-violet-600 focus:ring-violet-500 border-slate-300 rounded" />
+                      <span className="text-sm text-slate-600">Remember me</span>
                     </label>
-
-
                     <button
                       type="button"
                       onClick={() => setActiveTab('forgot')}
@@ -63745,11 +63098,8 @@ if (!token) {
                     >
                       Forgot password?
                     </button>
-
                   </div>
 
-
-                  {/* Sign In */}
                   <button
                     type="submit"
                     disabled={loading}
@@ -63757,49 +63107,26 @@ if (!token) {
                   >
                     {loading ? 'Signing in...' : 'Sign In →'}
                   </button>
-
                 </form>
-
               )}
 
-
-              {/* ==================================================
-                  FORGOT PASSWORD
-              ================================================== */}
+              {/* FORGOT PASSWORD FORM */}
               {activeTab === 'forgot' && (
-
-                <form
-                  onSubmit={handleForgotPassword}
-                  className="space-y-5"
-                >
-
+                <form onSubmit={handleForgotPassword} className="space-y-5">
                   <div className="bg-violet-50 border border-violet-100 p-4 rounded-xl text-violet-700 text-sm">
                     🔐 We'll send a password reset link to your registered email address.
                   </div>
-
-
                   <div>
-
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">
-                      Email Address
-                    </label>
-
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">Email Address</label>
                     <input
                       type="email"
                       value={forgotPasswordForm.email}
-                      onChange={(e) =>
-                        setForgotPasswordForm({
-                          email: e.target.value
-                        })
-                      }
+                      onChange={(e) => setForgotPasswordForm({ email: e.target.value })}
                       className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition"
                       placeholder="Enter your registered email"
                       required
                     />
-
                   </div>
-
-
                   <button
                     type="submit"
                     disabled={loading}
@@ -63807,10 +63134,7 @@ if (!token) {
                   >
                     {loading ? 'Sending...' : 'Send Reset Link'}
                   </button>
-
-
                   <div className="text-center">
-
                     <button
                       type="button"
                       onClick={() => setActiveTab('login')}
@@ -63818,19 +63142,13 @@ if (!token) {
                     >
                       ← Back to Sign In
                     </button>
-
                   </div>
-
                 </form>
-
               )}
 
-
-              {/* ================= CONTACT ADMINISTRATOR ================= */}
+              {/* CONTACT ADMINISTRATOR */}
               <p className="mt-7 text-center text-sm text-slate-500">
-
                 New to SchoolAid?
-
                 <button
                   type="button"
                   onClick={() => {
@@ -63841,195 +63159,87 @@ if (!token) {
                 >
                   Contact Administrator
                 </button>
-
               </p>
-
             </div>
 
-
-            {/* ================= SUPPORT CARD ================= */}
+            {/* SUPPORT CARD */}
             <div className="mt-5 bg-white/10 backdrop-blur-xl border border-white/10 rounded-2xl p-5 text-white">
-
               <div className="flex items-center gap-4">
-
                 <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center">
-
-                  <svg
-                    className="w-6 h-6"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M18 8a6 6 0 00-12 0v5a2 2 0 002 2h1V9H8a4 4 0 018 0h-1v6h1a2 2 0 002-2V8z"
-                    />
-
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M18 15v2a3 3 0 01-3 3h-2"
-                    />
-
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M18 8a6 6 0 00-12 0v5a2 2 0 002 2h1V9H8a4 4 0 018 0h-1v6h1a2 2 0 002-2V8z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M18 15v2a3 3 0 01-3 3h-2" />
                   </svg>
-
                 </div>
-
-
                 <div>
-
-                  <p className="font-bold">
-                    Need help?
-                  </p>
-
-                  <p className="text-sm text-white/70">
-                    Our support team is here for you.
-                  </p>
-
+                  <p className="font-bold">Need help?</p>
+                  <p className="text-sm text-white/70">Our support team is here for you.</p>
                   <button
                     onClick={() => {
-                      const supportInfo = `📋 SchoolAid Support\n\n📱 Phone: +254 180 559 352\n📧 Email: technologieszyphra@gmail.com\n💬 WhatsApp: +254 180 559 352\n\n🕐 Support Hours: Mon-Sun, 24hours `;
+                      const supportInfo = `📋 SchoolAid Support\n\n📱 Phone: +254 180 559 352\n📧 Email: technologieszyphra@gmail.com\n💬 WhatsApp: +254 180 559 352\n\n🕐 Support Hours: Mon-Sun, 24hours`;
                       alert(supportInfo);
                     }}
                     className="text-sm font-semibold text-white hover:text-violet-200 transition mt-1"
                   >
                     Contact Support →
                   </button>
-
                 </div>
-
               </div>
-
             </div>
-
           </div>
-
         </div>
 
-
-        {/* ==================================================
-            MOBILE LOGIN
-        ================================================== */}
+        {/* MOBILE LOGIN */}
         <div className="lg:hidden absolute inset-0 bg-gradient-to-br from-violet-700 to-indigo-900 overflow-y-auto">
-
           <div className="min-h-screen px-5 py-8 flex items-center justify-center">
-
             <div className="w-full max-w-md">
-
-              {/* Mobile logo */}
               <div className="text-center text-white mb-8">
-
                 <div className="mx-auto w-16 h-16 rounded-2xl bg-white/10 backdrop-blur flex items-center justify-center mb-4">
-
-                  <svg
-                    viewBox="0 0 64 64"
-                    className="w-11 h-11"
-                    fill="none"
-                  >
-
-                    <path
-                      d="M10 17C18 14 25 16 32 21V51C25 46 18 44 10 47V17Z"
-                      fill="white"
-                    />
-
-                    <path
-                      d="M54 17C46 14 39 16 32 21V51C39 46 46 44 54 47V17Z"
-                      fill="white"
-                      opacity=".75"
-                    />
-
-                    <path
-                      d="M32 7L35 13L42 14L37 19L38 26L32 23L26 26L27 19L22 14L29 13L32 7Z"
-                      fill="#FBBF24"
-                    />
-
+                  <svg viewBox="0 0 64 64" className="w-11 h-11" fill="none">
+                    <path d="M10 17C18 14 25 16 32 21V51C25 46 18 44 10 47V17Z" fill="white" />
+                    <path d="M54 17C46 14 39 16 32 21V51C39 46 46 44 54 47V17Z" fill="white" opacity=".75" />
+                    <path d="M32 7L35 13L42 14L37 19L38 26L32 23L26 26L27 19L22 14L29 13L32 7Z" fill="#FBBF24" />
                   </svg>
-
                 </div>
-
-                <h1 className="text-4xl font-black">
-                  School<span className="text-yellow-300">Aid</span>
-                </h1>
-
-                <p className="text-white/70 text-sm mt-1">
-                  Smart School Management System
-                </p>
-
+                <h1 className="text-4xl font-black">School<span className="text-yellow-300">Aid</span></h1>
+                <p className="text-white/70 text-sm mt-1">Smart School Management System</p>
               </div>
 
-
-              {/* Mobile card */}
               <div className="bg-white rounded-3xl p-6 shadow-2xl">
-
-                <h2 className="text-2xl font-bold text-slate-900">
-                  Welcome back.
-                </h2>
-
-                <p className="text-sm text-slate-500 mt-1 mb-6">
-                  Sign in to your SchoolAid account.
-                </p>
-
+                <h2 className="text-2xl font-bold text-slate-900">Welcome back.</h2>
+                <p className="text-sm text-slate-500 mt-1 mb-6">Sign in to your SchoolAid account.</p>
 
                 {error && (
                   <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
                     ❌ {error}
                   </div>
                 )}
-
-
                 {success && (
                   <div className="mb-4 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-xl text-sm">
                     ✅ {success}
                   </div>
                 )}
 
-
                 {activeTab === 'login' && (
-
                   <form onSubmit={handleLogin} className="space-y-5">
-
                     <div>
-
-                      <label className="block text-sm font-semibold text-slate-700 mb-2">
-                        Email Address
-                      </label>
-
+                      <label className="block text-sm font-semibold text-slate-700 mb-2">Email Address</label>
                       <input
                         type="email"
                         value={loginForm.email}
-                        onChange={(e) =>
-                          setLoginForm({
-                            ...loginForm,
-                            email: e.target.value
-                          })
-                        }
+                        onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
                         className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition"
                         placeholder="Enter your email"
                         required
                       />
-
                     </div>
-
-
                     <div>
-
-                      <label className="block text-sm font-semibold text-slate-700 mb-2">
-                        Password
-                      </label>
-
+                      <label className="block text-sm font-semibold text-slate-700 mb-2">Password</label>
                       <div className="relative">
                         <input
                           type={showLoginPassword ? "text" : "password"}
                           value={loginForm.password}
-                          onChange={(e) =>
-                            setLoginForm({
-                              ...loginForm,
-                              password: e.target.value
-                            })
-                          }
+                          onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
                           className="w-full px-4 py-3.5 pr-12 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition"
                           placeholder="Enter your password"
                           required
@@ -64052,24 +63262,12 @@ if (!token) {
                           )}
                         </button>
                       </div>
-
                     </div>
-
-
                     <div className="flex justify-between items-center">
-
                       <label className="flex gap-2 items-center text-sm text-slate-600">
-
-                        <input
-                          type="checkbox"
-                          className="rounded text-violet-600"
-                        />
-
+                        <input type="checkbox" className="rounded text-violet-600" />
                         Remember me
-
                       </label>
-
-
                       <button
                         type="button"
                         onClick={() => setActiveTab('forgot')}
@@ -64077,10 +63275,7 @@ if (!token) {
                       >
                         Forgot password?
                       </button>
-
                     </div>
-
-
                     <button
                       type="submit"
                       disabled={loading}
@@ -64088,38 +63283,22 @@ if (!token) {
                     >
                       {loading ? 'Signing in...' : 'Sign In →'}
                     </button>
-
                   </form>
-
                 )}
 
-
                 {activeTab === 'forgot' && (
-
-                  <form
-                    onSubmit={handleForgotPassword}
-                    className="space-y-5"
-                  >
-
+                  <form onSubmit={handleForgotPassword} className="space-y-5">
                     <div className="bg-violet-50 p-4 rounded-xl text-violet-700 text-sm">
                       🔐 We'll send a password reset link to your email.
                     </div>
-
-
                     <input
                       type="email"
                       value={forgotPasswordForm.email}
-                      onChange={(e) =>
-                        setForgotPasswordForm({
-                          email: e.target.value
-                        })
-                      }
+                      onChange={(e) => setForgotPasswordForm({ email: e.target.value })}
                       className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition"
                       placeholder="Enter your registered email"
                       required
                     />
-
-
                     <button
                       type="submit"
                       disabled={loading}
@@ -64127,8 +63306,6 @@ if (!token) {
                     >
                       {loading ? 'Sending...' : 'Send Reset Link'}
                     </button>
-
-
                     <button
                       type="button"
                       onClick={() => setActiveTab('login')}
@@ -64136,17 +63313,11 @@ if (!token) {
                     >
                       ← Back to Sign In
                     </button>
-
                   </form>
-
                 )}
 
-
-                {/* Mobile Contact Admin */}
                 <p className="mt-6 text-center text-sm text-slate-500">
-
                   New to SchoolAid?
-
                   <button
                     type="button"
                     onClick={() => {
@@ -64157,1073 +63328,1091 @@ if (!token) {
                   >
                     Contact Administrator
                   </button>
-
                 </p>
-
               </div>
-
-
               <p className="text-center text-white/60 text-xs mt-6">
                 Secure • Reliable • Easy to Use
               </p>
-
             </div>
-
           </div>
-
         </div>
-
       </div>
-
     </div>
   );
 }
 
-  // Main app render
-  return (
-    <div className="min-h-screen bg-gray-100 flex">
-      <GlobalLoadingIndicator loading={loading} />
-      
-      {showStudentAdmissionModal && (
-        <StudentAdmissionModal 
-          message="dashboard"
-          onAdmissionSubmit={(student) => {
-            setShowStudentAdmissionModal(false);
-            console.log('Student logged in:', student);
-          }}
-          onClose={() => {
-            setShowStudentAdmissionModal(false);
-          }}
-        />
-      )}
-      
-      {/* Sidebar */}
-      <div className={`${sidebarCollapsed ? 'w-20' : 'w-64'} bg-gray-900 text-white transition-all duration-300 flex flex-col`}>
-        <div className="p-4 border-b border-gray-700 flex justify-between items-center">
-          {!sidebarCollapsed ? <h2 className="text-xl font-bold text-indigo-400">SchoolAid</h2> : <h2 className="text-xl mx-auto">SA</h2>}
-          <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="p-1 hover:bg-gray-700 rounded">
-            <i className={`fas fa-chevron-${sidebarCollapsed ? 'right' : 'left'}`}></i>
-          </button>
-        </div>
+// ===== DASHBOARD RENDER (when logged in) =====
+return (
+  <div className="min-h-screen bg-gray-100 flex">
+    <GlobalLoadingIndicator loading={loading} />
+    
+    {showStudentAdmissionModal && (
+      <StudentAdmissionModal 
+        message="dashboard"
+        onAdmissionSubmit={(student) => {
+          setShowStudentAdmissionModal(false);
+          console.log('Student logged in:', student);
+        }}
+        onClose={() => {
+          setShowStudentAdmissionModal(false);
+        }}
+      />
+    )}
+    
+    {/* ==================== SIDEBAR - FIXED ==================== */}
+    <div 
+      className={`${sidebarCollapsed ? 'w-20' : 'w-64'} bg-gray-900 text-white transition-all duration-300 flex flex-col`}
+      style={{ height: '100vh', position: 'sticky', top: 0, flexShrink: 0 }}
+    >
+      <div className="p-4 border-b border-gray-700 flex justify-between items-center">
+        {!sidebarCollapsed ? <h2 className="text-xl font-bold text-indigo-400">SchoolAid</h2> : <h2 className="text-xl mx-auto">SA</h2>}
+        <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="p-1 hover:bg-gray-700 rounded">
+          <i className={`fas fa-chevron-${sidebarCollapsed ? 'right' : 'left'}`}></i>
+        </button>
+      </div>
 
-        <div className="p-4 border-b border-gray-700">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-indigo-600 rounded-full flex items-center justify-center">
-              <span className="text-lg font-bold">{user?.firstName?.[0]}{user?.lastName?.[0]}</span>
+      <div className="p-4 border-b border-gray-700">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 bg-indigo-600 rounded-full flex items-center justify-center">
+            <span className="text-lg font-bold">{user?.firstName?.[0]}{user?.lastName?.[0]}</span>
+          </div>
+          {!sidebarCollapsed && (
+            <div>
+              <p className="font-medium">{user?.firstName} {user?.lastName}</p>
+              <p className="text-xs text-gray-400">{user?.role}</p>
             </div>
-            {!sidebarCollapsed && (
-              <div>
-                <p className="font-medium">{user?.firstName} {user?.lastName}</p>
-                <p className="text-xs text-gray-400">{user?.role}</p>
+          )}
+        </div>
+      </div>
+
+      <nav className="flex-1 overflow-y-auto py-4">
+        {dashboardSections.map((section, idx) => (
+          <React.Fragment key={idx}>
+            <SidebarSection title={section.title} collapsed={sidebarCollapsed}>
+              {section.items.map(item => (
+                <SidebarItem
+                  key={item.id}
+                  icon={item.icon}
+                  label={item.label}
+                  active={activeModule === item.id}
+                  collapsed={sidebarCollapsed}
+                  onClick={() => setActiveModule(item.id)}
+                />
+              ))}
+            </SidebarSection>
+            {idx < dashboardSections.length - 1 && !sidebarCollapsed && (
+              <div className="border-t border-gray-800 my-2"></div>
+            )}
+          </React.Fragment>
+        ))}
+      </nav>
+
+      <div className="p-4 border-t border-gray-700">
+        <button onClick={handleLogout} className="flex items-center space-x-2 text-gray-300 hover:text-white w-full justify-center">
+          <i className="fas fa-sign-out-alt"></i>
+          {!sidebarCollapsed && <span>Logout</span>}
+        </button>
+      </div>
+    </div>
+
+    {/* ==================== MAIN CONTENT - SCROLLABLE ==================== */}
+    <div className="flex-1 overflow-auto" style={{ height: '100vh' }}>
+      <div className="bg-white shadow-sm p-4 sticky top-0 z-10">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            {schoolSettings.logo ? (
+              <img 
+                src={schoolSettings.logo} 
+                alt="School Logo" 
+                className="h-10 w-10 rounded-full object-cover"
+                onError={(e) => {
+                  e.target.onerror = null;
+                  const parent = e.target.parentNode;
+                  const letter = schoolSettings.name?.charAt(0) || 'S';
+                  parent.innerHTML = `<div class="h-10 w-10 bg-indigo-600 rounded-full flex items-center justify-center text-white font-bold">${letter}</div>`;
+                }}
+              />
+            ) : (
+              <div className="h-10 w-10 bg-indigo-600 rounded-full flex items-center justify-center text-white font-bold">
+                {schoolSettings.name?.charAt(0) || 'S'}
               </div>
             )}
+            <div>
+              <h1 className="text-2xl font-bold text-gray-800">{schoolSettings.name || 'SchoolAid'}</h1>
+              <p className="text-xs text-gray-500">{schoolSettings.category}</p>
+            </div>
           </div>
-        </div>
-
-        <nav className="flex-1 overflow-y-auto py-4">
-          {dashboardSections.map((section, idx) => (
-            <React.Fragment key={idx}>
-              <SidebarSection title={section.title} collapsed={sidebarCollapsed}>
-                {section.items.map(item => (
-                  <SidebarItem
-                    key={item.id}
-                    icon={item.icon}
-                    label={item.label}
-                    active={activeModule === item.id}
-                    collapsed={sidebarCollapsed}
-                    onClick={() => setActiveModule(item.id)}
-                  />
-                ))}
-              </SidebarSection>
-              {idx < dashboardSections.length - 1 && !sidebarCollapsed && (
-                <div className="border-t border-gray-800 my-2"></div>
-              )}
-            </React.Fragment>
-          ))}
-        </nav>
-
-        <div className="p-4 border-t border-gray-700">
-          <button onClick={handleLogout} className="flex items-center space-x-2 text-gray-300 hover:text-white w-full justify-center">
-            <i className="fas fa-sign-out-alt"></i>
-            {!sidebarCollapsed && <span>Logout</span>}
-          </button>
+          <div className="flex items-center space-x-4">
+            {user?.role === 'SUPER_ADMIN' && activeModule === 'schools' && (
+              <select className="border rounded px-3 py-2" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
+                <option value="">All Categories</option>
+                <option value="ECDE_PRIMARY_JSS">ECDE + Primary + JSS</option>
+                <option value="SENIOR_SECONDARY">Senior Secondary</option>
+                <option value="COLLEGE_TVET">College/TVET</option>
+                <option value="UNIVERSITY">University</option>
+              </select>
+            )}
+            <input type="text" placeholder="Search..." className="border rounded px-4 py-2" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+            <div className="relative">
+              <i className="fas fa-bell text-gray-500 text-xl"></i>
+              <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-xs text-white flex items-center justify-center">3</span>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 overflow-auto">
-        <div className="bg-white shadow-sm p-4 sticky top-0 z-10">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              {schoolSettings.logo ? (
-                <img 
-                  src={schoolSettings.logo} 
-                  alt="School Logo" 
-                  className="h-10 w-10 rounded-full object-cover"
-                  onError={(e) => {
-                    e.target.onerror = null;
-                    const parent = e.target.parentNode;
-                    const letter = schoolSettings.name?.charAt(0) || 'S';
-                    parent.innerHTML = `<div class="h-10 w-10 bg-indigo-600 rounded-full flex items-center justify-center text-white font-bold">${letter}</div>`;
-                  }}
-                />
-              ) : (
-                <div className="h-10 w-10 bg-indigo-600 rounded-full flex items-center justify-center text-white font-bold">
-                  {schoolSettings.name?.charAt(0) || 'S'}
-                </div>
-              )}
-              <div>
-                <h1 className="text-2xl font-bold text-gray-800">{schoolSettings.name || 'SchoolAid'}</h1>
-                <p className="text-xs text-gray-500">{schoolSettings.category}</p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-4">
-              {user?.role === 'SUPER_ADMIN' && activeModule === 'schools' && (
-                <select className="border rounded px-3 py-2" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
-                  <option value="">All Categories</option>
-                  <option value="ECDE_PRIMARY_JSS">ECDE + Primary + JSS</option>
-                  <option value="SENIOR_SECONDARY">Senior Secondary</option>
-                  <option value="COLLEGE_TVET">College/TVET</option>
-                  <option value="UNIVERSITY">University</option>
-                </select>
-              )}
-              <input type="text" placeholder="Search..." className="border rounded px-4 py-2" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-              <div className="relative">
-                <i className="fas fa-bell text-gray-500 text-xl"></i>
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-xs text-white flex items-center justify-center">3</span>
-              </div>
-            </div>
-          </div>
-        </div>
+      <div className="p-6">
+        {error && <div className="mb-4 bg-red-50 p-4 rounded text-red-700">{error}</div>}
+        {success && <div className="mb-4 bg-green-50 p-4 rounded text-green-700">{success}</div>}
 
-        <div className="p-6">
-          {error && <div className="mb-4 bg-red-50 p-4 rounded text-red-700">{error}</div>}
-          {success && <div className="mb-4 bg-green-50 p-4 rounded text-green-700">{success}</div>}
+        {/* ==================== ALL MODULE RENDERING ==================== */}
+        {/* Dashboard Module */}
+        {activeModule === 'dashboard' && (
+          <DashboardModule 
+            setActiveModule={setActiveModule}
+            user={user}
+            currentSchool={currentSchool}
+            loading={loading}
+            students={students}
+            classes={classes}
+            payments={payments}
+            staff={staff}
+            faculties={faculties}
+            departments={departments}
+            courses={courses}
+            programs={programs}
+            units={units}
+            results={results}
+            attendance={attendance}
+            hostels={hostels}
+            labs={labs}
+            research={research}
+            parents={parents}
+            exams={exams}
+            subjects={subjects}
+            timetable={timetable}
+            vehicles={vehicles}
+            routes={routes}
+            inventory={inventory}
+            books={books}
+            borrows={borrows}
+            fees={fees}
+            expenses={expenses}
+            healthRecords={healthRecords}
+            staffAttendance={staffAttendance}
+            admissionNumber={studentAdmissionNumber}
+            unitRegistrations={unitRegistrations}
+            courseEnrollments={courseEnrollments}
+          />
+        )}
 
-          {/* ==================== ALL MODULE RENDERING ==================== */}
-          {activeModule === 'dashboard' && (
-            <DashboardModule 
-              setActiveModule={setActiveModule}
-              user={user}
-              currentSchool={currentSchool}
-              loading={loading}
-              students={students}
-              classes={classes}
-              payments={payments}
-              staff={staff}
-              faculties={faculties}
-              departments={departments}
-              courses={courses}
-              programs={programs}
-              units={units}
-              results={results}
-              attendance={attendance}
-              hostels={hostels}
-              labs={labs}
-              research={research}
-              parents={parents}
-              exams={exams}
-              subjects={subjects}
-              timetable={timetable}
-              vehicles={vehicles}
-              routes={routes}
-              inventory={inventory}
-              books={books}
-              borrows={borrows}
-              fees={fees}
-              expenses={expenses}
-              healthRecords={healthRecords}
-              staffAttendance={staffAttendance}
-              admissionNumber={studentAdmissionNumber}
-              unitRegistrations={unitRegistrations}
-              courseEnrollments={courseEnrollments}
-            />
-          )}
+        {/* Students Module */}
+        {activeModule === 'students' && canAccessModule(user, 'students') && (
+          <StudentModule 
+            students={students} 
+            setStudents={setStudents}
+            classes={classes} 
+            routes={routes} 
+            courses={courses}
+            faculties={faculties}
+            departments={departments}
+            programs={programs}
+            fees={fees} 
+            payments={payments}
+            parents={parents}
+            setParents={setParents}
+            form={studentForm} 
+            setForm={setStudentForm} 
+            onSubmit={handleRegisterStudent}
+            handleUpdate={handleUpdate}
+            handleDelete={handleDelete}
+            currentSchool={currentSchool}
+            exams={exams}
+            subjects={subjects}
+            units={units}
+            attendance={attendance}
+            setAttendance={setAttendance}
+            user={user}
+            admissionNumber={studentAdmissionNumber} 
+          />
+        )}
 
-          {activeModule === 'students' && canAccessModule(user, 'students') && (
-            <StudentModule 
-              students={students} 
-              setStudents={setStudents}
-              classes={classes} 
-              routes={routes} 
-              courses={courses}
-              faculties={faculties}
-              departments={departments}
-              programs={programs}
-              fees={fees} 
-              payments={payments}
-              parents={parents}
-              setParents={setParents}
-              form={studentForm} 
-              setForm={setStudentForm} 
-              onSubmit={handleRegisterStudent}
-              handleUpdate={handleUpdate}
-              handleDelete={handleDelete}
-              currentSchool={currentSchool}
-              exams={exams}
-              subjects={subjects}
-              units={units}
-              attendance={attendance}
-              setAttendance={setAttendance}
-              user={user}
-              admissionNumber={studentAdmissionNumber} 
-            />
-          )}
+        {/* Schemes of Work Module */}
+        {activeModule === 'schemes-of-work' && canAccessModule(user, 'schemes-of-work') && (
+          <SchemesOfWorkModule 
+            timetable={timetable}
+            classes={classes}
+            subjects={subjects}
+            staff={staff}
+            courses={courses}
+            programs={programs}
+            units={units}
+            departments={departments}
+            currentSchool={currentSchool}
+            user={user}
+          />
+        )}
 
-          {activeModule === 'schemes-of-work' && canAccessModule(user, 'schemes-of-work') && (
-            <SchemesOfWorkModule 
-              timetable={timetable}
-              classes={classes}
-              subjects={subjects}
-              staff={staff}
-              courses={courses}
-              programs={programs}
-              units={units}
-               departments={departments}
-              currentSchool={currentSchool}
-              user={user}
+        {/* Labs Module */}
+        {activeModule === 'labs' && canAccessModule(user, 'labs') && (
+          <LabsModule 
+            labs={labs}
+            setLabs={setLabs}
+            classes={classes}
+            departments={departments}
+            courses={courses}
+            programs={programs}
+            user={user}
+            staff={staff} 
+            users={users}
+            currentSchool={currentSchool}
+            schoolCategory={schoolSettings.category}
+          />
+        )}
+
+        {/* Sickbay Module */}
+        {activeModule === 'sickbay' && canAccessModule(user, 'sickbay') && (
+          <SickBayModule 
+            hostels={hostels}
+            students={students}
+            attendance={attendance}
+            healthRecords={healthRecords}
+            setActiveModule={setActiveModule}
+            user={user}
+            onPatientChange={() => setRefreshTrigger(prev => prev + 1)}
+            key={refreshTrigger}
+          />
+        )}
+
+        {/* Health Module */}
+        {activeModule === 'health' && canAccessModule(user, 'health') && (
+          <HealthModule 
+            students={students}
+            currentSchool={currentSchool}
+            user={user}
+            hostels={hostels}
+            onDataChange={() => window.location.reload()}
+          />
+        )}
+
+        {/* Course Enrollment Module */}
+        {activeModule === 'course-enrollment' && canAccessModule(user, 'course-enrollment') && (
+          <CourseEnrollmentModule 
+            students={students}
+            courses={courses}
+            programs={programs}
+            currentSchool={currentSchool}
+            user={user}
+            fees={fees}
+            payments={payments}
+            classes={classes}
+            setUnitRegistrations={setUnitRegistrations}
+            setActiveModule={setActiveModule}  
+          />
+        )}
+
+        {/* Unit Registration Module */}
+        {activeModule === 'unit-registration' && canAccessModule(user, 'unit-registration') && (
+          <UnitRegistrationModule 
+            students={students}
+            units={units}
+            courses={courses}
+            programs={programs}
+            currentSchool={currentSchool}
+            user={user}
+            fees={fees}
+            payments={payments}
+            exams={exams}
+            unitRegistrations={unitRegistrations}
+            courseEnrollments={courseEnrollments}
+            setUnitRegistrations={setUnitRegistrations}
+            setActiveModule={setActiveModule}  
+          />
+        )}
+
+        {/* Schools Module (Super Admin only) */}
+        {user?.role === 'SUPER_ADMIN' && activeModule === 'schools' && (
+          <SchoolModule 
+            schools={getFilteredSchools()} 
+            form={schoolForm} 
+            setForm={setSchoolForm} 
+            onSubmit={handleRegisterSchool} 
+            userRole={user?.role} 
+            onSchoolSelect={handleSchoolChange} 
+            onDelete={(schoolId) => handleDelete('/schools', schoolId, setSchools, schools)} 
+          />
+        )}
+
+        {/* Users Module */}
+        {activeModule === 'users' && canAccessModule(user, 'users') && (
+          <UserModule 
+            users={users} 
+            setUsers={setUsers}
+            form={userForm} 
+            setForm={setUserForm}
+            onCreate={(data) => handleCreate('/users', data, setUsers, users)}
+            onUpdate={(id, data) => handleUpdate('/users', id, data, setUsers, users)}
+            onDelete={(id) => handleDelete('/users', id, setUsers, users)}
+            currentSchool={currentSchool}
+            user={user}
+          />
+        )}
+
+        {/* Classes Module */}
+        {activeModule === 'classes' && canAccessModule(user, 'classes') && (
+          <ClassModule 
+            classes={classes} 
+            setClasses={setClasses} 
+            form={classForm} 
+            setForm={setClassForm} 
+            onCreate={(data) => handleCreate('/classes', data, setClasses, classes)} 
+            onUpdate={(id, data) => handleUpdate('/classes', id, data, setClasses, classes)} 
+            onDelete={(id) => handleDelete('/classes', id, setClasses, classes)} 
+            schoolId={getCurrentSchoolId()} 
+          />
+        )}
+
+        {/* Fee Statement Module */}
+        {activeModule === 'fee-statement' && canAccessModule(user, 'fee-statement') && (
+          <FeeStatementModule
+            students={students}
+            fees={fees}
+            payments={payments}
+            currentSchool={currentSchool}
+            user={user}
+            admissionNumber={studentAdmissionNumber}
+            programs={programs}   
+            courses={courses}     
+            classes={classes}     
+          />
+        )}
+
+        {/* Exam Cards Module */}
+        {activeModule === 'exam-cards' && canAccessModule(user, 'exam-cards') && (
+          <ExamCardsModule
+            students={students}
+            classes={classes}
+            courses={courses}
+            programs={programs}
+            subjects={subjects}
+            units={units}
+            fees={fees}
+            payments={payments}
+            currentSchool={currentSchool}
+            user={user}
+            admissionNumber={studentAdmissionNumber}
+            unitRegistrations={unitRegistrations}
+          />
+        )}
+
+        {/* Receipt History Module */}
+        {activeModule === 'receipt-history' && canAccessModule(user, 'receipt-history') && (
+          <ReceiptHistoryModule
+            payments={payments}
+            students={students}
+            currentSchool={currentSchool}
+            user={user}
+            dateRange={dateRange}
+            setDateRange={setDateRange}
+          />
+        )}
+
+        {/* Staff Module */}
+        {activeModule === 'staff' && canAccessModule(user, 'staff') && (
+          <StaffModule 
+            staff={staff} 
+            setStaff={setStaff} 
+            users={users} 
+            payroll={payroll} 
+            setPayroll={setPayroll} 
+            form={staffForm} 
+            setForm={setStaffForm} 
+            onCreate={(data) => handleCreate('/staff', data, setStaff, staff)} 
+            onUpdate={(id, data) => handleUpdate('/staff', id, data, setStaff, staff)} 
+            onDelete={(id) => handleDelete('/staff', id, setStaff, staff)} 
+            currentSchool={currentSchool}
+            user={user}
+            departments={departments}
+          />
+        )}
+
+        {/* Subjects Module */}
+        {activeModule === 'subjects' && canAccessModule(user, 'subjects') && (
+          <SubjectModule 
+            subjects={subjects} 
+            setSubjects={setSubjects} 
+            classes={classes} 
+            staff={staff} 
+            form={subjectForm} 
+            setForm={setSubjectForm} 
+            onCreate={(data) => handleCreate('/subjects', data, setSubjects, subjects)} 
+            onUpdate={(id, data) => handleUpdate('/subjects', id, data, setSubjects, subjects)} 
+            onDelete={(id) => handleDelete('/subjects', id, setSubjects, subjects)} 
+            user={user}  
+            currentSchool={currentSchool} 
+          />
+        )}
+
+        {/* Exams Module */}
+        {activeModule === 'exams' && canAccessModule(user, 'exams') && (
+          <ExamModule 
+            exams={exams} 
+            setExams={setExams} 
+            classes={classes} 
+            subjects={subjects} 
+            students={students} 
+            results={results} 
+            setResults={setResults} 
+            handleCreate={handleCreate} 
+            handleUpdate={handleUpdate} 
+            handleDelete={handleDelete} 
+            schoolCategory={schoolSettings.category} 
+            courses={courses}  
+            programs={programs}
+            currentSchool={currentSchool} 
+            units={units} 
+            user={user} 
+          />
+        )}
+
+        {/* Attendance Module */}
+        {activeModule === 'attendance' && canAccessModule(user, 'attendance') && (
+          <AttendanceModule 
+            attendance={attendance} 
+            setAttendance={setAttendance} 
+            classes={classes} 
+            students={students} 
+            courses={courses}
+            programs={programs}
+            units={units}
+            subjects={subjects}
+            timetable={timetable}
+            handleCreate={handleCreate} 
+            currentSchool={currentSchool} 
+            user={user} 
+            admissionNumber={studentAdmissionNumber}
+            enrollments={courseEnrollments}
+          />
+        )}
+
+        {/* Fees Module */}
+        {activeModule === 'fees' && canAccessModule(user, 'fees') && (
+          <FeesModule 
+            fees={fees} 
+            setFees={setFees} 
+            payments={payments} 
+            setPayments={setPayments} 
+            classes={classes} 
+            students={students} 
+            routes={routes} 
+            courses={courses}  
+            programs={programs} 
+            departments={departments} 
+            faculties={faculties} 
+            form={feeForm} 
+            setForm={setFeeForm} 
+            onCreate={handleCreateFee} 
+            onDelete={(id) => handleDelete('/fees', id, setFees, fees)}  
+            handleUpdate={handleUpdate}
+            currentSchool={currentSchool} 
+            user={user} 
+            admissionNumber={studentAdmissionNumber}  
+          />
+        )}
+
+        {/* Library Module */}
+        {activeModule === 'library' && canAccessModule(user, 'library') && (
+          <LibraryModule 
+            books={books} 
+            setBooks={setBooks} 
+            borrows={borrows} 
+            setBorrows={setBorrows} 
+            students={students} 
+            handleCreate={handleCreate} 
+            handleUpdate={handleUpdate} 
+            handleDelete={handleDelete} 
+            user={user}   
+            currentSchool={currentSchool} 
+            admissionNumber={studentAdmissionNumber}  
+          />
+        )}
+
+        {/* Timetable Module */}
+        {activeModule === 'timetable' && canAccessModule(user, 'timetable') && (
+          <TimetableModule 
+            timetable={timetable} 
+            setTimetable={setTimetable} 
+            classes={classes} 
+            subjects={subjects} 
+            staff={staff} 
+            courses={courses}
+            programs={programs}
+            units={units}
+            handleCreate={handleCreate} 
+            handleDelete={(id) => handleDelete('/timetable', id, setTimetable, timetable)} 
+            currentSchool={currentSchool}
+            user={user}
+            students={students}
+            enrollments={courseEnrollments}
+          />
+        )}
+
+        {/* Transport Module */}
+        {activeModule === 'transport' && canAccessModule(user, 'transport') && (
+          <TransportModule 
+            vehicles={vehicles} 
+            setVehicles={setVehicles} 
+            routes={routes} 
+            setRoutes={setRoutes} 
+            form={routeForm} 
+            setForm={setRouteForm} 
+            onCreate={(data) => handleCreate('/transport-routes', data, setRoutes, routes)} 
+            user={user} 
+          />
+        )}
+
+        {/* Hostel Module */}
+        {activeModule === 'hostel' && canAccessModule(user, 'hostel') && (
+          <HostelModule 
+            hostels={hostels} 
+            setHostels={setHostels} 
+            students={students} 
+            form={hostelForm} 
+            setForm={setHostelForm} 
+            roomForm={roomAssignForm} 
+            setRoomForm={setRoomAssignForm} 
+            handleCreate={handleCreate} 
+            handleUpdate={handleUpdate} 
+            handleDelete={handleDelete} 
+            currentSchool={currentSchool} 
+            courses={courses}  
+            classes={classes} 
+            user={user}
+          />
+        )}
+
+        {/* Inventory Module */}
+        {activeModule === 'inventory' && canAccessModule(user, 'inventory') && (
+          <InventoryModule 
+            inventory={inventory} 
+            setInventory={setInventory} 
+            form={inventoryForm} 
+            setForm={setInventoryForm} 
+            handleCreate={handleCreate} 
+            handleUpdate={handleUpdate} 
+            handleDelete={handleDelete} 
+            user={user} 
+            users={users}
+            departments={departments}
+            classes={classes} 
+            currentSchool={currentSchool}
+          />
+        )}
+
+        {/* Announcements Module */}
+        {activeModule === 'announcements' && canAccessModule(user, 'announcements') && (
+          <AnnouncementModule 
+            announcements={announcements} 
+            setAnnouncements={setAnnouncements} 
+            events={events} 
+            setEvents={setEvents} 
+            form={announcementForm} 
+            setForm={setAnnouncementForm} 
+            eventForm={eventForm} 
+            setEventForm={setEventForm} 
+            handleCreate={handleCreate} 
+            handleUpdate={handleUpdate} 
+            handleDelete={handleDelete} 
+            user={user} 
+          />
+        )}
+
+        {/* Events Module */}
+        {activeModule === 'events' && canAccessModule(user, 'events') && (
+          <AnnouncementModule 
+            announcements={announcements} 
+            setAnnouncements={setAnnouncements} 
+            events={events} 
+            setEvents={setEvents} 
+            form={announcementForm} 
+            setForm={setAnnouncementForm} 
+            eventForm={eventForm} 
+            setEventForm={setEventForm} 
+            handleCreate={handleCreate} 
+            handleUpdate={handleUpdate} 
+            handleDelete={handleDelete} 
+            user={user} 
+          />
+        )}
+
+        {/* Reports Module */}
+        {activeModule === 'reports' && canAccessModule(user, 'reports') && (
+          <ReportsModule 
+            students={students} 
+            classes={classes} 
+            results={results} 
+            exams={exams}              
+            subjects={subjects}
+            programs={programs}        
+            units={units}              
+            payments={payments} 
+            expenses={expenses} 
+            dateRange={dateRange} 
+            setDateRange={setDateRange} 
+            currentSchool={currentSchool} 
+            courses={courses}
+            user={user}
+          />
+        )}
+
+        {/* Expenses Module */}
+        {activeModule === 'expenses' && canAccessModule(user, 'expenses') && (
+          <AccountingModule 
+            payments={payments} 
+            expenses={expenses} 
+            dateRange={dateRange} 
+            setDateRange={setDateRange} 
+            showIncomeOnly={false} 
+            showExpensesOnly={true} 
+            isOtherIncome={false} 
+            user={user} 
+          />
+        )}
+
+        {/* Other Income Module */}
+        {activeModule === 'other-income' && canAccessModule(user, 'other-income') && (
+          <AccountingModule 
+            payments={payments} 
+            expenses={expenses} 
+            dateRange={dateRange} 
+            setDateRange={setDateRange} 
+            showIncomeOnly={true}      
+            showExpensesOnly={false} 
+            isOtherIncome={true}
+            user={user}
+          />
+        )}
+
+        {/* Messages Module */}
+        {activeModule === 'messages' && canAccessModule(user, 'messages') && (
+          <MessageModule 
+            form={messageForm} 
+            setForm={setMessageForm} 
+            onSubmit={handleSendMessage} 
+            classes={classes}
+            user={user}
+            students={students}      
+            staff={staff}           
+            parents={parents}       
+            users={users}           
+            currentSchool={currentSchool}  
+          />
+        )}
+
+        {/* Settings Module */}
+        {activeModule === 'settings' && canAccessModule(user, 'settings') && (
+          <SettingsModule 
+            user={user} 
+            school={currentSchool} 
+            setSchool={setCurrentSchool} 
+            features={features} 
+            auditLogs={auditLogs} 
+            dateRange={dateRange} 
+            setDateRange={setDateRange} 
+            changePasswordForm={changePasswordForm} 
+            setChangePasswordForm={setChangePasswordForm} 
+            handleChangePassword={handleChangePassword} 
+            loadFeatures={loadFeatures} 
+            loadAuditLogs={loadAuditLogs} 
+            toggleFeature={toggleFeature} 
+          />
+        )}
+
+        {/* Results Module */}
+        {activeModule === 'results' && canAccessModule(user, 'results') && (
+          <ResultsModule 
+            exams={exams}   
+            setExams={setExams} 
+            results={results} 
+            students={students} 
+            subjects={subjects} 
+            classes={classes} 
+            courses={courses}  
+            programs={programs} 
+            currentSchool={currentSchool} 
+            parents={parents} 
+            units={units} 
+            user={user}   
+            admissionNumber={studentAdmissionNumber} 
+          />
+        )}
+
+        {/* Fee Reminders Module */}
+        {activeModule === 'fee-reminders' && canAccessModule(user, 'fee-reminders') && (
+          <FeeRemindersModule 
+            fees={fees} 
+            payments={payments} 
+            students={students} 
+            classes={classes} 
+            courses={courses}  
+            programs={programs}
+            parents={parents} 
+            currentSchool={currentSchool} 
+            user={user} 
+          />
+        )}
+
+        {/* Promotion Module */}
+        {activeModule === 'promotion' && canAccessModule(user, 'promotion') && (
+          <PromotionModule 
+            classes={classes} 
+            students={students} 
+            setStudents={setStudents}  
+            programs={programs}   
+            courses={courses} 
+            currentSchool={currentSchool} 
+            user={user} 
+          />
+        )}
+
+        {/* Fee Allocation Module */}
+        {activeModule === 'fee-allocation' && canAccessModule(user, 'fee-allocation') && (
+          <FeeAllocationModule 
+            fees={fees}
+            students={students}
+            courses={courses}
+            programs={programs}
+            classes={classes}
+            currentSchool={currentSchool}
+            user={user}
+          />
+        )}
+
+        {/* Fee Collection Module */}
+        {activeModule === 'fee-collection' && canAccessModule(user, 'fee-collection') && (
+          <FeeCollectionModule 
+            students={students}
+            fees={fees}
+            payments={payments}
+            setPayments={setPayments}
+            classes={classes}
+            courses={courses}
+            programs={programs}
+            currentSchool={currentSchool}
+            parents={parents}
+            user={user}
+          />
+        )}
+
+        {/* Staff Attendance Module */}
+        {activeModule === 'staff-attendance' && canAccessModule(user, 'staff-attendance') && (
+          <StaffAttendanceModule 
+            staff={staff} 
+            setStaffAttendance={setStaffAttendance} 
+            currentSchool={currentSchool}
+            user={user}
+          />
+        )}
+
+        {/* Course Units Module */}
+        {activeModule === 'course-units' && canAccessModule(user, 'course-units') && (
+          <CourseUnitsModule
+            courses={courses}
+            programs={programs}
+            units={units}
+            setUnits={setUnits}
+            handleCreate={handleCreate}
+            handleUpdate={handleUpdate}
+            handleDelete={handleDelete}
+            user={user}
+            currentSchool={currentSchool}
+          />
+        )}
+
+        {/* Discipline Module */}
+        {activeModule === 'discipline' && canAccessModule(user, 'discipline') && (
+          <DisciplineModule 
+            students={students}
+            classes={classes}
+            staff={staff}
+            parents={parents}
+            currentSchool={currentSchool}
+            user={user}
+            handleCreate={handleCreate}
+            handleUpdate={handleUpdate}
+            handleDelete={handleDelete}
+          />
+        )}
+
+        {/* ==================== UNIVERSITY MODULES ==================== */}
+        {schoolSettings.category === 'UNIVERSITY' && (
+          <>
+            {activeModule === 'faculties' && canAccessModule(user, 'faculties') && (
+              <FacultiesModule 
+                faculties={faculties} 
+                setFaculties={setFaculties} 
+                form={{}} 
+                setForm={() => {}} 
+                handleCreate={handleCreate} 
+                handleUpdate={handleUpdate} 
+                handleDelete={handleDelete} 
+                user={user} 
+                staff={staff} 
+              />
+            )}
             
-            />
-          )}
+            {activeModule === 'departments' && canAccessModule(user, 'departments') && (
+              <DepartmentsModule 
+                departments={departments} 
+                setDepartments={setDepartments} 
+                faculties={faculties} 
+                form={{}} 
+                setForm={() => {}} 
+                handleCreate={handleCreate} 
+                handleUpdate={handleUpdate} 
+                handleDelete={handleDelete} 
+                user={user} 
+                currentSchool={currentSchool}  
+                staff={staff} 
+                users={users}
+              />
+            )}
+            
+            {activeModule === 'courses' && canAccessModule(user, 'courses') && (
+              <CoursesModule 
+                courses={courses} 
+                setCourses={setCourses} 
+                departments={departments} 
+                form={{}} 
+                setForm={() => {}} 
+                handleCreate={handleCreate} 
+                handleUpdate={handleUpdate} 
+                handleDelete={handleDelete} 
+                user={user} 
+                staff={staff}
+                users={users} 
+              />
+            )}
+              
+            {activeModule === 'labs' && canAccessModule(user, 'labs') && (
+              <LabsModule 
+                labs={labs} 
+                setLabs={setLabs} 
+                departments={departments} 
+                handleCreate={handleCreate} 
+                handleUpdate={handleUpdate} 
+                handleDelete={handleDelete} 
+                user={user} 
+                staff={staff} 
+                users={users}
+              />
+            )}
+            
+            {activeModule === 'research' && canAccessModule(user, 'research') && (
+              <ResearchModule 
+                research={research} 
+                setResearch={setResearch} 
+                faculties={faculties} 
+                form={{}} 
+                setForm={() => {}} 
+                handleCreate={handleCreate} 
+                handleUpdate={handleUpdate} 
+                handleDelete={handleDelete} 
+                user={user} 
+              />
+            )}
+          </>
+        )}
 
-          {/* In your App component render */}
-{activeModule === 'labs' && canAccessModule(user, 'labs') && (
-  <LabsModule 
-    labs={labs}
-    setLabs={setLabs}
-    classes={classes}        // For Primary/Secondary
-    departments={departments} // For general
-    courses={courses}         // For University
-    programs={programs}       // For TVET
-    user={user}
-    staff={staff} 
-  users={users}
-  currentSchool={currentSchool}
-    schoolCategory={schoolSettings.category}
-  />
-)}
+        {/* ==================== TVET MODULES ==================== */}
+        {schoolSettings.category === 'COLLEGE_TVET' && (
+          <>
+            {activeModule === 'faculties' && canAccessModule(user, 'faculties') && (
+              <FacultiesModule 
+                faculties={faculties} 
+                setFaculties={setFaculties} 
+                form={{}} 
+                setForm={() => {}} 
+                handleCreate={handleCreate} 
+                handleUpdate={handleUpdate} 
+                handleDelete={handleDelete} 
+                user={user} 
+                staff={staff}
+              />
+            )}
 
-          {activeModule === 'sickbay' && canAccessModule(user, 'sickbay') && (
-            <SickBayModule 
-              hostels={hostels}
-              students={students}
-              attendance={attendance}
-              healthRecords={healthRecords}
-              setActiveModule={setActiveModule}
-              user={user}
-              onPatientChange={() => setRefreshTrigger(prev => prev + 1)}
-              key={refreshTrigger}
-            />
-          )}
-
-          {activeModule === 'health' && canAccessModule(user, 'health') && (
-            <HealthModule 
-              students={students}
-              currentSchool={currentSchool}
-              user={user}
-              hostels={hostels}
-              onDataChange={() => window.location.reload()}
-            />
-          )}
-
-    {/* ==================== COURSE ENROLLMENT MODULE ==================== */}
-{activeModule === 'course-enrollment' && canAccessModule(user, 'course-enrollment') && (
-  <CourseEnrollmentModule 
-    students={students}
-    courses={courses}
-    programs={programs}
-    currentSchool={currentSchool}
-    user={user}
-    fees={fees}
-    payments={payments}
-    classes={classes}
-    setUnitRegistrations={setUnitRegistrations}
-      setActiveModule={setActiveModule}  
-  />
-)}
-
-{/* ==================== UNIT REGISTRATION MODULE ==================== */}
-{activeModule === 'unit-registration' && canAccessModule(user, 'unit-registration') && (
-  <UnitRegistrationModule 
-    students={students}
-    units={units}
-    courses={courses}
-    programs={programs}
-    currentSchool={currentSchool}
-    user={user}
-    fees={fees}
-    payments={payments}
-    exams={exams}
-    unitRegistrations={unitRegistrations}
-    courseEnrollments={courseEnrollments}
-    setUnitRegistrations={setUnitRegistrations}
-      setActiveModule={setActiveModule}  
-  />
-)}
-          {user?.role === 'SUPER_ADMIN' && activeModule === 'schools' && (
-            <SchoolModule 
-              schools={getFilteredSchools()} 
-              form={schoolForm} 
-              setForm={setSchoolForm} 
-              onSubmit={handleRegisterSchool} 
-              userRole={user?.role} 
-              onSchoolSelect={handleSchoolChange} 
-              onDelete={(schoolId) => handleDelete('/schools', schoolId, setSchools, schools)} 
-            />
-          )}
-
-          {activeModule === 'users' && canAccessModule(user, 'users') && (
-            <UserModule 
-              users={users} 
-              setUsers={setUsers}
-              form={userForm} 
-              setForm={setUserForm}
-              onCreate={(data) => handleCreate('/users', data, setUsers, users)}
-              onUpdate={(id, data) => handleUpdate('/users', id, data, setUsers, users)}
-              onDelete={(id) => handleDelete('/users', id, setUsers, users)}
-              currentSchool={currentSchool}
-              user={user}
-            />
-          )}
-
-          {activeModule === 'classes' && canAccessModule(user, 'classes') && (
-            <ClassModule 
-              classes={classes} 
-              setClasses={setClasses} 
-              form={classForm} 
-              setForm={setClassForm} 
-              onCreate={(data) => handleCreate('/classes', data, setClasses, classes)} 
-              onUpdate={(id, data) => handleUpdate('/classes', id, data, setClasses, classes)} 
-              onDelete={(id) => handleDelete('/classes', id, setClasses, classes)} 
-              schoolId={getCurrentSchoolId()} 
-            />
-          )}
-
-          {activeModule === 'fee-statement' && canAccessModule(user, 'fee-statement') && (
-            <FeeStatementModule
-              students={students}
-              fees={fees}
-              payments={payments}
-              currentSchool={currentSchool}
-              user={user}
-              admissionNumber={studentAdmissionNumber}
-              programs={programs}   
-              courses={courses}     
-              classes={classes}     
-            />
-          )}
-
-          {activeModule === 'exam-cards' && canAccessModule(user, 'exam-cards') && (
-            <ExamCardsModule
-              students={students}
-              classes={classes}
-              courses={courses}
-              programs={programs}
-              subjects={subjects}
-              units={units}
-              fees={fees}
-              payments={payments}
-              currentSchool={currentSchool}
-              user={user}
-              admissionNumber={studentAdmissionNumber}
-              unitRegistrations={unitRegistrations}
-            />
-          )}
-
-          {activeModule === 'receipt-history' && canAccessModule(user, 'receipt-history') && (
-            <ReceiptHistoryModule
-              payments={payments}
-              students={students}
-              currentSchool={currentSchool}
-              user={user}
-              dateRange={dateRange}
-              setDateRange={setDateRange}
-            />
-          )}
-
-          {activeModule === 'staff' && canAccessModule(user, 'staff') && (
-            <StaffModule 
-              staff={staff} 
-              setStaff={setStaff} 
-              users={users} 
-              payroll={payroll} 
-              setPayroll={setPayroll} 
-              form={staffForm} 
-              setForm={setStaffForm} 
-              onCreate={(data) => handleCreate('/staff', data, setStaff, staff)} 
-              onUpdate={(id, data) => handleUpdate('/staff', id, data, setStaff, staff)} 
-              onDelete={(id) => handleDelete('/staff', id, setStaff, staff)} 
-              currentSchool={currentSchool}
-              user={user}
+            {activeModule === 'departments' && canAccessModule(user, 'departments') && (
+              <DepartmentsModule 
+                departments={departments} 
+                setDepartments={setDepartments}  
+                faculties={faculties} 
+                form={{}} 
+                setForm={() => {}} 
+                handleCreate={handleCreate} 
+                handleUpdate={handleUpdate} 
+                handleDelete={handleDelete} 
+                user={user}   
+                currentSchool={currentSchool}  
+                staff={staff}
+                users={users}
+              />
+            )}
+            
+            {activeModule === 'programs' && canAccessModule(user, 'programs') && (
+              <ProgramsModule 
+                programs={programs}
+                setPrograms={setPrograms}
                 departments={departments}
-            />
+                form={{}}
+                setForm={() => {}}
+                handleCreate={handleCreate}
+                handleUpdate={handleUpdate}
+                handleDelete={handleDelete}
+                user={user}
+                currentSchool={currentSchool}
+                staff={staff} 
+                users={users}
+                showFilters={showFilters}        
+                setShowFilters={setShowFilters}
+              />
+            )}
+            
+            {activeModule === 'labs' && canAccessModule(user, 'labs') && (
+              <LabsModule 
+                labs={labs} 
+                setLabs={setLabs} 
+                departments={departments} 
+                handleCreate={handleCreate} 
+                handleUpdate={handleUpdate} 
+                handleDelete={handleDelete} 
+                user={user} 
+                staff={staff} 
+                users={users}
+              />
+            )}
+          </>
+        )}
 
-          )}
+        {/* ==================== PRIMARY / SECONDARY MODULES ==================== */}
+        {(schoolSettings.category === 'ECDE_PRIMARY_JSS' || schoolSettings.category === 'SENIOR_SECONDARY') && (
+          <>
+            {activeModule === 'labs' && canAccessModule(user, 'labs') && (
+              <LabsModule 
+                labs={labs} 
+                setLabs={setLabs} 
+                departments={departments}
+                classes={classes}
+                handleCreate={handleCreate} 
+                handleUpdate={handleUpdate} 
+                handleDelete={handleDelete} 
+                user={user} 
+                staff={staff} 
+                users={users}
+                schoolCategory={schoolSettings.category}
+              />
+            )}
+          </>
+        )}
 
-          {activeModule === 'payroll' && canAccessModule(user, 'payroll') && (
-            <StaffModule 
-              staff={staff} 
-              setStaff={setStaff} 
-              users={users} 
-              payroll={payroll} 
-              setPayroll={setPayroll} 
-              form={staffForm} 
-              setForm={setStaffForm} 
-              onCreate={(data) => handleCreate('/staff', data, setStaff, staff)} 
-              onUpdate={(id, data) => handleUpdate('/staff', id, data, setStaff, staff)} 
-              onDelete={(id) => handleDelete('/staff', id, setStaff, staff)} 
-              currentSchool={currentSchool}
-              user={user}
-            />
-          )}
+        {/* Student Arrival Module */}
+        {activeModule === 'student-arrival' && canAccessModule(user, 'student-arrival') && (
+          <StudentArrivalModule
+            students={students}
+            currentSchool={currentSchool}
+            user={user}
+            classes={classes}
+            courses={courses}
+            programs={programs}
+          />
+        )}
 
-          {activeModule === 'subjects' && canAccessModule(user, 'subjects') && (
-            <SubjectModule 
-              subjects={subjects} 
-              setSubjects={setSubjects} 
-              classes={classes} 
-              staff={staff} 
-              form={subjectForm} 
-              setForm={setSubjectForm} 
-              onCreate={(data) => handleCreate('/subjects', data, setSubjects, subjects)} 
-              onUpdate={(id, data) => handleUpdate('/subjects', id, data, setSubjects, subjects)} 
-              onDelete={(id) => handleDelete('/subjects', id, setSubjects, subjects)} 
-              user={user}  
-              currentSchool={currentSchool} 
-            />
-          )}
+        {/* Receptionist Module */}
+        {activeModule === 'receptionist' && canAccessModule(user, 'receptionist') && (
+          <ReceptionistModule
+            user={user}
+            currentSchool={currentSchool}
+            students={students}
+            staff={staff}
+            parents={parents}
+            setActiveModule={setActiveModule}
+          />
+        )}
 
-          {activeModule === 'exams' && canAccessModule(user, 'exams') && (
-            <ExamModule 
-              exams={exams} 
-              setExams={setExams} 
-              classes={classes} 
-              subjects={subjects} 
-              students={students} 
-              results={results} 
-              setResults={setResults} 
-              handleCreate={handleCreate} 
-              handleUpdate={handleUpdate} 
-              handleDelete={handleDelete} 
-              schoolCategory={schoolSettings.category} 
-              courses={courses}  
-              programs={programs}
-              currentSchool={currentSchool} 
-              units={units} 
-              user={user} 
-            />
-          )}
+        {/* Roles Module */}
+        {activeModule === 'roles' && canAccessModule(user, 'roles') && (
+          <RolesManagementModule 
+            user={user}
+            users={users}
+            setUsers={setUsers}
+            currentSchool={currentSchool}
+          />
+        )}
 
-          {activeModule === 'attendance' && canAccessModule(user, 'attendance') && (
-            <AttendanceModule 
-              attendance={attendance} 
-              setAttendance={setAttendance} 
-              classes={classes} 
-              students={students} 
-              courses={courses}
-              programs={programs}
-              units={units}
-              subjects={subjects}
-              timetable={timetable}
-              handleCreate={handleCreate} 
-              currentSchool={currentSchool} 
-              user={user} 
-              admissionNumber={studentAdmissionNumber}
-              enrollments={courseEnrollments}
-            />
-          )}
+        {/* Card Management Module */}
+        {activeModule === 'card-management' && canAccessModule(user, 'card-management') && (
+          <CardManagementModule
+            students={students}
+            staff={staff}
+            currentSchool={currentSchool}
+            user={user}
+            programs={programs}
+            courses={courses}
+            classes={classes}
+            departments={departments}
+          />
+        )}
 
-          {activeModule === 'fees' && canAccessModule(user, 'fees') && (
-            <FeesModule 
-              fees={fees} 
-              setFees={setFees} 
-              payments={payments} 
-              setPayments={setPayments} 
-              classes={classes} 
-              students={students} 
-              routes={routes} 
-              courses={courses}  
-              programs={programs} 
-              departments={departments} 
-              faculties={faculties} 
-              form={feeForm} 
-              setForm={setFeeForm} 
-              onCreate={handleCreateFee} 
-              onDelete={(id) => handleDelete('/fees', id, setFees, fees)}  
-              handleUpdate={handleUpdate}
-              currentSchool={currentSchool} 
-              user={user} 
-              admissionNumber={studentAdmissionNumber}  
-            />
-          )}
+        {/* Certificates Module */}
+        {activeModule === 'certificates' && canAccessModule(user, 'certificates') && (
+          <CertificateModule
+            students={students}
+            staff={staff}
+            currentSchool={currentSchool}
+            user={user}
+          />
+        )}
 
-          {activeModule === 'library' && canAccessModule(user, 'library') && (
-            <LibraryModule 
-              books={books} 
-              setBooks={setBooks} 
-              borrows={borrows} 
-              setBorrows={setBorrows} 
-              students={students} 
-              handleCreate={handleCreate} 
-              handleUpdate={handleUpdate} 
-              handleDelete={handleDelete} 
-              user={user}   
-              currentSchool={currentSchool} 
-              admissionNumber={studentAdmissionNumber}  
-            />
-          )}
+        {/* Alumni Module */}
+        {activeModule === 'alumni' && canAccessModule(user, 'alumni') && (
+          <AlumniModule
+            students={students}
+            currentSchool={currentSchool}
+            user={user}
+            parents={parents}
+          />
+        )}
 
-          {activeModule === 'timetable' && canAccessModule(user, 'timetable') && (
-            <TimetableModule 
-              timetable={timetable} 
-              setTimetable={setTimetable} 
-              classes={classes} 
-              subjects={subjects} 
-              staff={staff} 
-              courses={courses}
-              programs={programs}
-              units={units}
-              handleCreate={handleCreate} 
-              handleDelete={(id) => handleDelete('/timetable', id, setTimetable, timetable)} 
-              currentSchool={currentSchool}
-              user={user}
-              students={students}
-              enrollments={courseEnrollments}
-            />
-          )}
+        {/* Live Classroom Module */}
+        {activeModule === 'live-classroom' && canAccessModule(user, 'live-classroom') && (
+          <LiveClassroomModule
+            currentSchool={currentSchool}
+            user={user}
+            students={students}
+            staff={staff}
+          />
+        )}
 
-          {activeModule === 'transport' && canAccessModule(user, 'transport') && (
-            <TransportModule 
-              vehicles={vehicles} 
-              setVehicles={setVehicles} 
-              routes={routes} 
-              setRoutes={setRoutes} 
-              form={routeForm} 
-              setForm={setRouteForm} 
-              onCreate={(data) => handleCreate('/transport-routes', data, setRoutes, routes)} 
-              user={user} 
-            />
-          )}
+        {/* Online Exams Module */}
+        {activeModule === 'online-exams' && canAccessModule(user, 'online-exams') && (
+          <OnlineExamsModule
+            currentSchool={currentSchool}
+            user={user}
+            students={students}
+            subjects={subjects}
+            classes={classes}
+            courses={courses}
+            programs={programs}
+            units={units}
+            setActiveModule={setActiveModule}
+            setActiveTab={setActiveTab}
+          />
+        )}
 
-          {activeModule === 'hostel' && canAccessModule(user, 'hostel') && (
-            <HostelModule 
-              hostels={hostels} 
-              setHostels={setHostels} 
-              students={students} 
-              form={hostelForm} 
-              setForm={setHostelForm} 
-              roomForm={roomAssignForm} 
-              setRoomForm={setRoomAssignForm} 
-              handleCreate={handleCreate} 
-              handleUpdate={handleUpdate} 
-              handleDelete={handleDelete} 
-              currentSchool={currentSchool} 
-              courses={courses}  
-              classes={classes} 
-              user={user}
-            />
-          )}
-
-          {activeModule === 'inventory' && canAccessModule(user, 'inventory') && (
-            <InventoryModule 
-              inventory={inventory} 
-              setInventory={setInventory} 
-              form={inventoryForm} 
-              setForm={setInventoryForm} 
-              handleCreate={handleCreate} 
-              handleUpdate={handleUpdate} 
-              handleDelete={handleDelete} 
-              user={user} 
-               users={users}
-              departments={departments}
-              classes={classes} 
-               currentSchool={currentSchool}
-               
-            />
-          )}
-
-          {activeModule === 'announcements' && canAccessModule(user, 'announcements') && (
-            <AnnouncementModule 
-              announcements={announcements} 
-              setAnnouncements={setAnnouncements} 
-              events={events} 
-              setEvents={setEvents} 
-              form={announcementForm} 
-              setForm={setAnnouncementForm} 
-              eventForm={eventForm} 
-              setEventForm={setEventForm} 
-              handleCreate={handleCreate} 
-              handleUpdate={handleUpdate} 
-              handleDelete={handleDelete} 
-              user={user} 
-            />
-          )}
-
-          {activeModule === 'events' && canAccessModule(user, 'events') && (
-            <AnnouncementModule 
-              announcements={announcements} 
-              setAnnouncements={setAnnouncements} 
-              events={events} 
-              setEvents={setEvents} 
-              form={announcementForm} 
-              setForm={setAnnouncementForm} 
-              eventForm={eventForm} 
-              setEventForm={setEventForm} 
-              handleCreate={handleCreate} 
-              handleUpdate={handleUpdate} 
-              handleDelete={handleDelete} 
-              user={user} 
-            />
-          )}
-
-          {activeModule === 'reports' && canAccessModule(user, 'reports') && (
-            <ReportsModule 
-              students={students} 
-              classes={classes} 
-              results={results} 
-              exams={exams}              
-              subjects={subjects}
-              programs={programs}        
-              units={units}              
-              payments={payments} 
-              expenses={expenses} 
-              dateRange={dateRange} 
-              setDateRange={setDateRange} 
-              currentSchool={currentSchool} 
-              courses={courses}
-              user={user}
-            />
-          )}
-
-          {activeModule === 'expenses' && canAccessModule(user, 'expenses') && (
-            <AccountingModule 
-              payments={payments} 
-              expenses={expenses} 
-              dateRange={dateRange} 
-              setDateRange={setDateRange} 
-              showIncomeOnly={false} 
-              showExpensesOnly={true} 
-              isOtherIncome={false} 
-              user={user} 
-            />
-          )}
-
-          {activeModule === 'other-income' && canAccessModule(user, 'other-income') && (
-            <AccountingModule 
-              payments={payments} 
-              expenses={expenses} 
-              dateRange={dateRange} 
-              setDateRange={setDateRange} 
-              showIncomeOnly={true}      
-              showExpensesOnly={false} 
-              isOtherIncome={true}
-              user={user}
-            />
-          )}
-
-       {activeModule === 'messages' && canAccessModule(user, 'messages') && (
-  <MessageModule 
-    form={messageForm} 
-    setForm={setMessageForm} 
-    onSubmit={handleSendMessage} 
-    classes={classes}
-    user={user}
-    students={students}      
-    staff={staff}           
-    parents={parents}       
-    users={users}           
-    currentSchool={currentSchool}  
-  />
-)}
-
-          {activeModule === 'settings' && canAccessModule(user, 'settings') && (
-            <SettingsModule 
-              user={user} 
-              school={currentSchool} 
-              setSchool={setCurrentSchool} 
-              features={features} 
-              auditLogs={auditLogs} 
-              dateRange={dateRange} 
-              setDateRange={setDateRange} 
-              changePasswordForm={changePasswordForm} 
-              setChangePasswordForm={setChangePasswordForm} 
-              handleChangePassword={handleChangePassword} 
-              loadFeatures={loadFeatures} 
-              loadAuditLogs={loadAuditLogs} 
-              toggleFeature={toggleFeature} 
-            />
-          )}
-
-          {activeModule === 'results' && canAccessModule(user, 'results') && (
-            <ResultsModule 
-              exams={exams}   
-              setExams={setExams} 
-              results={results} 
-              students={students} 
-              subjects={subjects} 
-              classes={classes} 
-              courses={courses}  
-              programs={programs} 
-              currentSchool={currentSchool} 
-              parents={parents} 
-              units={units} 
-              user={user}   
-              admissionNumber={studentAdmissionNumber} 
-            />
-          )}
-
-          {activeModule === 'fee-reminders' && canAccessModule(user, 'fee-reminders') && (
-            <FeeRemindersModule 
-              fees={fees} 
-              payments={payments} 
-              students={students} 
-              classes={classes} 
-              courses={courses}  
-              programs={programs}
-              parents={parents} 
-              currentSchool={currentSchool} 
-              user={user} 
-            />
-          )}
-
-          {activeModule === 'promotion' && canAccessModule(user, 'promotion') && (
-            <PromotionModule 
-              classes={classes} 
-              students={students} 
-              setStudents={setStudents}  
-              programs={programs}   
-              courses={courses} 
-              currentSchool={currentSchool} 
-              user={user} 
-            />
-          )}
-
-          {activeModule === 'fee-allocation' && canAccessModule(user, 'fee-allocation') && (
-            <FeeAllocationModule 
-              fees={fees}
-              students={students}
-              courses={courses}
-              programs={programs}
-              classes={classes}
-              currentSchool={currentSchool}
-              user={user}
-            />
-          )}
-
-          {activeModule === 'fee-collection' && canAccessModule(user, 'fee-collection') && (
-            <FeeCollectionModule 
-              students={students}
-              fees={fees}
-              payments={payments}
-              setPayments={setPayments}
-              classes={classes}
-              courses={courses}
-              programs={programs}
-              currentSchool={currentSchool}
-              parents={parents}
-              user={user}
-            />
-          )}
-
-          {activeModule === 'staff-attendance' && canAccessModule(user, 'staff-attendance') && (
-            <StaffAttendanceModule 
-              staff={staff} 
-              setStaffAttendance={setStaffAttendance} 
-              currentSchool={currentSchool}
-              user={user}
-            />
-          )}
-
-          {activeModule === 'course-units' && canAccessModule(user, 'course-units') && (
-            <CourseUnitsModule
-              courses={courses}
-              programs={programs}
-              units={units}
-              setUnits={setUnits}
-              handleCreate={handleCreate}
-              handleUpdate={handleUpdate}
-              handleDelete={handleDelete}
-              user={user}
-              currentSchool={currentSchool}
-            />
-          )}
-
-          {activeModule === 'discipline' && canAccessModule(user, 'discipline') && (
-            <DisciplineModule 
-              students={students}
-              classes={classes}
-              staff={staff}
-              parents={parents}
-              currentSchool={currentSchool}
-              user={user}
-              handleCreate={handleCreate}
-              handleUpdate={handleUpdate}
-              handleDelete={handleDelete}
-            />
-          )}
-{/* ==================== UNIVERSITY MODULES ==================== */}
-{schoolSettings.category === 'UNIVERSITY' && (
-  <>
-    {activeModule === 'faculties' && canAccessModule(user, 'faculties') && (
-      <FacultiesModule 
-        faculties={faculties} 
-        setFaculties={setFaculties} 
-        form={{}} 
-        setForm={() => {}} 
-        handleCreate={handleCreate} 
-        handleUpdate={handleUpdate} 
-        handleDelete={handleDelete} 
-        user={user} 
-        staff={staff} 
-      />
-    )}
-    
-    {activeModule === 'departments' && canAccessModule(user, 'departments') && (
-      <DepartmentsModule 
-        departments={departments} 
-        setDepartments={setDepartments} 
-        faculties={faculties} 
-        form={{}} 
-        setForm={() => {}} 
-        handleCreate={handleCreate} 
-        handleUpdate={handleUpdate} 
-        handleDelete={handleDelete} 
-        user={user} 
-        currentSchool={currentSchool}  
-        staff={staff} 
-        users={users}
-      />
-    )}
-    
-    {activeModule === 'courses' && canAccessModule(user, 'courses') && (
-      <CoursesModule 
-        courses={courses} 
-        setCourses={setCourses} 
-        departments={departments} 
-        form={{}} 
-        setForm={() => {}} 
-        handleCreate={handleCreate} 
-        handleUpdate={handleUpdate} 
-        handleDelete={handleDelete} 
-        user={user} 
-        staff={staff}
-        users={users} 
-      />
-    )}
-      
-    {activeModule === 'labs' && canAccessModule(user, 'labs') && (
-      <LabsModule 
-        labs={labs} 
-        setLabs={setLabs} 
-        departments={departments} 
-        handleCreate={handleCreate} 
-        handleUpdate={handleUpdate} 
-        handleDelete={handleDelete} 
-        user={user} 
-        staff={staff} 
-        users={users}
-      />
-    )}
-    
-    {activeModule === 'research' && canAccessModule(user, 'research') && (
-      <ResearchModule 
-        research={research} 
-        setResearch={setResearch} 
-        faculties={faculties} 
-        form={{}} 
-        setForm={() => {}} 
-        handleCreate={handleCreate} 
-        handleUpdate={handleUpdate} 
-        handleDelete={handleDelete} 
-        user={user} 
-      />
-    )}
-  </>
-)}
-
-{/* ==================== TVET MODULES ==================== */}
-{schoolSettings.category === 'COLLEGE_TVET' && (
-  <>
-    {activeModule === 'faculties' && canAccessModule(user, 'faculties') && (
-      <FacultiesModule 
-        faculties={faculties} 
-        setFaculties={setFaculties} 
-        form={{}} 
-        setForm={() => {}} 
-        handleCreate={handleCreate} 
-        handleUpdate={handleUpdate} 
-        handleDelete={handleDelete} 
-        user={user} 
-        staff={staff}
-      />
-    )}
-
-    {activeModule === 'departments' && canAccessModule(user, 'departments') && (
-      <DepartmentsModule 
-        departments={departments} 
-        setDepartments={setDepartments}  
-        faculties={faculties} 
-        form={{}} 
-        setForm={() => {}} 
-        handleCreate={handleCreate} 
-        handleUpdate={handleUpdate} 
-        handleDelete={handleDelete} 
-        user={user}   
-        currentSchool={currentSchool}  
-        staff={staff}
-        users={users}
-      />
-    )}
-    
-    {activeModule === 'programs' && canAccessModule(user, 'programs') && (
-      <ProgramsModule 
-        programs={programs}
-        setPrograms={setPrograms}
-        departments={departments}
-        form={{}}
-        setForm={() => {}}
-        handleCreate={handleCreate}
-        handleUpdate={handleUpdate}
-        handleDelete={handleDelete}
-        user={user}
-        currentSchool={currentSchool}
-        staff={staff} 
-        users={users}
-          showFilters={showFilters}        
-  setShowFilters={setShowFilters}
-
-      />
-    )}
-    
-    {activeModule === 'labs' && canAccessModule(user, 'labs') && (
-      <LabsModule 
-        labs={labs} 
-        setLabs={setLabs} 
-        departments={departments} 
-        handleCreate={handleCreate} 
-        handleUpdate={handleUpdate} 
-        handleDelete={handleDelete} 
-        user={user} 
-        staff={staff} 
-        users={users}
-      />
-    )}
-  </>
-)}
-
-{/* ==================== PRIMARY / SECONDARY MODULES ==================== */}
-{schoolSettings.category === 'ECDE_PRIMARY_JSS' || schoolSettings.category === 'SENIOR_SECONDARY' && (
-  <>
-       {activeModule === 'labs' && canAccessModule(user, 'labs') && (
-      <LabsModule 
-        labs={labs} 
-        setLabs={setLabs} 
-        departments={departments}
-        classes={classes}  // ← IMPORTANT: Pass your classes here
-        handleCreate={handleCreate} 
-        handleUpdate={handleUpdate} 
-        handleDelete={handleDelete} 
-        user={user} 
-        staff={staff} 
-        users={users}
-        schoolCategory={schoolSettings.category}
-      />
-    )}
-  </>
-)}
-
-{activeModule === 'student-arrival' && canAccessModule(user, 'student-arrival') && (
-  <StudentArrivalModule
-    students={students}
-    currentSchool={currentSchool}
-    user={user}
-    classes={classes}
-    courses={courses}
-    programs={programs}
-  />
-)}
-
-{activeModule === 'receptionist' && canAccessModule(user, 'receptionist') && (
-  <ReceptionistModule
-    user={user}
-    currentSchool={currentSchool}
-    students={students}
-    staff={staff}
-    parents={parents}
-    setActiveModule={setActiveModule}
-  />
-)}
-
-{activeModule === 'roles' && canAccessModule(user, 'roles') && (
-  <RolesManagementModule 
-    user={user}
-    users={users}
-    setUsers={setUsers}
-    currentSchool={currentSchool}
-  />
-)}
-
-{activeModule === 'card-management' && canAccessModule(user, 'card-management') && (
-  <CardManagementModule
-    students={students}
-    staff={staff}
-    currentSchool={currentSchool}
-    user={user}
-    programs={programs}
-    courses={courses}
-    classes={classes}
-    departments={departments}
-  />
-)}
-
-{activeModule === 'certificates' && canAccessModule(user, 'certificates') && (
-  <CertificateModule
-    students={students}
-    staff={staff}
-    currentSchool={currentSchool}
-    user={user}
-  />
-)}
-
-{activeModule === 'alumni' && canAccessModule(user, 'alumni') && (
-  <AlumniModule
-    students={students}
-    currentSchool={currentSchool}
-    user={user}
-    parents={parents}
-  />
-)}
-
-{activeModule === 'live-classroom' && canAccessModule(user, 'live-classroom') && (
-  <LiveClassroomModule
-    currentSchool={currentSchool}
-    user={user}
-    students={students}
-    staff={staff}
-  />
-)}
-
-{activeModule === 'online-exams' && canAccessModule(user, 'online-exams') && (
-  <OnlineExamsModule
-    currentSchool={currentSchool}
-    user={user}
-    students={students}
-    subjects={subjects}
-    classes={classes}
-    courses={courses}
-    programs={programs}
-    units={units}
-    setActiveModule={setActiveModule}
-    setActiveTab={setActiveTab}
-  />
-)}
-
-{/* ==================== END OF MODULE RENDERING ==================== */}
-</div>
+        {/* ==================== END OF MODULE RENDERING ==================== */}
       </div>
     </div>
-  );
+  </div>
+);
 }
-
 
 export default App;
