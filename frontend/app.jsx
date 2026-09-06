@@ -7,7 +7,7 @@ import React, {
 } from 'react';
 import axios from 'axios';
 import ResetPassword from './src/components/ResetPassword';
-import { fetchApi } from '../utils/api';
+import { fetchApi } from './src/utils/api';
 
 const api = axios.create({
   baseURL: 'https://school-management-system-hna5.onrender.com/api',
