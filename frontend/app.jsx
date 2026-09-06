@@ -14,6 +14,19 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' }
 });
 
+// ✅ ADD THIS REQUEST INTERCEPTOR - REQUIRED FOR AUTH!
+api.interceptors.request.use(
+  config => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  error => {
+    return Promise.reject(error);
+  }
+);
 
 // Add response interceptor for better error handling
 api.interceptors.response.use(
@@ -26,7 +39,14 @@ api.interceptors.response.use(
       data: error.response?.data
     });
     
-    // Show user-friendly error messages
+    // ✅ Handle 401 errors - redirect to login
+    if (error.response?.status === 401) {
+      console.warn('🔐 Unauthorized - redirecting to login');
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/';
+    }
+    
     if (error.response?.status === 404) {
       console.warn('Endpoint not found:', error.config?.url);
     }
@@ -37,6 +57,7 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
 
 // ==================== HELPER FUNCTIONS ====================
 
