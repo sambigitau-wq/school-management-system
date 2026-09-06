@@ -24870,162 +24870,161 @@ const DepartmentsModule = ({
     phone: '',
     programs: []
   });
+const SearchableSelect = ({ label, value, onChange, options, placeholder, disabled, required, className }) => {
+  const [search, setSearch] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef(null);
+  const inputRef = useRef(null);
+  const isSelectingRef = useRef(false);
 
-  // ==================== SEARCHABLE SELECT COMPONENT ====================
-  const SearchableSelect = ({ label, value, onChange, options, placeholder, disabled, required, className }) => {
-    const [search, setSearch] = useState('');
-    const [isOpen, setIsOpen] = useState(false);
-    const dropdownRef = useRef(null);
-    const inputRef = useRef(null);
+  const filteredOptions = useMemo(() => {
+    if (!search.trim()) return options;
+    const searchLower = search.toLowerCase();
+    return options.filter(opt => 
+      opt.label?.toLowerCase().includes(searchLower) ||
+      opt.subLabel?.toLowerCase().includes(searchLower) ||
+      opt.value?.toString().toLowerCase().includes(searchLower)
+    );
+  }, [options, search]);
 
-    const filteredOptions = useMemo(() => {
-      if (!search.trim()) return options;
-      const searchLower = search.toLowerCase();
-      return options.filter(opt => 
-        opt.label?.toLowerCase().includes(searchLower) ||
-        opt.subLabel?.toLowerCase().includes(searchLower) ||
-        opt.value?.toString().toLowerCase().includes(searchLower)
-      );
-    }, [options, search]);
+  const selectedOption = options.find(opt => opt.value === value);
 
-    const selectedOption = options.find(opt => opt.value === value);
-
-    useEffect(() => {
-      const handleClickOutside = (event) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-          setIsOpen(false);
-          if (selectedOption) {
-            setSearch(selectedOption.label);
-          } else {
-            setSearch('');
-          }
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+        if (selectedOption) {
+          setSearch(selectedOption.label);
+        } else {
+          setSearch('');
         }
-      };
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [selectedOption]);
-
-    const handleSelect = (selectedValue) => {
-      onChange({ target: { value: selectedValue } });
-      const selected = options.find(opt => opt.value === selectedValue);
-      setSearch(selected ? selected.label : '');
-      setIsOpen(false);
-      setTimeout(() => {
-        if (inputRef.current) {
-          inputRef.current.focus();
-        }
-      }, 0);
-    };
-
-    const handleInputChange = (e) => {
-      const newValue = e.target.value;
-      setSearch(newValue);
-      setIsOpen(true);
-      if (newValue === '') {
-        onChange({ target: { value: '' } });
       }
     };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [selectedOption]);
 
-    const handleFocus = () => {
+  const handleSelect = (selectedValue) => {
+    isSelectingRef.current = true;
+    onChange({ target: { value: selectedValue } });
+    const selected = options.find(opt => opt.value === selectedValue);
+    setSearch(selected ? selected.label : '');
+    setIsOpen(false);
+    setTimeout(() => {
+      isSelectingRef.current = false;
+    }, 200);
+  };
+
+  const handleInputChange = (e) => {
+    const newValue = e.target.value;
+    setSearch(newValue);
+    setIsOpen(true);
+    if (newValue === '') {
+      onChange({ target: { value: '' } });
+    }
+  };
+
+  const handleFocus = () => {
+    if (!isSelectingRef.current) {
       setIsOpen(true);
       if (selectedOption && !search) {
         setSearch(selectedOption.label);
       }
-    };
-
-    const handleBlur = (e) => {
-      const relatedTarget = e.relatedTarget;
-      if (dropdownRef.current && dropdownRef.current.contains(relatedTarget)) {
-        return;
-      }
-      setTimeout(() => {
-        if (document.activeElement !== inputRef.current) {
-          setIsOpen(false);
-          if (selectedOption) {
-            setSearch(selectedOption.label);
-          } else {
-            setSearch('');
-          }
-        }
-      }, 150);
-    };
-
-    const handleClear = (e) => {
-      e.stopPropagation();
-      onChange({ target: { value: '' } });
-      setSearch('');
-      setIsOpen(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
-    };
-
-    return (
-      <div className="relative" ref={dropdownRef}>
-        {label && (
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-        )}
-        <div className="relative">
-          <input
-            ref={inputRef}
-            type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
-            } ${className || ''}`}
-            value={search}
-            onChange={handleInputChange}
-            onFocus={handleFocus}
-            onBlur={handleBlur}
-            placeholder=""
-            disabled={disabled}
-            autoComplete="off"
-          />
-          {value && !disabled && (
-            <button
-              type="button"
-              onClick={handleClear}
-              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-        </div>
-        {isOpen && !disabled && (
-          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-            {filteredOptions.length > 0 ? (
-              filteredOptions.map((opt) => (
-                <div
-                  key={opt.value || Math.random().toString()}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
-                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
-                  }`}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => handleSelect(opt.value)}
-                >
-                  <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
-                </div>
-              ))
-            ) : (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {search.trim() ? 'No results found' : 'Type to search...'}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
+    }
   };
+
+  const handleBlur = () => {
+    // Use longer timeout and check if we're selecting
+    setTimeout(() => {
+      if (!isSelectingRef.current) {
+        setIsOpen(false);
+        if (selectedOption) {
+          setSearch(selectedOption.label);
+        } else {
+          setSearch('');
+        }
+      }
+    }, 250);
+  };
+
+  const handleClear = (e) => {
+    e.stopPropagation();
+    onChange({ target: { value: '' } });
+    setSearch('');
+    setIsOpen(false);
+    if (inputRef.current) {
+      inputRef.current.focus();
+    }
+  };
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      {label && (
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          {label}
+          {required && <span className="text-red-500 ml-1">*</span>}
+        </label>
+      )}
+      <div className="relative">
+        <input
+          ref={inputRef}
+          type="text"
+          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
+            disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
+          } ${className || ''}`}
+          value={search}
+          onChange={handleInputChange}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
+          placeholder={placeholder || ''}
+          disabled={disabled}
+          autoComplete="off"
+        />
+        {value && !disabled && (
+          <button
+            type="button"
+            onClick={handleClear}
+            className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
+        <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
+          <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </div>
+      {isOpen && !disabled && (
+        <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
+          {filteredOptions.length > 0 ? (
+            filteredOptions.map((opt) => (
+              <div
+                key={opt.value || Math.random().toString()}
+                className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
+                  opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
+                }`}
+                onMouseDown={(e) => {
+                  e.preventDefault(); // Prevent blur
+                }}
+                onClick={() => handleSelect(opt.value)}
+              >
+                <div className="font-medium">{opt.label}</div>
+                {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+              </div>
+            ))
+          ) : (
+            <div className="px-3 py-4 text-center text-gray-500 text-sm">
+              {search.trim() ? 'No results found' : 'Type to search...'}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
  
   api.interceptors.request.use(config => {
@@ -65067,6 +65066,9 @@ if (!token) {
         currentSchool={currentSchool}
         staff={staff} 
         users={users}
+          showFilters={showFilters}        
+  setShowFilters={setShowFilters}
+
       />
     )}
     
