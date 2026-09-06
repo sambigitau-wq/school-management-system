@@ -60746,7 +60746,6 @@ const OnlineExamsModule = ({
     </div>
   );
 };
-
 // ==================== MAIN APP COMPONENT ====================
 function App() {
   // ===== RESET PASSWORD ROUTE =====
@@ -61928,7 +61927,7 @@ if (user.role === 'SCHOOL_ADMIN') {
         { icon: "bus", label: "Transport", id: 'transport' },
         { icon: "bed", label: "Hostel", id: 'hostel' },
         { icon: "box", label: "Inventory", id: 'inventory' },
-        { icon: "microscope", label: "Labs", id: 'labs' }
+        { icon: "microscope", label: "Labs", id: 'labs' }  // ✅ Added labs here
       ]
     },
     {
@@ -62839,181 +62838,442 @@ const response = await fetch('https://school-management-system-hna5.onrender.com
       setLoading(false); 
     }
   };
-
-// ===== 10. RENDER - LOGIN PAGE =====
+// ===== 10. RENDER =====
 if (!token) {
   return (
     <div className="min-h-screen bg-white overflow-hidden relative">
-      {/* BACKGROUND */}
+
+      {/* ================= BACKGROUND ================= */}
       <div className="absolute inset-0 pointer-events-none">
+
+        {/* Right gradient panel */}
         <div className="absolute top-0 right-0 w-[46%] h-full bg-gradient-to-br from-indigo-700 via-violet-700 to-purple-900" />
+
+        {/* Decorative circles */}
         <div className="absolute -top-32 -left-32 w-96 h-96 rounded-full bg-violet-100 opacity-60" />
+
         <div className="absolute bottom-[-180px] left-[30%] w-[500px] h-[500px] rounded-full bg-purple-100 opacity-50" />
+
         <div className="absolute top-20 right-20 w-64 h-64 rounded-full border border-white/10" />
+
         <div className="absolute top-32 right-32 w-40 h-40 rounded-full border border-white/10" />
+
       </div>
 
-      {/* MAIN CONTENT */}
+
+      {/* ================= MAIN CONTENT ================= */}
       <div className="relative z-10 min-h-screen flex">
-        {/* LEFT BRANDING SECTION */}
+
+        {/* ==================================================
+            LEFT BRANDING SECTION
+        ================================================== */}
         <div className="w-full lg:w-[58%] px-8 sm:px-12 lg:px-20 xl:px-28 py-10 flex flex-col justify-between">
-          {/* LOGO */}
+
+          {/* ================= LOGO ================= */}
           <div>
             <div className="flex items-center gap-4">
+
+              {/* SchoolAid Logo */}
               <div className="relative">
+
                 <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-700 flex items-center justify-center shadow-lg shadow-indigo-200">
-                  <svg viewBox="0 0 64 64" className="w-11 h-11 text-white" fill="none">
-                    <path d="M10 17C18 14 25 16 32 21V51C25 46 18 44 10 47V17Z" fill="white" opacity="0.95" />
-                    <path d="M54 17C46 14 39 16 32 21V51C39 46 46 44 54 47V17Z" fill="white" opacity="0.75" />
-                    <path d="M32 7L35 13L42 14L37 19L38 26L32 23L26 26L27 19L22 14L29 13L32 7Z" fill="#FBBF24" />
+
+                  <svg
+                    viewBox="0 0 64 64"
+                    className="w-11 h-11 text-white"
+                    fill="none"
+                  >
+                    {/* Open book */}
+                    <path
+                      d="M10 17C18 14 25 16 32 21V51C25 46 18 44 10 47V17Z"
+                      fill="white"
+                      opacity="0.95"
+                    />
+
+                    <path
+                      d="M54 17C46 14 39 16 32 21V51C39 46 46 44 54 47V17Z"
+                      fill="white"
+                      opacity="0.75"
+                    />
+
+                    {/* Graduation star */}
+                    <path
+                      d="M32 7L35 13L42 14L37 19L38 26L32 23L26 26L27 19L22 14L29 13L32 7Z"
+                      fill="#FBBF24"
+                    />
+
                   </svg>
+
                 </div>
+
               </div>
+
               <div>
                 <h1 className="text-4xl font-extrabold tracking-tight text-slate-900">
                   School<span className="text-violet-600">Aid</span>
                 </h1>
+
                 <p className="text-sm font-medium text-slate-500 tracking-wide">
                   Smart School Management System
                 </p>
+
               </div>
+
             </div>
           </div>
 
-          {/* HERO */}
+
+          {/* ================= HERO ================= */}
           <div className="max-w-2xl mt-16 lg:mt-0">
+
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-violet-50 border border-violet-100 text-violet-700 text-sm font-semibold mb-7">
+
               <span className="w-2 h-2 rounded-full bg-violet-600 animate-pulse" />
+
               Smarter schools. Better outcomes.
+
             </div>
+
+
             <h2 className="text-5xl sm:text-6xl xl:text-7xl font-black tracking-tight leading-[1.02] text-slate-950">
-              Manage.<br />
-              Educate.<br />
+
+              Manage.
+
+              <br />
+
+              Educate.
+
+              <br />
+
               <span className="bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 bg-clip-text text-transparent">
                 Inspire.
               </span>
+
             </h2>
+
+
             <p className="mt-7 text-lg sm:text-xl text-slate-600 leading-relaxed max-w-xl">
+
               Everything your school needs to manage students,
               empower teachers, track performance and build a
               better learning experience — all in one intelligent platform.
+
             </p>
 
-            {/* FEATURES */}
+
+            {/* ================= FEATURES ================= */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-10">
+
+              {/* Student */}
               <div className="group bg-white rounded-2xl p-4 border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all">
+
                 <div className="w-11 h-11 rounded-xl bg-violet-100 text-violet-600 flex items-center justify-center mb-3">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 14l9-5-9-5-9 5 9 5z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 12v5c3 2 6 3 7 3s4-1 7-3v-5" />
+
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M12 14l9-5-9-5-9 5 9 5z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M5 12v5c3 2 6 3 7 3s4-1 7-3v-5"
+                    />
                   </svg>
+
                 </div>
-                <h3 className="font-bold text-slate-900 text-sm">Students</h3>
-                <p className="text-xs text-slate-500 mt-1">Records & performance</p>
+
+                <h3 className="font-bold text-slate-900 text-sm">
+                  Students
+                </h3>
+
+                <p className="text-xs text-slate-500 mt-1">
+                  Records & performance
+                </p>
+
               </div>
+
+
+              {/* Teachers */}
               <div className="group bg-white rounded-2xl p-4 border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all">
+
                 <div className="w-11 h-11 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center mb-3">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 14l9-5-9-5-9 5 9 5z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 22V14" />
+
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M12 14l9-5-9-5-9 5 9 5z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M12 22V14"
+                    />
                   </svg>
+
                 </div>
-                <h3 className="font-bold text-slate-900 text-sm">Teachers</h3>
-                <p className="text-xs text-slate-500 mt-1">Smart management</p>
+
+                <h3 className="font-bold text-slate-900 text-sm">
+                  Teachers
+                </h3>
+
+                <p className="text-xs text-slate-500 mt-1">
+                  Smart management
+                </p>
+
               </div>
+
+
+              {/* Attendance */}
               <div className="group bg-white rounded-2xl p-4 border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all">
+
                 <div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center mb-3">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 11l3 3L22 4" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
+
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M9 11l3 3L22 4"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"
+                    />
                   </svg>
+
                 </div>
-                <h3 className="font-bold text-slate-900 text-sm">Attendance</h3>
-                <p className="text-xs text-slate-500 mt-1">Real-time tracking</p>
+
+                <h3 className="font-bold text-slate-900 text-sm">
+                  Attendance
+                </h3>
+
+                <p className="text-xs text-slate-500 mt-1">
+                  Real-time tracking
+                </p>
+
               </div>
+
+
+              {/* Reports */}
               <div className="group bg-white rounded-2xl p-4 border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all">
+
                 <div className="w-11 h-11 rounded-xl bg-pink-100 text-pink-600 flex items-center justify-center mb-3">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 19V5M4 19h16M8 16v-5M12 16V7M16 16v-9M20 16V3" />
+
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M4 19V5M4 19h16M8 16v-5M12 16V7M16 16v-9M20 16V3"
+                    />
                   </svg>
+
                 </div>
-                <h3 className="font-bold text-slate-900 text-sm">Analytics</h3>
-                <p className="text-xs text-slate-500 mt-1">Powerful reports</p>
+
+                <h3 className="font-bold text-slate-900 text-sm">
+                  Analytics
+                </h3>
+
+                <p className="text-xs text-slate-500 mt-1">
+                  Powerful reports
+                </p>
+
               </div>
+
             </div>
 
-            {/* TRUST */}
+
+            {/* ================= TRUST ================= */}
             <div className="flex flex-wrap items-center gap-6 mt-10">
+
               <div className="flex items-center gap-3">
+
                 <div className="w-10 h-10 rounded-full bg-violet-100 flex items-center justify-center text-violet-600">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4" />
+
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M9 12l2 2 4-4"
+                    />
                   </svg>
+
                 </div>
+
                 <div>
-                  <p className="text-sm font-bold text-slate-900">Secure</p>
-                  <p className="text-xs text-slate-500">Built for schools</p>
+                  <p className="text-sm font-bold text-slate-900">
+                    Secure
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Built for schools
+                  </p>
                 </div>
+
               </div>
+
+
               <div className="hidden sm:block h-8 w-px bg-slate-200" />
+
+
               <div>
+
                 <p className="text-sm font-bold text-slate-900">
-                  Simple. <span className="text-violet-600">Powerful.</span>
+                  Simple.
+                  <span className="text-violet-600"> Powerful.</span>
                 </p>
-                <p className="text-xs text-slate-500">Everything in one place.</p>
+
+                <p className="text-xs text-slate-500">
+                  Everything in one place.
+                </p>
+
               </div>
+
             </div>
+
           </div>
 
-          {/* FOOTER */}
+
+          {/* ================= FOOTER ================= */}
           <div className="mt-12 lg:mt-0">
+
             <p className="text-xs text-slate-400">
               © {new Date().getFullYear()} SchoolAid. Smart technology for better schools.
             </p>
+
           </div>
+
         </div>
 
-        {/* RIGHT LOGIN SECTION */}
+
+        {/* ==================================================
+            RIGHT LOGIN SECTION
+        ================================================== */}
         <div className="hidden lg:flex w-[42%] relative items-center justify-center px-12">
+
+          {/* Decorative education pattern */}
           <div className="absolute inset-0 overflow-hidden">
-            <div className="absolute top-20 right-20 text-white/10 text-9xl font-black">+</div>
-            <div className="absolute bottom-32 right-20 text-white/10 text-8xl font-black">×</div>
+
+            <div className="absolute top-20 right-20 text-white/10 text-9xl font-black">
+              +
+            </div>
+
+            <div className="absolute bottom-32 right-20 text-white/10 text-8xl font-black">
+              ×
+            </div>
+
             <div className="absolute top-1/2 right-10 w-72 h-72 border border-white/10 rounded-full" />
+
             <div className="absolute bottom-10 left-10 w-40 h-40 border border-white/10 rounded-full" />
+
           </div>
 
+
           <div className="relative w-full max-w-xl">
-            {/* LOGIN CARD */}
+
+            {/* ================= LOGIN CARD ================= */}
             <div className="bg-white rounded-[2rem] shadow-2xl shadow-black/20 p-8 xl:p-10">
+
               {/* Header */}
               <div className="flex items-start justify-between mb-8">
+
                 <div>
-                  <p className="text-sm font-semibold text-violet-600 mb-2">SCHOOLAID PORTAL</p>
-                  <h3 className="text-3xl font-extrabold text-slate-900">Welcome back.</h3>
-                  <p className="text-sm text-slate-500 mt-2">Sign in to continue to your dashboard.</p>
+
+                  <p className="text-sm font-semibold text-violet-600 mb-2">
+                    SCHOOLAID PORTAL
+                  </p>
+
+                  <h3 className="text-3xl font-extrabold text-slate-900">
+                    Welcome back.
+                  </h3>
+
+                  <p className="text-sm text-slate-500 mt-2">
+                    Sign in to continue to your dashboard.
+                  </p>
+
                 </div>
+
+
                 <div className="w-12 h-12 rounded-2xl bg-violet-50 flex items-center justify-center">
-                  <svg className="w-6 h-6 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-5a2 2 0 00-2-2H6a2 2 0 00-2 2v5a2 2 0 002 2zm10-9V7a4 4 0 00-8 0v3h8z" />
+
+                  <svg
+                    className="w-6 h-6 text-violet-600"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M12 15v2m-6 4h12a2 2 0 002-2v-5a2 2 0 00-2-2H6a2 2 0 00-2 2v5a2 2 0 002 2zm10-9V7a4 4 0 00-8 0v3h8z"
+                    />
                   </svg>
+
                 </div>
+
               </div>
 
-              {/* ERROR & SUCCESS */}
+
+              {/* ================= ERROR ================= */}
               {error && (
                 <div className="mb-5 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
                   ❌ {error}
                 </div>
               )}
+
+
+              {/* ================= SUCCESS ================= */}
               {success && (
                 <div className="mb-5 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-xl text-sm">
                   ✅ {success}
                 </div>
               )}
 
-              {/* TABS */}
+
+              {/* ================= TABS ================= */}
               <div className="flex bg-slate-100 rounded-xl p-1 mb-7">
+
                 <button
                   onClick={() => setActiveTab('login')}
                   className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
@@ -63024,6 +63284,7 @@ if (!token) {
                 >
                   Sign In
                 </button>
+
                 <button
                   onClick={() => setActiveTab('forgot')}
                   className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
@@ -63034,41 +63295,75 @@ if (!token) {
                 >
                   Reset Password
                 </button>
+
               </div>
 
-              {/* LOGIN FORM */}
+
+              {/* ==================================================
+                  LOGIN
+              ================================================== */}
               {activeTab === 'login' && (
+
                 <form onSubmit={handleLogin} className="space-y-5">
+
+                  {/* Email */}
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">Email Address</label>
+
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">
+                      Email Address
+                    </label>
+
                     <div className="relative">
+
                       <input
                         type="email"
                         value={loginForm.email}
-                        onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
+                        onChange={(e) =>
+                          setLoginForm({
+                            ...loginForm,
+                            email: e.target.value
+                          })
+                        }
                         className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition"
                         placeholder="Enter your email"
                         required
                         autoComplete="email"
                       />
+
                     </div>
+
                   </div>
 
+
+                  {/* Password */}
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">Password</label>
+
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">
+                      Password
+                    </label>
+
                     <div className="relative">
+
                       <input
                         type={showLoginPassword ? "text" : "password"}
                         value={loginForm.password}
-                        onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
+                        onChange={(e) =>
+                          setLoginForm({
+                            ...loginForm,
+                            password: e.target.value
+                          })
+                        }
                         className="w-full px-4 py-3.5 pr-12 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition"
                         placeholder="Enter your password"
                         required
                         autoComplete="current-password"
                       />
+
                       <button
                         type="button"
-                        onClick={() => setShowLoginPassword(!showLoginPassword)}
+                        onClick={() =>
+                          setShowLoginPassword(!showLoginPassword)
+                        }
                         className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-violet-600 transition"
                         tabIndex="-1"
                       >
@@ -63083,14 +63378,30 @@ if (!token) {
                           </svg>
                         )}
                       </button>
+
                     </div>
+
                   </div>
 
+
+                  {/* Options */}
                   <div className="flex items-center justify-between">
+
                     <label className="flex items-center gap-2 cursor-pointer">
-                      <input id="remember-me" type="checkbox" className="h-4 w-4 text-violet-600 focus:ring-violet-500 border-slate-300 rounded" />
-                      <span className="text-sm text-slate-600">Remember me</span>
+
+                      <input
+                        id="remember-me"
+                        type="checkbox"
+                        className="h-4 w-4 text-violet-600 focus:ring-violet-500 border-slate-300 rounded"
+                      />
+
+                      <span className="text-sm text-slate-600">
+                        Remember me
+                      </span>
+
                     </label>
+
+
                     <button
                       type="button"
                       onClick={() => setActiveTab('forgot')}
@@ -63098,8 +63409,11 @@ if (!token) {
                     >
                       Forgot password?
                     </button>
+
                   </div>
 
+
+                  {/* Sign In */}
                   <button
                     type="submit"
                     disabled={loading}
@@ -63107,26 +63421,49 @@ if (!token) {
                   >
                     {loading ? 'Signing in...' : 'Sign In →'}
                   </button>
+
                 </form>
+
               )}
 
-              {/* FORGOT PASSWORD FORM */}
+
+              {/* ==================================================
+                  FORGOT PASSWORD
+              ================================================== */}
               {activeTab === 'forgot' && (
-                <form onSubmit={handleForgotPassword} className="space-y-5">
+
+                <form
+                  onSubmit={handleForgotPassword}
+                  className="space-y-5"
+                >
+
                   <div className="bg-violet-50 border border-violet-100 p-4 rounded-xl text-violet-700 text-sm">
                     🔐 We'll send a password reset link to your registered email address.
                   </div>
+
+
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">Email Address</label>
+
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">
+                      Email Address
+                    </label>
+
                     <input
                       type="email"
                       value={forgotPasswordForm.email}
-                      onChange={(e) => setForgotPasswordForm({ email: e.target.value })}
+                      onChange={(e) =>
+                        setForgotPasswordForm({
+                          email: e.target.value
+                        })
+                      }
                       className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition"
                       placeholder="Enter your registered email"
                       required
                     />
+
                   </div>
+
+
                   <button
                     type="submit"
                     disabled={loading}
@@ -63134,7 +63471,10 @@ if (!token) {
                   >
                     {loading ? 'Sending...' : 'Send Reset Link'}
                   </button>
+
+
                   <div className="text-center">
+
                     <button
                       type="button"
                       onClick={() => setActiveTab('login')}
@@ -63142,13 +63482,19 @@ if (!token) {
                     >
                       ← Back to Sign In
                     </button>
+
                   </div>
+
                 </form>
+
               )}
 
-              {/* CONTACT ADMINISTRATOR */}
+
+              {/* ================= CONTACT ADMINISTRATOR ================= */}
               <p className="mt-7 text-center text-sm text-slate-500">
+
                 New to SchoolAid?
+
                 <button
                   type="button"
                   onClick={() => {
@@ -63159,87 +63505,195 @@ if (!token) {
                 >
                   Contact Administrator
                 </button>
+
               </p>
+
             </div>
 
-            {/* SUPPORT CARD */}
+
+            {/* ================= SUPPORT CARD ================= */}
             <div className="mt-5 bg-white/10 backdrop-blur-xl border border-white/10 rounded-2xl p-5 text-white">
+
               <div className="flex items-center gap-4">
+
                 <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M18 8a6 6 0 00-12 0v5a2 2 0 002 2h1V9H8a4 4 0 018 0h-1v6h1a2 2 0 002-2V8z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M18 15v2a3 3 0 01-3 3h-2" />
+
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M18 8a6 6 0 00-12 0v5a2 2 0 002 2h1V9H8a4 4 0 018 0h-1v6h1a2 2 0 002-2V8z"
+                    />
+
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M18 15v2a3 3 0 01-3 3h-2"
+                    />
+
                   </svg>
+
                 </div>
+
+
                 <div>
-                  <p className="font-bold">Need help?</p>
-                  <p className="text-sm text-white/70">Our support team is here for you.</p>
+
+                  <p className="font-bold">
+                    Need help?
+                  </p>
+
+                  <p className="text-sm text-white/70">
+                    Our support team is here for you.
+                  </p>
+
                   <button
                     onClick={() => {
-                      const supportInfo = `📋 SchoolAid Support\n\n📱 Phone: +254 180 559 352\n📧 Email: technologieszyphra@gmail.com\n💬 WhatsApp: +254 180 559 352\n\n🕐 Support Hours: Mon-Sun, 24hours`;
+                      const supportInfo = `📋 SchoolAid Support\n\n📱 Phone: +254 180 559 352\n📧 Email: technologieszyphra@gmail.com\n💬 WhatsApp: +254 180 559 352\n\n🕐 Support Hours: Mon-Sun, 24hours `;
                       alert(supportInfo);
                     }}
                     className="text-sm font-semibold text-white hover:text-violet-200 transition mt-1"
                   >
                     Contact Support →
                   </button>
+
                 </div>
+
               </div>
+
             </div>
+
           </div>
+
         </div>
 
-        {/* MOBILE LOGIN */}
+
+        {/* ==================================================
+            MOBILE LOGIN
+        ================================================== */}
         <div className="lg:hidden absolute inset-0 bg-gradient-to-br from-violet-700 to-indigo-900 overflow-y-auto">
+
           <div className="min-h-screen px-5 py-8 flex items-center justify-center">
+
             <div className="w-full max-w-md">
+
+              {/* Mobile logo */}
               <div className="text-center text-white mb-8">
+
                 <div className="mx-auto w-16 h-16 rounded-2xl bg-white/10 backdrop-blur flex items-center justify-center mb-4">
-                  <svg viewBox="0 0 64 64" className="w-11 h-11" fill="none">
-                    <path d="M10 17C18 14 25 16 32 21V51C25 46 18 44 10 47V17Z" fill="white" />
-                    <path d="M54 17C46 14 39 16 32 21V51C39 46 46 44 54 47V17Z" fill="white" opacity=".75" />
-                    <path d="M32 7L35 13L42 14L37 19L38 26L32 23L26 26L27 19L22 14L29 13L32 7Z" fill="#FBBF24" />
+
+                  <svg
+                    viewBox="0 0 64 64"
+                    className="w-11 h-11"
+                    fill="none"
+                  >
+
+                    <path
+                      d="M10 17C18 14 25 16 32 21V51C25 46 18 44 10 47V17Z"
+                      fill="white"
+                    />
+
+                    <path
+                      d="M54 17C46 14 39 16 32 21V51C39 46 46 44 54 47V17Z"
+                      fill="white"
+                      opacity=".75"
+                    />
+
+                    <path
+                      d="M32 7L35 13L42 14L37 19L38 26L32 23L26 26L27 19L22 14L29 13L32 7Z"
+                      fill="#FBBF24"
+                    />
+
                   </svg>
+
                 </div>
-                <h1 className="text-4xl font-black">School<span className="text-yellow-300">Aid</span></h1>
-                <p className="text-white/70 text-sm mt-1">Smart School Management System</p>
+
+                <h1 className="text-4xl font-black">
+                  School<span className="text-yellow-300">Aid</span>
+                </h1>
+
+                <p className="text-white/70 text-sm mt-1">
+                  Smart School Management System
+                </p>
+
               </div>
 
+
+              {/* Mobile card */}
               <div className="bg-white rounded-3xl p-6 shadow-2xl">
-                <h2 className="text-2xl font-bold text-slate-900">Welcome back.</h2>
-                <p className="text-sm text-slate-500 mt-1 mb-6">Sign in to your SchoolAid account.</p>
+
+                <h2 className="text-2xl font-bold text-slate-900">
+                  Welcome back.
+                </h2>
+
+                <p className="text-sm text-slate-500 mt-1 mb-6">
+                  Sign in to your SchoolAid account.
+                </p>
+
 
                 {error && (
                   <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
                     ❌ {error}
                   </div>
                 )}
+
+
                 {success && (
                   <div className="mb-4 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-xl text-sm">
                     ✅ {success}
                   </div>
                 )}
 
+
                 {activeTab === 'login' && (
+
                   <form onSubmit={handleLogin} className="space-y-5">
+
                     <div>
-                      <label className="block text-sm font-semibold text-slate-700 mb-2">Email Address</label>
+
+                      <label className="block text-sm font-semibold text-slate-700 mb-2">
+                        Email Address
+                      </label>
+
                       <input
                         type="email"
                         value={loginForm.email}
-                        onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
+                        onChange={(e) =>
+                          setLoginForm({
+                            ...loginForm,
+                            email: e.target.value
+                          })
+                        }
                         className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition"
                         placeholder="Enter your email"
                         required
                       />
+
                     </div>
+
+
                     <div>
-                      <label className="block text-sm font-semibold text-slate-700 mb-2">Password</label>
+
+                      <label className="block text-sm font-semibold text-slate-700 mb-2">
+                        Password
+                      </label>
+
                       <div className="relative">
                         <input
                           type={showLoginPassword ? "text" : "password"}
                           value={loginForm.password}
-                          onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
+                          onChange={(e) =>
+                            setLoginForm({
+                              ...loginForm,
+                              password: e.target.value
+                            })
+                          }
                           className="w-full px-4 py-3.5 pr-12 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition"
                           placeholder="Enter your password"
                           required
@@ -63262,12 +63716,24 @@ if (!token) {
                           )}
                         </button>
                       </div>
+
                     </div>
+
+
                     <div className="flex justify-between items-center">
+
                       <label className="flex gap-2 items-center text-sm text-slate-600">
-                        <input type="checkbox" className="rounded text-violet-600" />
+
+                        <input
+                          type="checkbox"
+                          className="rounded text-violet-600"
+                        />
+
                         Remember me
+
                       </label>
+
+
                       <button
                         type="button"
                         onClick={() => setActiveTab('forgot')}
@@ -63275,7 +63741,10 @@ if (!token) {
                       >
                         Forgot password?
                       </button>
+
                     </div>
+
+
                     <button
                       type="submit"
                       disabled={loading}
@@ -63283,22 +63752,38 @@ if (!token) {
                     >
                       {loading ? 'Signing in...' : 'Sign In →'}
                     </button>
+
                   </form>
+
                 )}
 
+
                 {activeTab === 'forgot' && (
-                  <form onSubmit={handleForgotPassword} className="space-y-5">
+
+                  <form
+                    onSubmit={handleForgotPassword}
+                    className="space-y-5"
+                  >
+
                     <div className="bg-violet-50 p-4 rounded-xl text-violet-700 text-sm">
                       🔐 We'll send a password reset link to your email.
                     </div>
+
+
                     <input
                       type="email"
                       value={forgotPasswordForm.email}
-                      onChange={(e) => setForgotPasswordForm({ email: e.target.value })}
+                      onChange={(e) =>
+                        setForgotPasswordForm({
+                          email: e.target.value
+                        })
+                      }
                       className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition"
                       placeholder="Enter your registered email"
                       required
                     />
+
+
                     <button
                       type="submit"
                       disabled={loading}
@@ -63306,6 +63791,8 @@ if (!token) {
                     >
                       {loading ? 'Sending...' : 'Send Reset Link'}
                     </button>
+
+
                     <button
                       type="button"
                       onClick={() => setActiveTab('login')}
@@ -63313,11 +63800,17 @@ if (!token) {
                     >
                       ← Back to Sign In
                     </button>
+
                   </form>
+
                 )}
 
+
+                {/* Mobile Contact Admin */}
                 <p className="mt-6 text-center text-sm text-slate-500">
+
                   New to SchoolAid?
+
                   <button
                     type="button"
                     onClick={() => {
@@ -63328,15 +63821,1028 @@ if (!token) {
                   >
                     Contact Administrator
                   </button>
+
                 </p>
+
               </div>
+
+
               <p className="text-center text-white/60 text-xs mt-6">
                 Secure • Reliable • Easy to Use
               </p>
+
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+  );
+}
+// ===== 10. RENDER =====
+if (!token) {
+  return (
+    <div className="min-h-screen bg-white overflow-hidden relative">
+
+      {/* ================= BACKGROUND ================= */}
+      <div className="absolute inset-0 pointer-events-none">
+
+        {/* Right gradient panel */}
+        <div className="absolute top-0 right-0 w-[46%] h-full bg-gradient-to-br from-indigo-700 via-violet-700 to-purple-900" />
+
+        {/* Decorative circles */}
+        <div className="absolute -top-32 -left-32 w-96 h-96 rounded-full bg-violet-100 opacity-60" />
+
+        <div className="absolute bottom-[-180px] left-[30%] w-[500px] h-[500px] rounded-full bg-purple-100 opacity-50" />
+
+        <div className="absolute top-20 right-20 w-64 h-64 rounded-full border border-white/10" />
+
+        <div className="absolute top-32 right-32 w-40 h-40 rounded-full border border-white/10" />
+
+      </div>
+
+
+      {/* ================= MAIN CONTENT ================= */}
+      <div className="relative z-10 min-h-screen flex">
+
+        {/* ==================================================
+            LEFT BRANDING SECTION
+        ================================================== */}
+        <div className="w-full lg:w-[58%] px-8 sm:px-12 lg:px-20 xl:px-28 py-10 flex flex-col justify-between">
+
+          {/* ================= LOGO ================= */}
+          <div>
+            <div className="flex items-center gap-4">
+
+              {/* SchoolAid Logo */}
+              <div className="relative">
+
+                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-700 flex items-center justify-center shadow-lg shadow-indigo-200">
+
+                  <svg
+                    viewBox="0 0 64 64"
+                    className="w-11 h-11 text-white"
+                    fill="none"
+                  >
+                    {/* Open book */}
+                    <path
+                      d="M10 17C18 14 25 16 32 21V51C25 46 18 44 10 47V17Z"
+                      fill="white"
+                      opacity="0.95"
+                    />
+
+                    <path
+                      d="M54 17C46 14 39 16 32 21V51C39 46 46 44 54 47V17Z"
+                      fill="white"
+                      opacity="0.75"
+                    />
+
+                    {/* Graduation star */}
+                    <path
+                      d="M32 7L35 13L42 14L37 19L38 26L32 23L26 26L27 19L22 14L29 13L32 7Z"
+                      fill="#FBBF24"
+                    />
+
+                  </svg>
+
+                </div>
+
+              </div>
+
+              <div>
+                <h1 className="text-4xl font-extrabold tracking-tight text-slate-900">
+                  School<span className="text-violet-600">Aid</span>
+                </h1>
+
+                <p className="text-sm font-medium text-slate-500 tracking-wide">
+                  Smart School Management System
+                </p>
+
+              </div>
+
             </div>
           </div>
+
+
+          {/* ================= HERO ================= */}
+          <div className="max-w-2xl mt-16 lg:mt-0">
+
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-violet-50 border border-violet-100 text-violet-700 text-sm font-semibold mb-7">
+
+              <span className="w-2 h-2 rounded-full bg-violet-600 animate-pulse" />
+
+              Smarter schools. Better outcomes.
+
+            </div>
+
+
+            <h2 className="text-5xl sm:text-6xl xl:text-7xl font-black tracking-tight leading-[1.02] text-slate-950">
+
+              Manage.
+
+              <br />
+
+              Educate.
+
+              <br />
+
+              <span className="bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 bg-clip-text text-transparent">
+                Inspire.
+              </span>
+
+            </h2>
+
+
+            <p className="mt-7 text-lg sm:text-xl text-slate-600 leading-relaxed max-w-xl">
+
+              Everything your school needs to manage students,
+              empower teachers, track performance and build a
+              better learning experience — all in one intelligent platform.
+
+            </p>
+
+
+            {/* ================= FEATURES ================= */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-10">
+
+              {/* Student */}
+              <div className="group bg-white rounded-2xl p-4 border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all">
+
+                <div className="w-11 h-11 rounded-xl bg-violet-100 text-violet-600 flex items-center justify-center mb-3">
+
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M12 14l9-5-9-5-9 5 9 5z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M5 12v5c3 2 6 3 7 3s4-1 7-3v-5"
+                    />
+                  </svg>
+
+                </div>
+
+                <h3 className="font-bold text-slate-900 text-sm">
+                  Students
+                </h3>
+
+                <p className="text-xs text-slate-500 mt-1">
+                  Records & performance
+                </p>
+
+              </div>
+
+
+              {/* Teachers */}
+              <div className="group bg-white rounded-2xl p-4 border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all">
+
+                <div className="w-11 h-11 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center mb-3">
+
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M12 14l9-5-9-5-9 5 9 5z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M12 22V14"
+                    />
+                  </svg>
+
+                </div>
+
+                <h3 className="font-bold text-slate-900 text-sm">
+                  Teachers
+                </h3>
+
+                <p className="text-xs text-slate-500 mt-1">
+                  Smart management
+                </p>
+
+              </div>
+
+
+              {/* Attendance */}
+              <div className="group bg-white rounded-2xl p-4 border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all">
+
+                <div className="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center mb-3">
+
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M9 11l3 3L22 4"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"
+                    />
+                  </svg>
+
+                </div>
+
+                <h3 className="font-bold text-slate-900 text-sm">
+                  Attendance
+                </h3>
+
+                <p className="text-xs text-slate-500 mt-1">
+                  Real-time tracking
+                </p>
+
+              </div>
+
+
+              {/* Reports */}
+              <div className="group bg-white rounded-2xl p-4 border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all">
+
+                <div className="w-11 h-11 rounded-xl bg-pink-100 text-pink-600 flex items-center justify-center mb-3">
+
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M4 19V5M4 19h16M8 16v-5M12 16V7M16 16v-9M20 16V3"
+                    />
+                  </svg>
+
+                </div>
+
+                <h3 className="font-bold text-slate-900 text-sm">
+                  Analytics
+                </h3>
+
+                <p className="text-xs text-slate-500 mt-1">
+                  Powerful reports
+                </p>
+
+              </div>
+
+            </div>
+
+
+            {/* ================= TRUST ================= */}
+            <div className="flex flex-wrap items-center gap-6 mt-10">
+
+              <div className="flex items-center gap-3">
+
+                <div className="w-10 h-10 rounded-full bg-violet-100 flex items-center justify-center text-violet-600">
+
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M9 12l2 2 4-4"
+                    />
+                  </svg>
+
+                </div>
+
+                <div>
+                  <p className="text-sm font-bold text-slate-900">
+                    Secure
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Built for schools
+                  </p>
+                </div>
+
+              </div>
+
+
+              <div className="hidden sm:block h-8 w-px bg-slate-200" />
+
+
+              <div>
+
+                <p className="text-sm font-bold text-slate-900">
+                  Simple.
+                  <span className="text-violet-600"> Powerful.</span>
+                </p>
+
+                <p className="text-xs text-slate-500">
+                  Everything in one place.
+                </p>
+
+              </div>
+
+            </div>
+
+          </div>
+
+
+          {/* ================= FOOTER ================= */}
+          <div className="mt-12 lg:mt-0">
+
+            <p className="text-xs text-slate-400">
+              © {new Date().getFullYear()} SchoolAid. Smart technology for better schools.
+            </p>
+
+          </div>
+
         </div>
+
+
+        {/* ==================================================
+            RIGHT LOGIN SECTION
+        ================================================== */}
+        <div className="hidden lg:flex w-[42%] relative items-center justify-center px-12">
+
+          {/* Decorative education pattern */}
+          <div className="absolute inset-0 overflow-hidden">
+
+            <div className="absolute top-20 right-20 text-white/10 text-9xl font-black">
+              +
+            </div>
+
+            <div className="absolute bottom-32 right-20 text-white/10 text-8xl font-black">
+              ×
+            </div>
+
+            <div className="absolute top-1/2 right-10 w-72 h-72 border border-white/10 rounded-full" />
+
+            <div className="absolute bottom-10 left-10 w-40 h-40 border border-white/10 rounded-full" />
+
+          </div>
+
+
+          <div className="relative w-full max-w-xl">
+
+            {/* ================= LOGIN CARD ================= */}
+            <div className="bg-white rounded-[2rem] shadow-2xl shadow-black/20 p-8 xl:p-10">
+
+              {/* Header */}
+              <div className="flex items-start justify-between mb-8">
+
+                <div>
+
+                  <p className="text-sm font-semibold text-violet-600 mb-2">
+                    SCHOOLAID PORTAL
+                  </p>
+
+                  <h3 className="text-3xl font-extrabold text-slate-900">
+                    Welcome back.
+                  </h3>
+
+                  <p className="text-sm text-slate-500 mt-2">
+                    Sign in to continue to your dashboard.
+                  </p>
+
+                </div>
+
+
+                <div className="w-12 h-12 rounded-2xl bg-violet-50 flex items-center justify-center">
+
+                  <svg
+                    className="w-6 h-6 text-violet-600"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M12 15v2m-6 4h12a2 2 0 002-2v-5a2 2 0 00-2-2H6a2 2 0 00-2 2v5a2 2 0 002 2zm10-9V7a4 4 0 00-8 0v3h8z"
+                    />
+                  </svg>
+
+                </div>
+
+              </div>
+
+
+              {/* ================= ERROR ================= */}
+              {error && (
+                <div className="mb-5 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
+                  ❌ {error}
+                </div>
+              )}
+
+
+              {/* ================= SUCCESS ================= */}
+              {success && (
+                <div className="mb-5 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-xl text-sm">
+                  ✅ {success}
+                </div>
+              )}
+
+
+              {/* ================= TABS ================= */}
+              <div className="flex bg-slate-100 rounded-xl p-1 mb-7">
+
+                <button
+                  onClick={() => setActiveTab('login')}
+                  className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+                    activeTab === 'login'
+                      ? 'bg-white text-violet-700 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  Sign In
+                </button>
+
+                <button
+                  onClick={() => setActiveTab('forgot')}
+                  className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+                    activeTab === 'forgot'
+                      ? 'bg-white text-violet-700 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  Reset Password
+                </button>
+
+              </div>
+
+
+              {/* ==================================================
+                  LOGIN
+              ================================================== */}
+              {activeTab === 'login' && (
+
+                <form onSubmit={handleLogin} className="space-y-5">
+
+                  {/* Email */}
+                  <div>
+
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">
+                      Email Address
+                    </label>
+
+                    <div className="relative">
+
+                      <input
+                        type="email"
+                        value={loginForm.email}
+                        onChange={(e) =>
+                          setLoginForm({
+                            ...loginForm,
+                            email: e.target.value
+                          })
+                        }
+                        className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition"
+                        placeholder="Enter your email"
+                        required
+                        autoComplete="email"
+                      />
+
+                    </div>
+
+                  </div>
+
+
+                  {/* Password */}
+                  <div>
+
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">
+                      Password
+                    </label>
+
+                    <div className="relative">
+
+                      <input
+                        type={showLoginPassword ? "text" : "password"}
+                        value={loginForm.password}
+                        onChange={(e) =>
+                          setLoginForm({
+                            ...loginForm,
+                            password: e.target.value
+                          })
+                        }
+                        className="w-full px-4 py-3.5 pr-12 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition"
+                        placeholder="Enter your password"
+                        required
+                        autoComplete="current-password"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setShowLoginPassword(!showLoginPassword)
+                        }
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-violet-600 transition"
+                        tabIndex="-1"
+                      >
+                        {showLoginPassword ? (
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                          </svg>
+                        ) : (
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                          </svg>
+                        )}
+                      </button>
+
+                    </div>
+
+                  </div>
+
+
+                  {/* Options */}
+                  <div className="flex items-center justify-between">
+
+                    <label className="flex items-center gap-2 cursor-pointer">
+
+                      <input
+                        id="remember-me"
+                        type="checkbox"
+                        className="h-4 w-4 text-violet-600 focus:ring-violet-500 border-slate-300 rounded"
+                      />
+
+                      <span className="text-sm text-slate-600">
+                        Remember me
+                      </span>
+
+                    </label>
+
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('forgot')}
+                      className="text-sm font-semibold text-violet-600 hover:text-violet-700 transition"
+                    >
+                      Forgot password?
+                    </button>
+
+                  </div>
+
+
+                  {/* Sign In */}
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full py-3.5 rounded-xl text-white font-bold bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 shadow-lg shadow-violet-200 hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading ? 'Signing in...' : 'Sign In →'}
+                  </button>
+
+                </form>
+
+              )}
+
+
+              {/* ==================================================
+                  FORGOT PASSWORD
+              ================================================== */}
+              {activeTab === 'forgot' && (
+
+                <form
+                  onSubmit={handleForgotPassword}
+                  className="space-y-5"
+                >
+
+                  <div className="bg-violet-50 border border-violet-100 p-4 rounded-xl text-violet-700 text-sm">
+                    🔐 We'll send a password reset link to your registered email address.
+                  </div>
+
+
+                  <div>
+
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">
+                      Email Address
+                    </label>
+
+                    <input
+                      type="email"
+                      value={forgotPasswordForm.email}
+                      onChange={(e) =>
+                        setForgotPasswordForm({
+                          email: e.target.value
+                        })
+                      }
+                      className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition"
+                      placeholder="Enter your registered email"
+                      required
+                    />
+
+                  </div>
+
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full py-3.5 rounded-xl text-white font-bold bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading ? 'Sending...' : 'Send Reset Link'}
+                  </button>
+
+
+                  <div className="text-center">
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('login')}
+                      className="text-sm font-semibold text-violet-600 hover:text-violet-700 transition"
+                    >
+                      ← Back to Sign In
+                    </button>
+
+                  </div>
+
+                </form>
+
+              )}
+
+
+              {/* ================= CONTACT ADMINISTRATOR ================= */}
+              <p className="mt-7 text-center text-sm text-slate-500">
+
+                New to SchoolAid?
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const contactInfo = `📋 SchoolAid - Contact Administrator\n\n👤 Admin: SchoolAid Team\n📱 Phone: +254 180 559 352\n📧 Email: technologieszyphra@gmail.com\n💬 WhatsApp: +254 180 559 352\n\n🕐 Support Hours: Mon-Sun, 24HOURS\n\nWe're here to help you get started!`;
+                    alert(contactInfo);
+                  }}
+                  className="ml-1 font-semibold text-violet-600 hover:text-violet-700 transition"
+                >
+                  Contact Administrator
+                </button>
+
+              </p>
+
+            </div>
+
+
+            {/* ================= SUPPORT CARD ================= */}
+            <div className="mt-5 bg-white/10 backdrop-blur-xl border border-white/10 rounded-2xl p-5 text-white">
+
+              <div className="flex items-center gap-4">
+
+                <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center">
+
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M18 8a6 6 0 00-12 0v5a2 2 0 002 2h1V9H8a4 4 0 018 0h-1v6h1a2 2 0 002-2V8z"
+                    />
+
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M18 15v2a3 3 0 01-3 3h-2"
+                    />
+
+                  </svg>
+
+                </div>
+
+
+                <div>
+
+                  <p className="font-bold">
+                    Need help?
+                  </p>
+
+                  <p className="text-sm text-white/70">
+                    Our support team is here for you.
+                  </p>
+
+                  <button
+                    onClick={() => {
+                      const supportInfo = `📋 SchoolAid Support\n\n📱 Phone: +254 180 559 352\n📧 Email: technologieszyphra@gmail.com\n💬 WhatsApp: +254 180 559 352\n\n🕐 Support Hours: Mon-Sun, 24hours `;
+                      alert(supportInfo);
+                    }}
+                    className="text-sm font-semibold text-white hover:text-violet-200 transition mt-1"
+                  >
+                    Contact Support →
+                  </button>
+
+                </div>
+
+              </div>
+
+            </div>
+
+          </div>
+
+        </div>
+
+
+        {/* ==================================================
+            MOBILE LOGIN
+        ================================================== */}
+        <div className="lg:hidden absolute inset-0 bg-gradient-to-br from-violet-700 to-indigo-900 overflow-y-auto">
+
+          <div className="min-h-screen px-5 py-8 flex items-center justify-center">
+
+            <div className="w-full max-w-md">
+
+              {/* Mobile logo */}
+              <div className="text-center text-white mb-8">
+
+                <div className="mx-auto w-16 h-16 rounded-2xl bg-white/10 backdrop-blur flex items-center justify-center mb-4">
+
+                  <svg
+                    viewBox="0 0 64 64"
+                    className="w-11 h-11"
+                    fill="none"
+                  >
+
+                    <path
+                      d="M10 17C18 14 25 16 32 21V51C25 46 18 44 10 47V17Z"
+                      fill="white"
+                    />
+
+                    <path
+                      d="M54 17C46 14 39 16 32 21V51C39 46 46 44 54 47V17Z"
+                      fill="white"
+                      opacity=".75"
+                    />
+
+                    <path
+                      d="M32 7L35 13L42 14L37 19L38 26L32 23L26 26L27 19L22 14L29 13L32 7Z"
+                      fill="#FBBF24"
+                    />
+
+                  </svg>
+
+                </div>
+
+                <h1 className="text-4xl font-black">
+                  School<span className="text-yellow-300">Aid</span>
+                </h1>
+
+                <p className="text-white/70 text-sm mt-1">
+                  Smart School Management System
+                </p>
+
+              </div>
+
+
+              {/* Mobile card */}
+              <div className="bg-white rounded-3xl p-6 shadow-2xl">
+
+                <h2 className="text-2xl font-bold text-slate-900">
+                  Welcome back.
+                </h2>
+
+                <p className="text-sm text-slate-500 mt-1 mb-6">
+                  Sign in to your SchoolAid account.
+                </p>
+
+
+                {error && (
+                  <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
+                    ❌ {error}
+                  </div>
+                )}
+
+
+                {success && (
+                  <div className="mb-4 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-xl text-sm">
+                    ✅ {success}
+                  </div>
+                )}
+
+
+                {activeTab === 'login' && (
+
+                  <form onSubmit={handleLogin} className="space-y-5">
+
+                    <div>
+
+                      <label className="block text-sm font-semibold text-slate-700 mb-2">
+                        Email Address
+                      </label>
+
+                      <input
+                        type="email"
+                        value={loginForm.email}
+                        onChange={(e) =>
+                          setLoginForm({
+                            ...loginForm,
+                            email: e.target.value
+                          })
+                        }
+                        className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition"
+                        placeholder="Enter your email"
+                        required
+                      />
+
+                    </div>
+
+
+                    <div>
+
+                      <label className="block text-sm font-semibold text-slate-700 mb-2">
+                        Password
+                      </label>
+
+                      <div className="relative">
+                        <input
+                          type={showLoginPassword ? "text" : "password"}
+                          value={loginForm.password}
+                          onChange={(e) =>
+                            setLoginForm({
+                              ...loginForm,
+                              password: e.target.value
+                            })
+                          }
+                          className="w-full px-4 py-3.5 pr-12 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition"
+                          placeholder="Enter your password"
+                          required
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowLoginPassword(!showLoginPassword)}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-violet-600 transition"
+                          tabIndex="-1"
+                        >
+                          {showLoginPassword ? (
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                            </svg>
+                          ) : (
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                            </svg>
+                          )}
+                        </button>
+                      </div>
+
+                    </div>
+
+
+                    <div className="flex justify-between items-center">
+
+                      <label className="flex gap-2 items-center text-sm text-slate-600">
+
+                        <input
+                          type="checkbox"
+                          className="rounded text-violet-600"
+                        />
+
+                        Remember me
+
+                      </label>
+
+
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('forgot')}
+                        className="text-sm font-semibold text-violet-600"
+                      >
+                        Forgot password?
+                      </button>
+
+                    </div>
+
+
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="w-full py-3.5 rounded-xl text-white font-bold bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {loading ? 'Signing in...' : 'Sign In →'}
+                    </button>
+
+                  </form>
+
+                )}
+
+
+                {activeTab === 'forgot' && (
+
+                  <form
+                    onSubmit={handleForgotPassword}
+                    className="space-y-5"
+                  >
+
+                    <div className="bg-violet-50 p-4 rounded-xl text-violet-700 text-sm">
+                      🔐 We'll send a password reset link to your email.
+                    </div>
+
+
+                    <input
+                      type="email"
+                      value={forgotPasswordForm.email}
+                      onChange={(e) =>
+                        setForgotPasswordForm({
+                          email: e.target.value
+                        })
+                      }
+                      className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition"
+                      placeholder="Enter your registered email"
+                      required
+                    />
+
+
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="w-full py-3.5 rounded-xl text-white font-bold bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {loading ? 'Sending...' : 'Send Reset Link'}
+                    </button>
+
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('login')}
+                      className="w-full text-sm font-semibold text-violet-600"
+                    >
+                      ← Back to Sign In
+                    </button>
+
+                  </form>
+
+                )}
+
+
+                {/* Mobile Contact Admin */}
+                <p className="mt-6 text-center text-sm text-slate-500">
+
+                  New to SchoolAid?
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const contactInfo = `📋 SchoolAid - Contact Administrator\n\n👤 Admin: SchoolAid Team\n📱 Phone: +254 180 559 352\n📧 Email: technologieszyphra@gmail.com\n💬 WhatsApp: +254 180 559 352\n\n🕐 Support Hours: Mon-Sun, 24hours\n\nWe're here to help you get started!`;
+                      alert(contactInfo);
+                    }}
+                    className="ml-1 font-semibold text-violet-100 hover:text-white transition"
+                  >
+                    Contact Administrator
+                  </button>
+
+                </p>
+
+              </div>
+
+
+              <p className="text-center text-white/60 text-xs mt-6">
+                Secure • Reliable • Easy to Use
+              </p>
+
+            </div>
+
+          </div>
+
+        </div>
+
       </div>
+
     </div>
   );
 }
@@ -63466,7 +64972,6 @@ return (
         {success && <div className="mb-4 bg-green-50 p-4 rounded text-green-700">{success}</div>}
 
         {/* ==================== ALL MODULE RENDERING ==================== */}
-        {/* Dashboard Module */}
         {activeModule === 'dashboard' && (
           <DashboardModule 
             setActiveModule={setActiveModule}
@@ -63506,7 +65011,6 @@ return (
           />
         )}
 
-        {/* Students Module */}
         {activeModule === 'students' && canAccessModule(user, 'students') && (
           <StudentModule 
             students={students} 
@@ -63537,7 +65041,6 @@ return (
           />
         )}
 
-        {/* Schemes of Work Module */}
         {activeModule === 'schemes-of-work' && canAccessModule(user, 'schemes-of-work') && (
           <SchemesOfWorkModule 
             timetable={timetable}
@@ -63553,7 +65056,6 @@ return (
           />
         )}
 
-        {/* Labs Module */}
         {activeModule === 'labs' && canAccessModule(user, 'labs') && (
           <LabsModule 
             labs={labs}
@@ -63570,7 +65072,6 @@ return (
           />
         )}
 
-        {/* Sickbay Module */}
         {activeModule === 'sickbay' && canAccessModule(user, 'sickbay') && (
           <SickBayModule 
             hostels={hostels}
@@ -63584,7 +65085,6 @@ return (
           />
         )}
 
-        {/* Health Module */}
         {activeModule === 'health' && canAccessModule(user, 'health') && (
           <HealthModule 
             students={students}
@@ -63595,7 +65095,6 @@ return (
           />
         )}
 
-        {/* Course Enrollment Module */}
         {activeModule === 'course-enrollment' && canAccessModule(user, 'course-enrollment') && (
           <CourseEnrollmentModule 
             students={students}
@@ -63611,7 +65110,6 @@ return (
           />
         )}
 
-        {/* Unit Registration Module */}
         {activeModule === 'unit-registration' && canAccessModule(user, 'unit-registration') && (
           <UnitRegistrationModule 
             students={students}
@@ -63630,7 +65128,6 @@ return (
           />
         )}
 
-        {/* Schools Module (Super Admin only) */}
         {user?.role === 'SUPER_ADMIN' && activeModule === 'schools' && (
           <SchoolModule 
             schools={getFilteredSchools()} 
@@ -63643,7 +65140,6 @@ return (
           />
         )}
 
-        {/* Users Module */}
         {activeModule === 'users' && canAccessModule(user, 'users') && (
           <UserModule 
             users={users} 
@@ -63658,7 +65154,6 @@ return (
           />
         )}
 
-        {/* Classes Module */}
         {activeModule === 'classes' && canAccessModule(user, 'classes') && (
           <ClassModule 
             classes={classes} 
@@ -63672,7 +65167,6 @@ return (
           />
         )}
 
-        {/* Fee Statement Module */}
         {activeModule === 'fee-statement' && canAccessModule(user, 'fee-statement') && (
           <FeeStatementModule
             students={students}
@@ -63687,7 +65181,6 @@ return (
           />
         )}
 
-        {/* Exam Cards Module */}
         {activeModule === 'exam-cards' && canAccessModule(user, 'exam-cards') && (
           <ExamCardsModule
             students={students}
@@ -63705,7 +65198,6 @@ return (
           />
         )}
 
-        {/* Receipt History Module */}
         {activeModule === 'receipt-history' && canAccessModule(user, 'receipt-history') && (
           <ReceiptHistoryModule
             payments={payments}
@@ -63717,7 +65209,6 @@ return (
           />
         )}
 
-        {/* Staff Module */}
         {activeModule === 'staff' && canAccessModule(user, 'staff') && (
           <StaffModule 
             staff={staff} 
@@ -63736,7 +65227,23 @@ return (
           />
         )}
 
-        {/* Subjects Module */}
+        {activeModule === 'payroll' && canAccessModule(user, 'payroll') && (
+          <StaffModule 
+            staff={staff} 
+            setStaff={setStaff} 
+            users={users} 
+            payroll={payroll} 
+            setPayroll={setPayroll} 
+            form={staffForm} 
+            setForm={setStaffForm} 
+            onCreate={(data) => handleCreate('/staff', data, setStaff, staff)} 
+            onUpdate={(id, data) => handleUpdate('/staff', id, data, setStaff, staff)} 
+            onDelete={(id) => handleDelete('/staff', id, setStaff, staff)} 
+            currentSchool={currentSchool}
+            user={user}
+          />
+        )}
+
         {activeModule === 'subjects' && canAccessModule(user, 'subjects') && (
           <SubjectModule 
             subjects={subjects} 
@@ -63753,7 +65260,6 @@ return (
           />
         )}
 
-        {/* Exams Module */}
         {activeModule === 'exams' && canAccessModule(user, 'exams') && (
           <ExamModule 
             exams={exams} 
@@ -63775,7 +65281,6 @@ return (
           />
         )}
 
-        {/* Attendance Module */}
         {activeModule === 'attendance' && canAccessModule(user, 'attendance') && (
           <AttendanceModule 
             attendance={attendance} 
@@ -63795,7 +65300,6 @@ return (
           />
         )}
 
-        {/* Fees Module */}
         {activeModule === 'fees' && canAccessModule(user, 'fees') && (
           <FeesModule 
             fees={fees} 
@@ -63820,7 +65324,6 @@ return (
           />
         )}
 
-        {/* Library Module */}
         {activeModule === 'library' && canAccessModule(user, 'library') && (
           <LibraryModule 
             books={books} 
@@ -63837,7 +65340,6 @@ return (
           />
         )}
 
-        {/* Timetable Module */}
         {activeModule === 'timetable' && canAccessModule(user, 'timetable') && (
           <TimetableModule 
             timetable={timetable} 
@@ -63857,7 +65359,6 @@ return (
           />
         )}
 
-        {/* Transport Module */}
         {activeModule === 'transport' && canAccessModule(user, 'transport') && (
           <TransportModule 
             vehicles={vehicles} 
@@ -63871,7 +65372,6 @@ return (
           />
         )}
 
-        {/* Hostel Module */}
         {activeModule === 'hostel' && canAccessModule(user, 'hostel') && (
           <HostelModule 
             hostels={hostels} 
@@ -63891,7 +65391,6 @@ return (
           />
         )}
 
-        {/* Inventory Module */}
         {activeModule === 'inventory' && canAccessModule(user, 'inventory') && (
           <InventoryModule 
             inventory={inventory} 
@@ -63909,7 +65408,6 @@ return (
           />
         )}
 
-        {/* Announcements Module */}
         {activeModule === 'announcements' && canAccessModule(user, 'announcements') && (
           <AnnouncementModule 
             announcements={announcements} 
@@ -63927,7 +65425,6 @@ return (
           />
         )}
 
-        {/* Events Module */}
         {activeModule === 'events' && canAccessModule(user, 'events') && (
           <AnnouncementModule 
             announcements={announcements} 
@@ -63945,7 +65442,6 @@ return (
           />
         )}
 
-        {/* Reports Module */}
         {activeModule === 'reports' && canAccessModule(user, 'reports') && (
           <ReportsModule 
             students={students} 
@@ -63965,7 +65461,6 @@ return (
           />
         )}
 
-        {/* Expenses Module */}
         {activeModule === 'expenses' && canAccessModule(user, 'expenses') && (
           <AccountingModule 
             payments={payments} 
@@ -63979,7 +65474,6 @@ return (
           />
         )}
 
-        {/* Other Income Module */}
         {activeModule === 'other-income' && canAccessModule(user, 'other-income') && (
           <AccountingModule 
             payments={payments} 
@@ -63993,7 +65487,6 @@ return (
           />
         )}
 
-        {/* Messages Module */}
         {activeModule === 'messages' && canAccessModule(user, 'messages') && (
           <MessageModule 
             form={messageForm} 
@@ -64009,7 +65502,6 @@ return (
           />
         )}
 
-        {/* Settings Module */}
         {activeModule === 'settings' && canAccessModule(user, 'settings') && (
           <SettingsModule 
             user={user} 
@@ -64028,7 +65520,6 @@ return (
           />
         )}
 
-        {/* Results Module */}
         {activeModule === 'results' && canAccessModule(user, 'results') && (
           <ResultsModule 
             exams={exams}   
@@ -64047,7 +65538,6 @@ return (
           />
         )}
 
-        {/* Fee Reminders Module */}
         {activeModule === 'fee-reminders' && canAccessModule(user, 'fee-reminders') && (
           <FeeRemindersModule 
             fees={fees} 
@@ -64062,7 +65552,6 @@ return (
           />
         )}
 
-        {/* Promotion Module */}
         {activeModule === 'promotion' && canAccessModule(user, 'promotion') && (
           <PromotionModule 
             classes={classes} 
@@ -64075,7 +65564,6 @@ return (
           />
         )}
 
-        {/* Fee Allocation Module */}
         {activeModule === 'fee-allocation' && canAccessModule(user, 'fee-allocation') && (
           <FeeAllocationModule 
             fees={fees}
@@ -64088,7 +65576,6 @@ return (
           />
         )}
 
-        {/* Fee Collection Module */}
         {activeModule === 'fee-collection' && canAccessModule(user, 'fee-collection') && (
           <FeeCollectionModule 
             students={students}
@@ -64104,7 +65591,6 @@ return (
           />
         )}
 
-        {/* Staff Attendance Module */}
         {activeModule === 'staff-attendance' && canAccessModule(user, 'staff-attendance') && (
           <StaffAttendanceModule 
             staff={staff} 
@@ -64114,7 +65600,6 @@ return (
           />
         )}
 
-        {/* Course Units Module */}
         {activeModule === 'course-units' && canAccessModule(user, 'course-units') && (
           <CourseUnitsModule
             courses={courses}
@@ -64129,7 +65614,6 @@ return (
           />
         )}
 
-        {/* Discipline Module */}
         {activeModule === 'discipline' && canAccessModule(user, 'discipline') && (
           <DisciplineModule 
             students={students}
@@ -64314,7 +65798,6 @@ return (
           </>
         )}
 
-        {/* Student Arrival Module */}
         {activeModule === 'student-arrival' && canAccessModule(user, 'student-arrival') && (
           <StudentArrivalModule
             students={students}
@@ -64326,7 +65809,6 @@ return (
           />
         )}
 
-        {/* Receptionist Module */}
         {activeModule === 'receptionist' && canAccessModule(user, 'receptionist') && (
           <ReceptionistModule
             user={user}
@@ -64338,7 +65820,6 @@ return (
           />
         )}
 
-        {/* Roles Module */}
         {activeModule === 'roles' && canAccessModule(user, 'roles') && (
           <RolesManagementModule 
             user={user}
@@ -64348,7 +65829,6 @@ return (
           />
         )}
 
-        {/* Card Management Module */}
         {activeModule === 'card-management' && canAccessModule(user, 'card-management') && (
           <CardManagementModule
             students={students}
@@ -64362,7 +65842,6 @@ return (
           />
         )}
 
-        {/* Certificates Module */}
         {activeModule === 'certificates' && canAccessModule(user, 'certificates') && (
           <CertificateModule
             students={students}
@@ -64372,7 +65851,6 @@ return (
           />
         )}
 
-        {/* Alumni Module */}
         {activeModule === 'alumni' && canAccessModule(user, 'alumni') && (
           <AlumniModule
             students={students}
@@ -64382,7 +65860,6 @@ return (
           />
         )}
 
-        {/* Live Classroom Module */}
         {activeModule === 'live-classroom' && canAccessModule(user, 'live-classroom') && (
           <LiveClassroomModule
             currentSchool={currentSchool}
@@ -64392,7 +65869,6 @@ return (
           />
         )}
 
-        {/* Online Exams Module */}
         {activeModule === 'online-exams' && canAccessModule(user, 'online-exams') && (
           <OnlineExamsModule
             currentSchool={currentSchool}
