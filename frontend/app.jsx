@@ -26404,14 +26404,14 @@ const ProgramsModule = ({
     return options;
   }, [departments]);
 
-  // ==================== LEVEL OPTIONS ====================
-  const levelOptions = [
-    { value: '', label: 'Select Level' },
-    { value: 'Certificate', label: 'Certificate' },
-    { value: 'Diploma', label: 'Diploma' },
-    { value: 'Higher Diploma', label: 'Higher Diploma' },
-    { value: 'Degree', label: 'Degree' }
-  ];
+// ==================== LEVEL OPTIONS ====================
+const levelOptions = [
+  { value: '', label: '' }, 
+  { value: 'Certificate', label: 'Certificate' },
+  { value: 'Diploma', label: 'Diploma' },
+  { value: 'Higher Diploma', label: 'Higher Diploma' },
+  { value: 'Degree', label: 'Degree' }
+];
 
   // ==================== LEVEL FILTER OPTIONS ====================
   const levelFilterOptions = [
