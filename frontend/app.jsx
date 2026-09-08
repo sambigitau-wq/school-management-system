@@ -6781,12 +6781,127 @@ const StudentModule = ({
   );
 };
 
-// ==================== SUBJECT MODULE WITH SEARCHABLE SELECTS - EMPTY BY DEFAULT ====================
+// ==================== SUBJECT MODULE WITH FIXED SEARCHABLE SELECTS ====================
 const SubjectModule = ({ 
   subjects, setSubjects, classes, staff, form, setForm, 
   onCreate, onUpdate, onDelete, user, currentSchool
 }) => {
-  // ==================== SEARCHABLE SELECT COMPONENT - EMPTY BY DEFAULT ====================
+  // ==================== STATE ====================
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedClass, setSelectedClass] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [subjectForm, setSubjectForm] = useState({
+    name: '',
+    code: '',
+    classId: '',
+    teacherId: '',
+    isCompulsory: true,
+    maxMarks: 100
+  });
+
+  // ==================== PERMISSIONS ====================
+  const canEdit = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER'].includes(user?.role);
+  const canDelete = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
+
+  // ==================== FILTER SUBJECTS BY CURRENT SCHOOL ====================
+  const schoolFilteredSubjects = React.useMemo(() => {
+    if (!subjects || subjects.length === 0) return [];
+    
+    if (user?.role === 'SUPER_ADMIN') {
+      return subjects;
+    }
+    
+    if (!currentSchool?.id) return [];
+    
+    return subjects.filter(subject => {
+      const classObj = classes?.find(c => c.id === subject.classId);
+      return classObj?.schoolId === currentSchool.id;
+    });
+  }, [subjects, currentSchool, user, classes]);
+
+  // ==================== FILTER BY SEARCH AND CLASS ====================
+  const filteredSubjects = React.useMemo(() => {
+    let filtered = schoolFilteredSubjects;
+    
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(s => 
+        s.name?.toLowerCase().includes(term) ||
+        s.code?.toLowerCase().includes(term)
+      );
+    }
+    
+    if (selectedClass) {
+      filtered = filtered.filter(s => s.classId === selectedClass);
+    }
+    
+    return filtered;
+  }, [schoolFilteredSubjects, searchTerm, selectedClass]);
+
+  // ==================== FILTER CLASSES BY CURRENT SCHOOL ====================
+  const schoolClasses = React.useMemo(() => {
+    if (!classes) return [];
+    if (user?.role === 'SUPER_ADMIN') return classes;
+    return classes.filter(c => c.schoolId === currentSchool?.id);
+  }, [classes, currentSchool, user]);
+
+  // ==================== FILTER STAFF BY CURRENT SCHOOL ====================
+  const schoolStaff = React.useMemo(() => {
+    if (!staff) return [];
+    if (user?.role === 'SUPER_ADMIN') return staff;
+    return staff.filter(s => s.schoolId === currentSchool?.id);
+  }, [staff, currentSchool, user]);
+
+  // ==================== GET TEACHING STAFF ====================
+  const teachingStaff = React.useMemo(() => {
+    if (!schoolStaff || schoolStaff.length === 0) return [];
+    
+    // Filter only teaching staff
+    const teaching = schoolStaff.filter(s => s.staffType === 'TEACHING');
+    
+    console.log('All staff:', schoolStaff);
+    console.log('Teaching staff:', teaching);
+    
+    return teaching;
+  }, [schoolStaff]);
+
+  // ==================== CREATE OPTIONS FOR SELECTS ====================
+  const classOptions = React.useMemo(() => {
+    if (!schoolClasses || schoolClasses.length === 0) {
+      return [];
+    }
+    return schoolClasses.map(c => ({
+      value: c.id,
+      label: c.name || 'Unnamed Class',
+      subLabel: `Capacity: ${c.capacity || 'N/A'}`
+    }));
+  }, [schoolClasses]);
+
+  const teacherOptions = React.useMemo(() => {
+    if (!teachingStaff || teachingStaff.length === 0) {
+      return [];
+    }
+    
+    return teachingStaff
+      .filter(s => s && s.userId)
+      .map(s => {
+        const userData = s.user || s.User || {};
+        const firstName = userData.firstName || '';
+        const lastName = userData.lastName || '';
+        const fullName = `${firstName} ${lastName}`.trim();
+        
+        return {
+          value: s.userId,
+          label: fullName || 'Unknown Teacher',
+          subLabel: s.jobTitle || s.department || 'Teacher'
+        };
+      })
+      .filter(opt => opt.value);
+  }, [teachingStaff]);
+
+  // ==================== SIMPLIFIED SEARCHABLE SELECT ====================
   const SearchableSelect = ({ 
     label, 
     value, 
@@ -6796,38 +6911,34 @@ const SubjectModule = ({
     disabled,
     required,
     className,
-    noOptionsMessage = "No results found",
     emptyMessage = "No options available",
-    startEmpty = false // New prop to control empty state
+    noOptionsMessage = "No results found"
   }) => {
     const [search, setSearch] = useState('');
     const [isOpen, setIsOpen] = useState(false);
-    const [isFocused, setIsFocused] = useState(false);
     const dropdownRef = useRef(null);
+    const inputRef = useRef(null);
 
     // Filter options based on search
     const filteredOptions = useMemo(() => {
-      if (!options || options.length === 0) {
-        return [];
-      }
-      if (!search.trim()) {
-        return options;
-      }
+      if (!options || options.length === 0) return [];
+      if (!search.trim()) return options;
+      
       const searchLower = search.toLowerCase();
       return options.filter(opt => {
         if (!opt) return false;
-        const label = opt.label?.toLowerCase() || '';
-        const subLabel = opt.subLabel?.toLowerCase() || '';
-        const valueStr = opt.value?.toString().toLowerCase() || '';
+        const label = (opt.label || '').toLowerCase();
+        const subLabel = (opt.subLabel || '').toLowerCase();
+        const valueStr = String(opt.value || '').toLowerCase();
         return label.includes(searchLower) || 
                subLabel.includes(searchLower) || 
                valueStr.includes(searchLower);
       });
     }, [options, search]);
 
+    // Get selected option
     const selectedOption = useMemo(() => {
       if (!options || options.length === 0) return null;
-      // If value is empty string or null, return null (empty state)
       if (!value && value !== 0) return null;
       return options.find(opt => opt.value === value) || null;
     }, [options, value]);
@@ -6837,40 +6948,47 @@ const SubjectModule = ({
       const handleClickOutside = (event) => {
         if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
           setIsOpen(false);
-          setIsFocused(false);
         }
       };
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    // Clear search when dropdown closes
+    // Update search when value changes externally
     useEffect(() => {
-      if (!isOpen) {
+      if (!isOpen && selectedOption) {
+        setSearch(selectedOption.label);
+      } else if (!isOpen && !selectedOption) {
         setSearch('');
       }
-    }, [isOpen]);
+    }, [selectedOption, isOpen]);
 
     const handleSelect = (selectedValue) => {
       onChange({ target: { value: selectedValue } });
-      setSearch('');
+      const selected = options.find(opt => opt.value === selectedValue);
+      setSearch(selected ? selected.label : '');
       setIsOpen(false);
-      setIsFocused(false);
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
     };
 
     const handleInputChange = (e) => {
       const val = e.target.value;
       setSearch(val);
       setIsOpen(true);
-      setIsFocused(true);
+      
+      // If search is empty, clear the selection
+      if (val === '') {
+        onChange({ target: { value: '' } });
+      }
     };
 
     const handleFocus = () => {
       if (disabled) return;
-      setIsFocused(true);
       setIsOpen(true);
-      // If there's a selected option, show its label in the search input
-      if (selectedOption) {
+      // If there's a selected option and search is empty, show the label
+      if (selectedOption && !search) {
         setSearch(selectedOption.label);
       }
     };
@@ -6880,17 +6998,13 @@ const SubjectModule = ({
       onChange({ target: { value: '' } });
       setSearch('');
       setIsOpen(false);
-      setIsFocused(false);
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
     };
 
-    // Determine what to display
-    let displayValue = '';
-    if (isFocused) {
-      displayValue = search;
-    } else if (selectedOption) {
-      displayValue = selectedOption.label;
-    }
-    // If startEmpty is true and no selection, show empty
+    // Determine display value
+    const displayValue = isOpen ? search : (selectedOption ? selectedOption.label : '');
 
     return (
       <div className="relative" ref={dropdownRef}>
@@ -6903,9 +7017,10 @@ const SubjectModule = ({
         
         <div className="relative">
           <input
+            ref={inputRef}
             type="text"
             className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-pointer'
+              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
             } ${className || ''}`}
             value={displayValue}
             onChange={handleInputChange}
@@ -6914,7 +7029,6 @@ const SubjectModule = ({
               setTimeout(() => {
                 if (!dropdownRef.current?.contains(document.activeElement)) {
                   setIsOpen(false);
-                  setIsFocused(false);
                   if (!selectedOption) {
                     setSearch('');
                   }
@@ -6930,7 +7044,7 @@ const SubjectModule = ({
             <button
               type="button"
               onClick={handleClear}
-              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -6958,12 +7072,12 @@ const SubjectModule = ({
                   className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
                     opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
                   } ${opt.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
                     if (!opt.disabled) {
                       handleSelect(opt.value);
                     }
                   }}
-                  onMouseDown={(e) => e.preventDefault()}
                 >
                   <div className="font-medium">{opt.label}</div>
                   {opt.subLabel && (
@@ -6973,7 +7087,7 @@ const SubjectModule = ({
               ))
             ) : (
               <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {search ? `No results for "${search}"` : noOptionsMessage}
+                {search.trim() ? `No results for "${search}"` : noOptionsMessage}
               </div>
             )}
           </div>
@@ -6982,130 +7096,7 @@ const SubjectModule = ({
     );
   };
 
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedClass, setSelectedClass] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [subjectForm, setSubjectForm] = useState({
-    name: '',
-    code: '',
-    classId: '',
-    teacherId: '',
-    isCompulsory: true,
-    maxMarks: 100
-  });
-
-  // Determine user permissions
-  const canEdit = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER'].includes(user?.role);
-  const canDelete = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
-
-  // ==================== FILTER SUBJECTS BY CURRENT SCHOOL ====================
-  const schoolFilteredSubjects = React.useMemo(() => {
-    if (!subjects || subjects.length === 0) return [];
-    
-    if (user?.role === 'SUPER_ADMIN') {
-      return subjects;
-    }
-    
-    if (!currentSchool?.id) return [];
-    
-    return subjects.filter(subject => {
-      const classObj = classes?.find(c => c.id === subject.classId);
-      return classObj?.schoolId === currentSchool.id;
-    });
-  }, [subjects, currentSchool, user, classes]);
-
-  // ==================== FILTER BY SEARCH AND CLASS ====================
-  const filteredSubjects = React.useMemo(() => {
-    let filtered = schoolFilteredSubjects;
-    
-    if (searchTerm) {
-      filtered = filtered.filter(s => 
-        s.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        s.code?.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-    
-    if (selectedClass) {
-      filtered = filtered.filter(s => s.classId === selectedClass);
-    }
-    
-    return filtered;
-  }, [schoolFilteredSubjects, searchTerm, selectedClass]);
-
-  // ==================== FILTER CLASSES BY CURRENT SCHOOL ====================
-  const schoolClasses = React.useMemo(() => {
-    if (!classes) return [];
-    if (user?.role === 'SUPER_ADMIN') return classes;
-    return classes.filter(c => c.schoolId === currentSchool?.id);
-  }, [classes, currentSchool, user]);
-
-  // ==================== FILTER STAFF BY CURRENT SCHOOL ====================
-  const schoolStaff = React.useMemo(() => {
-    if (!staff) return [];
-    if (user?.role === 'SUPER_ADMIN') return staff;
-    return staff.filter(s => s.schoolId === currentSchool?.id);
-  }, [staff, currentSchool, user]);
-
-  // ==================== CREATE OPTIONS FOR SEARCHABLE SELECTS - EMPTY BY DEFAULT ====================
-  const classOptions = React.useMemo(() => {
-    if (!schoolClasses || schoolClasses.length === 0) {
-      return [];
-    }
-    return schoolClasses.map(c => ({
-      value: c.id,
-      label: c.name || 'Unnamed Class',
-      subLabel: `Capacity: ${c.capacity || 'N/A'}`
-    }));
-  }, [schoolClasses]);
-
-  const teacherOptions = React.useMemo(() => {
-    if (!schoolStaff || schoolStaff.length === 0) {
-      return [];
-    }
-    return schoolStaff
-      .filter(s => s.staffType === 'TEACHING' && s.user)
-      .map(s => ({
-        value: s.userId,
-        label: `${s.user?.firstName || ''} ${s.user?.lastName || ''}`.trim() || 'Unknown Teacher',
-        subLabel: s.jobTitle || s.department || 'Teacher'
-      }));
-  }, [schoolStaff]);
-
-  // ==================== SEARCH OPTIONS - START EMPTY ====================
-  const searchOptions = React.useMemo(() => {
-    if (!filteredSubjects || filteredSubjects.length === 0) {
-      return [];
-    }
-    return filteredSubjects.slice(0, 20).map(s => ({
-      value: s.name,
-      label: s.name,
-      subLabel: `Code: ${s.code || 'N/A'}`
-    }));
-  }, [filteredSubjects]);
-
-  const classFilterOptions = React.useMemo(() => {
-    if (!classOptions || classOptions.length === 0) {
-      return [];
-    }
-    return classOptions;
-  }, [classOptions]);
-
-  const classFormOptions = React.useMemo(() => {
-    if (!classOptions || classOptions.length === 0) {
-      return [];
-    }
-    return classOptions;
-  }, [classOptions]);
-
-  const teacherFormOptions = React.useMemo(() => {
-    if (!teacherOptions || teacherOptions.length === 0) {
-      return [];
-    }
-    return teacherOptions;
-  }, [teacherOptions]);
-
+  // ==================== HANDLE SUBMIT ====================
   const handleSubmit = (e) => {
     e.preventDefault();
     
@@ -7137,6 +7128,7 @@ const SubjectModule = ({
     });
   };
 
+  // ==================== HANDLE EDIT ====================
   const handleEdit = (subj) => {
     if (!canEdit) {
       alert('You do not have permission to edit subjects');
@@ -7147,9 +7139,21 @@ const SubjectModule = ({
     setShowForm(true);
   };
 
+  // ==================== HANDLE DELETE ====================
+  const handleDelete = (id, name) => {
+    if (!canDelete) {
+      alert('You do not have permission to delete subjects');
+      return;
+    }
+    if (window.confirm(`Delete subject "${name}"?`)) {
+      onDelete(id);
+    }
+  };
+
+  // ==================== RENDER ====================
   return (
     <div className="space-y-6">
-      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse"></div>}
+      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
       
       {/* School Info Badge */}
       {currentSchool && user?.role !== 'SUPER_ADMIN' && (
@@ -7193,9 +7197,10 @@ const SubjectModule = ({
         </div>
       )}
       
-      <div className="flex justify-between items-center">
+      {/* Header */}
+      <div className="flex flex-wrap justify-between items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold">Subject Management</h2>
+          <h2 className="text-2xl font-bold text-gray-800">Subject Management</h2>
           <p className="text-sm text-gray-500 mt-1">
             {filteredSubjects.length} subject{filteredSubjects.length !== 1 ? 's' : ''} found
           </p>
@@ -7213,22 +7218,31 @@ const SubjectModule = ({
               });
               setEditingId(null);
               setShowForm(true);
+              // Scroll to form
+              setTimeout(() => {
+                document.getElementById('subject-form')?.scrollIntoView({ behavior: 'smooth' });
+              }, 100);
             }}
-            className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center"
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2 transition-colors"
           >
-            <i className="fas fa-plus mr-2"></i>Add New Subject
+            <i className="fas fa-plus"></i>
+            Add New Subject
           </button>
         )}
       </div>
 
-      {/* ==================== FILTERS WITH SEARCHABLE SELECT - EMPTY BY DEFAULT ==================== */}
+      {/* ==================== FILTERS ==================== */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <SearchableSelect
             label="Search Subjects"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            options={searchOptions}
+            options={filteredSubjects.slice(0, 20).map(s => ({
+              value: s.name,
+              label: s.name,
+              subLabel: `Code: ${s.code || 'N/A'}`
+            }))}
             placeholder="Search by name or code..."
             emptyMessage="No subjects available"
             noOptionsMessage="No results found"
@@ -7238,14 +7252,14 @@ const SubjectModule = ({
             label="Filter by Class"
             value={selectedClass}
             onChange={(e) => setSelectedClass(e.target.value)}
-            options={classFilterOptions}
-            placeholder="Search classes..."
+            options={classOptions}
+            placeholder="All Classes"
             emptyMessage="No classes available"
             noOptionsMessage="No classes found"
           />
           
           <div className="flex items-end">
-            <div className="bg-gray-100 px-4 py-2 rounded-lg flex items-center gap-2">
+            <div className="bg-gray-100 px-4 py-2 rounded-lg flex items-center gap-2 w-full">
               <span className="text-sm text-gray-600">
                 <span className="font-bold">{filteredSubjects.length}</span> of {schoolFilteredSubjects.length} subjects
                 {user?.role === 'SUPER_ADMIN' && schoolFilteredSubjects.length !== subjects?.length && 
@@ -7258,7 +7272,7 @@ const SubjectModule = ({
                     setSearchTerm('');
                     setSelectedClass('');
                   }}
-                  className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                  className="text-xs text-indigo-600 hover:text-indigo-800 font-medium ml-2"
                 >
                   Clear
                 </button>
@@ -7297,10 +7311,13 @@ const SubjectModule = ({
         )}
       </div>
 
-      {/* ==================== ADD/EDIT FORM WITH SEARCHABLE SELECTS - EMPTY BY DEFAULT ==================== */}
+      {/* ==================== ADD/EDIT FORM ==================== */}
       {showForm && canEdit && (
-        <div className="bg-white p-6 rounded-xl shadow-sm border-2 border-indigo-100">
-          <h3 className="text-lg font-semibold mb-4">{editingId ? 'Edit' : 'Add New'} Subject</h3>
+        <div id="subject-form" className="bg-white p-6 rounded-xl shadow-sm border-2 border-indigo-100">
+          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <i className={`fas fa-${editingId ? 'edit' : 'plus-circle'} text-indigo-600`}></i>
+            {editingId ? 'Edit' : 'Add New'} Subject
+          </h3>
           
           {!editingId && currentSchool && user?.role !== 'SUPER_ADMIN' && (
             <div className="mb-4 p-3 bg-gray-50 rounded-lg text-sm text-gray-600 border border-gray-200">
@@ -7309,8 +7326,26 @@ const SubjectModule = ({
             </div>
           )}
           
+          {/* Warning if no teachers available */}
+          {teacherOptions.length === 0 && (
+            <div className="mb-4 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
+              <div className="flex items-start">
+                <i className="fas fa-exclamation-triangle text-yellow-600 mt-0.5 mr-2"></i>
+                <div>
+                  <p className="text-sm text-yellow-800 font-medium">No teachers available</p>
+                  <p className="text-xs text-yellow-700 mt-1">
+                    You need to add teaching staff before assigning teachers to subjects.
+                    <br />
+                    <span className="font-medium">Staff Type must be set to "Teaching"</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Subject Name */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Subject Name <span className="text-red-500">*</span>
@@ -7324,6 +7359,8 @@ const SubjectModule = ({
                   required
                 />
               </div>
+              
+              {/* Subject Code */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Subject Code <span className="text-red-500">*</span>
@@ -7338,27 +7375,30 @@ const SubjectModule = ({
                 />
               </div>
               
+              {/* Class */}
               <SearchableSelect
                 label="Class"
                 value={subjectForm.classId}
                 onChange={(e) => setSubjectForm({...subjectForm, classId: e.target.value})}
-                options={classFormOptions}
+                options={classOptions}
                 placeholder="Select a class..."
                 required
                 emptyMessage="No classes available"
                 noOptionsMessage="No classes found"
               />
               
+              {/* Teacher */}
               <SearchableSelect
                 label="Teacher"
                 value={subjectForm.teacherId}
                 onChange={(e) => setSubjectForm({...subjectForm, teacherId: e.target.value})}
-                options={teacherFormOptions}
+                options={teacherOptions}
                 placeholder="Select a teacher..."
-                emptyMessage="No teachers available"
+                emptyMessage={teachingStaff.length === 0 ? "No teaching staff available" : "No teachers available"}
                 noOptionsMessage="No teachers found"
               />
               
+              {/* Max Marks */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Max Marks <span className="text-red-500">*</span>
@@ -7367,16 +7407,17 @@ const SubjectModule = ({
                   type="number"
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
                   value={subjectForm.maxMarks}
-                  onChange={(e) => setSubjectForm({...subjectForm, maxMarks: parseInt(e.target.value)})}
+                  onChange={(e) => setSubjectForm({...subjectForm, maxMarks: parseInt(e.target.value) || 0})}
                   required
                   min="1"
                 />
               </div>
               
+              {/* Compulsory */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Compulsory</label>
                 <select
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white"
                   value={subjectForm.isCompulsory}
                   onChange={(e) => setSubjectForm({...subjectForm, isCompulsory: e.target.value === 'true'})}
                 >
@@ -7385,11 +7426,24 @@ const SubjectModule = ({
                 </select>
               </div>
             </div>
-            <div className="flex space-x-2">
-              <button type="submit" className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
+            
+            {/* Form Actions */}
+            <div className="flex flex-wrap gap-3 pt-2 border-t">
+              <button
+                type="submit"
+                className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
+              >
+                <i className={`fas fa-${editingId ? 'save' : 'plus-circle'}`}></i>
                 {editingId ? 'Update' : 'Save'} Subject
               </button>
-              <button type="button" onClick={() => setShowForm(false)} className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowForm(false);
+                  setEditingId(null);
+                }}
+                className="bg-gray-500 text-white px-6 py-2.5 rounded-lg hover:bg-gray-600 transition-colors"
+              >
                 Cancel
               </button>
             </div>
@@ -7398,7 +7452,7 @@ const SubjectModule = ({
       )}
 
       {/* ==================== SUBJECTS TABLE ==================== */}
-      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+      <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-200">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50">
@@ -7418,7 +7472,7 @@ const SubjectModule = ({
                   <td colSpan={canEdit ? "7" : "6"} className="px-6 py-8 text-center text-gray-500">
                     {searchTerm || selectedClass ? (
                       <>
-                        <i className="fas fa-search text-4xl text-gray-300 mb-2"></i>
+                        <i className="fas fa-search text-4xl text-gray-300 mb-2 block"></i>
                         <p>No subjects match your search criteria</p>
                         <p className="text-sm mt-1">Try adjusting your filters</p>
                         <button
@@ -7433,7 +7487,7 @@ const SubjectModule = ({
                       </>
                     ) : schoolFilteredSubjects.length === 0 ? (
                       <>
-                        <i className="fas fa-book text-4xl text-gray-300 mb-2"></i>
+                        <i className="fas fa-book text-4xl text-gray-300 mb-2 block"></i>
                         <p>No subjects found for {currentSchool?.name || 'this school'}</p>
                         {canEdit && (
                           <p className="text-sm mt-1">Click "Add New Subject" to create your first subject</p>
@@ -7441,7 +7495,7 @@ const SubjectModule = ({
                       </>
                     ) : (
                       <>
-                        <i className="fas fa-book text-4xl text-gray-300 mb-2"></i>
+                        <i className="fas fa-book text-4xl text-gray-300 mb-2 block"></i>
                         <p>No subjects yet</p>
                         {canEdit && (
                           <p className="text-sm mt-1">Click "Add New Subject" to create your first subject</p>
@@ -7454,6 +7508,15 @@ const SubjectModule = ({
                 filteredSubjects.map(subject => {
                   const teacher = schoolStaff.find(s => s.userId === subject.teacherId);
                   const className = schoolClasses.find(c => c.id === subject.classId);
+                  
+                  let teacherName = 'Not assigned';
+                  if (teacher) {
+                    const userData = teacher.user || teacher.User || {};
+                    const firstName = userData.firstName || '';
+                    const lastName = userData.lastName || '';
+                    teacherName = `${firstName} ${lastName}`.trim() || 'Unknown Teacher';
+                  }
+                  
                   return (
                     <tr key={subject.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4 whitespace-nowrap font-mono text-sm font-medium text-indigo-600">
@@ -7470,10 +7533,8 @@ const SubjectModule = ({
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        {teacher?.user ? (
-                          <span className="text-sm">
-                            {teacher.user.firstName} {teacher.user.lastName}
-                          </span>
+                        {teacher ? (
+                          <span className="text-sm">{teacherName}</span>
                         ) : (
                           <span className="text-gray-400 text-sm">Not assigned</span>
                         )}
@@ -7497,11 +7558,7 @@ const SubjectModule = ({
                           </button>
                           {canDelete && (
                             <button
-                              onClick={() => {
-                                if (window.confirm(`Delete subject "${subject.name}"?`)) {
-                                  onDelete(subject.id);
-                                }
-                              }}
+                              onClick={() => handleDelete(subject.id, subject.name)}
                               className="text-red-600 hover:text-red-900 p-2 hover:bg-red-50 rounded-lg transition-colors"
                               title="Delete Subject"
                             >
@@ -7520,7 +7577,7 @@ const SubjectModule = ({
         
         {/* Table footer with stats */}
         {filteredSubjects.length > 0 && (
-          <div className="px-6 py-3 bg-gray-50 border-t flex justify-between items-center text-sm text-gray-500">
+          <div className="px-6 py-3 bg-gray-50 border-t flex flex-wrap justify-between items-center gap-2 text-sm text-gray-500">
             <div>
               Showing <span className="font-medium">{filteredSubjects.length}</span> of <span className="font-medium">{schoolFilteredSubjects.length}</span> subjects
               {(searchTerm || selectedClass) && (
@@ -16280,7 +16337,8 @@ const StaffAttendanceReportsModule = ({ staff, currentSchool, user }) => {
     </div>
   );
 };
-// ==================== STAFF MODULE WITH SEARCHABLE SELECTS - ALL SCHOOL TYPES ====================
+
+// ==================== STAFF MODULE WITH FIXED SEARCHABLE SELECTS - ALL SCHOOL TYPES ====================
 const StaffModule = ({ 
   staff = [], 
   setStaff, 
@@ -16311,192 +16369,6 @@ const StaffModule = ({
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
-  // ==================== SEARCHABLE SELECT COMPONENT - EMPTY BY DEFAULT ====================
-  const SearchableSelect = ({ 
-    label, 
-    value, 
-    onChange, 
-    options = [], 
-    placeholder = "", 
-    disabled, 
-    required, 
-    className,
-    noOptionsMessage = "No results found",
-    emptyMessage = "No options available",
-    showEmptyOption = false
-  }) => {
-    const [search, setSearch] = useState('');
-    const [isOpen, setIsOpen] = useState(false);
-    const dropdownRef = useRef(null);
-    const inputRef = useRef(null);
-
-    const filteredOptions = useMemo(() => {
-      if (!options || options.length === 0) {
-        return [];
-      }
-      if (!search.trim()) {
-        return options;
-      }
-      const searchLower = search.toLowerCase();
-      return options.filter(opt => {
-        if (!opt) return false;
-        const label = opt.label?.toLowerCase() || '';
-        const subLabel = opt.subLabel?.toLowerCase() || '';
-        const valueStr = opt.value?.toString().toLowerCase() || '';
-        return label.includes(searchLower) || 
-               subLabel.includes(searchLower) || 
-               valueStr.includes(searchLower);
-      });
-    }, [options, search]);
-
-    const selectedOption = useMemo(() => {
-      if (!options || options.length === 0) return null;
-      if (!value && value !== 0) return null;
-      return options.find(opt => opt.value === value) || null;
-    }, [options, value]);
-
-    useEffect(() => {
-      const handleClickOutside = (event) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-          setIsOpen(false);
-        }
-      };
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
-
-    useEffect(() => {
-      if (!isOpen) {
-        setSearch('');
-      }
-    }, [isOpen]);
-
-    const handleSelect = (selectedValue) => {
-      onChange({ target: { value: selectedValue } });
-      const selected = options.find(opt => opt.value === selectedValue);
-      setSearch(selected ? selected.label : '');
-      setIsOpen(false);
-    };
-
-    const handleInputChange = (e) => {
-      const newValue = e.target.value;
-      setSearch(newValue);
-      setIsOpen(true);
-      if (newValue === '') {
-        onChange({ target: { value: '' } });
-      }
-    };
-
-    const handleFocus = () => {
-      if (disabled) return;
-      setIsOpen(true);
-      if (selectedOption && !search) {
-        setSearch(selectedOption.label);
-      }
-    };
-
-    const handleBlur = () => {
-      setTimeout(() => {
-        if (!dropdownRef.current?.contains(document.activeElement)) {
-          setIsOpen(false);
-          if (!selectedOption) {
-            setSearch('');
-          }
-        }
-      }, 200);
-    };
-
-    const handleClear = (e) => {
-      e.stopPropagation();
-      onChange({ target: { value: '' } });
-      setSearch('');
-      setIsOpen(false);
-    };
-
-    let displayValue = '';
-    if (isOpen) {
-      displayValue = search;
-    } else if (selectedOption) {
-      displayValue = selectedOption.label;
-    }
-
-    const showPlaceholder = !displayValue && placeholder;
-
-    return (
-      <div className="relative" ref={dropdownRef}>
-        {label && (
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-        )}
-        <div className="relative">
-          <input
-            ref={inputRef}
-            type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
-            } ${className || ''}`}
-            value={displayValue}
-            onChange={handleInputChange}
-            onFocus={handleFocus}
-            onBlur={handleBlur}
-            placeholder={showPlaceholder ? placeholder : ''}
-            disabled={disabled}
-            autoComplete="off"
-          />
-          {value && !disabled && (
-            <button
-              type="button"
-              onClick={handleClear}
-              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-        </div>
-        {isOpen && !disabled && (
-          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-            {options && options.length === 0 ? (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {emptyMessage}
-              </div>
-            ) : filteredOptions.length > 0 ? (
-              filteredOptions.map((opt) => (
-                <div
-                  key={opt.value || Math.random().toString()}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
-                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
-                  } ${opt.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    if (!opt.disabled) {
-                      handleSelect(opt.value);
-                    }
-                  }}
-                >
-                  <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
-                </div>
-              ))
-            ) : (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {search.trim() ? `No results for "${search}"` : noOptionsMessage}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
   // ==================== PERMISSIONS ====================
   const canEdit = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
   const canDelete = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL'].includes(user?.role);
@@ -16510,7 +16382,6 @@ const StaffModule = ({
   const isPrimary = schoolCategory === 'ECDE_PRIMARY_JSS';
   const isSecondary = schoolCategory === 'SENIOR_SECONDARY';
   
-  // Department field should only show for University and TVET
   const showDepartment = isUniversity || isTVET;
   const showSubjects = isRegularSchool && !isPrimary;
 
@@ -16679,7 +16550,7 @@ const StaffModule = ({
     return Array.from(deptMap.values());
   }, [staff, departments]);
 
-  // ==================== OPTIONS FOR SEARCHABLE SELECTS - EMPTY BY DEFAULT ====================
+  // ==================== OPTIONS FOR SELECTS ====================
   const departmentOptions = useMemo(() => {
     if (!departments || departments.length === 0) {
       return [];
@@ -16735,6 +16606,200 @@ const StaffModule = ({
       label: dept.name
     }));
   }, [uniqueDepartments]);
+
+  // ==================== FIXED SEARCHABLE SELECT ====================
+  const SearchableSelect = ({ 
+    label, 
+    value, 
+    onChange, 
+    options = [], 
+    placeholder = "Search...", 
+    disabled,
+    required,
+    className,
+    emptyMessage = "No options available",
+    noOptionsMessage = "No results found"
+  }) => {
+    const [search, setSearch] = useState('');
+    const [isOpen, setIsOpen] = useState(false);
+    const dropdownRef = useRef(null);
+    const inputRef = useRef(null);
+
+    // Filter options based on search
+    const filteredOptions = useMemo(() => {
+      if (!options || options.length === 0) return [];
+      if (!search.trim()) return options;
+      
+      const searchLower = search.toLowerCase();
+      return options.filter(opt => {
+        if (!opt) return false;
+        const label = (opt.label || '').toLowerCase();
+        const subLabel = (opt.subLabel || '').toLowerCase();
+        const valueStr = String(opt.value || '').toLowerCase();
+        return label.includes(searchLower) || 
+               subLabel.includes(searchLower) || 
+               valueStr.includes(searchLower);
+      });
+    }, [options, search]);
+
+    // Get selected option
+    const selectedOption = useMemo(() => {
+      if (!options || options.length === 0) return null;
+      if (!value && value !== 0) return null;
+      return options.find(opt => opt.value === value) || null;
+    }, [options, value]);
+
+    // Click outside handler
+    useEffect(() => {
+      const handleClickOutside = (event) => {
+        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+          setIsOpen(false);
+        }
+      };
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    // Update search when value changes externally
+    useEffect(() => {
+      if (!isOpen && selectedOption) {
+        setSearch(selectedOption.label);
+      } else if (!isOpen && !selectedOption) {
+        setSearch('');
+      }
+    }, [selectedOption, isOpen]);
+
+    const handleSelect = (selectedValue) => {
+      onChange({ target: { value: selectedValue } });
+      const selected = options.find(opt => opt.value === selectedValue);
+      setSearch(selected ? selected.label : '');
+      setIsOpen(false);
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
+    };
+
+    const handleInputChange = (e) => {
+      const val = e.target.value;
+      setSearch(val);
+      setIsOpen(true);
+      
+      // If search is empty, clear the selection
+      if (val === '') {
+        onChange({ target: { value: '' } });
+      }
+    };
+
+    const handleFocus = () => {
+      if (disabled) return;
+      setIsOpen(true);
+      if (selectedOption && !search) {
+        setSearch(selectedOption.label);
+      }
+    };
+
+    const handleClear = (e) => {
+      e.stopPropagation();
+      onChange({ target: { value: '' } });
+      setSearch('');
+      setIsOpen(false);
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
+    };
+
+    // Determine display value
+    const displayValue = isOpen ? search : (selectedOption ? selectedOption.label : '');
+
+    return (
+      <div className="relative" ref={dropdownRef}>
+        {label && (
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            {label}
+            {required && <span className="text-red-500 ml-1">*</span>}
+          </label>
+        )}
+        
+        <div className="relative">
+          <input
+            ref={inputRef}
+            type="text"
+            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
+              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
+            } ${className || ''}`}
+            value={displayValue}
+            onChange={handleInputChange}
+            onFocus={handleFocus}
+            onBlur={() => {
+              setTimeout(() => {
+                if (!dropdownRef.current?.contains(document.activeElement)) {
+                  setIsOpen(false);
+                  if (!selectedOption) {
+                    setSearch('');
+                  }
+                }
+              }, 200);
+            }}
+            placeholder={placeholder}
+            disabled={disabled}
+            autoComplete="off"
+          />
+          
+          {value && !disabled && (
+            <button
+              type="button"
+              onClick={handleClear}
+              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+          
+          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
+            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+        </div>
+
+        {isOpen && !disabled && (
+          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
+            {options && options.length === 0 ? (
+              <div className="px-3 py-4 text-center text-gray-500 text-sm">
+                {emptyMessage}
+              </div>
+            ) : filteredOptions.length > 0 ? (
+              filteredOptions.map((opt) => (
+                <div
+                  key={opt.value || opt.key || opt.id || Math.random().toString()}
+                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
+                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
+                  } ${opt.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    if (!opt.disabled) {
+                      handleSelect(opt.value);
+                    }
+                  }}
+                >
+                  <div className="font-medium">{opt.label}</div>
+                  {opt.subLabel && (
+                    <div className="text-xs text-gray-500">{opt.subLabel}</div>
+                  )}
+                </div>
+              ))
+            ) : (
+              <div className="px-3 py-4 text-center text-gray-500 text-sm">
+                {search.trim() ? `No results for "${search}"` : noOptionsMessage}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // ==================== HANDLE FORM SUBMIT ====================
   const handleSubmit = async (e) => {
@@ -16799,7 +16864,6 @@ const StaffModule = ({
         delete formData.subjects;
       }
 
-      // Remove department fields for primary/secondary schools
       if (!showDepartment) {
         delete formData.departmentId;
         delete formData.department;
@@ -16971,7 +17035,7 @@ const StaffModule = ({
         value={value}
         onChange={onChange}
         placeholder={placeholder}
-        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
         disabled={disabled}
         min={min}
         step={step}
@@ -17015,9 +17079,9 @@ const StaffModule = ({
           {canProcessPayroll && (
             <button
               onClick={() => setShowPayrollForm(true)}
-              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center"
+              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
             >
-              <i className="fas fa-money-bill-wave mr-2"></i>
+              <i className="fas fa-money-bill-wave"></i>
               Process Payroll
             </button>
           )}
@@ -17025,19 +17089,21 @@ const StaffModule = ({
             <button
               onClick={() => {
                 handleCancel();
-                document.getElementById('staff-form')?.scrollIntoView({ behavior: 'smooth' });
+                setTimeout(() => {
+                  document.getElementById('staff-form')?.scrollIntoView({ behavior: 'smooth' });
+                }, 100);
               }}
-              className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors flex items-center"
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
             >
-              <i className="fas fa-plus mr-2"></i>
+              <i className="fas fa-plus"></i>
               {editingId ? 'Cancel Edit' : 'Add Staff'}
             </button>
           )}
           <button
             onClick={() => setShowFilters(!showFilters)}
-            className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors flex items-center"
+            className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors flex items-center gap-2"
           >
-            <i className="fas fa-filter mr-2"></i>
+            <i className="fas fa-filter"></i>
             Filters
           </button>
         </div>
@@ -17069,29 +17135,25 @@ const StaffModule = ({
                 placeholder="Search by name, ID, or job title..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
               />
             </div>
-            <div>
-              <SearchableSelect
-                label="Department"
-                value={departmentFilter}
-                onChange={(e) => setDepartmentFilter(e.target.value)}
-                options={departmentFilterOptions}
-                placeholder="All Departments"
-                emptyMessage="No departments available"
-              />
-            </div>
-            <div>
-              <SearchableSelect
-                label="Staff Type"
-                value={staffTypeFilter}
-                onChange={(e) => setStaffTypeFilter(e.target.value)}
-                options={staffTypeOptions}
-                placeholder="All Staff Types"
-                emptyMessage="No staff types available"
-              />
-            </div>
+            <SearchableSelect
+              label="Department"
+              value={departmentFilter}
+              onChange={(e) => setDepartmentFilter(e.target.value)}
+              options={departmentFilterOptions}
+              placeholder="All Departments"
+              emptyMessage="No departments available"
+            />
+            <SearchableSelect
+              label="Staff Type"
+              value={staffTypeFilter}
+              onChange={(e) => setStaffTypeFilter(e.target.value)}
+              options={staffTypeOptions}
+              placeholder="All Staff Types"
+              emptyMessage="No staff types available"
+            />
           </div>
           <div className="mt-4 flex justify-between items-center">
             <span className="text-sm text-gray-500">
@@ -17130,27 +17192,25 @@ const StaffModule = ({
           
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* User Account */}
-            <div>
-              <SearchableSelect
-                label="User Account"
-                value={form.userId || ''}
-                onChange={(e) => setForm({...form, userId: e.target.value})}
-                options={userOptions}
-                placeholder="Search users..."
-                emptyMessage="No users available"
-                required
-                disabled={loading || editingId}
-              />
-              {editingId && (
-                <p className="text-xs text-gray-500 mt-1">
-                  <i className="fas fa-info-circle mr-1"></i>
-                  User account cannot be changed after creation
-                </p>
-              )}
-            </div>
+            <SearchableSelect
+              label="User Account"
+              value={form.userId || ''}
+              onChange={(e) => setForm({...form, userId: e.target.value})}
+              options={userOptions}
+              placeholder="Search users..."
+              emptyMessage="No users available"
+              required
+              disabled={loading || editingId}
+            />
+            {editingId && (
+              <p className="text-xs text-gray-500 mt-1">
+                <i className="fas fa-info-circle mr-1"></i>
+                User account cannot be changed after creation
+              </p>
+            )}
 
             {/* Employee ID & TSC Number */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <InputField
                 label="Employee ID"
                 value={form.employeeId || ''}
@@ -17167,49 +17227,45 @@ const StaffModule = ({
               />
             </div>
 
-            {/* Staff Role - NEW FIELD */}
-            <div>
-              <SearchableSelect
-                label="Staff Role"
-                value={form.staffRole || ''}
-                onChange={(e) => setForm({...form, staffRole: e.target.value})}
-                options={getStaffRoleOptions}
-                placeholder="Select staff role..."
-                emptyMessage="No staff roles available"
-                required
-                disabled={loading}
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                <i className="fas fa-info-circle mr-1"></i>
-                {isUniversity ? 'Academic or administrative role within the institution' : 
-                 isTVET ? 'Teaching or technical role within the institution' : 
-                 'Teaching or administrative role within the school'}
-              </p>
-            </div>
+            {/* Staff Role */}
+            <SearchableSelect
+              label="Staff Role"
+              value={form.staffRole || ''}
+              onChange={(e) => setForm({...form, staffRole: e.target.value})}
+              options={getStaffRoleOptions}
+              placeholder="Select staff role..."
+              emptyMessage="No staff roles available"
+              required
+              disabled={loading}
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              <i className="fas fa-info-circle mr-1"></i>
+              {isUniversity ? 'Academic or administrative role within the institution' : 
+               isTVET ? 'Teaching or technical role within the institution' : 
+               'Teaching or administrative role within the school'}
+            </p>
 
             {/* Department field - Only shown for University and TVET */}
             {showDepartment && (
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <SearchableSelect
-                    label={isUniversity ? "Faculty/Department" : "Department"}
-                    value={form.departmentId || ''}
-                    onChange={(e) => {
-                      const deptId = e.target.value;
-                      const dept = departments?.find(d => d.id === deptId);
-                      setForm({
-                        ...form, 
-                        departmentId: deptId,
-                        department: dept?.name || ''
-                      });
-                    }}
-                    options={departmentOptions}
-                    placeholder="Search departments..."
-                    emptyMessage={departments && departments.length > 0 ? "No departments available" : "No departments configured for this school"}
-                    required={isUniversity || isTVET}
-                    disabled={loading}
-                  />
-                </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <SearchableSelect
+                  label={isUniversity ? "Faculty/Department" : "Department"}
+                  value={form.departmentId || ''}
+                  onChange={(e) => {
+                    const deptId = e.target.value;
+                    const dept = departments?.find(d => d.id === deptId);
+                    setForm({
+                      ...form, 
+                      departmentId: deptId,
+                      department: dept?.name || ''
+                    });
+                  }}
+                  options={departmentOptions}
+                  placeholder="Search departments..."
+                  emptyMessage={departments && departments.length > 0 ? "No departments available" : "No departments configured for this school"}
+                  required={isUniversity || isTVET}
+                  disabled={loading}
+                />
                 <InputField
                   label="Job Title"
                   value={form.jobTitle || ''}
@@ -17223,20 +17279,18 @@ const StaffModule = ({
 
             {/* If no department, show job title full width */}
             {!showDepartment && (
-              <div>
-                <InputField
-                  label="Job Title"
-                  value={form.jobTitle || ''}
-                  onChange={(e) => setForm({...form, jobTitle: e.target.value})}
-                  placeholder="e.g., Class Teacher"
-                  required
-                  disabled={loading}
-                />
-              </div>
+              <InputField
+                label="Job Title"
+                value={form.jobTitle || ''}
+                onChange={(e) => setForm({...form, jobTitle: e.target.value})}
+                placeholder="e.g., Class Teacher"
+                required
+                disabled={loading}
+              />
             )}
 
             {/* Employment Date & Staff Type */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <InputField
                 label="Employment Date"
                 type="date"
@@ -17245,17 +17299,15 @@ const StaffModule = ({
                 required
                 disabled={loading}
               />
-              <div>
-                <SearchableSelect
-                  label="Staff Type"
-                  value={form.staffType || ''}
-                  onChange={(e) => setForm({...form, staffType: e.target.value})}
-                  options={staffTypeOptions}
-                  placeholder="Select staff type..."
-                  emptyMessage="No staff types available"
-                  disabled={loading}
-                />
-              </div>
+              <SearchableSelect
+                label="Staff Type"
+                value={form.staffType || ''}
+                onChange={(e) => setForm({...form, staffType: e.target.value})}
+                options={staffTypeOptions}
+                placeholder="Select staff type..."
+                emptyMessage="No staff types available"
+                disabled={loading}
+              />
             </div>
 
             {/* Subjects - Only for Secondary Schools */}
@@ -17295,7 +17347,7 @@ const StaffModule = ({
                 <i className="fas fa-money-bill text-green-600"></i>
                 Salary Details
               </h4>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <InputField
                   label="Basic Salary"
                   type="number"
@@ -17354,13 +17406,13 @@ const StaffModule = ({
             <div className="flex flex-wrap gap-3 pt-2 border-t">
               <button
                 type="submit"
-                className="flex-1 bg-indigo-600 text-white py-2.5 px-4 rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center disabled:opacity-50"
+                className="flex-1 bg-indigo-600 text-white py-2.5 px-4 rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center disabled:opacity-50 gap-2"
                 disabled={loading}
               >
                 {loading ? (
-                  <><i className="fas fa-spinner fa-spin mr-2"></i>Saving...</>
+                  <><i className="fas fa-spinner fa-spin"></i>Saving...</>
                 ) : (
-                  <><i className={`fas fa-${editingId ? 'save' : 'plus-circle'} mr-2`}></i>
+                  <><i className={`fas fa-${editingId ? 'save' : 'plus-circle'}`}></i>
                   {editingId ? 'Update Staff' : 'Add Staff'}</>
                 )}
               </button>
@@ -17380,7 +17432,7 @@ const StaffModule = ({
       )}
 
       {/* Staff List */}
-      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+      <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-200">
         <div className="px-6 py-4 bg-gray-50 border-b flex justify-between items-center flex-wrap gap-2">
           <h3 className="font-semibold text-lg flex items-center gap-2">
             <i className="fas fa-users text-indigo-600"></i>
@@ -17625,13 +17677,13 @@ const StaffModule = ({
               <div className="flex space-x-3 pt-2">
                 <button
                   onClick={processPayroll}
-                  className="flex-1 bg-green-600 text-white py-2.5 px-4 rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center disabled:opacity-50"
+                  className="flex-1 bg-green-600 text-white py-2.5 px-4 rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center disabled:opacity-50 gap-2"
                   disabled={loading || staff.length === 0}
                 >
                   {loading ? (
-                    <><i className="fas fa-spinner fa-spin mr-2"></i>Processing...</>
+                    <><i className="fas fa-spinner fa-spin"></i>Processing...</>
                   ) : (
-                    <><i className="fas fa-calculator mr-2"></i>Process Payroll</>
+                    <><i className="fas fa-calculator"></i>Process Payroll</>
                   )}
                 </button>
                 <button
