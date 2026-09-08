@@ -16550,6 +16550,81 @@ const StaffModule = ({
     }).format(amount || 0);
   };
 
+  // ==================== STAFF ROLE OPTIONS BASED ON SCHOOL TYPE ====================
+  const getStaffRoleOptions = useMemo(() => {
+    if (isUniversity) {
+      return [
+        { value: 'PROFESSOR', label: 'Professor' },
+        { value: 'SENIOR_LECTURER', label: 'Senior Lecturer' },
+        { value: 'LECTURER', label: 'Lecturer' },
+        { value: 'ASSISTANT_LECTURER', label: 'Assistant Lecturer' },
+        { value: 'TUTOR', label: 'Tutor' },
+        { value: 'HOD_LECTURER', label: 'Head of Department (Academic)' },
+        { value: 'DEAN', label: 'Dean' },
+        { value: 'REGISTRAR', label: 'Registrar' },
+        { value: 'LIBRARIAN', label: 'Librarian' },
+        { value: 'IT_OFFICER', label: 'IT Officer' },
+        { value: 'ADMINISTRATOR', label: 'Administrator' },
+        { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
+        { value: 'SUPPORT_STAFF', label: 'Support Staff' },
+        { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
+        { value: 'COUNSELOR', label: 'Counselor' },
+        { value: 'NURSE', label: 'Nurse' },
+      ];
+    } else if (isTVET) {
+      return [
+        { value: 'TECHNICAL_INSTRUCTOR', label: 'Technical Instructor' },
+        { value: 'WORKSHOP_SUPERVISOR', label: 'Workshop Supervisor' },
+        { value: 'HOD', label: 'Head of Department' },
+        { value: 'PRINCIPAL', label: 'Principal' },
+        { value: 'DEPUTY_PRINCIPAL', label: 'Deputy Principal' },
+        { value: 'CLASS_TEACHER', label: 'Class Teacher' },
+        { value: 'SUBJECT_TEACHER', label: 'Subject Teacher' },
+        { value: 'SUPPORT_STAFF', label: 'Support Staff' },
+        { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
+        { value: 'LIBRARIAN', label: 'Librarian' },
+        { value: 'ADMINISTRATOR', label: 'Administrator' },
+        { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
+        { value: 'IT_OFFICER', label: 'IT Officer' },
+        { value: 'COUNSELOR', label: 'Counselor' },
+        { value: 'NURSE', label: 'Nurse' },
+      ];
+    } else if (isSecondary) {
+      return [
+        { value: 'PRINCIPAL', label: 'Principal' },
+        { value: 'DEPUTY_PRINCIPAL', label: 'Deputy Principal' },
+        { value: 'HOD', label: 'Head of Department' },
+        { value: 'CLASS_TEACHER', label: 'Class Teacher' },
+        { value: 'SUBJECT_TEACHER', label: 'Subject Teacher' },
+        { value: 'SUPPORT_STAFF', label: 'Support Staff' },
+        { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
+        { value: 'LIBRARIAN', label: 'Librarian' },
+        { value: 'ADMINISTRATOR', label: 'Administrator' },
+        { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
+        { value: 'IT_OFFICER', label: 'IT Officer' },
+        { value: 'COUNSELOR', label: 'Counselor' },
+        { value: 'NURSE', label: 'Nurse' },
+      ];
+    } else {
+      // Primary / ECDE / JSS
+      return [
+        { value: 'HEAD_TEACHER', label: 'Head Teacher' },
+        { value: 'DEPUTY_HEAD_TEACHER', label: 'Deputy Head Teacher' },
+        { value: 'SENIOR_TEACHER', label: 'Senior Teacher' },
+        { value: 'CLASS_TEACHER', label: 'Class Teacher' },
+        { value: 'SUBJECT_TEACHER', label: 'Subject Teacher' },
+        { value: 'SUPPORT_STAFF', label: 'Support Staff' },
+        { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
+        { value: 'LIBRARIAN', label: 'Librarian' },
+        { value: 'ADMINISTRATOR', label: 'Administrator' },
+        { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
+        { value: 'IT_OFFICER', label: 'IT Officer' },
+        { value: 'COUNSELOR', label: 'Counselor' },
+        { value: 'NURSE', label: 'Nurse' },
+      ];
+    }
+  }, [isUniversity, isTVET, isSecondary]);
+
   // ==================== FILTER STAFF ====================
   const filteredStaff = useMemo(() => {
     let filtered = [...staff];
@@ -16563,11 +16638,13 @@ const StaffModule = ({
         const jobTitle = (member.jobTitle || '').toLowerCase();
         const department = (member.department || '').toLowerCase();
         const email = (userData.email || '').toLowerCase();
+        const staffRole = (member.staffRole || '').replace(/_/g, ' ').toLowerCase();
         return name.includes(term) || 
                employeeId.includes(term) || 
                jobTitle.includes(term) || 
                department.includes(term) ||
-               email.includes(term);
+               email.includes(term) ||
+               staffRole.includes(term);
       });
     }
 
@@ -16675,6 +16752,12 @@ const StaffModule = ({
       return;
     }
 
+    if (!form.staffRole) {
+      setErrorMessage('Please select a staff role');
+      setTimeout(() => setErrorMessage(''), 3000);
+      return;
+    }
+
     if (!form.employmentDate) {
       setErrorMessage('Please select employment date');
       setTimeout(() => setErrorMessage(''), 3000);
@@ -16750,6 +16833,7 @@ const StaffModule = ({
         specialization: '',
         subjects: [],
         staffType: 'TEACHING',
+        staffRole: '',
         bankDetails: { bank: '', branch: '', account: '' },
         salary: { basic: 0, house: 0, transport: 0 }
       });
@@ -16848,7 +16932,8 @@ const StaffModule = ({
         : new Date().toISOString().split('T')[0],
       salary: member.salary || { basic: 0, house: 0, transport: 0 },
       departmentId: member.departmentId || '',
-      department: member.department || ''
+      department: member.department || '',
+      staffRole: member.staffRole || ''
     });
     setEditingId(member.id);
   };
@@ -16868,6 +16953,7 @@ const StaffModule = ({
       specialization: '',
       subjects: [],
       staffType: 'TEACHING',
+      staffRole: '',
       bankDetails: { bank: '', branch: '', account: '' },
       salary: { basic: 0, house: 0, transport: 0 }
     });
@@ -17043,6 +17129,7 @@ const StaffModule = ({
           </h3>
           
           <form onSubmit={handleSubmit} className="space-y-4">
+            {/* User Account */}
             <div>
               <SearchableSelect
                 label="User Account"
@@ -17062,6 +17149,7 @@ const StaffModule = ({
               )}
             </div>
 
+            {/* Employee ID & TSC Number */}
             <div className="grid grid-cols-2 gap-4">
               <InputField
                 label="Employee ID"
@@ -17077,6 +17165,26 @@ const StaffModule = ({
                 placeholder="e.g., TSC-12345"
                 disabled={loading}
               />
+            </div>
+
+            {/* Staff Role - NEW FIELD */}
+            <div>
+              <SearchableSelect
+                label="Staff Role"
+                value={form.staffRole || ''}
+                onChange={(e) => setForm({...form, staffRole: e.target.value})}
+                options={getStaffRoleOptions}
+                placeholder="Select staff role..."
+                emptyMessage="No staff roles available"
+                required
+                disabled={loading}
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                <i className="fas fa-info-circle mr-1"></i>
+                {isUniversity ? 'Academic or administrative role within the institution' : 
+                 isTVET ? 'Teaching or technical role within the institution' : 
+                 'Teaching or administrative role within the school'}
+              </p>
             </div>
 
             {/* Department field - Only shown for University and TVET */}
@@ -17127,6 +17235,7 @@ const StaffModule = ({
               </div>
             )}
 
+            {/* Employment Date & Staff Type */}
             <div className="grid grid-cols-2 gap-4">
               <InputField
                 label="Employment Date"
@@ -17149,6 +17258,7 @@ const StaffModule = ({
               </div>
             </div>
 
+            {/* Subjects - Only for Secondary Schools */}
             {showSubjects && (
               <div>
                 <InputField
@@ -17168,6 +17278,7 @@ const StaffModule = ({
               </div>
             )}
 
+            {/* Specialization - Only for University/TVET */}
             {(isUniversity || isTVET) && (
               <InputField
                 label="Specialization"
@@ -17317,6 +17428,9 @@ const StaffModule = ({
               const userData = member.User || {};
               const totalSalary = getTotalSalary(member);
               const departmentName = getDepartmentName(member.departmentId) || member.department || 'N/A';
+              const staffRoleDisplay = member.staffRole 
+                ? member.staffRole.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase()) 
+                : 'N/A';
               
               return (
                 <div
@@ -17349,8 +17463,14 @@ const StaffModule = ({
                             {member.staffType === 'TEACHING' ? 'Teaching' : 'Non-Teaching'}
                           </span>
                         </div>
+                        <div>
+                          <span className="text-gray-500">Role:</span>
+                          <span className="ml-1 font-medium text-indigo-600">
+                            {staffRoleDisplay}
+                          </span>
+                        </div>
                         {showDepartment && (
-                          <div>
+                          <div className="col-span-2">
                             <span className="text-gray-500">Department:</span>
                             <span className="ml-1 font-medium truncate block">{departmentName}</span>
                           </div>
