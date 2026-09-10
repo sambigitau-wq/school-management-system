@@ -62004,24 +62004,30 @@ if (user.role === 'SCHOOL_ADMIN') {
   const sections = [
     dashboardSection
   ];
-
-  // ===== TVET SECTIONS =====
-  if (isTVET) {
-    sections.push(
-      {
-        title: "TVET",
-        items: [
-          { icon: "building", label: "Faculties", id: 'faculties' },
-          { icon: "layer-group", label: "Departments", id: 'departments' },
-          { icon: "graduation-cap", label: "Programs", id: 'programs' },
-          { icon: "book-open", label: "Modules", id: 'course-units' },
-          { icon: "microscope", label: "Labs", id: 'labs' },
-          { icon: "user-plus", label: "Course Enrollment", id: 'course-enrollment' },
-          { icon: "book", label: "Unit Registration", id: 'unit-registration' }
-        ]
-      }
-    );
-  }
+if (isTVET) {
+  sections.push(
+    {
+      title: "TVET",
+      items: [
+        { icon: "building", label: "Faculties", id: 'faculties' },
+        { icon: "layer-group", label: "Departments", id: 'departments' },
+        { icon: "graduation-cap", label: "Programs", id: 'programs' },
+        { icon: "book-open", label: "Modules", id: 'course-units' },
+        { icon: "microscope", label: "Labs", id: 'labs' },
+        { icon: "user-plus", label: "Course Enrollment", id: 'course-enrollment' },
+        { icon: "book", label: "Unit Registration", id: 'unit-registration' }
+      ]
+    },
+    // 👇 ADD THIS NEW SECTION
+    {
+      title: "STUDENTS & STAFF",
+      items: [
+        { icon: "user-graduate", label: "Students", id: 'students' },
+        { icon: "chalkboard-teacher", label: "Staff", id: 'staff' }
+      ]
+    }
+  );
+}
 
   // ===== UNIVERSITY SECTIONS =====
   if (isUniversity) {
