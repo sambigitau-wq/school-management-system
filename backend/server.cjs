@@ -1238,7 +1238,8 @@ const Payment = sequelize.define('Payment', {
   admissionNumber: { type: DataTypes.STRING, allowNull: true },
   courseName: { type: DataTypes.STRING, allowNull: true },
   className: { type: DataTypes.STRING, allowNull: true },
-  feeName: { type: DataTypes.STRING, allowNull: true }
+  feeName: { type: DataTypes.STRING, allowNull: true },
+  discountAmount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 }
 });
 
 const CourseUnit = sequelize.define('CourseUnit', {
@@ -11357,7 +11358,7 @@ app.post('/api/payments', authenticate, async (req, res) => {
       mpesaCode, mpesaPhone, bankReference, bankMessage,
       cardLast4, cardApprovalCode, chequeNumber, chequeBank,
       isOtherIncome, incomeCategory, description, payer,
-      studentName, admissionNumber, courseName, className, feeName
+      studentName, admissionNumber, courseName, className, feeName, discountAmount 
     } = req.body;
 
     // Validate required fields
@@ -11427,7 +11428,8 @@ app.post('/api/payments', authenticate, async (req, res) => {
       admissionNumber: admissionNumber || null,
       courseName: courseName || null,
       className: className || null,
-      feeName: feeName || null
+      feeName: feeName || null,
+      discountAmount: parseFloat(discountAmount) || 0  // ✅ NEW
     });
 
     // If this payment is for a specific fee, update the allocation status
@@ -11733,9 +11735,9 @@ app.get('/api/students/:studentId/fee-statement', authenticate, async (req, res)
     });
 
     const totalFees = fees.reduce((sum, fee) => sum + parseFloat(fee.amount || 0), 0);
-    const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-    const balance = totalFees - totalPaid;
-
+   const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+const totalDiscounts = payments.reduce((sum, p) => sum + parseFloat(p.discountAmount || 0), 0);
+const balance = totalFees - totalDiscounts - totalPaid;
     res.json({
       success: true,
       statement: {
