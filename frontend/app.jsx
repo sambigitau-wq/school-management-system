@@ -61081,6 +61081,7 @@ function App() {
   const [results, setResults] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [fees, setFees] = useState([]);
+  const [discounts, setDiscounts] = useState([]);   // ✅ ADD THIS
   const [payments, setPayments] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [staff, setStaff] = useState([]);
