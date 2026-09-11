@@ -1196,7 +1196,11 @@ const Fee = sequelize.define('Fee', {
   isRecurring: { type: DataTypes.BOOLEAN, defaultValue: false },
   allocationType: { type: DataTypes.ENUM('AUTO', 'MANUAL'), defaultValue: 'AUTO' },
   appliesTo: { type: DataTypes.JSONB, defaultValue: ['ALL'] },
-  transportRouteId: { type: DataTypes.UUID, allowNull: true }
+  transportRouteId: { type: DataTypes.UUID, allowNull: true },
+
+  // ✅ NEW: Fee-level default discount (applies to every student who gets this fee)
+  discountAmount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+  discountPercent: { type: DataTypes.FLOAT, defaultValue: 0 }
 });
 
 const Payment = sequelize.define('Payment', {
@@ -2673,6 +2677,41 @@ const FeeAllocation = sequelize.define('FeeAllocation', {
     { fields: ['schoolId'] }
   ]
 });
+
+// ==================== DISCOUNT MODEL ====================
+const Discount = sequelize.define('Discount', {
+  id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+  studentId: { type: DataTypes.UUID, allowNull: false },
+  feeId: { type: DataTypes.UUID, allowNull: true }, // null = applies to all fees for the student
+  type: {
+    type: DataTypes.ENUM('AMOUNT', 'PERCENT'),
+    allowNull: false,
+    defaultValue: 'AMOUNT'
+  },
+  value: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 },
+  reason: { type: DataTypes.STRING, allowNull: true },
+  academicYear: { type: DataTypes.STRING, allowNull: true },
+  term: { type: DataTypes.STRING, allowNull: true },
+  schoolId: { type: DataTypes.UUID, allowNull: false },
+  createdBy: { type: DataTypes.UUID, allowNull: true },
+  isActive: { type: DataTypes.BOOLEAN, defaultValue: true }
+}, {
+  timestamps: true,
+  indexes: [
+    { fields: ['studentId'] },
+    { fields: ['feeId'] },
+    { fields: ['schoolId'] },
+    { fields: ['studentId', 'feeId'] }
+  ]
+});
+
+// ==================== DISCOUNT ASSOCIATIONS ====================
+Discount.belongsTo(Student, { foreignKey: 'studentId' });
+Discount.belongsTo(Fee, { foreignKey: 'feeId' });
+Discount.belongsTo(School, { foreignKey: 'schoolId' });
+Student.hasMany(Discount, { foreignKey: 'studentId' });
+Fee.hasMany(Discount, { foreignKey: 'feeId' });
+School.hasMany(Discount, { foreignKey: 'schoolId' });
 
 // ==================== FEE ALLOCATION ASSOCIATIONS ====================
 FeeAllocation.belongsTo(Student, { foreignKey: 'studentId' });
@@ -10568,7 +10607,395 @@ app.delete('/api/fees/:id', authenticate, requireSchoolAdmin, async (req, res) =
     });
   }
 });
+// ==================== DISCOUNT ROUTES ====================
 
+// GET all discounts (with filters)
+app.get('/api/discounts', authenticate, async (req, res) => {
+  try {
+    const { studentId, feeId, academicYear, term } = req.query;
+    const where = { schoolId: req.user.schoolId, isActive: true };
+
+    if (studentId) where.studentId = studentId;
+    if (feeId) where.feeId = feeId;
+    if (academicYear) where.academicYear = academicYear;
+    if (term) where.term = term;
+
+    // Students/parents see only their own
+    if (req.user.role === 'STUDENT') {
+      const student = await Student.findOne({ where: { userId: req.user.id } });
+      if (!student) return res.json({ success: true, discounts: [] });
+      where.studentId = student.id;
+    } else if (req.user.role === 'PARENT') {
+      const children = await Parent.findAll({
+        where: { userId: req.user.id },
+        attributes: ['studentId']
+      });
+      where.studentId = { [Op.in]: children.map(c => c.studentId) };
+    }
+
+    const discounts = await Discount.findAll({
+      where,
+      include: [
+        { model: Student, attributes: ['id', 'firstName', 'lastName', 'admissionNumber'] },
+        { model: Fee, attributes: ['id', 'name', 'amount', 'term', 'academicYear'] }
+      ],
+      order: [['createdAt', 'DESC']]
+    });
+
+    res.json({ success: true, discounts });
+  } catch (error) {
+    console.error('❌ Get discounts error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET single discount
+app.get('/api/discounts/:id', authenticate, async (req, res) => {
+  try {
+    const discount = await Discount.findOne({
+      where: { id: req.params.id, schoolId: req.user.schoolId },
+      include: [
+        { model: Student, attributes: ['id', 'firstName', 'lastName', 'admissionNumber'] },
+        { model: Fee, attributes: ['id', 'name', 'amount'] }
+      ]
+    });
+
+    if (!discount) {
+      return res.status(404).json({ success: false, message: 'Discount not found' });
+    }
+
+    res.json({ success: true, discount });
+  } catch (error) {
+    console.error('❌ Get discount error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// CREATE or UPSERT discount
+app.post('/api/discounts', authenticate, async (req, res) => {
+  try {
+    const canGrant = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(req.user.role);
+    if (!canGrant) {
+      return res.status(403).json({ success: false, message: 'You do not have permission to grant discounts' });
+    }
+
+    const { studentId, feeId, type, value, reason, academicYear, term } = req.body;
+
+    // Validation
+    if (!studentId) {
+      return res.status(400).json({ success: false, message: 'studentId is required' });
+    }
+    if (!type || !['AMOUNT', 'PERCENT'].includes(type)) {
+      return res.status(400).json({ success: false, message: 'type must be AMOUNT or PERCENT' });
+    }
+    const numValue = parseFloat(value);
+    if (isNaN(numValue) || numValue <= 0) {
+      return res.status(400).json({ success: false, message: 'value must be a positive number' });
+    }
+    if (type === 'PERCENT' && numValue > 100) {
+      return res.status(400).json({ success: false, message: 'Percent discount cannot exceed 100%' });
+    }
+
+    // Verify student belongs to this school
+    const student = await Student.findOne({
+      where: { id: studentId, schoolId: req.user.schoolId }
+    });
+    if (!student) {
+      return res.status(404).json({ success: false, message: 'Student not found in this school' });
+    }
+
+    // If feeId given, verify fee exists and belongs to this school
+    if (feeId) {
+      const fee = await Fee.findOne({
+        where: { id: feeId, schoolId: req.user.schoolId }
+      });
+      if (!fee) {
+        return res.status(404).json({ success: false, message: 'Fee not found in this school' });
+      }
+
+      // Cap amount discount at fee amount
+      if (type === 'AMOUNT' && numValue > parseFloat(fee.amount)) {
+        return res.status(400).json({
+          success: false,
+          message: `Discount cannot exceed fee amount (${fee.amount})`
+        });
+      }
+    }
+
+    // Upsert: one active discount per (studentId, feeId) combination
+    const existing = await Discount.findOne({
+      where: { studentId, feeId: feeId || null, isActive: true }
+    });
+
+    let discount;
+    if (existing) {
+      await existing.update({
+        type,
+        value: numValue,
+        reason: reason || null,
+        academicYear: academicYear || null,
+        term: term || null
+      });
+      discount = existing;
+    } else {
+      discount = await Discount.create({
+        studentId,
+        feeId: feeId || null,
+        type,
+        value: numValue,
+        reason: reason || null,
+        academicYear: academicYear || null,
+        term: term || null,
+        schoolId: req.user.schoolId,
+        createdBy: req.user.id,
+        isActive: true
+      });
+    }
+
+    // Create audit log
+    try {
+      await createAuditLog(req, existing ? 'UPDATE' : 'CREATE', 'DISCOUNT', discount.id, null, {
+        studentId, feeId, type, value: numValue, reason
+      });
+    } catch (logErr) { /* non-critical */ }
+
+    const populated = await Discount.findByPk(discount.id, {
+      include: [
+        { model: Student, attributes: ['id', 'firstName', 'lastName', 'admissionNumber'] },
+        { model: Fee, attributes: ['id', 'name', 'amount'] }
+      ]
+    });
+
+    res.status(existing ? 200 : 201).json({
+      success: true,
+      message: existing ? 'Discount updated successfully' : 'Discount applied successfully',
+      discount: populated
+    });
+  } catch (error) {
+    console.error('❌ Create discount error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// UPDATE discount
+app.put('/api/discounts/:id', authenticate, async (req, res) => {
+  try {
+    const canGrant = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(req.user.role);
+    if (!canGrant) {
+      return res.status(403).json({ success: false, message: 'You do not have permission to edit discounts' });
+    }
+
+    const discount = await Discount.findOne({
+      where: { id: req.params.id, schoolId: req.user.schoolId }
+    });
+    if (!discount) {
+      return res.status(404).json({ success: false, message: 'Discount not found' });
+    }
+
+    const { type, value, reason, academicYear, term } = req.body;
+
+    if (type && !['AMOUNT', 'PERCENT'].includes(type)) {
+      return res.status(400).json({ success: false, message: 'type must be AMOUNT or PERCENT' });
+    }
+    if (value !== undefined) {
+      const numValue = parseFloat(value);
+      if (isNaN(numValue) || numValue <= 0) {
+        return res.status(400).json({ success: false, message: 'value must be positive' });
+      }
+      if ((type || discount.type) === 'PERCENT' && numValue > 100) {
+        return res.status(400).json({ success: false, message: 'Percent cannot exceed 100%' });
+      }
+    }
+
+    await discount.update({
+      ...(type && { type }),
+      ...(value !== undefined && { value: parseFloat(value) }),
+      ...(reason !== undefined && { reason }),
+      ...(academicYear !== undefined && { academicYear }),
+      ...(term !== undefined && { term })
+    });
+
+    const populated = await Discount.findByPk(discount.id, {
+      include: [
+        { model: Student, attributes: ['id', 'firstName', 'lastName', 'admissionNumber'] },
+        { model: Fee, attributes: ['id', 'name', 'amount'] }
+      ]
+    });
+
+    res.json({ success: true, message: 'Discount updated', discount: populated });
+  } catch (error) {
+    console.error('❌ Update discount error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// DELETE discount (soft delete by isActive = false)
+app.delete('/api/discounts/:id', authenticate, async (req, res) => {
+  try {
+    const canDelete = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL'].includes(req.user.role);
+    if (!canDelete) {
+      return res.status(403).json({ success: false, message: 'You do not have permission to remove discounts' });
+    }
+
+    const discount = await Discount.findOne({
+      where: { id: req.params.id, schoolId: req.user.schoolId }
+    });
+    if (!discount) {
+      return res.status(404).json({ success: false, message: 'Discount not found' });
+    }
+
+    await discount.update({ isActive: false });
+
+    try {
+      await createAuditLog(req, 'DELETE', 'DISCOUNT', discount.id);
+    } catch (logErr) { /* non-critical */ }
+
+    res.json({ success: true, message: 'Discount removed successfully' });
+  } catch (error) {
+    console.error('❌ Delete discount error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ============================================================
+// STUDENT FEE STATEMENT — applies discounts + payments
+// Balance = Fee Amount − Discount − Paid
+// ============================================================
+app.get('/api/discounts/student/:studentId/statement', authenticate, async (req, res) => {
+  try {
+    const { studentId } = req.params;
+
+    // Authorization
+    if (req.user.role === 'STUDENT') {
+      const me = await Student.findOne({ where: { userId: req.user.id } });
+      if (!me || me.id !== studentId) {
+        return res.status(403).json({ success: false, message: 'Access denied' });
+      }
+    } else if (req.user.role === 'PARENT') {
+      const link = await Parent.findOne({ where: { userId: req.user.id, studentId } });
+      if (!link) {
+        return res.status(403).json({ success: false, message: 'Access denied' });
+      }
+    }
+
+    const student = await Student.findOne({
+      where: { id: studentId, schoolId: req.user.schoolId },
+      include: [
+        { model: Class, required: false },
+        { model: Course, required: false },
+        { model: Program, required: false }
+      ]
+    });
+    if (!student) {
+      return res.status(404).json({ success: false, message: 'Student not found' });
+    }
+
+    const school = await School.findByPk(req.user.schoolId);
+
+    // Get fees that apply to this student
+    const feeWhere = { schoolId: req.user.schoolId };
+    if (school.category === 'UNIVERSITY' && student.courseId) {
+      feeWhere.courseId = student.courseId;
+    } else if (school.category === 'COLLEGE_TVET' && student.programId) {
+      feeWhere.programId = student.programId;
+    } else if (student.classId) {
+      feeWhere.classId = student.classId;
+    }
+
+    const fees = await Fee.findAll({ where: feeWhere });
+
+    // Get this student's discounts and payments
+    const discounts = await Discount.findAll({
+      where: { studentId, schoolId: req.user.schoolId, isActive: true }
+    });
+    const payments = await Payment.findAll({
+      where: { studentId, schoolId: req.user.schoolId, isOtherIncome: false }
+    });
+
+    // Build statement line by line
+    const lines = fees.map(fee => {
+      const amount = parseFloat(fee.amount) || 0;
+
+      // Per-student discount (highest priority)
+      const perStudentDiscount = discounts.find(d => d.feeId === fee.id);
+      // Student-wide discount (feeId === null)
+      const studentWideDiscount = !perStudentDiscount
+        ? discounts.find(d => d.feeId === null)
+        : null;
+
+      let discountAmount = 0;
+      let discountSource = null;
+
+      if (perStudentDiscount) {
+        discountAmount = perStudentDiscount.type === 'PERCENT'
+          ? amount * (parseFloat(perStudentDiscount.value) / 100)
+          : parseFloat(perStudentDiscount.value);
+        discountSource = perStudentDiscount;
+      } else if (studentWideDiscount) {
+        discountAmount = studentWideDiscount.type === 'PERCENT'
+          ? amount * (parseFloat(studentWideDiscount.value) / 100)
+          : parseFloat(studentWideDiscount.value);
+        discountSource = studentWideDiscount;
+      } else {
+        // Fall back to fee-level default discount
+        if (parseFloat(fee.discountPercent) > 0) {
+          discountAmount = amount * (parseFloat(fee.discountPercent) / 100);
+        } else if (parseFloat(fee.discountAmount) > 0) {
+          discountAmount = parseFloat(fee.discountAmount);
+        }
+      }
+
+      const paid = payments
+        .filter(p => p.feeId === fee.id)
+        .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+
+      const payable = Math.max(0, amount - discountAmount);
+      const balance = Math.max(0, payable - paid);
+
+      return {
+        feeId: fee.id,
+        feeName: fee.name,
+        category: fee.category,
+        term: fee.term,
+        academicYear: fee.academicYear,
+        amount,
+        discount: discountAmount,
+        discountReason: discountSource?.reason || null,
+        payable,
+        paid,
+        balance,
+        isCleared: balance <= 0
+      };
+    });
+
+    const totals = lines.reduce(
+      (acc, l) => ({
+        billed: acc.billed + l.amount,
+        discounts: acc.discounts + l.discount,
+        payable: acc.payable + l.payable,
+        paid: acc.paid + l.paid,
+        balance: acc.balance + l.balance
+      }),
+      { billed: 0, discounts: 0, payable: 0, paid: 0, balance: 0 }
+    );
+
+    res.json({
+      success: true,
+      student: {
+        id: student.id,
+        firstName: student.firstName,
+        lastName: student.lastName,
+        admissionNumber: student.admissionNumber
+      },
+      lines,
+      totals,
+      isFullyCleared: totals.balance <= 0
+    });
+  } catch (error) {
+    console.error('❌ Get student statement error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 // ==================== AUTO-ALLOCATE FEE (FOR EXISTING FEES) ====================
 app.post('/api/fees/:id/auto-allocate', authenticate, requireSchoolAdmin, async (req, res) => {
   try {
