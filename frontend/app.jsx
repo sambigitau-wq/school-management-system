@@ -29368,7 +29368,7 @@ const FeesModule = ({
   handleUpdate,
   currentSchool, user,
   admissionNumber: propAdmissionNumber,
-  // ✅ NEW: optional discounts prop (array of per-student discounts)
+  // ✅ Optional: discounts array + setter passed from parent
   discounts = [], setDiscounts
 }) => {
   // ==================== 1. STATE DECLARATIONS ====================
@@ -29391,12 +29391,12 @@ const FeesModule = ({
   const [admissionNumber, setAdmissionNumber] = useState(propAdmissionNumber);
   const [admissionMessage, setAdmissionMessage] = useState('');
 
-  // ✅ NEW: discount UI state
+  // ✅ Discount modal state
   const [showDiscountModal, setShowDiscountModal] = useState(false);
   const [discountStudent, setDiscountStudent] = useState(null);
   const [discountFee, setDiscountFee] = useState(null);
   const [discountForm, setDiscountForm] = useState({
-    type: 'AMOUNT',          // 'AMOUNT' or 'PERCENT'
+    type: 'AMOUNT',
     value: '',
     reason: '',
     academicYear: new Date().getFullYear().toString(),
@@ -29676,7 +29676,6 @@ const FeesModule = ({
     { value: 'Higher Diploma', label: 'Higher Diploma' }
   ], []);
 
-  // ✅ NEW: student options for discount modal
   const studentOptions = useMemo(() => {
     const opts = [{ value: '', label: '' }];
     (students || []).forEach(s => {
@@ -29689,17 +29688,16 @@ const FeesModule = ({
     return opts;
   }, [students]);
 
-  // ==================== 7. PERMISSIONS ====================
+  // ==================== 6. PERMISSIONS ====================
   const isStudent = user?.role === 'STUDENT';
   const isParent = user?.role === 'PARENT';
   const canManage = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
   const canDelete = ['SCHOOL_ADMIN', 'PRINCIPAL'].includes(user?.role);
   const canEdit = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
-  // ✅ NEW: who can grant discounts (more restrictive than editing)
   const canGrantDiscount = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
   const canView = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'ACCOUNTANT', 'PARENT', 'STUDENT'].includes(user?.role);
 
-  // ==================== 8. HELPERS ====================
+  // ==================== 7. HELPERS ====================
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-KE', {
       style: 'currency', currency: 'KES', minimumFractionDigits: 0
@@ -29733,34 +29731,44 @@ const FeesModule = ({
     return classes?.find(c => c.id === classId)?.name || 'N/A';
   };
 
-  // ✅ NEW: compute discount amount for a given fee
-  // Priority: fee-level discount → per-student discount → 0
+  // ✅ Compute discount amount for a given fee (optionally per student)
+  // Priority: per-student → student-wide → fee-level default → 0
   const getDiscountForFee = (fee, studentId = null) => {
     if (!fee) return 0;
 
-    // 1) Per-student discount (from discounts array)
+    // 1) Per-student discount (needs a studentId)
     if (studentId && Array.isArray(discounts)) {
-      const studentDiscount = discounts.find(d =>
-        d.feeId === fee.id && d.studentId === studentId
+      const perFeeDiscount = discounts.find(d =>
+        d.studentId === studentId && d.feeId === fee.id && d.isActive !== false
       );
-      if (studentDiscount) {
-        const val = parseFloat(studentDiscount.value) || 0;
-        return studentDiscount.type === 'PERCENT'
+      const studentWideDiscount = !perFeeDiscount
+        ? discounts.find(d =>
+            d.studentId === studentId && d.feeId === null && d.isActive !== false
+          )
+        : null;
+
+      const active = perFeeDiscount || studentWideDiscount;
+      if (active) {
+        const val = parseFloat(active.value) || 0;
+        return active.type === 'PERCENT'
           ? (parseFloat(fee.amount) || 0) * (val / 100)
           : val;
       }
     }
 
-    // 2) Fee-level default discount
-    const feeDiscountAmount = parseFloat(fee.discountAmount) || 0;
-    const feeDiscountPercent = parseFloat(fee.discountPercent) || 0;
-    if (feeDiscountPercent > 0) {
-      return (parseFloat(fee.amount) || 0) * (feeDiscountPercent / 100);
-    }
-    return feeDiscountAmount;
+    // 2) Fee-level default discount (applies to all students)
+    return getFeeLevelDiscount(fee);
   };
 
-  // ✅ NEW: compute total paid toward a specific fee by a specific student
+  // ✅ Fee-level default discount ONLY (no per-student logic)
+  const getFeeLevelDiscount = (fee) => {
+    if (!fee) return 0;
+    const amount = parseFloat(fee.amount) || 0;
+    const pct = parseFloat(fee.discountPercent) || 0;
+    if (pct > 0) return amount * (pct / 100);
+    return parseFloat(fee.discountAmount) || 0;
+  };
+
   const getPaidForFee = (fee, studentId = null) => {
     if (!fee || !Array.isArray(payments)) return 0;
     return payments
@@ -29768,7 +29776,6 @@ const FeesModule = ({
       .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
   };
 
-  // ✅ NEW: compute outstanding balance for a fee (optionally per student)
   const getBalanceForFee = (fee, studentId = null) => {
     const amount = parseFloat(fee?.amount) || 0;
     const discount = getDiscountForFee(fee, studentId);
@@ -29776,7 +29783,7 @@ const FeesModule = ({
     return amount - discount - paid;
   };
 
-  // ==================== 9. HANDLERS ====================
+  // ==================== 8. HANDLERS ====================
   const handleEdit = (fee) => {
     if (!canEdit) { alert('You do not have permission to edit fees'); return; }
     
@@ -29800,7 +29807,6 @@ const FeesModule = ({
       classId: fee.classId || '',
       isOptional: fee.isOptional || false,
       isRecurring: fee.isRecurring || false,
-      // ✅ NEW
       discountAmount: fee.discountAmount || 0,
       discountPercent: fee.discountPercent || 0
     });
@@ -29859,7 +29865,6 @@ const FeesModule = ({
       if (submitData.amount === '') submitData.amount = 0;
       if (submitData.year === '') submitData.year = isUniversity ? 1 : null;
       if (isTVET && submitData.term) submitData.module = parseInt(submitData.term);
-      // ✅ NEW: normalize discount fields
       submitData.discountAmount = parseFloat(submitData.discountAmount) || 0;
       submitData.discountPercent = parseFloat(submitData.discountPercent) || 0;
       
@@ -29906,20 +29911,24 @@ const FeesModule = ({
       module: isTVET ? 1 : null,
       classId: '',
       isOptional: false, isRecurring: false,
-      // ✅ NEW
       discountAmount: 0, discountPercent: 0
     });
   };
 
-  // ✅ NEW: open discount modal for a student+fee
-  const openDiscountModal = (student, fee = null) => {
+  // ✅ Open discount modal
+  const openDiscountModal = (student = null, fee = null) => {
     if (!canGrantDiscount) { alert('You do not have permission to grant discounts'); return; }
     setDiscountStudent(student || null);
     setDiscountFee(fee || null);
-    // Pre-fill if an existing discount exists
-    const existing = Array.isArray(discounts) && student && fee
-      ? discounts.find(d => d.feeId === fee.id && d.studentId === student.id)
-      : null;
+
+    // Try to pre-fill if we already know both student AND fee
+    let existing = null;
+    if (student && fee && Array.isArray(discounts)) {
+      existing = discounts.find(d =>
+        d.studentId === student.id && d.feeId === fee.id && d.isActive !== false
+      );
+    }
+
     setDiscountForm({
       type: existing?.type || 'AMOUNT',
       value: existing?.value || '',
@@ -29927,10 +29936,37 @@ const FeesModule = ({
       academicYear: existing?.academicYear || new Date().getFullYear().toString(),
       term: existing?.term || ''
     });
+
     setShowDiscountModal(true);
   };
 
-  // ✅ NEW: save discount
+  // ✅ Pre-fill discount form when both student and fee are chosen in the modal
+  useEffect(() => {
+    if (!showDiscountModal) return;
+    if (!discountStudent) return;
+    if (discountForm.value) return; // user already typing — don't overwrite
+
+    const existing = Array.isArray(discounts)
+      ? discounts.find(d =>
+          d.studentId === discountStudent.id &&
+          (d.feeId || null) === (discountFee?.id || null) &&
+          d.isActive !== false
+        )
+      : null;
+
+    if (existing) {
+      setDiscountForm({
+        type: existing.type || 'AMOUNT',
+        value: existing.value || '',
+        reason: existing.reason || '',
+        academicYear: existing.academicYear || new Date().getFullYear().toString(),
+        term: existing.term || ''
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showDiscountModal, discountStudent, discountFee]);
+
+  // ✅ Save discount
   const handleSaveDiscount = async () => {
     if (!canGrantDiscount) { alert('You do not have permission to grant discounts'); return; }
     if (!discountStudent) { alert('Please select a student'); return; }
@@ -29941,7 +29977,7 @@ const FeesModule = ({
     try {
       const payload = {
         studentId: discountStudent.id,
-        feeId: discountFee?.id || null, // null = applies to all fees for the student
+        feeId: discountFee?.id || null,
         type: discountForm.type,
         value: parseFloat(discountForm.value),
         reason: discountForm.reason || '',
@@ -29950,11 +29986,11 @@ const FeesModule = ({
         schoolId: currentSchool?.id
       };
 
-      // Find existing discount to update
       const existing = Array.isArray(discounts)
         ? discounts.find(d =>
             d.studentId === discountStudent.id &&
-            (d.feeId || null) === (discountFee?.id || null)
+            (d.feeId || null) === (discountFee?.id || null) &&
+            d.isActive !== false
           )
         : null;
 
@@ -29990,7 +30026,28 @@ const FeesModule = ({
     }
   };
 
-  // ==================== 10. RENDER ====================
+  // ✅ Remove a fee-level discount (clears discountAmount + discountPercent on the fee)
+  const handleRemoveFeeLevelDiscount = async (fee) => {
+    if (!canGrantDiscount) { alert('You do not have permission to remove discounts'); return; }
+    if (!window.confirm(`Remove the default discount on "${fee.name}"?`)) return;
+    setLoading(true); setApiError('');
+    try {
+      await handleUpdate('/fees', fee.id, {
+        ...fee,
+        discountAmount: 0,
+        discountPercent: 0
+      }, setFees, fees);
+      alert('✅ Default discount removed');
+    } catch (error) {
+      console.error('Error removing fee-level discount:', error);
+      alert('❌ Failed to remove discount: ' + (error.response?.data?.message || error.message));
+      setApiError(error.response?.data?.message || error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==================== 9. RENDER ====================
   if (!canView) {
     return (
       <div className="bg-white p-8 rounded-xl shadow-sm text-center">
@@ -30000,21 +30057,28 @@ const FeesModule = ({
     );
   }
 
-  // ✅ NEW: summary totals now account for discounts
+  // ✅ Summary totals — fee-level and per-student discounts counted exactly once
   const totalBilled = fees.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
+
   const totalDiscounts = fees.reduce((sum, f) => {
-    // fee-level discount for all students + per-student discounts
-    const feeLevel = getDiscountForFee(f);
+    // Fee-level default discount (applies to everyone)
+    const feeLevel = getFeeLevelDiscount(f);
+
+    // Per-student discounts (each attached to a specific student+fee)
     const perStudent = Array.isArray(discounts)
       ? discounts
-          .filter(d => d.feeId === f.id)
+          .filter(d => d.feeId === f.id && d.isActive !== false)
           .reduce((s, d) => {
             const v = parseFloat(d.value) || 0;
-            return s + (d.type === 'PERCENT' ? (parseFloat(f.amount) || 0) * (v / 100) : v);
+            return s + (d.type === 'PERCENT'
+              ? (parseFloat(f.amount) || 0) * (v / 100)
+              : v);
           }, 0)
       : 0;
+
     return sum + feeLevel + perStudent;
   }, 0);
+
   const totalPaid = payments?.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0) || 0;
 
   return (
@@ -30037,7 +30101,6 @@ const FeesModule = ({
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">{getFeeTitle()}</h2>
         <div className="flex space-x-2">
-          {/* ✅ NEW: Grant Discount button */}
           {canGrantDiscount && (
             <button
               onClick={() => openDiscountModal(null, null)}
@@ -30139,7 +30202,6 @@ const FeesModule = ({
                 onChange={(e) => setForm({...form, transportRouteId: e.target.value || null})}
                 options={routeOptions} disabled={loading} placeholder="Search route..." />
 
-              {/* ✅ NEW: Fee-level default discount */}
               <InputField
                 label="Default Discount Amount (KES)"
                 type="number"
@@ -30240,7 +30302,7 @@ const FeesModule = ({
         </div>
       )}
 
-      {/* ==================== ✅ NEW: DISCOUNT MODAL ==================== */}
+      {/* ==================== DISCOUNT MODAL ==================== */}
       {showDiscountModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6">
@@ -30264,10 +30326,8 @@ const FeesModule = ({
                 }}
                 options={studentOptions}
                 placeholder="Search student..."
-                disabled={!!discountStudent && !!discountFee} // lock if opened from a specific row
               />
 
-              {/* Optionally scope to a specific fee */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Applies To
@@ -30332,7 +30392,6 @@ const FeesModule = ({
                 />
               </div>
 
-              {/* Live preview */}
               {discountStudent && (
                 <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-sm">
                   <p className="font-medium text-purple-800 mb-1">Preview:</p>
@@ -30412,7 +30471,7 @@ const FeesModule = ({
         </div>
       )}
 
-      {/* ==================== SUMMARY CARDS (with discounts) ==================== */}
+      {/* ==================== SUMMARY CARDS ==================== */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <div className="bg-white p-4 rounded-xl shadow-sm">
           <p className="text-sm text-gray-500">Total Fees</p>
@@ -30453,7 +30512,10 @@ const FeesModule = ({
                   {isTVET ? 'Module' : (isUniversity ? 'Semester' : 'Term')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Discount</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase"
+                    title="Default discount for all students. Per-student discounts are visible in Fee Collection.">
+                  Default Discount
+                </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Year</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due Date</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
@@ -30479,7 +30541,7 @@ const FeesModule = ({
                 </tr>
               ) : (
                 fees.map(fee => {
-                  const feeDiscount = getDiscountForFee(fee);
+                  const feeLevelDiscount = getFeeLevelDiscount(fee);
                   return (
                     <tr key={fee.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap font-medium">{fee.name}</td>
@@ -30492,9 +30554,19 @@ const FeesModule = ({
                         {formatCurrency(fee.amount)}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        {feeDiscount > 0 ? (
-                          <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-medium">
-                            −{formatCurrency(feeDiscount)}
+                        {feeLevelDiscount > 0 ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-medium">
+                            −{formatCurrency(feeLevelDiscount)}
+                            {canGrantDiscount && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveFeeLevelDiscount(fee)}
+                                className="text-red-600 hover:text-red-800 ml-1"
+                                title="Remove default discount"
+                              >
+                                ×
+                              </button>
+                            )}
                           </span>
                         ) : (
                           <span className="text-gray-400 text-xs">—</span>
@@ -30522,7 +30594,7 @@ const FeesModule = ({
                             <button
                               onClick={() => openDiscountModal(null, fee)}
                               className="text-purple-600 hover:text-purple-900 p-2 hover:bg-purple-50 rounded-lg transition-colors"
-                              title="Grant discount on this fee">
+                              title="Grant per-student discount on this fee">
                               <i className="fas fa-percent"></i>
                             </button>
                           )}
@@ -30560,7 +30632,9 @@ const FeesModule = ({
             <ul className="list-disc list-inside mt-1 space-y-1 text-xs">
               <li><span className="font-medium text-green-600">Auto Allocation:</span> Fee is automatically assigned to all eligible students when created.</li>
               <li><span className="font-medium text-yellow-600">Manual Allocation:</span> Fee is not assigned automatically. Use the Fee Allocation module to assign.</li>
-              <li><span className="font-medium text-purple-600">Discounts:</span> Applied before payments. Outstanding = Amount − Discount − Paid. A student who pays the discounted amount will show as cleared.</li>
+              <li><span className="font-medium text-purple-600">Default Discount:</span> Set on the fee itself — applies to every student who gets that fee. Shown in the <em>Default Discount</em> column.</li>
+              <li><span className="font-medium text-purple-600">Per-Student Discount:</span> Click the <i className="fas fa-percent"></i> button on any fee row to grant a discount to a specific student (bursary, scholarship, sibling, staff child).</li>
+              <li><span className="font-medium text-gray-700">Balance formula:</span> Outstanding = Amount − Discount − Paid. A student who pays the discounted amount shows as <strong>cleared</strong>.</li>
             </ul>
           </div>
         </div>
@@ -30568,7 +30642,6 @@ const FeesModule = ({
     </div>
   );
 };
-
 // ==================== FEE ALLOCATION MODULE WITH SEARCHABLE SELECT ====================
 const FeeAllocationModule = ({ 
   fees, students, courses, classes, programs, currentSchool, user 
@@ -46240,7 +46313,21 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
     </div>
   );
 };
-const FeeCollectionModule = ({ students, fees, payments, setPayments, classes, courses, programs, currentSchool, parents, user }) => {
+const FeeCollectionModule = ({ 
+  students, 
+  fees, 
+  payments, 
+  setPayments, 
+  classes, 
+  courses, 
+  programs, 
+  currentSchool, 
+  parents, 
+  user,
+  // ✅ NEW: discounts passed from parent
+  discounts = [],
+  setDiscounts
+}) => {
   const [selectedStudent, setSelectedStudent] = useState('');
   const [studentDetails, setStudentDetails] = useState(null);
   const [amount, setAmount] = useState('');
@@ -46258,11 +46345,24 @@ const FeeCollectionModule = ({ students, fees, payments, setPayments, classes, c
   const [feeStructure, setFeeStructure] = useState([]);
   const [outstandingBalance, setOutstandingBalance] = useState(0);
   const [totalPaid, setTotalPaid] = useState(0);
+  const [totalDiscounts, setTotalDiscounts] = useState(0); // ✅ NEW
+  const [studentDiscounts, setStudentDiscounts] = useState([]); // ✅ NEW
   const [recentPayments, setRecentPayments] = useState([]);
   const [apiError, setApiError] = useState('');
   const [showReceipt, setShowReceipt] = useState(false);
   const [lastReceipt, setLastReceipt] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+
+  // ✅ NEW: modal for granting a discount from this screen
+  const [showDiscountModal, setShowDiscountModal] = useState(false);
+  const [discountForm, setDiscountForm] = useState({
+    feeId: '',
+    type: 'AMOUNT',
+    value: '',
+    reason: '',
+    academicYear: new Date().getFullYear().toString(),
+    term: ''
+  });
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-KE', { 
@@ -46277,6 +46377,8 @@ const FeeCollectionModule = ({ students, fees, payments, setPayments, classes, c
   const isUniversity = schoolCategory === 'UNIVERSITY';
   const isTVET = schoolCategory === 'COLLEGE_TVET';
   const isRegularSchool = !isUniversity && !isTVET;
+
+  const canGrantDiscount = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
 
   const SearchableSelect = ({ 
     label, 
@@ -46494,6 +46596,63 @@ const FeeCollectionModule = ({ students, fees, payments, setPayments, classes, c
     { value: 'CARD', label: 'Card', subLabel: 'Debit/Credit card' }
   ], []);
 
+  // ✅ NEW: fee options for the discount modal
+  const feeOptions = useMemo(() => {
+    const opts = [{ value: '', label: 'All fees for this student' }];
+    (feeStructure || []).forEach(f => {
+      opts.push({
+        value: f.id,
+        label: f.name,
+        subLabel: `${formatCurrency(f.amount)}`
+      });
+    });
+    return opts;
+  }, [feeStructure]);
+
+  // ✅ NEW: compute the discount amount for a specific fee
+  const getDiscountForFee = (fee, studentId) => {
+    if (!fee || !studentId) return { amount: 0, source: null };
+
+    // Priority: per-fee discount → student-wide discount → fee-level default
+    const perFee = discounts.find(d =>
+      d.studentId === studentId && d.feeId === fee.id && d.isActive !== false
+    );
+    const studentWide = !perFee
+      ? discounts.find(d =>
+          d.studentId === studentId && d.feeId === null && d.isActive !== false
+        )
+      : null;
+
+    const active = perFee || studentWide;
+
+    if (active) {
+      const value = parseFloat(active.value) || 0;
+      const amount = active.type === 'PERCENT'
+        ? (parseFloat(fee.amount) || 0) * (value / 100)
+        : value;
+      return { amount, source: active };
+    }
+
+    // Fall back to fee-level default
+    const feeAmount = parseFloat(fee.amount) || 0;
+    if (parseFloat(fee.discountPercent) > 0) {
+      return { amount: feeAmount * (parseFloat(fee.discountPercent) / 100), source: null };
+    }
+    if (parseFloat(fee.discountAmount) > 0) {
+      return { amount: parseFloat(fee.discountAmount), source: null };
+    }
+
+    return { amount: 0, source: null };
+  };
+
+  // ✅ NEW: compute amount paid for a specific fee by a specific student
+  const getPaidForFee = (fee, studentId) => {
+    if (!fee || !studentId) return 0;
+    return (payments || [])
+      .filter(p => p.studentId === studentId && p.feeId === fee.id)
+      .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+  };
+
   const loadStudentFeeInfo = async (studentId) => {
     setLoading(true);
     setApiError('');
@@ -46504,6 +46663,7 @@ const FeeCollectionModule = ({ students, fees, payments, setPayments, classes, c
         return;
       }
       setStudentDetails(student);
+
       let feeParams = {};
       if (isTVET && student.programId) {
         feeParams.programId = student.programId;
@@ -46512,15 +46672,41 @@ const FeeCollectionModule = ({ students, fees, payments, setPayments, classes, c
       } else if (student.classId) {
         feeParams.classId = student.classId;
       }
+
       const feesRes = await api.get('/fees', { params: feeParams });
       const studentFees = feesRes.data.fees || [];
       setFeeStructure(studentFees);
+
       const totalFeesAmount = studentFees.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
+
       const paymentsRes = await api.get('/payments', { params: { studentId: student.id } });
       const studentPayments = paymentsRes.data.payments || [];
       const totalPaidAmount = studentPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
       setTotalPaid(totalPaidAmount);
-      setOutstandingBalance(totalFeesAmount - totalPaidAmount);
+
+      // ✅ NEW: fetch discounts for this student
+      let studentDiscountsList = [];
+      try {
+        const discountsRes = await api.get('/discounts', { params: { studentId: student.id } });
+        studentDiscountsList = discountsRes.data.discounts || [];
+      } catch (err) {
+        console.warn('Could not fetch discounts, using prop:', err.message);
+        studentDiscountsList = (discounts || []).filter(d => d.studentId === student.id);
+      }
+      setStudentDiscounts(studentDiscountsList);
+
+      // ✅ NEW: compute total discount across the student's fees
+      let totalDiscountAmount = 0;
+      studentFees.forEach(fee => {
+        const { amount: discountAmt } = getDiscountForFee(fee, student.id);
+        totalDiscountAmount += discountAmt;
+      });
+      setTotalDiscounts(totalDiscountAmount);
+
+      // ✅ NEW: balance = total fees − total discounts − total paid
+      const newBalance = Math.max(0, totalFeesAmount - totalDiscountAmount - totalPaidAmount);
+      setOutstandingBalance(newBalance);
+
       const sortedPayments = [...studentPayments].sort((a, b) => new Date(b.date) - new Date(a.date));
       setRecentPayments(sortedPayments.slice(0, 5));
     } catch (error) {
@@ -46540,6 +46726,8 @@ const FeeCollectionModule = ({ students, fees, payments, setPayments, classes, c
       setFeeStructure([]);
       setOutstandingBalance(0);
       setTotalPaid(0);
+      setTotalDiscounts(0);
+      setStudentDiscounts([]);
       setRecentPayments([]);
     }
   };
@@ -46574,11 +46762,10 @@ const FeeCollectionModule = ({ students, fees, payments, setPayments, classes, c
         studentName: student ? `${student.firstName} ${student.lastName}` : null,
         admissionNumber: student?.admissionNumber || null
       };
-      const token = localStorage.getItem('token');
-    const response = await fetchApi('/payments', {
-  method: 'POST',
-  body: JSON.stringify(paymentData)
-});
+      const response = await fetchApi('/payments', {
+        method: 'POST',
+        body: JSON.stringify(paymentData)
+      });
       const data = await response.json();
       if (data.success) {
         const receipt = {
@@ -46591,7 +46778,7 @@ const FeeCollectionModule = ({ students, fees, payments, setPayments, classes, c
           reference: reference || data.payment.transactionId,
           notes,
           balanceAfter: outstandingBalance - parseFloat(amount),
-          collectedBy: user?.firstName + ' ' + user?.lastName || 'System'
+          collectedBy: (user?.firstName || '') + ' ' + (user?.lastName || '') || 'System'
         };
         setLastReceipt(receipt);
         setShowReceipt(true);
@@ -46615,6 +46802,96 @@ const FeeCollectionModule = ({ students, fees, payments, setPayments, classes, c
     }
   };
 
+  // ✅ NEW: open the discount modal
+  const openDiscountModal = () => {
+    if (!selectedStudent) {
+      alert('Please select a student first');
+      return;
+    }
+    setDiscountForm({
+      feeId: '',
+      type: 'AMOUNT',
+      value: '',
+      reason: '',
+      academicYear: new Date().getFullYear().toString(),
+      term: ''
+    });
+    setShowDiscountModal(true);
+  };
+
+  // ✅ NEW: save a discount
+  const handleSaveDiscount = async () => {
+    if (!selectedStudent) { alert('Please select a student'); return; }
+    if (!discountForm.value || parseFloat(discountForm.value) <= 0) {
+      alert('Please enter a valid discount value');
+      return;
+    }
+    setLoading(true);
+    setApiError('');
+    try {
+      const payload = {
+        studentId: selectedStudent,
+        feeId: discountForm.feeId || null,
+        type: discountForm.type,
+        value: parseFloat(discountForm.value),
+        reason: discountForm.reason || '',
+        academicYear: discountForm.academicYear,
+        term: discountForm.term || null,
+        schoolId: currentSchool?.id
+      };
+
+      const res = await api.post('/discounts', payload);
+      const savedDiscount = res.data?.discount;
+
+      // Update local state
+      if (savedDiscount) {
+        setStudentDiscounts(prev => {
+          const exists = prev.find(d => d.id === savedDiscount.id);
+          return exists
+            ? prev.map(d => d.id === savedDiscount.id ? savedDiscount : d)
+            : [...prev, savedDiscount];
+        });
+        if (setDiscounts) {
+          setDiscounts(prev => {
+            const exists = prev.find(d => d.id === savedDiscount.id);
+            return exists
+              ? prev.map(d => d.id === savedDiscount.id ? savedDiscount : d)
+              : [...prev, savedDiscount];
+          });
+        }
+      }
+
+      setShowDiscountModal(false);
+      await loadStudentFeeInfo(selectedStudent);
+      alert('✅ Discount applied successfully!');
+    } catch (error) {
+      console.error('Error saving discount:', error);
+      alert('❌ Failed to save discount: ' + (error.response?.data?.message || error.message));
+      setApiError(error.response?.data?.message || error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ✅ NEW: remove a discount
+  const handleRemoveDiscount = async (discountId) => {
+    if (!canGrantDiscount) { alert('You do not have permission to remove discounts'); return; }
+    if (!window.confirm('Remove this discount?')) return;
+    setLoading(true);
+    try {
+      await api.delete(`/discounts/${discountId}`);
+      setStudentDiscounts(prev => prev.filter(d => d.id !== discountId));
+      if (setDiscounts) setDiscounts(prev => prev.filter(d => d.id !== discountId));
+      await loadStudentFeeInfo(selectedStudent);
+      alert('✅ Discount removed');
+    } catch (error) {
+      console.error('Error removing discount:', error);
+      alert('❌ Failed to remove discount: ' + (error.response?.data?.message || error.message));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {showReceipt && lastReceipt && (
@@ -46625,6 +46902,98 @@ const FeeCollectionModule = ({ students, fees, payments, setPayments, classes, c
           user={user}
           school={currentSchool}
         />
+      )}
+
+      {/* ✅ NEW: Discount Modal */}
+      {showDiscountModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                <i className="fas fa-percent text-purple-600 mr-2"></i>
+                Grant Discount
+              </h3>
+              <button onClick={() => setShowDiscountModal(false)} className="text-gray-400 hover:text-gray-600">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+
+            {studentDetails && (
+              <p className="text-sm text-gray-600 mb-4">
+                For: <span className="font-medium">
+                  {studentDetails.firstName} {studentDetails.lastName}
+                </span> ({studentDetails.admissionNumber})
+              </p>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Applies To</label>
+                <select
+                  value={discountForm.feeId}
+                  onChange={(e) => setDiscountForm({ ...discountForm, feeId: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg"
+                >
+                  {feeOptions.map(o => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}{o.subLabel ? ` — ${o.subLabel}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Type *</label>
+                  <select
+                    value={discountForm.type}
+                    onChange={(e) => setDiscountForm({ ...discountForm, type: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="AMOUNT">Fixed Amount (KES)</option>
+                    <option value="PERCENT">Percentage (%)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    {discountForm.type === 'PERCENT' ? 'Percentage (%) *' : 'Amount (KES) *'}
+                  </label>
+                  <input
+                    type="number"
+                    value={discountForm.value}
+                    onChange={(e) => setDiscountForm({ ...discountForm, value: e.target.value })}
+                    placeholder={discountForm.type === 'PERCENT' ? 'e.g., 10' : 'e.g., 3000'}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    min="0"
+                    step="0.01"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Reason / Notes</label>
+                <input
+                  type="text"
+                  value={discountForm.reason}
+                  onChange={(e) => setDiscountForm({ ...discountForm, reason: e.target.value })}
+                  placeholder="e.g., Bursary, Staff child, Sibling discount"
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+            </div>
+
+            <div className="flex space-x-2 mt-6 pt-4 border-t">
+              <button onClick={handleSaveDiscount} disabled={loading}
+                className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 disabled:opacity-50">
+                {loading ? 'Saving...' : 'Apply Discount'}
+              </button>
+              <button onClick={() => setShowDiscountModal(false)}
+                className="flex-1 bg-gray-500 text-white py-2 rounded-lg hover:bg-gray-600">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       
       {currentSchool && (
@@ -46683,8 +47052,21 @@ const FeeCollectionModule = ({ students, fees, payments, setPayments, classes, c
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Total Fees:</span>
-                  <span className="font-semibold">{formatCurrency(feeStructure.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0))}</span>
+                  <span className="font-semibold">
+                    {formatCurrency(feeStructure.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0))}
+                  </span>
                 </div>
+
+                {/* ✅ NEW: discount row */}
+                {totalDiscounts > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Discount:</span>
+                    <span className="font-semibold text-purple-600">
+                      −{formatCurrency(totalDiscounts)}
+                    </span>
+                  </div>
+                )}
+
                 <div className="flex justify-between">
                   <span className="text-gray-600">Total Paid:</span>
                   <span className="font-semibold text-green-600">{formatCurrency(totalPaid)}</span>
@@ -46692,9 +47074,55 @@ const FeeCollectionModule = ({ students, fees, payments, setPayments, classes, c
                 <div className="flex justify-between border-t pt-2">
                   <span className="text-gray-600">Outstanding Balance:</span>
                   <span className={`font-bold ${outstandingBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                    {formatCurrency(outstandingBalance)}
+                    {outstandingBalance > 0 ? formatCurrency(outstandingBalance) : '✅ CLEARED'}
                   </span>
                 </div>
+
+                {/* ✅ NEW: Grant Discount button */}
+                {canGrantDiscount && (
+                  <button
+                    type="button"
+                    onClick={openDiscountModal}
+                    className="w-full mt-2 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 flex items-center justify-center text-sm"
+                  >
+                    <i className="fas fa-percent mr-2"></i>Grant Discount
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* ✅ NEW: Existing discounts list */}
+            {studentDetails && studentDiscounts.length > 0 && (
+              <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+                <p className="text-xs font-semibold text-purple-800 mb-2">
+                  <i className="fas fa-tags mr-1"></i>Active Discounts
+                </p>
+                <ul className="space-y-1">
+                  {studentDiscounts.map(d => {
+                    const fee = feeStructure.find(f => f.id === d.feeId);
+                    return (
+                      <li key={d.id} className="flex justify-between items-center text-xs text-purple-800">
+                        <span>
+                          {fee ? fee.name : 'All fees'} —{' '}
+                          {d.type === 'PERCENT'
+                            ? `${parseFloat(d.value)}%`
+                            : formatCurrency(d.value)}
+                          {d.reason && <span className="text-purple-600"> ({d.reason})</span>}
+                        </span>
+                        {canGrantDiscount && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveDiscount(d.id)}
+                            className="text-red-500 hover:text-red-700 ml-2"
+                            title="Remove discount"
+                          >
+                            <i className="fas fa-times"></i>
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
               </div>
             )}
             
@@ -46710,6 +47138,17 @@ const FeeCollectionModule = ({ students, fees, payments, setPayments, classes, c
                 step="0.01"
                 min="0"
               />
+              {outstandingBalance > 0 && (
+                <p className="text-xs text-gray-500 mt-1">
+                  <button
+                    type="button"
+                    onClick={() => setAmount(String(outstandingBalance))}
+                    className="text-indigo-600 hover:text-indigo-800 underline"
+                  >
+                    Pay full balance ({formatCurrency(outstandingBalance)})
+                  </button>
+                </p>
+              )}
             </div>
             
             <div>
@@ -65368,6 +65807,8 @@ return (
             currentSchool={currentSchool}
             parents={parents}
             user={user}
+              discounts={discounts}
+  setDiscounts={setDiscounts}
           />
         )}
 
