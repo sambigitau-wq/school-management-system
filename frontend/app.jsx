@@ -30642,9 +30642,11 @@ const FeesModule = ({
     </div>
   );
 };
-// ==================== FEE ALLOCATION MODULE WITH SEARCHABLE SELECT ====================
+// ==================== FEE ALLOCATION MODULE WITH SEARCHABLE SELECT + DISCOUNTS ====================
 const FeeAllocationModule = ({ 
-  fees, students, courses, classes, programs, currentSchool, user 
+  fees, students, courses, classes, programs, currentSchool, user,
+  // ✅ NEW: discounts passed from parent
+  discounts = []
 }) => {
   const [selectedProgram, setSelectedProgram] = useState('');
   const [selectedCourse, setSelectedCourse] = useState('');
@@ -30658,7 +30660,6 @@ const FeeAllocationModule = ({
   const [allocationResult, setAllocationResult] = useState(null);
   const [studentSearch, setStudentSearch] = useState('');
   const [loading, setLoading] = useState(false);
-
 
   const canAllocate = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
   const canView = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
@@ -30674,6 +30675,38 @@ const FeeAllocationModule = ({
       currency: 'KES',
       minimumFractionDigits: 0
     }).format(amount || 0);
+  };
+
+  // ✅ NEW: Compute the discount amount for a given fee + student
+  // Priority: per-student discount → student-wide discount → fee-level default → 0
+  const getDiscountForFee = (fee, studentId = null) => {
+    if (!fee) return 0;
+
+    // 1) Per-student discount
+    if (studentId && Array.isArray(discounts)) {
+      const perFee = discounts.find(d =>
+        d.studentId === studentId && d.feeId === fee.id && d.isActive !== false
+      );
+      const studentWide = !perFee
+        ? discounts.find(d =>
+            d.studentId === studentId && d.feeId === null && d.isActive !== false
+          )
+        : null;
+
+      const active = perFee || studentWide;
+      if (active) {
+        const val = parseFloat(active.value) || 0;
+        return active.type === 'PERCENT'
+          ? (parseFloat(fee.amount) || 0) * (val / 100)
+          : val;
+      }
+    }
+
+    // 2) Fee-level default discount (applies to everyone)
+    const amount = parseFloat(fee.amount) || 0;
+    const pct = parseFloat(fee.discountPercent) || 0;
+    if (pct > 0) return amount * (pct / 100);
+    return parseFloat(fee.discountAmount) || 0;
   };
 
   // ==================== SEARCHABLE SELECT COMPONENT ====================
@@ -30897,7 +30930,7 @@ const FeeAllocationModule = ({
     return opts;
   }, [classes]);
 
-  // ==================== FILTERED FEES (DEFINED BEFORE IT'S USED) ====================
+  // ==================== FILTERED FEES ====================
   const filteredFees = useMemo(() => {
     return fees.filter(fee => {
       if (isUniversity) {
@@ -30912,7 +30945,7 @@ const FeeAllocationModule = ({
     });
   }, [fees, selectedCourse, selectedProgram, selectedModule, selectedClass, isUniversity, isTVET]);
 
-  // ==================== FEE OPTIONS (DEPENDS ON filteredFees) ====================
+  // ==================== FEE OPTIONS ====================
   const feeOptions = useMemo(() => {
     const opts = [{ value: '', label: '' }];
     const filtered = filteredFees || [];
@@ -30921,14 +30954,19 @@ const FeeAllocationModule = ({
       if (isTVET && f.module) label += ` (Module ${f.module})`;
       if (isUniversity && f.semester) label += ` (Sem ${f.semester})`;
       if (f.academicYear) label += ` (${f.academicYear})`;
+      // ✅ Show default discount badge in the option sublabel
+      const discount = getDiscountForFee(f);
+      const subLabel = discount > 0
+        ? `Default discount: −${formatCurrency(discount)}`
+        : (f.category || 'Fee');
       opts.push({
         value: f.id,
         label: label,
-        subLabel: f.category || 'Fee'
+        subLabel
       });
     });
     return opts;
-  }, [filteredFees, isTVET, isUniversity]);
+  }, [filteredFees, isTVET, isUniversity, discounts]);
 
   const moduleOptions = useMemo(() => {
     const opts = [{ value: '', label: '' }];
@@ -30984,6 +31022,10 @@ const FeeAllocationModule = ({
           const paymentsRes = await api.get(`/payments?studentId=${student.id}`);
           const studentPayments = paymentsRes.data.payments || [];
           const totalPaid = studentPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+          // ✅ NEW: also sum discounts recorded on past payments
+          const totalPaidDiscounts = studentPayments.reduce(
+            (sum, p) => sum + parseFloat(p.discountAmount || 0), 0
+          );
           
           let applicableFees = [];
           if (isTVET && student.programId) {
@@ -30998,13 +31040,22 @@ const FeeAllocationModule = ({
           }
           
           const totalFees = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
-          const balance = totalFees - totalPaid;
+
+          // ✅ NEW: compute all applicable discounts for this student
+          const totalApplicableDiscounts = applicableFees.reduce((sum, f) => {
+            return sum + getDiscountForFee(f, student.id);
+          }, 0);
+
+          // ✅ Final balance = fees − discounts (fee-level + per-student) − paid discounts − paid
+          const balance = totalFees - totalApplicableDiscounts - totalPaidDiscounts - totalPaid;
+
           const feeAllocated = selectedFee ? await checkFeeAllocated(student.id, selectedFee) : false;
           
           return {
             ...student,
             totalFees,
             totalPaid,
+            totalDiscounts: totalApplicableDiscounts + totalPaidDiscounts,
             balance,
             feeAllocated,
             currentModule: student.currentModule || ''
@@ -31022,7 +31073,12 @@ const FeeAllocationModule = ({
     loadStudents();
     setSelectedStudents([]);
     setSelectAll(false);
-  }, [selectedProgram, selectedCourse, selectedClass, selectedModule, students, isTVET, isUniversity, isPrimarySecondary, selectedFee]);
+  }, [
+    selectedProgram, selectedCourse, selectedClass, selectedModule,
+    students, isTVET, isUniversity, isPrimarySecondary, selectedFee,
+    // ✅ re-run when discounts change so balance stays accurate
+    discounts
+  ]);
 
   // ==================== FILTERED STUDENTS ====================
   const filteredStudents = availableStudents.filter(student => 
@@ -31116,6 +31172,9 @@ const FeeAllocationModule = ({
     );
   }
 
+  // Selected fee details (for the info banner)
+  const selectedFeeObj = fees.find(f => f.id === selectedFee);
+
   return (
     <div className="space-y-6">
       {allocating && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse"></div>}
@@ -31197,15 +31256,32 @@ const FeeAllocationModule = ({
           />
         </div>
 
-        {selectedFee && (
+        {selectedFee && selectedFeeObj && (
           <div className="mb-4 p-3 bg-indigo-50 rounded-lg">
             <p className="text-sm text-indigo-800">
               <i className="fas fa-info-circle mr-2"></i>
-              Allocating: <strong>{fees.find(f => f.id === selectedFee)?.name}</strong> - 
-              {formatCurrency(fees.find(f => f.id === selectedFee)?.amount)}
-              {isTVET && fees.find(f => f.id === selectedFee)?.module && 
-                ` (Module ${fees.find(f => f.id === selectedFee)?.module})`}
+              Allocating: <strong>{selectedFeeObj.name}</strong> — 
+              {formatCurrency(selectedFeeObj.amount)}
+              {isTVET && selectedFeeObj.module && ` (Module ${selectedFeeObj.module})`}
             </p>
+
+            {/* ✅ NEW: default discount preview for the selected fee */}
+            {(() => {
+              const defaultDiscount = getDiscountForFee(selectedFeeObj);
+              if (defaultDiscount <= 0) return null;
+              return (
+                <p className="text-xs text-purple-700 mt-1">
+                  <i className="fas fa-percent mr-1"></i>
+                  Default discount on this fee:{' '}
+                  <strong>−{formatCurrency(defaultDiscount)}</strong>{' '}
+                  → Students pay{' '}
+                  <strong>
+                    {formatCurrency((parseFloat(selectedFeeObj.amount) || 0) - defaultDiscount)}
+                  </strong>
+                </p>
+              );
+            })()}
+
             <p className="text-xs text-indigo-600 mt-1">
               ⚠️ This creates allocation records. Students will see this fee on their statement but no payment is recorded.
             </p>
@@ -31256,6 +31332,8 @@ const FeeAllocationModule = ({
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Admission</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Balance</th>
+                    {/* ✅ NEW: Discount column */}
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Discount</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                     {isTVET && (
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Module</th>
@@ -31265,7 +31343,7 @@ const FeeAllocationModule = ({
                 <tbody className="divide-y divide-gray-200">
                   {filteredStudents.length === 0 ? (
                     <tr>
-                      <td colSpan={canAllocate ? 6 : 5} className="px-4 py-8 text-center text-gray-500">
+                      <td colSpan={canAllocate ? 7 : 6} className="px-4 py-8 text-center text-gray-500">
                         No students found
                       </td>
                     </tr>
@@ -31296,6 +31374,17 @@ const FeeAllocationModule = ({
                           }`}>
                             {formatCurrency(student.balance)}
                           </span>
+                        </td>
+                        {/* ✅ NEW: Discount cell */}
+                        <td className="px-4 py-2">
+                          {student.totalDiscounts > 0 ? (
+                            <span className="inline-flex items-center px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-medium">
+                              <i className="fas fa-percent mr-1"></i>
+                              −{formatCurrency(student.totalDiscounts)}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400 text-xs">—</span>
+                          )}
                         </td>
                         <td className="px-4 py-2">
                           {student.feeAllocated ? (
@@ -65792,6 +65881,7 @@ return (
             classes={classes}
             currentSchool={currentSchool}
             user={user}
+            discounts={discounts}
           />
         )}
 
