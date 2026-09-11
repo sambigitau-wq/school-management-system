@@ -8680,12 +8680,8 @@ const ExamModule = ({
     const dropdownRef = useRef(null);
 
     const filteredOptions = useMemo(() => {
-      if (!options || options.length === 0) {
-        return [];
-      }
-      if (!search.trim()) {
-        return options;
-      }
+      if (!options || options.length === 0) return [];
+      if (!search.trim()) return options;
       const searchLower = search.toLowerCase();
       return options.filter(opt => {
         if (!opt) return false;
@@ -8716,9 +8712,7 @@ const ExamModule = ({
     }, []);
 
     useEffect(() => {
-      if (!isOpen) {
-        setSearch('');
-      }
+      if (!isOpen) setSearch('');
     }, [isOpen]);
 
     const handleSelect = (selectedValue) => {
@@ -8739,9 +8733,7 @@ const ExamModule = ({
       if (disabled) return;
       setIsFocused(true);
       setIsOpen(true);
-      if (selectedOption) {
-        setSearch(selectedOption.label);
-      }
+      if (selectedOption) setSearch(selectedOption.label);
     };
 
     const handleClear = (e) => {
@@ -8753,11 +8745,8 @@ const ExamModule = ({
     };
 
     let displayValue = '';
-    if (isFocused) {
-      displayValue = search;
-    } else if (selectedOption) {
-      displayValue = selectedOption.label;
-    }
+    if (isFocused) displayValue = search;
+    else if (selectedOption) displayValue = selectedOption.label;
 
     const showPlaceholder = !displayValue && placeholder;
 
@@ -8784,9 +8773,7 @@ const ExamModule = ({
                 if (!dropdownRef.current?.contains(document.activeElement)) {
                   setIsOpen(false);
                   setIsFocused(false);
-                  if (!selectedOption) {
-                    setSearch('');
-                  }
+                  if (!selectedOption) setSearch('');
                 }
               }, 200);
             }}
@@ -8827,11 +8814,7 @@ const ExamModule = ({
                   className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
                     opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
                   } ${opt.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  onClick={() => {
-                    if (!opt.disabled) {
-                      handleSelect(opt.value);
-                    }
-                  }}
+                  onClick={() => { if (!opt.disabled) handleSelect(opt.value); }}
                   onMouseDown={(e) => e.preventDefault()}
                 >
                   <div className="font-medium">{opt.label}</div>
@@ -8877,8 +8860,10 @@ const ExamModule = ({
   const [filteredUnitsForForm, setFilteredUnitsForForm] = useState([]);
   const [filteredSubjects, setFilteredSubjects] = useState([]);
   
+  // ============ TEACHING STAFF STATE ============
   const [teachingStaff, setTeachingStaff] = useState([]);
   const [loadingStaff, setLoadingStaff] = useState(false);
+  const [staffLoadError, setStaffLoadError] = useState('');
   const [invigilatorConflicts, setInvigilatorConflicts] = useState([]);
   
   const [loading, setLoading] = useState(false);
@@ -8886,36 +8871,20 @@ const ExamModule = ({
   const [apiError, setApiError] = useState('');
 
   const [examForm, setExamForm] = useState({
-    name: '', 
-    type: '', 
-    classId: '', 
-    term: '',
+    name: '', type: '', classId: '', term: '',
     academicYear: new Date().getFullYear().toString(), 
     date: new Date().toISOString().split('T')[0], 
     maxMarks: 100,
-    examHall: '', 
-    invigilator: '',
-    invigilatorId: '',
-    startTime: '', 
-    endTime: '',
-    courseId: '', 
-    programId: '',
-    departmentId: '', 
-    facultyId: '', 
-    semester: '',
-    year: '',
-    module: '',
-    unitId: '',
-    subjectId: '',
+    examHall: '', invigilator: '', invigilatorId: '',
+    startTime: '', endTime: '',
+    courseId: '', programId: '',
+    departmentId: '', facultyId: '', semester: '',
+    year: '', module: '', unitId: '', subjectId: '',
     schoolCategory: currentSchool?.category || 'SENIOR_SECONDARY'
   });
 
   const [resultForm, setResultForm] = useState({
-    studentId: '', 
-    examId: '', 
-    marks: '',
-    isAbsent: false,
-    remarks: ''
+    studentId: '', examId: '', marks: '', isAbsent: false, remarks: ''
   });
 
   const [bulkResults, setBulkResults] = useState([]);
@@ -8923,9 +8892,6 @@ const ExamModule = ({
   const [filterGrade, setFilterGrade] = useState('');
   const [selectedStudentsForMessage, setSelectedStudentsForMessage] = useState([]);
   const [selectAllForMessage, setSelectAllForMessage] = useState(false);
-
-
-
 
   // ============================================================
   // SCHOOL TYPE DETECTION
@@ -8955,54 +8921,242 @@ const ExamModule = ({
   const canPublishResults = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal;
 
   // ============================================================
-  // FETCH TEACHING STAFF
+  // ✅ TEACHING STAFF FETCHING (ROBUST — MULTI-SHAPE, SCHOOL-SCOPED)
   // ============================================================
-  const fetchTeachingStaff = async () => {
-    try {
-      setLoadingStaff(true);
-      const res = await api.get('/staff');
-      const teachers = res.data.staff?.filter(s => s.staffType === 'TEACHING') || [];
-      setTeachingStaff(teachers);
-      console.log('👨‍🏫 Teaching staff loaded:', teachers.length);
-    } catch (error) {
-      console.error('Error fetching teaching staff:', error);
-    } finally {
-      setLoadingStaff(false);
-    }
+
+  // Helper: extract an array of staff from whatever the API returned
+  const extractStaffArray = (payload) => {
+    if (!payload) return [];
+    if (Array.isArray(payload)) return payload;
+    return (
+      payload.staff ||
+      payload.Staff ||
+      payload.staffMembers ||
+      payload.teachers ||
+      payload.Teachers ||
+      payload.users ||
+      payload.Users ||
+      payload.data ||
+      payload.results ||
+      payload.items ||
+      []
+    );
   };
 
+  // Helper: decide if a staff record is "teaching"
+  const isTeachingStaff = (s) => {
+    if (!s) return false;
+    // Gather all possible fields that might carry the role/type
+    const candidates = [
+      s.staffType,
+      s.staff_type,
+      s.type,
+      s.role,
+      s.category,
+      s.staffCategory,
+      s.position,
+      s.designation,
+      s.StaffType?.name,
+      s.Role?.name,
+      s.StaffCategory?.name
+    ]
+      .filter(Boolean)
+      .map(v => String(v).toUpperCase());
+
+    if (candidates.length === 0) {
+      // No type field at all → assume teaching (better than showing "none")
+      return true;
+    }
+
+    return candidates.some(c => 
+      c.includes('TEACH') ||          // TEACHER, TEACHING, HEAD_TEACHER
+      c === 'TUTOR' ||                // university tutors
+      c === 'LECTURER' ||             // university lecturers
+      c === 'INSTRUCTOR' ||           // TVET instructors
+      c === 'TRAINER' ||              // TVET trainers
+      c === 'FACILITATOR'
+    );
+  };
+
+  // Helper: extract a nice display name
+  const getStaffDisplayName = (s) => {
+    if (!s) return 'Unknown';
+    const u = s.User || s.user || s.account || {};
+    const first = u.firstName || u.first_name || s.firstName || s.first_name || '';
+    const last = u.lastName || u.last_name || s.lastName || s.last_name || '';
+    const full = `${first} ${last}`.trim();
+    return (
+      full ||
+      s.name ||
+      s.fullName ||
+      s.displayName ||
+      u.name ||
+      u.email ||
+      s.email ||
+      `Staff ${s.id}`
+    );
+  };
+
+  // Helper: extract department / subject label
+  const getStaffSubLabel = (s) => {
+    if (!s) return '';
+    return (
+      s.department?.name ||
+      s.Department?.name ||
+      s.department ||
+      s.subject?.name ||
+      s.Subject?.name ||
+      s.staffType ||
+      s.type ||
+      s.role ||
+      ''
+    );
+  };
+
+  // MAIN: fetch teaching staff from the system, scoped to this school
+  const fetchTeachingStaff = async () => {
+    setLoadingStaff(true);
+    setStaffLoadError('');
+
+    // Build a list of endpoints to try, in order of preference
+    const schoolId = currentSchool?.id;
+    const endpoints = [];
+
+    if (schoolId) {
+      endpoints.push(`/staff?schoolId=${schoolId}`);
+      endpoints.push(`/staff?school_id=${schoolId}`);
+      endpoints.push(`/schools/${schoolId}/staff`);
+    }
+    endpoints.push('/staff');
+    endpoints.push('/staffs');
+
+    let rawStaff = [];
+    let lastError = null;
+    let usedEndpoint = null;
+
+    // Try each endpoint until we get something usable
+    for (const url of endpoints) {
+      try {
+        console.log(`🔎 Trying staff endpoint: ${url}`);
+        const res = await api.get(url);
+        const arr = extractStaffArray(res.data);
+        console.log(`📥 ${url} → returned ${arr.length} record(s)`, res.data);
+        if (arr.length > 0) {
+          rawStaff = arr;
+          usedEndpoint = url;
+          break;
+        }
+      } catch (err) {
+        console.warn(`⚠️ Endpoint failed: ${url}`, err?.response?.status, err?.message);
+        lastError = err;
+      }
+    }
+
+    // Fallback: try /users filtered by teacher-ish roles
+    if (rawStaff.length === 0) {
+      const userEndpoints = [];
+      if (schoolId) {
+        userEndpoints.push(`/users?schoolId=${schoolId}&role=TEACHER`);
+        userEndpoints.push(`/users?schoolId=${schoolId}`);
+      }
+      userEndpoints.push('/users?role=TEACHER');
+      userEndpoints.push('/users');
+
+      for (const url of userEndpoints) {
+        try {
+          console.log(`🔎 Fallback staff endpoint: ${url}`);
+          const res = await api.get(url);
+          const arr = extractStaffArray(res.data);
+          console.log(`📥 ${url} → returned ${arr.length} user record(s)`);
+          if (arr.length > 0) {
+            // Normalize user records to look like staff records
+            rawStaff = arr.map(u => ({
+              id: u.id,
+              staffType: u.role,
+              role: u.role,
+              User: u,
+              user: u,
+              department: u.department || u.Department?.name || null
+            }));
+            usedEndpoint = url;
+            break;
+          }
+        } catch (err) {
+          console.warn(`⚠️ Fallback failed: ${url}`, err?.response?.status);
+          lastError = err;
+        }
+      }
+    }
+
+    if (rawStaff.length === 0) {
+      console.error('❌ No staff records could be retrieved from any endpoint.');
+      if (lastError) {
+        setStaffLoadError(
+          lastError.response?.data?.message ||
+          lastError.message ||
+          'Failed to load teaching staff'
+        );
+      } else {
+        setStaffLoadError('No staff records found for this school.');
+      }
+      setTeachingStaff([]);
+      setLoadingStaff(false);
+      return;
+    }
+
+    // Filter to teaching staff only
+    const teaching = rawStaff.filter(isTeachingStaff);
+
+    console.log(`✅ Loaded ${rawStaff.length} staff total, ${teaching.length} identified as teaching staff (from ${usedEndpoint})`);
+
+    // If the filter removed EVERYONE, fall back to showing all staff
+    // so the invigilator dropdown is never empty when data exists.
+    const finalList = teaching.length > 0 ? teaching : rawStaff;
+
+    if (teaching.length === 0 && rawStaff.length > 0) {
+      console.warn('⚠️ No records matched the "teaching" filter — using all staff as fallback.');
+    }
+
+    // De-duplicate by id
+    const seen = new Set();
+    const deduped = finalList.filter(s => {
+      const key = s?.id ?? s?.staffId ?? s?.userId;
+      if (!key) return true;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    setTeachingStaff(deduped);
+    setLoadingStaff(false);
+  };
+
+  // Refetch when school changes
   useEffect(() => {
     fetchTeachingStaff();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSchool?.id]);
 
   // ============================================================
   // CHECK INVIGILATOR CONFLICTS
   // ============================================================
   const checkInvigilatorConflicts = async (invigilatorId, date, startTime, endTime, currentExamId = null) => {
     if (!invigilatorId || !date || !startTime || !endTime) return [];
-    
     try {
       const allExams = exams || [];
-      
       const conflicts = allExams.filter(exam => {
         if (currentExamId && exam.id === currentExamId) return false;
         if (exam.invigilatorId !== invigilatorId) return false;
         if (exam.date !== date) return false;
-        
         const examStart = exam.startTime;
         const examEnd = exam.endTime;
-        
         if (!examStart || !examEnd) return false;
-        
         const newStartNum = parseInt(startTime.replace(':', ''));
         const newEndNum = parseInt(endTime.replace(':', ''));
         const examStartNum = parseInt(examStart.replace(':', ''));
         const examEndNum = parseInt(examEnd.replace(':', ''));
-        
-        const overlaps = (newStartNum < examEndNum && newEndNum > examStartNum);
-        return overlaps;
+        return (newStartNum < examEndNum && newEndNum > examStartNum);
       });
-      
       setInvigilatorConflicts(conflicts);
       return conflicts;
     } catch (error) {
@@ -9026,92 +9180,58 @@ const ExamModule = ({
   }, [examForm.invigilatorId, examForm.date, examForm.startTime, examForm.endTime, selectedExam]);
 
   // ============================================================
-  // OPTIONS FOR SEARCHABLE SELECTS - EMPTY BY DEFAULT
+  // OPTIONS FOR SEARCHABLE SELECTS
   // ============================================================
   const courseOptions = useMemo(() => {
-    if (!courses || courses.length === 0) {
-      return [];
-    }
-    return courses.map(c => ({ 
-      value: c.id, 
-      label: c.name,
-      subLabel: c.code || ''
-    }));
+    if (!courses || courses.length === 0) return [];
+    return courses.map(c => ({ value: c.id, label: c.name, subLabel: c.code || '' }));
   }, [courses]);
 
   const programOptions = useMemo(() => {
-    if (!programs || programs.length === 0) {
-      return [];
-    }
-    return programs.map(p => ({ 
-      value: p.id, 
-      label: p.name,
-      subLabel: p.code || ''
-    }));
+    if (!programs || programs.length === 0) return [];
+    return programs.map(p => ({ value: p.id, label: p.name, subLabel: p.code || '' }));
   }, [programs]);
 
   const classOptions = useMemo(() => {
-    if (!classes || classes.length === 0) {
-      return [];
-    }
-    return classes.map(c => ({ 
-      value: c.id, 
-      label: c.name,
-      subLabel: `Capacity: ${c.capacity || 'N/A'}`
-    }));
+    if (!classes || classes.length === 0) return [];
+    return classes.map(c => ({ value: c.id, label: c.name, subLabel: `Capacity: ${c.capacity || 'N/A'}` }));
   }, [classes]);
 
   const getUnitOptionsForFilters = useCallback(() => {
-    if (!filteredUnitsForFilters || filteredUnitsForFilters.length === 0) {
-      return [];
-    }
+    if (!filteredUnitsForFilters || filteredUnitsForFilters.length === 0) return [];
     return filteredUnitsForFilters.map(u => ({ 
-      value: u.id, 
-      label: u.name,
+      value: u.id, label: u.name,
       subLabel: isUniversity ? `Semester: ${u.semester || 'N/A'}` : `Module: ${u.module || 'N/A'}`
     }));
   }, [filteredUnitsForFilters, isUniversity]);
 
   const getUnitOptionsForForm = useCallback(() => {
-    if (!filteredUnitsForForm || filteredUnitsForForm.length === 0) {
-      return [];
-    }
+    if (!filteredUnitsForForm || filteredUnitsForForm.length === 0) return [];
     return filteredUnitsForForm.map(u => ({ 
-      value: u.id, 
-      label: u.name,
+      value: u.id, label: u.name,
       subLabel: isUniversity ? `Semester: ${u.semester || 'N/A'}` : `Module: ${u.module || 'N/A'}`
     }));
   }, [filteredUnitsForForm, isUniversity]);
 
   const getSubjectOptions = useCallback(() => {
-    if (!filteredSubjects || filteredSubjects.length === 0) {
-      return [];
-    }
-    return filteredSubjects.map(s => ({ 
-      value: s.id, 
-      label: s.name,
-      subLabel: `Code: ${s.code || 'N/A'}`
-    }));
+    if (!filteredSubjects || filteredSubjects.length === 0) return [];
+    return filteredSubjects.map(s => ({ value: s.id, label: s.name, subLabel: `Code: ${s.code || 'N/A'}` }));
   }, [filteredSubjects]);
 
+  // ✅ UPDATED: uses the robust name/sub-label helpers
   const getInvigilatorOptions = useCallback(() => {
-    if (!teachingStaff || teachingStaff.length === 0) {
-      return [];
-    }
-    return teachingStaff.map(s => ({ 
-      value: s.id, 
-      label: s.User ? `${s.User.firstName} ${s.User.lastName}` : 'Unknown',
-      subLabel: s.department || 'No department'
+    if (!teachingStaff || teachingStaff.length === 0) return [];
+    return teachingStaff.map(s => ({
+      value: s.id,
+      label: getStaffDisplayName(s),
+      subLabel: getStaffSubLabel(s) || 'Teaching Staff'
     }));
   }, [teachingStaff]);
 
   const getExamNameOptions = useCallback(() => {
-    if (!availableExamNames || availableExamNames.length === 0) {
-      return [];
-    }
+    if (!availableExamNames || availableExamNames.length === 0) return [];
     return availableExamNames.map(name => ({ 
-      value: name, 
-      label: name,
+      value: name, label: name,
       subLabel: `Used in ${exams?.filter(e => e.name === name).length || 0} exam(s)`
     }));
   }, [availableExamNames, exams]);
@@ -9121,11 +9241,9 @@ const ExamModule = ({
   // ============================================================
   useEffect(() => {
     if (isUniversity && selectedCourse && units && units.length > 0) {
-      const filtered = units.filter(u => u.courseId === selectedCourse);
-      setFilteredUnitsForFilters(filtered);
+      setFilteredUnitsForFilters(units.filter(u => u.courseId === selectedCourse));
     } else if (isTVET && selectedProgram && units && units.length > 0) {
-      const filtered = units.filter(u => u.programId === selectedProgram);
-      setFilteredUnitsForFilters(filtered);
+      setFilteredUnitsForFilters(units.filter(u => u.programId === selectedProgram));
     } else {
       setFilteredUnitsForFilters([]);
     }
@@ -9133,11 +9251,9 @@ const ExamModule = ({
 
   useEffect(() => {
     if (isUniversity && examForm.courseId && units && units.length > 0) {
-      const filtered = units.filter(u => u.courseId === examForm.courseId);
-      setFilteredUnitsForForm(filtered);
+      setFilteredUnitsForForm(units.filter(u => u.courseId === examForm.courseId));
     } else if (isTVET && examForm.programId && units && units.length > 0) {
-      const filtered = units.filter(u => u.programId === examForm.programId);
-      setFilteredUnitsForForm(filtered);
+      setFilteredUnitsForForm(units.filter(u => u.programId === examForm.programId));
     } else {
       setFilteredUnitsForForm([]);
     }
@@ -9145,8 +9261,7 @@ const ExamModule = ({
 
   useEffect(() => {
     if (isRegularSchool && selectedClass && subjects) {
-      const filtered = subjects.filter(s => s.classId === selectedClass);
-      setFilteredSubjects(filtered);
+      setFilteredSubjects(subjects.filter(s => s.classId === selectedClass));
     } else {
       setFilteredSubjects([]);
     }
@@ -9167,39 +9282,29 @@ const ExamModule = ({
   // ============================================================
   const getCourseName = (courseId) => {
     if (!courseId) return 'N/A';
-    const course = courses?.find(c => c.id === courseId);
-    return course ? course.name : 'N/A';
+    return courses?.find(c => c.id === courseId)?.name || 'N/A';
   };
-
   const getProgramName = (programId) => {
     if (!programId) return 'N/A';
-    const program = programs?.find(p => p.id === programId);
-    return program ? program.name : 'N/A';
+    return programs?.find(p => p.id === programId)?.name || 'N/A';
   };
-
   const getUnitName = (unitId) => {
     if (!unitId) return 'N/A';
-    const unit = units?.find(u => u.id === unitId);
-    return unit ? unit.name : 'N/A';
+    return units?.find(u => u.id === unitId)?.name || 'N/A';
   };
-
   const getClassName = (classId) => {
     if (!classId) return 'N/A';
-    const classObj = classes?.find(c => c.id === classId);
-    return classObj ? classObj.name : 'N/A';
+    return classes?.find(c => c.id === classId)?.name || 'N/A';
   };
-
   const getSubjectName = (subjectId) => {
     if (!subjectId) return 'N/A';
-    const subject = subjects?.find(s => s.id === subjectId);
-    return subject ? subject.name : 'N/A';
+    return subjects?.find(s => s.id === subjectId)?.name || 'N/A';
   };
-
   const getStaffName = (staffId) => {
     if (!staffId) return 'N/A';
     const staff = teachingStaff.find(s => s.id === staffId);
     if (!staff) return 'Unknown';
-    return staff.User ? `${staff.User.firstName} ${staff.User.lastName}` : 'Unknown';
+    return getStaffDisplayName(staff);
   };
 
   // ============================================================
@@ -9207,7 +9312,6 @@ const ExamModule = ({
   // ============================================================
   const calculateGrade = (marks, maxMarks = 100, examCategory = null) => {
     if (!marks && marks !== 0) return { grade: '-', points: 0, remark: '' };
-    
     const percentage = (marks / maxMarks) * 100;
     const category = examCategory || schoolCategory;
     
@@ -9218,48 +9322,41 @@ const ExamModule = ({
       if (percentage >= 40) return { grade: 'D', points: 2.0, remark: 'Fair' };
       return { grade: 'E', points: 1.0, remark: 'Poor' };
     } 
-    else if (category === 'COLLEGE_TVET') {
+    if (category === 'COLLEGE_TVET') {
       if (percentage >= 80) return { grade: 'DISTINCTION', points: 5, remark: 'Distinction' };
       if (percentage >= 65) return { grade: 'CREDIT', points: 4, remark: 'Credit' };
       if (percentage >= 50) return { grade: 'MERIT', points: 3, remark: 'Merit' };
       if (percentage >= 40) return { grade: 'PASS', points: 2, remark: 'Pass' };
       return { grade: 'FAIL', points: 1, remark: 'Fail' };
     }
-    else if (category === 'ECDE_PRIMARY_JSS') {
+    if (category === 'ECDE_PRIMARY_JSS') {
       if (percentage >= 80) return { grade: 'Exceeding Expectations', points: 4, remark: 'Exceeding Expectations' };
       if (percentage >= 65) return { grade: 'Meeting Expectations', points: 3, remark: 'Meeting Expectations' };
       if (percentage >= 50) return { grade: 'Approaching Expectations', points: 2, remark: 'Approaching Expectations' };
       if (percentage >= 30) return { grade: 'Below Expectations', points: 1, remark: 'Below Expectations' };
       return { grade: 'Needs Improvement', points: 0, remark: 'Needs Improvement' };
     }
-    else {
-      if (percentage >= 80) return { grade: 'A', points: 12, remark: 'Excellent' };
-      if (percentage >= 75) return { grade: 'A-', points: 11, remark: 'Very Good' };
-      if (percentage >= 70) return { grade: 'B+', points: 10, remark: 'Good' };
-      if (percentage >= 65) return { grade: 'B', points: 9, remark: 'Above Average' };
-      if (percentage >= 60) return { grade: 'B-', points: 8, remark: 'Average' };
-      if (percentage >= 55) return { grade: 'C+', points: 7, remark: 'Below Average' };
-      if (percentage >= 50) return { grade: 'C', points: 6, remark: 'Fair' };
-      if (percentage >= 45) return { grade: 'C-', points: 5, remark: 'Below Expectations' };
-      if (percentage >= 40) return { grade: 'D+', points: 4, remark: 'Needs Improvement' };
-      if (percentage >= 35) return { grade: 'D', points: 3, remark: 'Poor' };
-      if (percentage >= 30) return { grade: 'D-', points: 2, remark: 'Very Poor' };
-      return { grade: 'E', points: 1, remark: 'Needs Intervention' };
-    }
+    if (percentage >= 80) return { grade: 'A', points: 12, remark: 'Excellent' };
+    if (percentage >= 75) return { grade: 'A-', points: 11, remark: 'Very Good' };
+    if (percentage >= 70) return { grade: 'B+', points: 10, remark: 'Good' };
+    if (percentage >= 65) return { grade: 'B', points: 9, remark: 'Above Average' };
+    if (percentage >= 60) return { grade: 'B-', points: 8, remark: 'Average' };
+    if (percentage >= 55) return { grade: 'C+', points: 7, remark: 'Below Average' };
+    if (percentage >= 50) return { grade: 'C', points: 6, remark: 'Fair' };
+    if (percentage >= 45) return { grade: 'C-', points: 5, remark: 'Below Expectations' };
+    if (percentage >= 40) return { grade: 'D+', points: 4, remark: 'Needs Improvement' };
+    if (percentage >= 35) return { grade: 'D', points: 3, remark: 'Poor' };
+    if (percentage >= 30) return { grade: 'D-', points: 2, remark: 'Very Poor' };
+    return { grade: 'E', points: 1, remark: 'Needs Intervention' };
   };
 
   const getGradeColor = (grade) => {
     if (!grade) return 'bg-gray-100 text-gray-800';
-    if (grade === 'A' || grade === 'A-' || grade === 'Exceeding Expectations' || grade === 'DISTINCTION')
-      return 'bg-green-100 text-green-800';
-    if (grade === 'B+' || grade === 'B' || grade === 'B-' || grade === 'Meeting Expectations' || grade === 'CREDIT')
-      return 'bg-blue-100 text-blue-800';
-    if (grade === 'C+' || grade === 'C' || grade === 'C-' || grade === 'Approaching Expectations' || grade === 'MERIT')
-      return 'bg-yellow-100 text-yellow-800';
-    if (grade === 'D+' || grade === 'D' || grade === 'D-' || grade === 'Below Expectations' || grade === 'PASS')
-      return 'bg-orange-100 text-orange-800';
-    if (grade === 'E' || grade === 'Needs Improvement' || grade === 'FAIL')
-      return 'bg-red-100 text-red-800';
+    if (['A', 'A-', 'Exceeding Expectations', 'DISTINCTION'].includes(grade)) return 'bg-green-100 text-green-800';
+    if (['B+', 'B', 'B-', 'Meeting Expectations', 'CREDIT'].includes(grade)) return 'bg-blue-100 text-blue-800';
+    if (['C+', 'C', 'C-', 'Approaching Expectations', 'MERIT'].includes(grade)) return 'bg-yellow-100 text-yellow-800';
+    if (['D+', 'D', 'D-', 'Below Expectations', 'PASS'].includes(grade)) return 'bg-orange-100 text-orange-800';
+    if (['E', 'Needs Improvement', 'FAIL'].includes(grade)) return 'bg-red-100 text-red-800';
     return 'bg-gray-100 text-gray-800';
   };
 
@@ -9268,21 +9365,15 @@ const ExamModule = ({
   // ============================================================
   const filteredExams = useMemo(() => {
     let filtered = exams || [];
-    
     if (isUniversity) {
       if (selectedCourse) filtered = filtered.filter(e => e.courseId === selectedCourse);
       if (selectedYear) filtered = filtered.filter(e => e.year === parseInt(selectedYear));
       if (selectedSemester) filtered = filtered.filter(e => e.semester === parseInt(selectedSemester));
       if (selectedUnit) filtered = filtered.filter(e => e.unitId === selectedUnit);
     } else if (isTVET) {
-      if (selectedProgram) {
-        filtered = filtered.filter(e => e.programId === selectedProgram);
-      }
+      if (selectedProgram) filtered = filtered.filter(e => e.programId === selectedProgram);
       if (selectedYear) filtered = filtered.filter(e => e.year === parseInt(selectedYear));
-      if (selectedModule) {
-        const moduleNum = parseInt(selectedModule);
-        filtered = filtered.filter(e => e.module === moduleNum);
-      }
+      if (selectedModule) filtered = filtered.filter(e => e.module === parseInt(selectedModule));
       if (selectedUnit) filtered = filtered.filter(e => e.unitId === selectedUnit);
     } else {
       if (selectedClass) filtered = filtered.filter(e => e.classId === selectedClass);
@@ -9299,9 +9390,7 @@ const ExamModule = ({
       setLoading(true);
       setApiError('');
       const res = await api.get('/exams');
-      if (res.data.exams) {
-        setExams(res.data.exams);
-      }
+      if (res.data.exams) setExams(res.data.exams);
     } catch (error) {
       console.error('Error refreshing exams:', error);
       setApiError('Failed to load exams. Please check your connection.');
@@ -9315,92 +9404,49 @@ const ExamModule = ({
   // ============================================================
   const handleExamSubmit = async (e) => {
     e.preventDefault();
-    
-    if (!canCreateExams) {
-      alert('You do not have permission to create exams');
-      return;
-    }
+    if (!canCreateExams) { alert('You do not have permission to create exams'); return; }
     
     if (isUniversity) {
-      if (!examForm.courseId) {
-        alert('Please select a course');
-        return;
-      }
-      if (!examForm.unitId) {
-        alert('Please select a unit');
-        return;
-      }
-      if (!examForm.type) {
-        alert('Please select exam type');
-        return;
-      }
+      if (!examForm.courseId) { alert('Please select a course'); return; }
+      if (!examForm.unitId) { alert('Please select a unit'); return; }
+      if (!examForm.type) { alert('Please select exam type'); return; }
     } else if (isTVET) {
-      if (!examForm.programId) {
-        alert('Please select a program');
-        return;
-      }
-      if (!examForm.unitId) {
-        alert('Please select a unit/module');
-        return;
-      }
-      if (!examForm.type) {
-        alert('Please select exam type');
-        return;
-      }
+      if (!examForm.programId) { alert('Please select a program'); return; }
+      if (!examForm.unitId) { alert('Please select a unit/module'); return; }
+      if (!examForm.type) { alert('Please select exam type'); return; }
     } else {
-      if (!examForm.classId) {
-        alert('Please select a class');
-        return;
-      }
-      if (!examForm.subjectId) {
-        alert('Please select a subject');
-        return;
-      }
+      if (!examForm.classId) { alert('Please select a class'); return; }
+      if (!examForm.subjectId) { alert('Please select a subject'); return; }
     }
     
-    if (examNameOption === 'new' && !customExamName) {
-      alert('Please enter a new exam name');
-      return;
-    }
+    if (examNameOption === 'new' && !customExamName) { alert('Please enter a new exam name'); return; }
 
     if (examForm.invigilatorId) {
       const conflicts = await checkInvigilatorConflicts(
-        examForm.invigilatorId,
-        examForm.date,
-        examForm.startTime,
-        examForm.endTime,
-        selectedExam?.id
+        examForm.invigilatorId, examForm.date, examForm.startTime, examForm.endTime, selectedExam?.id
       );
-      
       if (conflicts.length > 0) {
         const conflictNames = conflicts.map(c => c.name).join(', ');
-        if (!window.confirm(`Warning: This invigilator is already assigned to: ${conflictNames} at this time. Continue anyway?`)) {
-          return;
-        }
+        if (!window.confirm(`Warning: This invigilator is already assigned to: ${conflictNames} at this time. Continue anyway?`)) return;
       }
     }
     
     let examData;
     const selectedInvigilator = teachingStaff.find(s => s.id === examForm.invigilatorId);
-    const invigilatorName = selectedInvigilator?.User 
-      ? `${selectedInvigilator.User.firstName} ${selectedInvigilator.User.lastName}` 
+    const invigilatorName = selectedInvigilator 
+      ? getStaffDisplayName(selectedInvigilator) 
       : examForm.invigilator;
     
     if (isUniversity) {
       examData = {
         name: examNameOption === 'new' ? customExamName : examForm.name,
-        type: examForm.type,
-        courseId: examForm.courseId,
-        unitId: examForm.unitId,
+        type: examForm.type, courseId: examForm.courseId, unitId: examForm.unitId,
         year: examForm.year ? parseInt(examForm.year) : null,
         semester: examForm.semester ? parseInt(examForm.semester) : null,
-        date: examForm.date,
-        startTime: examForm.startTime || null,
-        endTime: examForm.endTime || null,
+        date: examForm.date, startTime: examForm.startTime || null, endTime: examForm.endTime || null,
         maxMarks: examForm.maxMarks ? parseInt(examForm.maxMarks) : 100,
         examHall: examForm.examHall || null,
-        invigilator: invigilatorName,
-        invigilatorId: examForm.invigilatorId || null,
+        invigilator: invigilatorName, invigilatorId: examForm.invigilatorId || null,
         academicYear: examForm.academicYear,
         term: examForm.semester ? `Semester ${examForm.semester}` : null,
         schoolId: currentSchool?.id
@@ -9408,18 +9454,13 @@ const ExamModule = ({
     } else if (isTVET) {
       examData = {
         name: examNameOption === 'new' ? customExamName : examForm.name,
-        type: examForm.type,
-        programId: examForm.programId,
-        unitId: examForm.unitId,
+        type: examForm.type, programId: examForm.programId, unitId: examForm.unitId,
         year: examForm.year ? parseInt(examForm.year) : null,
         module: examForm.module ? parseInt(examForm.module) : null,
-        date: examForm.date,
-        startTime: examForm.startTime || null,
-        endTime: examForm.endTime || null,
+        date: examForm.date, startTime: examForm.startTime || null, endTime: examForm.endTime || null,
         maxMarks: examForm.maxMarks ? parseInt(examForm.maxMarks) : 100,
         examHall: examForm.examHall || null,
-        invigilator: invigilatorName,
-        invigilatorId: examForm.invigilatorId || null,
+        invigilator: invigilatorName, invigilatorId: examForm.invigilatorId || null,
         academicYear: examForm.academicYear,
         term: examForm.module ? `Module ${examForm.module}` : null,
         schoolId: currentSchool?.id
@@ -9427,16 +9468,11 @@ const ExamModule = ({
     } else {
       examData = {
         name: examNameOption === 'new' ? customExamName : examForm.name,
-        type: examForm.type,
-        classId: examForm.classId,
-        subjectId: examForm.subjectId,
-        date: examForm.date,
-        startTime: examForm.startTime || null,
-        endTime: examForm.endTime || null,
+        type: examForm.type, classId: examForm.classId, subjectId: examForm.subjectId,
+        date: examForm.date, startTime: examForm.startTime || null, endTime: examForm.endTime || null,
         maxMarks: examForm.maxMarks ? parseInt(examForm.maxMarks) : 100,
         examHall: examForm.examHall || null,
-        invigilator: invigilatorName,
-        invigilatorId: examForm.invigilatorId || null,
+        invigilator: invigilatorName, invigilatorId: examForm.invigilatorId || null,
         academicYear: examForm.academicYear,
         term: examForm.term || 'Term 1',
         schoolId: currentSchool?.id
@@ -9448,10 +9484,7 @@ const ExamModule = ({
     try {
       let response;
       if (selectedExam) {
-        if (!canEditExams) {
-          alert('You do not have permission to edit exams');
-          return;
-        }
+        if (!canEditExams) { alert('You do not have permission to edit exams'); return; }
         response = await api.put(`/exams/${selectedExam.id}`, examData);
       } else {
         response = await api.post('/exams', examData);
@@ -9468,7 +9501,6 @@ const ExamModule = ({
       } else {
         alert('❌ Failed to save exam: ' + (response.data.message || 'Unknown error'));
       }
-      
     } catch (error) {
       console.error('Error saving exam:', error);
       alert('❌ Failed to save exam: ' + (error.response?.data?.message || error.message));
@@ -9480,28 +9512,17 @@ const ExamModule = ({
   // ============================================================
   const handleSingleResultSubmit = async (e) => {
     e.preventDefault();
-    
-    if (!canAddResults) {
-      alert('You do not have permission to add results');
-      return;
-    }
-
-    if (!resultForm.studentId || !resultForm.examId) {
-      alert('Please select a student and exam');
-      return;
-    }
+    if (!canAddResults) { alert('You do not have permission to add results'); return; }
+    if (!resultForm.studentId || !resultForm.examId) { alert('Please select a student and exam'); return; }
 
     setSavingResults(true);
     setApiError('');
     
     try {
       const exam = exams.find(e => e.id === resultForm.examId);
-      if (!exam) {
-        throw new Error('Exam not found. Please refresh and try again.');
-      }
+      if (!exam) throw new Error('Exam not found. Please refresh and try again.');
       
       const marks = resultForm.isAbsent ? 0 : parseFloat(resultForm.marks) || 0;
-      
       if (!resultForm.isAbsent && (marks < 0 || marks > exam.maxMarks)) {
         alert(`Marks must be between 0 and ${exam.maxMarks}`);
         setSavingResults(false);
@@ -9509,57 +9530,34 @@ const ExamModule = ({
       }
       
       const { grade, points } = calculateGrade(marks, exam.maxMarks, exam.schoolCategory);
-      
       const resultData = {
-        studentId: resultForm.studentId,
-        examId: resultForm.examId,
+        studentId: resultForm.studentId, examId: resultForm.examId,
         ...(isUniversity || isTVET ? { unitId: exam.unitId } : { subjectId: exam.subjectId }),
-        marks: marks,
-        grade: grade,
-        points: points,
+        marks, grade, points,
         isAbsent: resultForm.isAbsent || false,
         remarks: resultForm.remarks || ''
       };
       
-      console.log('📤 Submitting result:', resultData);
-      
       let existingResult = null;
       try {
         const existingResults = await api.get(`/results?examId=${resultForm.examId}&studentId=${resultForm.studentId}`);
-        if (existingResults.data.results && existingResults.data.results.length > 0) {
-          existingResult = existingResults.data.results[0];
-        }
-      } catch (err) {
-        console.log('No existing result found, creating new one');
-      }
+        if (existingResults.data.results?.length > 0) existingResult = existingResults.data.results[0];
+      } catch (err) { console.log('No existing result found, creating new one'); }
       
       let response;
-      if (existingResult) {
-        response = await api.put(`/results/${existingResult.id}`, resultData);
-      } else {
-        response = await api.post('/results', resultData);
-      }
+      if (existingResult) response = await api.put(`/results/${existingResult.id}`, resultData);
+      else response = await api.post('/results', resultData);
       
       if (setResults && response.data.result) {
         const newResult = response.data.result;
-        if (existingResult) {
-          setResults(results.map(r => r.id === existingResult.id ? newResult : r));
-        } else {
-          setResults([...results, newResult]);
-        }
+        if (existingResult) setResults(results.map(r => r.id === existingResult.id ? newResult : r));
+        else setResults([...results, newResult]);
       }
       
       alert('✅ Result saved successfully!');
       setShowResultForm(false);
-      setResultForm({
-        studentId: '',
-        examId: '',
-        marks: '',
-        isAbsent: false,
-        remarks: ''
-      });
+      setResultForm({ studentId: '', examId: '', marks: '', isAbsent: false, remarks: '' });
       refreshExams();
-      
     } catch (error) {
       console.error('❌ Error saving result:', error);
       alert('❌ Failed to save result: ' + (error.response?.data?.message || error.message || 'Unknown error'));
@@ -9574,100 +9572,56 @@ const ExamModule = ({
   // ============================================================
   const loadStudentsForBulkResults = async (examId) => {
     if (!examId) return;
-    
-    if (!canAddResults) {
-      alert('You do not have permission to add results');
-      return;
-    }
+    if (!canAddResults) { alert('You do not have permission to add results'); return; }
     
     setLoading(true);
     setSelectedExamForResults(examId);
     
     try {
       const exam = exams.find(e => e.id === examId);
-      if (!exam) {
-        alert('Exam not found');
-        setLoading(false);
-        return;
-      }
+      if (!exam) { alert('Exam not found'); setLoading(false); return; }
       
       let studentList = [];
-      
       if (isUniversity) {
-        if (!exam.courseId) {
-          alert('This exam has no course assigned');
-          setLoading(false);
-          return;
-        }
+        if (!exam.courseId) { alert('This exam has no course assigned'); setLoading(false); return; }
         const res = await api.get(`/students?courseId=${exam.courseId}`);
         studentList = res.data.students || [];
-        if (exam.year) {
-          studentList = studentList.filter(s => s.currentYear === exam.year);
-        }
+        if (exam.year) studentList = studentList.filter(s => s.currentYear === exam.year);
       } else if (isTVET) {
-        if (!exam.programId) {
-          alert('This exam has no program assigned');
-          setLoading(false);
-          return;
-        }
+        if (!exam.programId) { alert('This exam has no program assigned'); setLoading(false); return; }
         const res = await api.get(`/students?programId=${exam.programId}`);
         studentList = res.data.students || [];
-        if (exam.module) {
-          studentList = studentList.filter(s => s.currentModule === `Module ${exam.module}`);
-        }
+        if (exam.module) studentList = studentList.filter(s => s.currentModule === `Module ${exam.module}`);
       } else {
-        if (!exam.classId) {
-          alert('This exam has no class assigned');
-          setLoading(false);
-          return;
-        }
+        if (!exam.classId) { alert('This exam has no class assigned'); setLoading(false); return; }
         const res = await api.get(`/students?classId=${exam.classId}`);
         studentList = res.data.students || [];
       }
       
-      if (studentList.length === 0) {
-        alert('No students found for this exam');
-        setLoading(false);
-        return;
-      }
+      if (studentList.length === 0) { alert('No students found for this exam'); setLoading(false); return; }
       
       let existingResults = [];
       try {
         const res = await api.get(`/results/exam/${examId}`);
         existingResults = res.data.results || [];
-      } catch (err) {
-        console.log('No existing results');
-      }
+      } catch (err) { console.log('No existing results'); }
       
       let itemName = '';
-      if (isUniversity || isTVET) {
-        const unit = units?.find(u => u.id === exam.unitId);
-        itemName = unit?.name || 'Unknown Unit';
-      } else {
-        const subject = subjects?.find(s => s.id === exam.subjectId);
-        itemName = subject?.name || 'Unknown Subject';
-      }
+      if (isUniversity || isTVET) itemName = units?.find(u => u.id === exam.unitId)?.name || 'Unknown Unit';
+      else itemName = subjects?.find(s => s.id === exam.subjectId)?.name || 'Unknown Subject';
       
       const bulkData = studentList.map(student => {
         const existing = existingResults.find(r => r.studentId === student.id);
-        
         let gradeInfo = { grade: '-', points: 0 };
-        if (existing?.marks) {
-          gradeInfo = calculateGrade(existing.marks, exam.maxMarks, exam.schoolCategory);
-        }
-        
+        if (existing?.marks) gradeInfo = calculateGrade(existing.marks, exam.maxMarks, exam.schoolCategory);
         return {
           studentId: student.id,
           studentName: `${student.firstName} ${student.lastName}`,
           admissionNumber: student.admissionNumber,
-          unitId: exam.unitId,
-          subjectId: exam.subjectId,
-          unitName: itemName,
-          marks: existing?.marks || '',
-          grade: existing?.grade || gradeInfo.grade,
+          unitId: exam.unitId, subjectId: exam.subjectId, unitName: itemName,
+          marks: existing?.marks || '', grade: existing?.grade || gradeInfo.grade,
           points: existing?.points || gradeInfo.points,
-          isAbsent: existing?.isAbsent || false,
-          resultId: existing?.id,
+          isAbsent: existing?.isAbsent || false, resultId: existing?.id,
           schoolCategory: exam.schoolCategory
         };
       });
@@ -9686,26 +9640,16 @@ const ExamModule = ({
   // BULK RESULTS HANDLERS
   // ============================================================
   const handleMarkChange = (studentId, value) => {
-    setBulkResults(prev => prev.map(e => 
-      e.studentId === studentId ? { ...e, marks: value } : e
-    ));
+    setBulkResults(prev => prev.map(e => e.studentId === studentId ? { ...e, marks: value } : e));
   };
-
   const handleAbsentChange = (studentId, checked) => {
-    setBulkResults(prev => prev.map(e => 
-      e.studentId === studentId 
-        ? { ...e, isAbsent: checked, marks: checked ? 0 : e.marks } 
-        : e
-    ));
+    setBulkResults(prev => prev.map(e => e.studentId === studentId ? { ...e, isAbsent: checked, marks: checked ? 0 : e.marks } : e));
   };
-
   const handleGradeBlur = (studentId, marks) => {
     if (marks) {
       const exam = exams.find(e => e.id === selectedExamForResults);
       const { grade, points } = calculateGrade(marks, exam?.maxMarks, exam?.schoolCategory);
-      setBulkResults(prev => prev.map(e => 
-        e.studentId === studentId ? { ...e, grade, points } : e
-      ));
+      setBulkResults(prev => prev.map(e => e.studentId === studentId ? { ...e, grade, points } : e));
     }
   };
 
@@ -9713,79 +9657,46 @@ const ExamModule = ({
   // SAVE BULK RESULTS
   // ============================================================
   const saveBulkResults = async () => {
-    if (!canAddResults) {
-      alert('You do not have permission to add results');
-      return;
-    }
-    
+    if (!canAddResults) { alert('You do not have permission to add results'); return; }
     const hasResults = bulkResults.some(e => e.marks !== '' || e.isAbsent);
-    if (!hasResults) {
-      alert('No results to save. Please enter marks or mark students as absent.');
-      return;
-    }
+    if (!hasResults) { alert('No results to save. Please enter marks or mark students as absent.'); return; }
     
     setLoading(true);
-    let savedCount = 0;
-    let errorCount = 0;
+    let savedCount = 0, errorCount = 0;
     const errors = [];
     
     try {
       const exam = exams.find(e => e.id === selectedExamForResults);
-      if (!exam) {
-        alert('Exam not found. Please refresh and try again.');
-        setLoading(false);
-        return;
-      }
-      
-      console.log('📝 Saving bulk results for exam:', exam.name);
-      console.log('📊 Results to save:', bulkResults.length);
+      if (!exam) { alert('Exam not found. Please refresh and try again.'); setLoading(false); return; }
       
       for (const entry of bulkResults) {
-        if (entry.marks === '' && !entry.isAbsent) {
-          continue;
-        }
-        
+        if (entry.marks === '' && !entry.isAbsent) continue;
         const marks = entry.isAbsent ? 0 : parseFloat(entry.marks) || 0;
-        
         if (!entry.isAbsent && (marks < 0 || marks > exam.maxMarks)) {
           errors.push(`${entry.studentName}: Marks must be between 0 and ${exam.maxMarks}`);
           errorCount++;
           continue;
         }
-        
         const { grade, points } = calculateGrade(marks, exam.maxMarks, exam.schoolCategory);
-        
         const resultData = {
-          studentId: entry.studentId,
-          examId: selectedExamForResults,
+          studentId: entry.studentId, examId: selectedExamForResults,
           ...(isUniversity || isTVET ? { unitId: exam.unitId } : { subjectId: exam.subjectId }),
-          marks: marks,
-          grade: grade,
-          points: points,
+          marks, grade, points,
           isAbsent: entry.isAbsent || false,
           remarks: entry.isAbsent ? 'Absent' : ''
         };
-        
         try {
-          if (entry.resultId) {
-            await api.put(`/results/${entry.resultId}`, resultData);
-            console.log(`✅ Updated result for ${entry.studentName}`);
-          } else {
-            await api.post('/results', resultData);
-            console.log(`✅ Created result for ${entry.studentName}`);
-          }
+          if (entry.resultId) await api.put(`/results/${entry.resultId}`, resultData);
+          else await api.post('/results', resultData);
           savedCount++;
         } catch (err) {
-          console.error(`❌ Error saving for ${entry.studentName}:`, err.response?.data || err.message);
           errors.push(`${entry.studentName}: ${err.response?.data?.message || err.message}`);
           errorCount++;
         }
       }
       
       let message = `✅ ${savedCount} results saved successfully.`;
-      if (errorCount > 0) {
-        message += `\n❌ ${errorCount} errors occurred:\n${errors.join('\n')}`;
-      }
+      if (errorCount > 0) message += `\n❌ ${errorCount} errors occurred:\n${errors.join('\n')}`;
       alert(message);
       
       if (savedCount > 0) {
@@ -9796,7 +9707,6 @@ const ExamModule = ({
         setResultSearch('');
         setFilterGrade('');
       }
-      
     } catch (error) {
       console.error('❌ Error saving bulk results:', error);
       alert('❌ Failed to save results: ' + (error.response?.data?.message || error.message));
@@ -9810,17 +9720,12 @@ const ExamModule = ({
   // ============================================================
   const handleSelectAllForMessage = (checked) => {
     setSelectAllForMessage(checked);
-    if (checked) {
-      setSelectedStudentsForMessage(bulkResults.map(s => s.studentId));
-    } else {
-      setSelectedStudentsForMessage([]);
-    }
+    if (checked) setSelectedStudentsForMessage(bulkResults.map(s => s.studentId));
+    else setSelectedStudentsForMessage([]);
   };
-
   const handleSelectForMessage = (studentId, checked) => {
-    if (checked) {
-      setSelectedStudentsForMessage([...selectedStudentsForMessage, studentId]);
-    } else {
+    if (checked) setSelectedStudentsForMessage([...selectedStudentsForMessage, studentId]);
+    else {
       setSelectedStudentsForMessage(selectedStudentsForMessage.filter(id => id !== studentId));
       setSelectAllForMessage(false);
     }
@@ -9830,22 +9735,14 @@ const ExamModule = ({
   // DELETE EXAM
   // ============================================================
   const handleDeleteExam = (examId) => {
-    if (!canDeleteExams) {
-      alert('You do not have permission to delete exams');
-      return;
-    }
-    
-    if (window.confirm('Delete this exam?')) {
-      handleDelete('/exams', examId, setExams, exams);
-    }
+    if (!canDeleteExams) { alert('You do not have permission to delete exams'); return; }
+    if (window.confirm('Delete this exam?')) handleDelete('/exams', examId, setExams, exams);
   };
 
   // ============================================================
   // LOAD EXAMS ON MOUNT
   // ============================================================
-  useEffect(() => {
-    refreshExams();
-  }, []);
+  useEffect(() => { refreshExams(); }, []);
 
   const filteredBulkResults = bulkResults.filter(entry => 
     entry.studentName?.toLowerCase().includes(resultSearch.toLowerCase()) ||
@@ -9859,20 +9756,35 @@ const ExamModule = ({
   // ============================================================
   return (
     <div className="space-y-6">
-      {/* Loading Bar */}
       {(loading || savingResults || loadingStaff) && (
         <div className="h-1 bg-indigo-600 animate-pulse fixed top-0 left-0 w-full z-50" />
       )}
       
-      {/* API Error */}
       {apiError && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-          <i className="fas fa-exclamation-circle mr-2"></i>
-          {apiError}
+          <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
+        </div>
+      )}
+
+      {/* ✅ Staff load error surface */}
+      {staffLoadError && !loadingStaff && (
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg flex justify-between items-center">
+          <div>
+            <i className="fas fa-exclamation-triangle mr-2"></i>
+            {staffLoadError}
+            <span className="text-xs ml-2 text-yellow-700">
+              (Teaching staff list for invigilators may be incomplete.)
+            </span>
+          </div>
+          <button
+            onClick={fetchTeachingStaff}
+            className="text-xs bg-yellow-600 text-white px-3 py-1 rounded hover:bg-yellow-700"
+          >
+            Retry
+          </button>
         </div>
       )}
       
-      {/* Invigilator Conflicts */}
       {invigilatorConflicts.length > 0 && (
         <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg">
           <div className="flex items-start">
@@ -9902,11 +9814,7 @@ const ExamModule = ({
         </h2>
         
         <div className="flex space-x-2">
-          <button
-            onClick={refreshExams}
-            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center"
-            title="Refresh Exams"
-          >
+          <button onClick={refreshExams} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center">
             <i className="fas fa-sync-alt mr-2"></i>Refresh
           </button>
           
@@ -9914,27 +9822,14 @@ const ExamModule = ({
             <button
               onClick={() => {
                 setExamForm({
-                  name: '', 
-                  type: isUniversity ? 'MIDTERM' : (isTVET ? 'PRACTICAL' : 'OPENER'), 
-                  classId: '', 
-                  term: isUniversity ? 'Semester 1' : (isTVET ? 'Module 1' : 'Term 1'),
-                  academicYear: new Date().getFullYear().toString(), 
-                  date: new Date().toISOString().split('T')[0], 
-                  maxMarks: 100,
-                  examHall: '', 
-                  invigilator: '',
-                  invigilatorId: '',
-                  startTime: '', 
-                  endTime: '',
-                  courseId: '', 
-                  programId: '',
-                  departmentId: '', 
-                  facultyId: '', 
-                  semester: '',
-                  year: '',
-                  module: '',
-                  unitId: '',
-                  subjectId: '',
+                  name: '', type: isUniversity ? 'MIDTERM' : (isTVET ? 'PRACTICAL' : 'OPENER'),
+                  classId: '', term: isUniversity ? 'Semester 1' : (isTVET ? 'Module 1' : 'Term 1'),
+                  academicYear: new Date().getFullYear().toString(),
+                  date: new Date().toISOString().split('T')[0], maxMarks: 100,
+                  examHall: '', invigilator: '', invigilatorId: '',
+                  startTime: '', endTime: '', courseId: '', programId: '',
+                  departmentId: '', facultyId: '', semester: '', year: '', module: '',
+                  unitId: '', subjectId: '',
                   schoolCategory: currentSchool?.category || 'SENIOR_SECONDARY'
                 });
                 setExamNameOption('select');
@@ -9946,9 +9841,7 @@ const ExamModule = ({
               className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center"
             >
               <i className="fas fa-plus mr-2"></i>
-              {isUniversity ? 'Create Course Exam' : 
-               isTVET ? 'Create Program Exam' : 
-               'Create Exam'}
+              {isUniversity ? 'Create Course Exam' : isTVET ? 'Create Program Exam' : 'Create Exam'}
             </button>
           )}
         </div>
@@ -9958,124 +9851,53 @@ const ExamModule = ({
       <div className="bg-white p-6 rounded-xl shadow-sm">
         <h3 className="text-lg font-semibold mb-4">🔍 Filter Exams</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          
           {isUniversity && (
             <>
-              <SearchableSelect
-                label="Course"
-                value={selectedCourse}
-                onChange={(e) => {
-                  setSelectedCourse(e.target.value);
-                  setSelectedUnit('');
-                  setSelectedSemester('');
-                }}
-                options={courseOptions}
-                placeholder="Search course..."
-                emptyMessage="No courses available"
-              />
-              <SearchableSelect
-                label="Year"
-                value={selectedYear}
+              <SearchableSelect label="Course" value={selectedCourse}
+                onChange={(e) => { setSelectedCourse(e.target.value); setSelectedUnit(''); setSelectedSemester(''); }}
+                options={courseOptions} placeholder="Search course..." emptyMessage="No courses available" />
+              <SearchableSelect label="Year" value={selectedYear}
                 onChange={(e) => setSelectedYear(e.target.value)}
-                options={[
-                  { value: '1', label: 'Year 1' },
-                  { value: '2', label: 'Year 2' },
-                  { value: '3', label: 'Year 3' },
-                  { value: '4', label: 'Year 4' }
-                ]}
-                placeholder="All Years"
-                emptyMessage="No years available"
-              />
-              <SearchableSelect
-                label="Semester"
-                value={selectedSemester}
+                options={[{ value: '1', label: 'Year 1' }, { value: '2', label: 'Year 2' }, { value: '3', label: 'Year 3' }, { value: '4', label: 'Year 4' }]}
+                placeholder="All Years" emptyMessage="No years available" />
+              <SearchableSelect label="Semester" value={selectedSemester}
                 onChange={(e) => setSelectedSemester(e.target.value)}
-                options={[
-                  { value: '1', label: 'Semester 1' },
-                  { value: '2', label: 'Semester 2' }
-                ]}
-                placeholder="All Semesters"
-                emptyMessage="No semesters available"
-              />
+                options={[{ value: '1', label: 'Semester 1' }, { value: '2', label: 'Semester 2' }]}
+                placeholder="All Semesters" emptyMessage="No semesters available" />
             </>
           )}
-          
           {isTVET && (
             <>
-              <SearchableSelect
-                label="Program"
-                value={selectedProgram}
-                onChange={(e) => {
-                  setSelectedProgram(e.target.value);
-                  setSelectedUnit('');
-                  setSelectedModule('');
-                }}
-                options={programOptions}
-                placeholder="Search program..."
-                emptyMessage="No programs available"
-              />
-              <SearchableSelect
-                label="Year"
-                value={selectedYear}
+              <SearchableSelect label="Program" value={selectedProgram}
+                onChange={(e) => { setSelectedProgram(e.target.value); setSelectedUnit(''); setSelectedModule(''); }}
+                options={programOptions} placeholder="Search program..." emptyMessage="No programs available" />
+              <SearchableSelect label="Year" value={selectedYear}
                 onChange={(e) => setSelectedYear(e.target.value)}
-                options={[
-                  { value: '1', label: 'Year 1' },
-                  { value: '2', label: 'Year 2' },
-                  { value: '3', label: 'Year 3' }
-                ]}
-                placeholder="All Years"
-                emptyMessage="No years available"
-              />
-              <SearchableSelect
-                label="Module"
-                value={selectedModule}
+                options={[{ value: '1', label: 'Year 1' }, { value: '2', label: 'Year 2' }, { value: '3', label: 'Year 3' }]}
+                placeholder="All Years" emptyMessage="No years available" />
+              <SearchableSelect label="Module" value={selectedModule}
                 onChange={(e) => setSelectedModule(e.target.value)}
-                options={[
-                  { value: '1', label: 'Module 1' },
-                  { value: '2', label: 'Module 2' },
-                  { value: '3', label: 'Module 3' },
-                  { value: '4', label: 'Module 4' }
-                ]}
-                placeholder="All Modules"
-                emptyMessage="No modules available"
-              />
+                options={[{ value: '1', label: 'Module 1' }, { value: '2', label: 'Module 2' }, { value: '3', label: 'Module 3' }, { value: '4', label: 'Module 4' }]}
+                placeholder="All Modules" emptyMessage="No modules available" />
             </>
           )}
-          
           {isRegularSchool && (
             <>
-              <SearchableSelect
-                label="Class"
-                value={selectedClass}
-                onChange={(e) => {
-                  setSelectedClass(e.target.value);
-                  setSelectedSubject('');
-                }}
-                options={classOptions}
-                placeholder="Search class..."
-                emptyMessage="No classes available"
-              />
-              <SearchableSelect
-                label="Subject"
-                value={selectedSubject}
+              <SearchableSelect label="Class" value={selectedClass}
+                onChange={(e) => { setSelectedClass(e.target.value); setSelectedSubject(''); }}
+                options={classOptions} placeholder="Search class..." emptyMessage="No classes available" />
+              <SearchableSelect label="Subject" value={selectedSubject}
                 onChange={(e) => setSelectedSubject(e.target.value)}
-                options={getSubjectOptions()}
-                placeholder="Search subject..."
-                emptyMessage="No subjects available"
-                disabled={!selectedClass}
-              />
+                options={getSubjectOptions()} placeholder="Search subject..." emptyMessage="No subjects available"
+                disabled={!selectedClass} />
             </>
           )}
-          
           {(isUniversity || isTVET) && (
-            <SearchableSelect
-              label={isUniversity ? "Unit" : "Module"}
-              value={selectedUnit}
+            <SearchableSelect label={isUniversity ? "Unit" : "Module"} value={selectedUnit}
               onChange={(e) => setSelectedUnit(e.target.value)}
               options={getUnitOptionsForFilters()}
               placeholder={`Search ${isUniversity ? 'unit' : 'module'}...`}
-              emptyMessage={`No ${isUniversity ? 'units' : 'modules'} available`}
-            />
+              emptyMessage={`No ${isUniversity ? 'units' : 'modules'} available`} />
           )}
         </div>
         
@@ -10086,14 +9908,9 @@ const ExamModule = ({
           {(selectedCourse || selectedProgram || selectedClass || selectedSubject || selectedUnit || selectedYear || selectedSemester || selectedModule) && (
             <button
               onClick={() => {
-                setSelectedCourse('');
-                setSelectedProgram('');
-                setSelectedClass('');
-                setSelectedSubject('');
-                setSelectedUnit('');
-                setSelectedYear('');
-                setSelectedSemester('');
-                setSelectedModule('');
+                setSelectedCourse(''); setSelectedProgram(''); setSelectedClass('');
+                setSelectedSubject(''); setSelectedUnit(''); setSelectedYear('');
+                setSelectedSemester(''); setSelectedModule('');
               }}
               className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
             >
@@ -10127,176 +9944,108 @@ const ExamModule = ({
                 <div className="col-span-2">
                   <div className="flex space-x-4 mb-2">
                     <label className="flex items-center">
-                      <input
-                        type="radio"
-                        checked={examNameOption === 'select'}
-                        onChange={() => {
-                          setExamNameOption('select');
-                          setCustomExamName('');
-                        }}
-                        className="mr-2"
-                      />
+                      <input type="radio" checked={examNameOption === 'select'}
+                        onChange={() => { setExamNameOption('select'); setCustomExamName(''); }} className="mr-2" />
                       Select Existing Exam
                     </label>
                     <label className="flex items-center">
-                      <input
-                        type="radio"
-                        checked={examNameOption === 'new'}
-                        onChange={() => {
-                          setExamNameOption('new');
-                          setExamForm({...examForm, name: ''});
-                        }}
-                        className="mr-2"
-                      />
+                      <input type="radio" checked={examNameOption === 'new'}
+                        onChange={() => { setExamNameOption('new'); setExamForm({...examForm, name: ''}); }} className="mr-2" />
                       Create New Exam Name
                     </label>
                   </div>
 
                   {examNameOption === 'select' ? (
-                    <SearchableSelect
-                      label="Exam Name"
-                      value={examForm.name}
+                    <SearchableSelect label="Exam Name" value={examForm.name}
                       onChange={(e) => setExamForm({...examForm, name: e.target.value})}
                       options={getExamNameOptions()}
                       placeholder="Search or select exam name..."
-                      emptyMessage="No existing exam names found"
-                      required
-                    />
+                      emptyMessage="No existing exam names found" required />
                   ) : (
-                    <input
-                      type="text"
-                      value={customExamName}
-                      onChange={(e) => {
-                        setCustomExamName(e.target.value);
-                        setExamForm({...examForm, name: e.target.value});
-                      }}
+                    <input type="text" value={customExamName}
+                      onChange={(e) => { setCustomExamName(e.target.value); setExamForm({...examForm, name: e.target.value}); }}
                       placeholder="Enter new exam name (e.g., END OF TERM 1 2024)"
-                      className="w-full px-3 py-2 border rounded-lg"
-                      required
-                    />
+                      className="w-full px-3 py-2 border rounded-lg" required />
                   )}
                 </div>
 
                 {/* Exam Type */}
                 <div className="col-span-2 md:col-span-1">
                   <label className="block text-sm font-medium mb-1">Exam Type *</label>
-                  <select
-                    value={examForm.type}
+                  <select value={examForm.type}
                     onChange={(e) => setExamForm({...examForm, type: e.target.value})}
-                    className="w-full px-3 py-2 border rounded-lg"
-                    required
-                  >
+                    className="w-full px-3 py-2 border rounded-lg" required>
                     <option value="">-- Select Type --</option>
-                    {isUniversity && (
-                      <>
-                        <option value="MIDTERM">Midterm</option>
-                        <option value="FINAL">Final</option>
-                        <option value="QUIZ">Quiz</option>
-                        <option value="ASSIGNMENT">Assignment</option>
-                        <option value="PROJECT">Project</option>
-                        <option value="PRACTICAL">Practical</option>
-                        <option value="LAB">Lab</option>
-                      </>
-                    )}
-                    {isTVET && (
-                      <>
-                        <option value="PRACTICAL">Practical</option>
-                        <option value="PROJECT">Project</option>
-                        <option value="ASSIGNMENT">Assignment</option>
-                        <option value="QUIZ">Quiz</option>
-                        <option value="CAT">CAT</option>
-                        <option value="MIDTERM">Midterm</option>
-                        <option value="FINAL">Final Exam</option>
-                      </>
-                    )}
-                    {isRegularSchool && (
-                      <>
-                        <option value="OPENER">Opener Exam</option>
-                        <option value="MIDTERM">Midterm Exam</option>
-                        <option value="ENDTERM">End Term Exam</option>
-                        <option value="CAT">Continuous Assessment</option>
-                        <option value="MOCK">Mock Exam</option>
-                        <option value="PRACTICAL">Practical</option>
-                      </>
-                    )}
+                    {isUniversity && (<>
+                      <option value="MIDTERM">Midterm</option>
+                      <option value="FINAL">Final</option>
+                      <option value="QUIZ">Quiz</option>
+                      <option value="ASSIGNMENT">Assignment</option>
+                      <option value="PROJECT">Project</option>
+                      <option value="PRACTICAL">Practical</option>
+                      <option value="LAB">Lab</option>
+                    </>)}
+                    {isTVET && (<>
+                      <option value="PRACTICAL">Practical</option>
+                      <option value="PROJECT">Project</option>
+                      <option value="ASSIGNMENT">Assignment</option>
+                      <option value="QUIZ">Quiz</option>
+                      <option value="CAT">CAT</option>
+                      <option value="MIDTERM">Midterm</option>
+                      <option value="FINAL">Final Exam</option>
+                    </>)}
+                    {isRegularSchool && (<>
+                      <option value="OPENER">Opener Exam</option>
+                      <option value="MIDTERM">Midterm Exam</option>
+                      <option value="ENDTERM">End Term Exam</option>
+                      <option value="CAT">Continuous Assessment</option>
+                      <option value="MOCK">Mock Exam</option>
+                      <option value="PRACTICAL">Practical</option>
+                    </>)}
                   </select>
                 </div>
 
                 {/* Date */}
                 <div className="col-span-2 md:col-span-1">
                   <label className="block text-sm font-medium mb-1">Date *</label>
-                  <input
-                    type="date"
-                    value={examForm.date}
+                  <input type="date" value={examForm.date}
                     onChange={(e) => setExamForm({...examForm, date: e.target.value})}
-                    className="w-full px-3 py-2 border rounded-lg"
-                    required
-                  />
+                    className="w-full px-3 py-2 border rounded-lg" required />
                 </div>
 
-                {/* Course/Program/Class */}
                 {isUniversity && (
                   <div className="col-span-2">
-                    <SearchableSelect
-                      label="Course *"
-                      value={examForm.courseId}
-                      onChange={(e) => {
-                        setExamForm({...examForm, courseId: e.target.value, unitId: ''});
-                      }}
-                      options={courseOptions}
-                      placeholder="Search course..."
-                      emptyMessage="No courses available"
-                      required
-                    />
+                    <SearchableSelect label="Course *" value={examForm.courseId}
+                      onChange={(e) => setExamForm({...examForm, courseId: e.target.value, unitId: ''})}
+                      options={courseOptions} placeholder="Search course..."
+                      emptyMessage="No courses available" required />
                   </div>
                 )}
-
                 {isTVET && (
                   <div className="col-span-2">
-                    <SearchableSelect
-                      label="Program *"
-                      value={examForm.programId}
-                      onChange={(e) => {
-                        setExamForm({...examForm, programId: e.target.value, unitId: ''});
-                      }}
-                      options={programOptions}
-                      placeholder="Search program..."
-                      emptyMessage="No programs available"
-                      required
-                    />
+                    <SearchableSelect label="Program *" value={examForm.programId}
+                      onChange={(e) => setExamForm({...examForm, programId: e.target.value, unitId: ''})}
+                      options={programOptions} placeholder="Search program..."
+                      emptyMessage="No programs available" required />
                   </div>
                 )}
-
                 {isRegularSchool && (
                   <div className="col-span-2 md:col-span-1">
-                    <SearchableSelect
-                      label="Class *"
-                      value={examForm.classId}
-                      onChange={(e) => {
-                        setExamForm({...examForm, classId: e.target.value, subjectId: ''});
-                      }}
-                      options={classOptions}
-                      placeholder="Search class..."
-                      emptyMessage="No classes available"
-                      required
-                    />
+                    <SearchableSelect label="Class *" value={examForm.classId}
+                      onChange={(e) => setExamForm({...examForm, classId: e.target.value, subjectId: ''})}
+                      options={classOptions} placeholder="Search class..."
+                      emptyMessage="No classes available" required />
                   </div>
                 )}
 
-                {/* Unit/Module */}
                 {(isUniversity || isTVET) && (
                   <div className="col-span-2">
-                    <SearchableSelect
-                      label={isUniversity ? "Unit *" : "Module *"}
-                      value={examForm.unitId}
+                    <SearchableSelect label={isUniversity ? "Unit *" : "Module *"} value={examForm.unitId}
                       onChange={(e) => setExamForm({...examForm, unitId: e.target.value})}
                       options={getUnitOptionsForForm()}
                       placeholder={`Search ${isUniversity ? 'unit' : 'module'}...`}
                       emptyMessage={`No ${isUniversity ? 'units' : 'modules'} available`}
-                      required
-                      disabled={(!examForm.courseId && !examForm.programId)}
-                    />
-                    
+                      required disabled={(!examForm.courseId && !examForm.programId)} />
                     {filteredUnitsForForm.length > 0 && (
                       <p className="text-xs text-green-600 mt-1">
                         <i className="fas fa-check-circle mr-1"></i>
@@ -10306,179 +10055,125 @@ const ExamModule = ({
                   </div>
                 )}
 
-                {/* Subject for Regular Schools */}
                 {isRegularSchool && (
                   <div className="col-span-2 md:col-span-1">
-                    <SearchableSelect
-                      label="Subject *"
-                      value={examForm.subjectId}
+                    <SearchableSelect label="Subject *" value={examForm.subjectId}
                       onChange={(e) => setExamForm({...examForm, subjectId: e.target.value})}
-                      options={getSubjectOptions()}
-                      placeholder="Search subject..."
-                      emptyMessage="No subjects available"
-                      required
-                      disabled={!examForm.classId}
-                    />
+                      options={getSubjectOptions()} placeholder="Search subject..."
+                      emptyMessage="No subjects available" required disabled={!examForm.classId} />
                   </div>
                 )}
 
-                {/* Time Fields */}
                 <div>
                   <label className="block text-sm font-medium mb-1">Start Time</label>
-                  <input
-                    type="time"
-                    value={examForm.startTime}
+                  <input type="time" value={examForm.startTime}
                     onChange={(e) => setExamForm({...examForm, startTime: e.target.value})}
-                    className="w-full px-3 py-2 border rounded-lg"
-                  />
+                    className="w-full px-3 py-2 border rounded-lg" />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium mb-1">End Time</label>
-                  <input
-                    type="time"
-                    value={examForm.endTime}
+                  <input type="time" value={examForm.endTime}
                     onChange={(e) => setExamForm({...examForm, endTime: e.target.value})}
-                    className="w-full px-3 py-2 border rounded-lg"
-                  />
+                    className="w-full px-3 py-2 border rounded-lg" />
                 </div>
 
-                {/* Year/Semester/Module */}
-                {isUniversity && (
-                  <>
-                    <SearchableSelect
-                      label="Year"
-                      value={examForm.year}
-                      onChange={(e) => setExamForm({...examForm, year: e.target.value})}
-                      options={[
-                        { value: '1', label: 'Year 1' },
-                        { value: '2', label: 'Year 2' },
-                        { value: '3', label: 'Year 3' },
-                        { value: '4', label: 'Year 4' }
-                      ]}
-                      placeholder="Select Year..."
-                      emptyMessage="No years available"
-                    />
-                    <SearchableSelect
-                      label="Semester"
-                      value={examForm.semester}
-                      onChange={(e) => setExamForm({...examForm, semester: e.target.value})}
-                      options={[
-                        { value: '1', label: 'Semester 1' },
-                        { value: '2', label: 'Semester 2' }
-                      ]}
-                      placeholder="Select Semester..."
-                      emptyMessage="No semesters available"
-                    />
-                  </>
-                )}
-
-                {isTVET && (
-                  <>
-                    <SearchableSelect
-                      label="Year"
-                      value={examForm.year}
-                      onChange={(e) => setExamForm({...examForm, year: e.target.value})}
-                      options={[
-                        { value: '1', label: 'Year 1' },
-                        { value: '2', label: 'Year 2' },
-                        { value: '3', label: 'Year 3' }
-                      ]}
-                      placeholder="Select Year..."
-                      emptyMessage="No years available"
-                    />
-                    <SearchableSelect
-                      label="Module Level"
-                      value={examForm.module}
-                      onChange={(e) => setExamForm({...examForm, module: e.target.value})}
-                      options={[
-                        { value: '1', label: 'Module 1' },
-                        { value: '2', label: 'Module 2' },
-                        { value: '3', label: 'Module 3' },
-                        { value: '4', label: 'Module 4' }
-                      ]}
-                      placeholder="Select Module..."
-                      emptyMessage="No modules available"
-                    />
-                  </>
-                )}
-
+                {isUniversity && (<>
+                  <SearchableSelect label="Year" value={examForm.year}
+                    onChange={(e) => setExamForm({...examForm, year: e.target.value})}
+                    options={[{ value: '1', label: 'Year 1' }, { value: '2', label: 'Year 2' }, { value: '3', label: 'Year 3' }, { value: '4', label: 'Year 4' }]}
+                    placeholder="Select Year..." emptyMessage="No years available" />
+                  <SearchableSelect label="Semester" value={examForm.semester}
+                    onChange={(e) => setExamForm({...examForm, semester: e.target.value})}
+                    options={[{ value: '1', label: 'Semester 1' }, { value: '2', label: 'Semester 2' }]}
+                    placeholder="Select Semester..." emptyMessage="No semesters available" />
+                </>)}
+                {isTVET && (<>
+                  <SearchableSelect label="Year" value={examForm.year}
+                    onChange={(e) => setExamForm({...examForm, year: e.target.value})}
+                    options={[{ value: '1', label: 'Year 1' }, { value: '2', label: 'Year 2' }, { value: '3', label: 'Year 3' }]}
+                    placeholder="Select Year..." emptyMessage="No years available" />
+                  <SearchableSelect label="Module Level" value={examForm.module}
+                    onChange={(e) => setExamForm({...examForm, module: e.target.value})}
+                    options={[{ value: '1', label: 'Module 1' }, { value: '2', label: 'Module 2' }, { value: '3', label: 'Module 3' }, { value: '4', label: 'Module 4' }]}
+                    placeholder="Select Module..." emptyMessage="No modules available" />
+                </>)}
                 {isRegularSchool && (
-                  <SearchableSelect
-                    label="Term"
-                    value={examForm.term}
+                  <SearchableSelect label="Term" value={examForm.term}
                     onChange={(e) => setExamForm({...examForm, term: e.target.value})}
-                    options={[
-                      { value: 'Term 1', label: 'Term 1' },
-                      { value: 'Term 2', label: 'Term 2' },
-                      { value: 'Term 3', label: 'Term 3' }
-                    ]}
-                    placeholder="Select Term..."
-                    emptyMessage="No terms available"
-                  />
+                    options={[{ value: 'Term 1', label: 'Term 1' }, { value: 'Term 2', label: 'Term 2' }, { value: 'Term 3', label: 'Term 3' }]}
+                    placeholder="Select Term..." emptyMessage="No terms available" />
                 )}
 
-                {/* Max Marks */}
                 <div>
                   <label className="block text-sm font-medium mb-1">Max Marks</label>
-                  <input
-                    type="number"
-                    value={examForm.maxMarks}
+                  <input type="number" value={examForm.maxMarks}
                     onChange={(e) => setExamForm({...examForm, maxMarks: e.target.value === '' ? '' : parseInt(e.target.value)})}
                     className="w-full px-3 py-2 border rounded-lg"
-                    placeholder="Enter max marks"
-                    min="1"
-                    max="500"
-                  />
+                    placeholder="Enter max marks" min="1" max="500" />
                 </div>
 
-                {/* Exam Hall */}
                 <div>
                   <label className="block text-sm font-medium mb-1">Exam Hall</label>
-                  <input
-                    type="text"
-                    value={examForm.examHall}
+                  <input type="text" value={examForm.examHall}
                     onChange={(e) => setExamForm({...examForm, examHall: e.target.value})}
                     className="w-full px-3 py-2 border rounded-lg"
-                    placeholder={isTVET ? "e.g., Workshop A" : "e.g., Hall 1"}
-                  />
+                    placeholder={isTVET ? "e.g., Workshop A" : "e.g., Hall 1"} />
                 </div>
 
-                {/* Invigilator */}
+                {/* ✅ Invigilator — robust staff list */}
                 <div className="col-span-2">
                   <SearchableSelect
                     label="Invigilator"
                     value={examForm.invigilatorId}
                     onChange={(e) => setExamForm({...examForm, invigilatorId: e.target.value})}
                     options={getInvigilatorOptions()}
-                    placeholder="Select invigilator..."
-                    emptyMessage="No teaching staff available"
+                    placeholder={
+                      loadingStaff
+                        ? "Loading teaching staff..."
+                        : teachingStaff.length === 0
+                          ? "No teaching staff in this school yet"
+                          : "Select invigilator..."
+                    }
+                    emptyMessage={
+                      loadingStaff
+                        ? "Loading..."
+                        : staffLoadError
+                          ? "Could not load staff — click Retry above"
+                          : "No teaching staff found in this school"
+                    }
                   />
                   {examForm.invigilatorId && (
                     <p className="text-xs text-gray-500 mt-1">
                       Selected: {getStaffName(examForm.invigilatorId)}
                     </p>
                   )}
+                  {!loadingStaff && teachingStaff.length > 0 && (
+                    <p className="text-xs text-green-600 mt-1">
+                      <i className="fas fa-check-circle mr-1"></i>
+                      {teachingStaff.length} teaching staff available
+                    </p>
+                  )}
+                  {!loadingStaff && teachingStaff.length === 0 && (
+                    <button
+                      type="button"
+                      onClick={fetchTeachingStaff}
+                      className="text-xs text-indigo-600 hover:text-indigo-800 mt-1 underline"
+                    >
+                      Reload teaching staff
+                    </button>
+                  )}
                 </div>
               </div>
 
               <div className="flex justify-end space-x-2 pt-4 border-t">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowExamForm(false);
-                    setSelectedExam(null);
-                    setInvigilatorConflicts([]);
-                  }}
-                  className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
-                >
+                <button type="button"
+                  onClick={() => { setShowExamForm(false); setSelectedExam(null); setInvigilatorConflicts([]); }}
+                  className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">
                   Cancel
                 </button>
-                <button
-                  type="submit"
+                <button type="submit"
                   className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
-                  disabled={invigilatorConflicts.length > 0}
-                >
+                  disabled={invigilatorConflicts.length > 0}>
                   {invigilatorConflicts.length > 0 ? '⚠️ Conflicts Exist' : (selectedExam ? 'Update Exam' : 'Create Exam')}
                 </button>
               </div>
@@ -10492,115 +10187,56 @@ const ExamModule = ({
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-xl shadow-sm max-w-md w-full">
             <h3 className="text-xl font-bold mb-4">➕ Add Single Result</h3>
-            
             {apiError && (
               <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-                <i className="fas fa-exclamation-circle mr-2"></i>
-                {apiError}
+                <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
               </div>
             )}
-            
             <form onSubmit={handleSingleResultSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Exam</label>
-                <input
-                  type="text"
-                  value={exams.find(e => e.id === resultForm.examId)?.name || 'Select an exam first'}
-                  className="w-full px-3 py-2 bg-gray-100 border rounded-lg"
-                  disabled
-                />
+                <input type="text" value={exams.find(e => e.id === resultForm.examId)?.name || 'Select an exam first'}
+                  className="w-full px-3 py-2 bg-gray-100 border rounded-lg" disabled />
               </div>
-
               <div>
                 <label className="block text-sm font-medium mb-1">Student *</label>
-                <SearchableSelect
-                  label=""
-                  value={resultForm.studentId}
+                <SearchableSelect label="" value={resultForm.studentId}
                   onChange={(e) => setResultForm({...resultForm, studentId: e.target.value})}
-                  options={students.map(s => ({
-                    value: s.id,
-                    label: `${s.firstName} ${s.lastName}`,
-                    subLabel: s.admissionNumber
-                  }))}
-                  placeholder="Search students..."
-                  emptyMessage="No students available"
-                  required
-                />
+                  options={students.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}`, subLabel: s.admissionNumber }))}
+                  placeholder="Search students..." emptyMessage="No students available" required />
               </div>
-
               <div>
                 <label className="block text-sm font-medium mb-1">Marks</label>
-                <input
-                  type="number"
-                  value={resultForm.marks}
+                <input type="number" value={resultForm.marks}
                   onChange={(e) => setResultForm({...resultForm, marks: e.target.value})}
-                  className="w-full px-3 py-2 border rounded-lg"
-                  min="0"
+                  className="w-full px-3 py-2 border rounded-lg" min="0"
                   max={exams.find(e => e.id === resultForm.examId)?.maxMarks || 100}
-                  disabled={resultForm.isAbsent}
-                  step="0.5"
-                />
+                  disabled={resultForm.isAbsent} step="0.5" />
                 <p className="text-xs text-gray-500 mt-1">
                   Max: {exams.find(e => e.id === resultForm.examId)?.maxMarks || 100} marks
                 </p>
               </div>
-
               <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  id="isAbsent"
-                  checked={resultForm.isAbsent}
+                <input type="checkbox" id="isAbsent" checked={resultForm.isAbsent}
                   onChange={(e) => setResultForm({...resultForm, isAbsent: e.target.checked, marks: ''})}
-                  className="rounded"
-                />
+                  className="rounded" />
                 <label htmlFor="isAbsent" className="text-sm">Student was absent</label>
               </div>
-
               <div>
                 <label className="block text-sm font-medium mb-1">Remarks</label>
-                <textarea
-                  value={resultForm.remarks}
+                <textarea value={resultForm.remarks}
                   onChange={(e) => setResultForm({...resultForm, remarks: e.target.value})}
-                  className="w-full px-3 py-2 border rounded-lg"
-                  rows="2"
-                  placeholder="Optional remarks..."
-                />
+                  className="w-full px-3 py-2 border rounded-lg" rows="2"
+                  placeholder="Optional remarks..." />
               </div>
-
               <div className="flex justify-end space-x-2 pt-4 border-t">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowResultForm(false);
-                    setResultForm({
-                      studentId: '',
-                      examId: '',
-                      marks: '',
-                      isAbsent: false,
-                      remarks: ''
-                    });
-                    setApiError('');
-                  }}
-                  className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingResults}
-                  className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
-                >
-                  {savingResults ? (
-                    <>
-                      <i className="fas fa-spinner fa-spin mr-2"></i>
-                      Saving...
-                    </>
-                  ) : (
-                    <>
-                      <i className="fas fa-save mr-2"></i>
-                      Save Result
-                    </>
-                  )}
+                <button type="button"
+                  onClick={() => { setShowResultForm(false); setResultForm({ studentId: '', examId: '', marks: '', isAbsent: false, remarks: '' }); setApiError(''); }}
+                  className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">Cancel</button>
+                <button type="submit" disabled={savingResults}
+                  className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
+                  {savingResults ? (<><i className="fas fa-spinner fa-spin mr-2"></i>Saving...</>) 
+                                 : (<><i className="fas fa-save mr-2"></i>Save Result</>)}
                 </button>
               </div>
             </form>
@@ -10614,49 +10250,27 @@ const ExamModule = ({
           <div className="bg-white p-6 rounded-xl shadow-sm max-w-6xl w-full max-h-[90vh] overflow-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold">📊 Bulk Results Entry</h3>
-              <button
-                onClick={() => setShowBulkResultForm(false)}
-                className="text-gray-500 hover:text-gray-700"
-              >
+              <button onClick={() => setShowBulkResultForm(false)} className="text-gray-500 hover:text-gray-700">
                 <i className="fas fa-times"></i>
               </button>
             </div>
-
-            {/* Search and Filters */}
             <div className="mb-4 flex flex-wrap gap-3">
-              <input
-                type="text"
-                placeholder="Search students..."
-                value={resultSearch}
+              <input type="text" placeholder="Search students..." value={resultSearch}
                 onChange={(e) => setResultSearch(e.target.value)}
-                className="flex-1 px-3 py-2 border rounded-lg"
-              />
-              
+                className="flex-1 px-3 py-2 border rounded-lg" />
               {uniqueGrades.length > 0 && (
-                <select
-                  value={filterGrade}
-                  onChange={(e) => setFilterGrade(e.target.value)}
-                  className="px-3 py-2 border rounded-lg"
-                >
+                <select value={filterGrade} onChange={(e) => setFilterGrade(e.target.value)}
+                  className="px-3 py-2 border rounded-lg">
                   <option value="">All Grades</option>
-                  {uniqueGrades.map(g => (
-                    <option key={g} value={g}>{g}</option>
-                  ))}
+                  {uniqueGrades.map(g => (<option key={g} value={g}>{g}</option>))}
                 </select>
               )}
-
               <label className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  checked={selectAllForMessage}
-                  onChange={(e) => handleSelectAllForMessage(e.target.checked)}
-                  className="rounded"
-                />
+                <input type="checkbox" checked={selectAllForMessage}
+                  onChange={(e) => handleSelectAllForMessage(e.target.checked)} className="rounded" />
                 <span>Select All ({filteredBulkResults.length})</span>
               </label>
             </div>
-
-            {/* Results Table */}
             <div className="overflow-x-auto border rounded-lg">
               <table className="w-full">
                 <thead className="bg-gray-50 sticky top-0">
@@ -10673,36 +10287,24 @@ const ExamModule = ({
                 </thead>
                 <tbody className="divide-y">
                   {filteredBulkResults.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
-                        No students found
-                      </td>
-                    </tr>
+                    <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-500">No students found</td></tr>
                   ) : (
                     filteredBulkResults.map((entry) => (
                       <tr key={entry.studentId} className="hover:bg-gray-50">
                         <td className="px-4 py-2">
-                          <input
-                            type="checkbox"
-                            checked={selectedStudentsForMessage.includes(entry.studentId)}
+                          <input type="checkbox" checked={selectedStudentsForMessage.includes(entry.studentId)}
                             onChange={(e) => handleSelectForMessage(entry.studentId, e.target.checked)}
-                            className="rounded"
-                          />
+                            className="rounded" />
                         </td>
                         <td className="px-4 py-2 font-mono">{entry.admissionNumber}</td>
                         <td className="px-4 py-2">{entry.studentName}</td>
                         <td className="px-4 py-2">{entry.unitName}</td>
                         <td className="px-4 py-2">
-                          <input
-                            type="number"
-                            value={entry.marks}
+                          <input type="number" value={entry.marks}
                             onChange={(e) => handleMarkChange(entry.studentId, e.target.value)}
                             onBlur={(e) => handleGradeBlur(entry.studentId, e.target.value)}
-                            className="w-20 px-2 py-1 border rounded"
-                            disabled={entry.isAbsent}
-                            min="0"
-                            max={exams.find(e => e.id === selectedExamForResults)?.maxMarks || 100}
-                          />
+                            className="w-20 px-2 py-1 border rounded" disabled={entry.isAbsent} min="0"
+                            max={exams.find(e => e.id === selectedExamForResults)?.maxMarks || 100} />
                         </td>
                         <td className="px-4 py-2">
                           <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(entry.grade)}`}>
@@ -10711,12 +10313,9 @@ const ExamModule = ({
                         </td>
                         <td className="px-4 py-2">{entry.points.toFixed(1)}</td>
                         <td className="px-4 py-2">
-                          <input
-                            type="checkbox"
-                            checked={entry.isAbsent}
+                          <input type="checkbox" checked={entry.isAbsent}
                             onChange={(e) => handleAbsentChange(entry.studentId, e.target.checked)}
-                            className="rounded"
-                          />
+                            className="rounded" />
                         </td>
                       </tr>
                     ))
@@ -10724,25 +10323,13 @@ const ExamModule = ({
                 </tbody>
               </table>
             </div>
-
-            {/* Action Buttons */}
             <div className="mt-4 flex justify-end space-x-2">
-              <button
-                onClick={() => setShowBulkResultForm(false)}
-                className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={saveBulkResults}
-                disabled={loading}
-                className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
-              >
-                {loading ? (
-                  <><i className="fas fa-spinner fa-spin mr-2"></i>Saving...</>
-                ) : (
-                  <><i className="fas fa-save mr-2"></i>Save All Results</>
-                )}
+              <button onClick={() => setShowBulkResultForm(false)}
+                className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">Cancel</button>
+              <button onClick={saveBulkResults} disabled={loading}
+                className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
+                {loading ? (<><i className="fas fa-spinner fa-spin mr-2"></i>Saving...</>) 
+                         : (<><i className="fas fa-save mr-2"></i>Save All Results</>)}
               </button>
             </div>
           </div>
@@ -10757,31 +10344,21 @@ const ExamModule = ({
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                
-                {isUniversity && (
-                  <>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Course</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Year/Sem</th>
-                  </>
-                )}
-                
-                {isTVET && (
-                  <>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Program</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit/Module</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Year/Module</th>
-                  </>
-                )}
-                
-                {isRegularSchool && (
-                  <>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Class</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Subject</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Term</th>
-                  </>
-                )}
-                
+                {isUniversity && (<>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Course</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Year/Sem</th>
+                </>)}
+                {isTVET && (<>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Program</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit/Module</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Year/Module</th>
+                </>)}
+                {isRegularSchool && (<>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Class</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Subject</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Term</th>
+                </>)}
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Hall</th>
@@ -10797,10 +10374,8 @@ const ExamModule = ({
                     <i className="fas fa-file-alt text-4xl mb-2"></i>
                     <p>No exams created yet.</p>
                     {canCreateExams && (
-                      <button
-                        onClick={() => setShowExamForm(true)}
-                        className="mt-2 text-indigo-600 hover:text-indigo-800"
-                      >
+                      <button onClick={() => setShowExamForm(true)}
+                        className="mt-2 text-indigo-600 hover:text-indigo-800">
                         Click here to create your first exam
                       </button>
                     )}
@@ -10808,54 +10383,38 @@ const ExamModule = ({
                 </tr>
               ) : (
                 filteredExams.map((exam) => {
-                  let programName = 'N/A';
-                  if (isTVET && exam.programId) {
-                    const program = programs?.find(p => p.id === exam.programId);
-                    programName = program ? program.name : 'Unknown Program';
-                  }
-                  
+                  const programName = isTVET && exam.programId
+                    ? (programs?.find(p => p.id === exam.programId)?.name || 'Unknown Program')
+                    : 'N/A';
                   return (
                     <tr key={exam.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 font-medium">{exam.name}</td>
                       <td className="px-4 py-3">
-                        <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
-                          {exam.type}
-                        </span>
+                        <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">{exam.type}</span>
                       </td>
-                      
-                      {isUniversity && (
-                        <>
-                          <td className="px-4 py-3">{getCourseName(exam.courseId)}</td>
-                          <td className="px-4 py-3">{getUnitName(exam.unitId)}</td>
-                          <td className="px-4 py-3">Y{exam.year || '?'} S{exam.semester || '?'}</td>
-                        </>
-                      )}
-                      
-                      {isTVET && (
-                        <>
-                          <td className="px-4 py-3">{programName}</td>
-                          <td className="px-4 py-3">{getUnitName(exam.unitId)}</td>
-                          <td className="px-4 py-3">Y{exam.year || '?'} M{exam.module || '?'}</td>
-                        </>
-                      )}
-                      
-                      {isRegularSchool && (
-                        <>
-                          <td className="px-4 py-3">{getClassName(exam.classId)}</td>
-                          <td className="px-4 py-3">{getSubjectName(exam.subjectId)}</td>
-                          <td className="px-4 py-3">{exam.term || 'Term 1'}</td>
-                        </>
-                      )}
-                      
+                      {isUniversity && (<>
+                        <td className="px-4 py-3">{getCourseName(exam.courseId)}</td>
+                        <td className="px-4 py-3">{getUnitName(exam.unitId)}</td>
+                        <td className="px-4 py-3">Y{exam.year || '?'} S{exam.semester || '?'}</td>
+                      </>)}
+                      {isTVET && (<>
+                        <td className="px-4 py-3">{programName}</td>
+                        <td className="px-4 py-3">{getUnitName(exam.unitId)}</td>
+                        <td className="px-4 py-3">Y{exam.year || '?'} M{exam.module || '?'}</td>
+                      </>)}
+                      {isRegularSchool && (<>
+                        <td className="px-4 py-3">{getClassName(exam.classId)}</td>
+                        <td className="px-4 py-3">{getSubjectName(exam.subjectId)}</td>
+                        <td className="px-4 py-3">{exam.term || 'Term 1'}</td>
+                      </>)}
                       <td className="px-4 py-3">{new Date(exam.date).toLocaleDateString()}</td>
                       <td className="px-4 py-3">
-                        {exam.startTime && exam.endTime 
-                          ? `${exam.startTime.substring(0,5)}-${exam.endTime.substring(0,5)}` 
+                        {exam.startTime && exam.endTime
+                          ? `${exam.startTime.substring(0,5)}-${exam.endTime.substring(0,5)}`
                           : '—'}
                       </td>
                       <td className="px-4 py-3">{exam.examHall || '—'}</td>
                       <td className="px-4 py-3">{exam.invigilator || '—'}</td>
-                      
                       <td className="px-4 py-3">
                         <span className={`px-2 py-1 rounded-full text-xs ${
                           exam.isPublished ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
@@ -10863,19 +10422,15 @@ const ExamModule = ({
                           {exam.isPublished ? 'Published' : 'Draft'}
                         </span>
                       </td>
-                      
                       <td className="px-4 py-3">
                         <div className="flex space-x-2">
                           {canEditExams && (
                             <button
-                              onClick={() => { 
+                              onClick={() => {
                                 setExamForm({
-                                  name: exam.name,
-                                  type: exam.type,
-                                  classId: exam.classId || '',
-                                  subjectId: exam.subjectId || '',
-                                  courseId: exam.courseId || '',
-                                  programId: exam.programId || '',
+                                  name: exam.name, type: exam.type,
+                                  classId: exam.classId || '', subjectId: exam.subjectId || '',
+                                  courseId: exam.courseId || '', programId: exam.programId || '',
                                   unitId: exam.unitId || '',
                                   year: exam.year?.toString() || '',
                                   semester: exam.semester?.toString() || '',
@@ -10884,48 +10439,35 @@ const ExamModule = ({
                                   academicYear: exam.academicYear || new Date().getFullYear().toString(),
                                   date: exam.date ? new Date(exam.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
                                   maxMarks: exam.maxMarks || 100,
-                                  startTime: exam.startTime || '',
-                                  endTime: exam.endTime || '',
+                                  startTime: exam.startTime || '', endTime: exam.endTime || '',
                                   examHall: exam.examHall || '',
                                   invigilator: exam.invigilator || '',
                                   invigilatorId: exam.invigilatorId || '',
                                   schoolCategory: exam.schoolCategory
-                                }); 
+                                });
                                 setExamNameOption('select');
                                 setCustomExamName('');
-                                setSelectedExam(exam); 
-                                setShowExamForm(true); 
-                              }} 
-                              className="text-indigo-600 hover:text-indigo-900 p-2 hover:bg-indigo-50 rounded-lg transition-colors" 
-                              title="Edit Exam"
-                            >
+                                setSelectedExam(exam);
+                                setShowExamForm(true);
+                              }}
+                              className="text-indigo-600 hover:text-indigo-900 p-2 hover:bg-indigo-50 rounded-lg transition-colors"
+                              title="Edit Exam">
                               <i className="fas fa-edit"></i>
                             </button>
                           )}
-                          
-                          {canAddResults && (
-                            <>
-                              <button
-                                onClick={() => { 
-                                  setResultForm({...resultForm, examId: exam.id}); 
-                                  setShowResultForm(true); 
-                                }} 
-                                className="text-green-600 hover:text-green-900 p-2 hover:bg-green-50 rounded-lg transition-colors" 
-                                title="Add Single Result"
-                              >
-                                <i className="fas fa-plus-circle"></i>
-                              </button>
-                              
-                              <button
-                                onClick={() => loadStudentsForBulkResults(exam.id)} 
-                                className="text-purple-600 hover:text-purple-900 p-2 hover:bg-purple-50 rounded-lg transition-colors" 
-                                title="Bulk Results Entry"
-                              >
-                                <i className="fas fa-table"></i>
-                              </button>
-                            </>
-                          )}
-                          
+                          {canAddResults && (<>
+                            <button
+                              onClick={() => { setResultForm({...resultForm, examId: exam.id}); setShowResultForm(true); }}
+                              className="text-green-600 hover:text-green-900 p-2 hover:bg-green-50 rounded-lg transition-colors"
+                              title="Add Single Result">
+                              <i className="fas fa-plus-circle"></i>
+                            </button>
+                            <button onClick={() => loadStudentsForBulkResults(exam.id)}
+                              className="text-purple-600 hover:text-purple-900 p-2 hover:bg-purple-50 rounded-lg transition-colors"
+                              title="Bulk Results Entry">
+                              <i className="fas fa-table"></i>
+                            </button>
+                          </>)}
                           {canPublishResults && (
                             <button
                               onClick={() => {
@@ -10934,22 +10476,16 @@ const ExamModule = ({
                                 }
                               }}
                               className={`p-2 rounded-lg transition-colors ${
-                                exam.isPublished 
-                                  ? 'text-green-600 hover:bg-green-50' 
-                                  : 'text-yellow-600 hover:bg-yellow-50'
+                                exam.isPublished ? 'text-green-600 hover:bg-green-50' : 'text-yellow-600 hover:bg-yellow-50'
                               }`}
-                              title={exam.isPublished ? 'Published' : 'Publish'}
-                            >
+                              title={exam.isPublished ? 'Published' : 'Publish'}>
                               <i className={`fas fa-${exam.isPublished ? 'check-circle' : 'globe'}`}></i>
                             </button>
                           )}
-                          
                           {canDeleteExams && (
-                            <button
-                              onClick={() => handleDeleteExam(exam.id)} 
-                              className="text-red-600 hover:text-red-900 p-2 hover:bg-red-50 rounded-lg transition-colors" 
-                              title="Delete Exam"
-                            >
+                            <button onClick={() => handleDeleteExam(exam.id)}
+                              className="text-red-600 hover:text-red-900 p-2 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Delete Exam">
                               <i className="fas fa-trash"></i>
                             </button>
                           )}
