@@ -8647,6 +8647,8 @@ const CourseUnitsModule = ({
     </div>
   );
 };
+
+
 const ExamModule = ({ 
   exams, setExams, 
   classes, subjects, students, 
@@ -8921,10 +8923,11 @@ const ExamModule = ({
   const canPublishResults = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal;
 
   // ============================================================
-  // ✅ TEACHING STAFF FETCHING (ROBUST — MULTI-SHAPE, SCHOOL-SCOPED)
+  // ✅ TEACHING STAFF FETCHING — STRICT, STAFF-ONLY
   // ============================================================
 
-  // Helper: extract an array of staff from whatever the API returned
+  // Extract array of staff from any plausible response shape.
+  // NEVER falls back to a generic users list — staff only.
   const extractStaffArray = (payload) => {
     if (!payload) return [];
     if (Array.isArray(payload)) return payload;
@@ -8932,53 +8935,71 @@ const ExamModule = ({
       payload.staff ||
       payload.Staff ||
       payload.staffMembers ||
+      payload.staff_members ||
       payload.teachers ||
       payload.Teachers ||
-      payload.users ||
-      payload.Users ||
-      payload.data ||
+      payload.employees ||
+      payload.Employees ||
+      payload.data?.staff ||
+      payload.data?.staffMembers ||
+      payload.data?.teachers ||
+      payload.data?.employees ||
+      (Array.isArray(payload.data) ? payload.data : null) ||
       payload.results ||
       payload.items ||
       []
     );
   };
 
-  // Helper: decide if a staff record is "teaching"
+  // STRICT: a record must carry an explicit teaching-role marker.
+  // Anything else (admins, accountants, students, parents, unknown) is rejected.
   const isTeachingStaff = (s) => {
     if (!s) return false;
-    // Gather all possible fields that might carry the role/type
+
     const candidates = [
-      s.staffType,
-      s.staff_type,
-      s.type,
-      s.role,
-      s.category,
-      s.staffCategory,
-      s.position,
-      s.designation,
-      s.StaffType?.name,
-      s.Role?.name,
-      s.StaffCategory?.name
+      s.staffType, s.staff_type, s.type, s.role, s.category,
+      s.staffCategory, s.staff_category, s.position, s.designation,
+      s.jobTitle, s.job_title,
+      s.StaffType?.name, s.Role?.name, s.StaffCategory?.name,
+      s.User?.role, s.user?.role,
     ]
       .filter(Boolean)
-      .map(v => String(v).toUpperCase());
+      .map(v => String(v).toUpperCase().replace(/[\s-]+/g, '_'));
 
-    if (candidates.length === 0) {
-      // No type field at all → assume teaching (better than showing "none")
-      return true;
+    // No role info at all → reject (safer than accepting unknowns)
+    if (candidates.length === 0) return false;
+
+    const TEACHING_MARKERS = [
+      'TEACH',       // TEACHER, TEACHING, TEACHING_STAFF, HEAD_TEACHER
+      'TUTOR',
+      'LECTURER',
+      'INSTRUCTOR',
+      'TRAINER',
+      'FACILITATOR',
+      'PROFESSOR',
+    ];
+
+    const NON_TEACHING_MARKERS = [
+      'NON_TEACHING', 'NONTEACHING', 'SUPPORT_STAFF',
+      'ADMIN',             // ADMIN, ADMINISTRATOR, ADMIN_STAFF
+      'ACCOUNTANT', 'BURSAR', 'SECRETARY',
+      'DRIVER', 'SECURITY', 'CLEANER', 'COOK', 'LIBRARIAN',
+      'STUDENT', 'PARENT', 'GUARDIAN',
+      'SUPER_ADMIN', 'SCHOOL_ADMIN',
+      // Remove the next two if you DO want principals as invigilators
+      'PRINCIPAL', 'DEPUTY_PRINCIPAL',
+    ];
+
+    // Reject if any non-teaching marker matches
+    if (candidates.some(c => NON_TEACHING_MARKERS.some(m => c.includes(m)))) {
+      return false;
     }
 
-    return candidates.some(c => 
-      c.includes('TEACH') ||          // TEACHER, TEACHING, HEAD_TEACHER
-      c === 'TUTOR' ||                // university tutors
-      c === 'LECTURER' ||             // university lecturers
-      c === 'INSTRUCTOR' ||           // TVET instructors
-      c === 'TRAINER' ||              // TVET trainers
-      c === 'FACILITATOR'
-    );
+    // Accept only if an explicit teaching marker matches
+    return candidates.some(c => TEACHING_MARKERS.some(m => c.includes(m)));
   };
 
-  // Helper: extract a nice display name
+  // Extract a display name from any plausible field
   const getStaffDisplayName = (s) => {
     if (!s) return 'Unknown';
     const u = s.User || s.user || s.account || {};
@@ -8997,7 +9018,7 @@ const ExamModule = ({
     );
   };
 
-  // Helper: extract department / subject label
+  // Extract department / subject label
   const getStaffSubLabel = (s) => {
     if (!s) return '';
     return (
@@ -9013,15 +9034,16 @@ const ExamModule = ({
     );
   };
 
-  // MAIN: fetch teaching staff from the system, scoped to this school
+  // MAIN: fetch teaching staff from the system, scoped to this school.
+  // Only hits /staff endpoints. Never falls back to /users.
   const fetchTeachingStaff = async () => {
     setLoadingStaff(true);
     setStaffLoadError('');
 
-    // Build a list of endpoints to try, in order of preference
     const schoolId = currentSchool?.id;
-    const endpoints = [];
 
+    // Only /staff endpoints — never /users
+    const endpoints = [];
     if (schoolId) {
       endpoints.push(`/staff?schoolId=${schoolId}`);
       endpoints.push(`/staff?school_id=${schoolId}`);
@@ -9034,13 +9056,12 @@ const ExamModule = ({
     let lastError = null;
     let usedEndpoint = null;
 
-    // Try each endpoint until we get something usable
     for (const url of endpoints) {
       try {
         console.log(`🔎 Trying staff endpoint: ${url}`);
         const res = await api.get(url);
         const arr = extractStaffArray(res.data);
-        console.log(`📥 ${url} → returned ${arr.length} record(s)`, res.data);
+        console.log(`📥 ${url} → returned ${arr.length} record(s)`);
         if (arr.length > 0) {
           rawStaff = arr;
           usedEndpoint = url;
@@ -9052,74 +9073,41 @@ const ExamModule = ({
       }
     }
 
-    // Fallback: try /users filtered by teacher-ish roles
     if (rawStaff.length === 0) {
-      const userEndpoints = [];
-      if (schoolId) {
-        userEndpoints.push(`/users?schoolId=${schoolId}&role=TEACHER`);
-        userEndpoints.push(`/users?schoolId=${schoolId}`);
-      }
-      userEndpoints.push('/users?role=TEACHER');
-      userEndpoints.push('/users');
-
-      for (const url of userEndpoints) {
-        try {
-          console.log(`🔎 Fallback staff endpoint: ${url}`);
-          const res = await api.get(url);
-          const arr = extractStaffArray(res.data);
-          console.log(`📥 ${url} → returned ${arr.length} user record(s)`);
-          if (arr.length > 0) {
-            // Normalize user records to look like staff records
-            rawStaff = arr.map(u => ({
-              id: u.id,
-              staffType: u.role,
-              role: u.role,
-              User: u,
-              user: u,
-              department: u.department || u.Department?.name || null
-            }));
-            usedEndpoint = url;
-            break;
-          }
-        } catch (err) {
-          console.warn(`⚠️ Fallback failed: ${url}`, err?.response?.status);
-          lastError = err;
-        }
-      }
-    }
-
-    if (rawStaff.length === 0) {
-      console.error('❌ No staff records could be retrieved from any endpoint.');
-      if (lastError) {
-        setStaffLoadError(
-          lastError.response?.data?.message ||
-          lastError.message ||
-          'Failed to load teaching staff'
-        );
-      } else {
-        setStaffLoadError('No staff records found for this school.');
-      }
+      console.error('❌ No staff records could be retrieved from any /staff endpoint.');
+      setStaffLoadError(
+        lastError?.response?.data?.message ||
+        lastError?.message ||
+        'No staff records found for this school. Add staff in the Staff module first.'
+      );
       setTeachingStaff([]);
       setLoadingStaff(false);
       return;
     }
 
-    // Filter to teaching staff only
+    // Debug: log a sample record so field names can be verified in DevTools
+    console.log('📋 Sample staff record:', rawStaff[0]);
+
     const teaching = rawStaff.filter(isTeachingStaff);
+    console.log(`✅ ${rawStaff.length} staff total, ${teaching.length} matched teaching filter (from ${usedEndpoint})`);
 
-    console.log(`✅ Loaded ${rawStaff.length} staff total, ${teaching.length} identified as teaching staff (from ${usedEndpoint})`);
-
-    // If the filter removed EVERYONE, fall back to showing all staff
-    // so the invigilator dropdown is never empty when data exists.
-    const finalList = teaching.length > 0 ? teaching : rawStaff;
-
-    if (teaching.length === 0 && rawStaff.length > 0) {
-      console.warn('⚠️ No records matched the "teaching" filter — using all staff as fallback.');
+    if (teaching.length === 0) {
+      console.warn(
+        '⚠️ None of the staff records matched the strict "teaching" filter. ' +
+        'Check the "Sample staff record" log above and confirm the role/staffType field name.'
+      );
+      setStaffLoadError(
+        `Found ${rawStaff.length} staff record(s) but none matched a teaching role. ` +
+        `Check the browser console for "Sample staff record" to confirm the field name.`
+      );
+      setTeachingStaff([]);
+      setLoadingStaff(false);
+      return;
     }
 
     // De-duplicate by id
     const seen = new Set();
-    const deduped = finalList.filter(s => {
+    const deduped = teaching.filter(s => {
       const key = s?.id ?? s?.staffId ?? s?.userId;
       if (!key) return true;
       if (seen.has(key)) return false;
@@ -9218,7 +9206,7 @@ const ExamModule = ({
     return filteredSubjects.map(s => ({ value: s.id, label: s.name, subLabel: `Code: ${s.code || 'N/A'}` }));
   }, [filteredSubjects]);
 
-  // ✅ UPDATED: uses the robust name/sub-label helpers
+  // ✅ Invigilator options — built from the strict teaching-staff list
   const getInvigilatorOptions = useCallback(() => {
     if (!teachingStaff || teachingStaff.length === 0) return [];
     return teachingStaff.map(s => ({
@@ -9773,7 +9761,7 @@ const ExamModule = ({
             <i className="fas fa-exclamation-triangle mr-2"></i>
             {staffLoadError}
             <span className="text-xs ml-2 text-yellow-700">
-              (Teaching staff list for invigilators may be incomplete.)
+              (Invigilator list may be incomplete.)
             </span>
           </div>
           <button
@@ -10120,7 +10108,7 @@ const ExamModule = ({
                     placeholder={isTVET ? "e.g., Workshop A" : "e.g., Hall 1"} />
                 </div>
 
-                {/* ✅ Invigilator — robust staff list */}
+                {/* ✅ Invigilator — teaching staff only */}
                 <div className="col-span-2">
                   <SearchableSelect
                     label="Invigilator"
@@ -10131,14 +10119,14 @@ const ExamModule = ({
                       loadingStaff
                         ? "Loading teaching staff..."
                         : teachingStaff.length === 0
-                          ? "No teaching staff in this school yet"
+                          ? "No teaching staff available"
                           : "Select invigilator..."
                     }
                     emptyMessage={
                       loadingStaff
                         ? "Loading..."
                         : staffLoadError
-                          ? "Could not load staff — click Retry above"
+                          ? "Could not load teaching staff — click Retry above"
                           : "No teaching staff found in this school"
                     }
                   />
@@ -29369,7 +29357,7 @@ const TimetableModule = ({
     </div>
   );
 };
-// ==================== FEES MODULE WITH SEARCHABLE SELECT (FULLY WORKING) ====================
+// ==================== FEES MODULE WITH SEARCHABLE SELECT + DISCOUNTS ====================
 const FeesModule = ({ 
   fees, setFees, 
   payments, setPayments, 
@@ -29379,7 +29367,9 @@ const FeesModule = ({
   form, setForm, onCreate, onDelete,
   handleUpdate,
   currentSchool, user,
-  admissionNumber: propAdmissionNumber 
+  admissionNumber: propAdmissionNumber,
+  // ✅ NEW: optional discounts prop (array of per-student discounts)
+  discounts = [], setDiscounts
 }) => {
   // ==================== 1. STATE DECLARATIONS ====================
   const [showForm, setShowForm] = useState(false);
@@ -29401,23 +29391,28 @@ const FeesModule = ({
   const [admissionNumber, setAdmissionNumber] = useState(propAdmissionNumber);
   const [admissionMessage, setAdmissionMessage] = useState('');
 
+  // ✅ NEW: discount UI state
+  const [showDiscountModal, setShowDiscountModal] = useState(false);
+  const [discountStudent, setDiscountStudent] = useState(null);
+  const [discountFee, setDiscountFee] = useState(null);
+  const [discountForm, setDiscountForm] = useState({
+    type: 'AMOUNT',          // 'AMOUNT' or 'PERCENT'
+    value: '',
+    reason: '',
+    academicYear: new Date().getFullYear().toString(),
+    term: ''
+  });
+
   // ==================== 2. SCHOOL TYPE DETECTION ====================
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
   const isUniversity = schoolCategory === 'UNIVERSITY';
   const isTVET = schoolCategory === 'COLLEGE_TVET';
   const isPrimarySecondary = !isUniversity && !isTVET;
 
-  // ==================== 3. SEARCHABLE SELECT COMPONENT ====================
+  // ==================== 3. SEARCHABLE SELECT ====================
   const SearchableSelect = ({ 
-    label, 
-    value, 
-    onChange, 
-    options, 
-    placeholder, 
-    disabled, 
-    required, 
-    className,
-    showClear = true 
+    label, value, onChange, options, placeholder, 
+    disabled, required, className, showClear = true 
   }) => {
     const [search, setSearch] = useState('');
     const [isOpen, setIsOpen] = useState(false);
@@ -29425,7 +29420,6 @@ const FeesModule = ({
     const dropdownRef = useRef(null);
     const inputRef = useRef(null);
 
-    // ✅ Ensure there's always an empty option
     const optionsWithEmpty = useMemo(() => {
       const hasEmpty = options.some(opt => opt.value === '' || opt.value === null || opt.value === undefined);
       if (hasEmpty) return options;
@@ -29455,13 +29449,9 @@ const FeesModule = ({
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    // ✅ When value changes externally, update search
     useEffect(() => {
-      if (selectedOption && !isFocused) {
-        setSearch(selectedOption.label);
-      } else if (!selectedOption && !isFocused) {
-        setSearch('');
-      }
+      if (selectedOption && !isFocused) setSearch(selectedOption.label);
+      else if (!selectedOption && !isFocused) setSearch('');
     }, [value, selectedOption, isFocused]);
 
     const handleSelect = (selectedValue) => {
@@ -29470,9 +29460,7 @@ const FeesModule = ({
       setSearch(selected ? selected.label : '');
       setIsOpen(false);
       setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
+      if (inputRef.current) inputRef.current.focus();
     };
 
     const handleInputChange = (e) => {
@@ -29480,30 +29468,20 @@ const FeesModule = ({
       setSearch(newValue);
       setIsOpen(true);
       setIsFocused(true);
-      if (newValue === '') {
-        onChange({ target: { value: '' } });
-      }
+      if (newValue === '') onChange({ target: { value: '' } });
     };
 
-    const handleFocus = () => {
-      setIsFocused(true);
-      setIsOpen(true);
-    };
+    const handleFocus = () => { setIsFocused(true); setIsOpen(true); };
 
     const handleBlur = (e) => {
       const relatedTarget = e.relatedTarget;
-      if (dropdownRef.current && dropdownRef.current.contains(relatedTarget)) {
-        return;
-      }
+      if (dropdownRef.current && dropdownRef.current.contains(relatedTarget)) return;
       setTimeout(() => {
         if (document.activeElement !== inputRef.current) {
           setIsOpen(false);
           setIsFocused(false);
-          if (selectedOption) {
-            setSearch(selectedOption.label);
-          } else {
-            setSearch('');
-          }
+          if (selectedOption) setSearch(selectedOption.label);
+          else setSearch('');
         }
       }, 150);
     };
@@ -29511,12 +29489,8 @@ const FeesModule = ({
     const handleClear = (e) => {
       e.stopPropagation();
       onChange({ target: { value: '' } });
-      setSearch('');
-      setIsOpen(false);
-      setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
+      setSearch(''); setIsOpen(false); setIsFocused(false);
+      if (inputRef.current) inputRef.current.focus();
     };
 
     const getDisplayValue = () => {
@@ -29529,8 +29503,7 @@ const FeesModule = ({
       <div className="relative" ref={dropdownRef}>
         {label && (
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
+            {label}{required && <span className="text-red-500 ml-1">*</span>}
           </label>
         )}
         <div className="relative">
@@ -29549,12 +29522,9 @@ const FeesModule = ({
             autoComplete="off"
           />
           {value && showClear && !disabled && (
-            <button
-              type="button"
-              onClick={handleClear}
+            <button type="button" onClick={handleClear}
               className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-red-500 z-10"
-              title="Clear selection"
-            >
+              title="Clear selection">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
@@ -29570,14 +29540,12 @@ const FeesModule = ({
           <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
             {filteredOptions.length > 0 ? (
               filteredOptions.map((opt) => (
-                <div
-                  key={opt.value || Math.random().toString()}
+                <div key={opt.value || Math.random().toString()}
                   className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
                     opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
                   }`}
                   onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => handleSelect(opt.value)}
-                >
+                  onClick={() => handleSelect(opt.value)}>
                   <div className="font-medium">{opt.label}</div>
                   {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
                 </div>
@@ -29594,26 +29562,23 @@ const FeesModule = ({
   };
 
   // ==================== 4. INPUT FIELD ====================
-  const InputField = ({ label, type, value, onChange, placeholder, required, disabled, min, step }) => {
-    return (
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
-        </label>
-        <input
-          type={type || 'text'}
-          value={value !== undefined && value !== null ? value : ''}
-          onChange={onChange}
-          placeholder={placeholder}
-          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-          disabled={disabled}
-          min={min}
-          step={step}
-        />
-      </div>
-    );
-  };
+  const InputField = ({ label, type, value, onChange, placeholder, required, disabled, min, step }) => (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">
+        {label}{required && <span className="text-red-500 ml-1">*</span>}
+      </label>
+      <input
+        type={type || 'text'}
+        value={value !== undefined && value !== null ? value : ''}
+        onChange={onChange}
+        placeholder={placeholder}
+        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+        disabled={disabled}
+        min={min}
+        step={step}
+      />
+    </div>
+  );
 
   // ==================== 5. OPTIONS GENERATORS ====================
   const termOptions = useMemo(() => {
@@ -29627,12 +29592,9 @@ const FeesModule = ({
       );
     } else if (isTVET) {
       opts.push(
-        { value: '1', label: 'Module 1' },
-        { value: '2', label: 'Module 2' },
-        { value: '3', label: 'Module 3' },
-        { value: '4', label: 'Module 4' },
-        { value: '5', label: 'Module 5' },
-        { value: '6', label: 'Module 6' }
+        { value: '1', label: 'Module 1' }, { value: '2', label: 'Module 2' },
+        { value: '3', label: 'Module 3' }, { value: '4', label: 'Module 4' },
+        { value: '5', label: 'Module 5' }, { value: '6', label: 'Module 6' }
       );
     } else {
       opts.push(
@@ -29650,69 +29612,45 @@ const FeesModule = ({
       : isTVET 
         ? ['TUITION', 'REGISTRATION', 'WORKSHOP', 'MATERIALS', 'ASSESSMENT', 'ATTACHMENT', 'GRADUATION', 'OTHER']
         : ['TUITION', 'TRANSPORT', 'BOARDING', 'LIBRARY', 'ACTIVITY', 'UNIFORM', 'EXAMINATION', 'OTHER'];
-    
     return [{ value: '', label: '' }, ...categories.map(c => ({ value: c, label: c }))];
   }, [isUniversity, isTVET]);
 
   const facultyOptions = useMemo(() => {
     const opts = [{ value: '', label: '' }];
     (faculties || []).forEach(f => {
-      opts.push({
-        value: f.id,
-        label: f.name,
-        subLabel: f.dean ? `Dean: ${f.dean}` : 'Faculty'
-      });
+      opts.push({ value: f.id, label: f.name, subLabel: f.dean ? `Dean: ${f.dean}` : 'Faculty' });
     });
     return opts;
   }, [faculties]);
 
   const departmentOptions = useMemo(() => {
     const opts = [{ value: '', label: '' }];
-    const depts = (departments || []).filter(d => !selectedFaculty || d.facultyId === selectedFaculty);
-    depts.forEach(d => {
-      opts.push({
-        value: d.id,
-        label: d.name,
-        subLabel: d.faculty?.name || 'Department'
-      });
-    });
+    (departments || [])
+      .filter(d => !selectedFaculty || d.facultyId === selectedFaculty)
+      .forEach(d => opts.push({ value: d.id, label: d.name, subLabel: d.faculty?.name || 'Department' }));
     return opts;
   }, [departments, selectedFaculty]);
 
   const courseOptions = useMemo(() => {
     const opts = [{ value: '', label: '' }];
-    const coursesFiltered = (courses || []).filter(c => !selectedDepartment || c.departmentId === selectedDepartment);
-    coursesFiltered.forEach(c => {
-      opts.push({
-        value: c.id,
-        label: c.name,
-        subLabel: c.code || 'Course'
-      });
-    });
+    (courses || [])
+      .filter(c => !selectedDepartment || c.departmentId === selectedDepartment)
+      .forEach(c => opts.push({ value: c.id, label: c.name, subLabel: c.code || 'Course' }));
     return opts;
   }, [courses, selectedDepartment]);
 
   const programOptions = useMemo(() => {
     const opts = [{ value: '', label: '' }];
-    const programsFiltered = (programs || []).filter(p => !selectedDepartment || p.departmentId === selectedDepartment);
-    programsFiltered.forEach(p => {
-      opts.push({
-        value: p.id,
-        label: p.name,
-        subLabel: p.code || p.level || 'Program'
-      });
-    });
+    (programs || [])
+      .filter(p => !selectedDepartment || p.departmentId === selectedDepartment)
+      .forEach(p => opts.push({ value: p.id, label: p.name, subLabel: p.code || p.level || 'Program' }));
     return opts;
   }, [programs, selectedDepartment]);
 
   const classOptions = useMemo(() => {
     const opts = [{ value: '', label: '' }];
     (classes || []).forEach(c => {
-      opts.push({
-        value: c.id,
-        label: c.name,
-        subLabel: c.capacity ? `Capacity: ${c.capacity}` : 'Class'
-      });
+      opts.push({ value: c.id, label: c.name, subLabel: c.capacity ? `Capacity: ${c.capacity}` : 'Class' });
     });
     return opts;
   }, [classes]);
@@ -29720,20 +29658,14 @@ const FeesModule = ({
   const routeOptions = useMemo(() => {
     const opts = [{ value: '', label: '' }];
     (routes || []).forEach(r => {
-      opts.push({
-        value: r.id,
-        label: r.name,
-        subLabel: r.fee ? `Fee: ${r.fee}` : 'Transport Route'
-      });
+      opts.push({ value: r.id, label: r.name, subLabel: r.fee ? `Fee: ${r.fee}` : 'Transport Route' });
     });
     return opts;
   }, [routes]);
 
   const yearOptions = useMemo(() => {
     const opts = [{ value: '', label: '' }];
-    for (let i = 1; i <= 6; i++) {
-      opts.push({ value: i, label: `Year ${i}` });
-    }
+    for (let i = 1; i <= 6; i++) opts.push({ value: i, label: `Year ${i}` });
     return opts;
   }, []);
 
@@ -29744,7 +29676,18 @@ const FeesModule = ({
     { value: 'Higher Diploma', label: 'Higher Diploma' }
   ], []);
 
-  
+  // ✅ NEW: student options for discount modal
+  const studentOptions = useMemo(() => {
+    const opts = [{ value: '', label: '' }];
+    (students || []).forEach(s => {
+      opts.push({
+        value: s.id,
+        label: `${s.firstName || ''} ${s.lastName || ''}`.trim() || s.name || 'Student',
+        subLabel: s.admissionNumber || ''
+      });
+    });
+    return opts;
+  }, [students]);
 
   // ==================== 7. PERMISSIONS ====================
   const isStudent = user?.role === 'STUDENT';
@@ -29752,14 +29695,14 @@ const FeesModule = ({
   const canManage = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
   const canDelete = ['SCHOOL_ADMIN', 'PRINCIPAL'].includes(user?.role);
   const canEdit = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
+  // ✅ NEW: who can grant discounts (more restrictive than editing)
+  const canGrantDiscount = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
   const canView = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'ACCOUNTANT', 'PARENT', 'STUDENT'].includes(user?.role);
 
-  // ==================== 8. HELPER FUNCTIONS ====================
+  // ==================== 8. HELPERS ====================
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-KE', {
-      style: 'currency',
-      currency: 'KES',
-      minimumFractionDigits: 0
+      style: 'currency', currency: 'KES', minimumFractionDigits: 0
     }).format(amount || 0);
   };
 
@@ -29779,28 +29722,63 @@ const FeesModule = ({
 
   const getProgramName = (programId) => {
     if (!programId) return 'N/A';
-    const program = programs?.find(p => p.id === programId);
-    return program ? program.name : 'N/A';
+    return programs?.find(p => p.id === programId)?.name || 'N/A';
   };
-
   const getCourseName = (courseId) => {
     if (!courseId) return 'N/A';
-    const course = courses?.find(c => c.id === courseId);
-    return course ? course.name : 'N/A';
+    return courses?.find(c => c.id === courseId)?.name || 'N/A';
   };
-
   const getClassName = (classId) => {
     if (!classId) return 'N/A';
-    const classObj = classes?.find(c => c.id === classId);
-    return classObj ? classObj.name : 'N/A';
+    return classes?.find(c => c.id === classId)?.name || 'N/A';
+  };
+
+  // ✅ NEW: compute discount amount for a given fee
+  // Priority: fee-level discount → per-student discount → 0
+  const getDiscountForFee = (fee, studentId = null) => {
+    if (!fee) return 0;
+
+    // 1) Per-student discount (from discounts array)
+    if (studentId && Array.isArray(discounts)) {
+      const studentDiscount = discounts.find(d =>
+        d.feeId === fee.id && d.studentId === studentId
+      );
+      if (studentDiscount) {
+        const val = parseFloat(studentDiscount.value) || 0;
+        return studentDiscount.type === 'PERCENT'
+          ? (parseFloat(fee.amount) || 0) * (val / 100)
+          : val;
+      }
+    }
+
+    // 2) Fee-level default discount
+    const feeDiscountAmount = parseFloat(fee.discountAmount) || 0;
+    const feeDiscountPercent = parseFloat(fee.discountPercent) || 0;
+    if (feeDiscountPercent > 0) {
+      return (parseFloat(fee.amount) || 0) * (feeDiscountPercent / 100);
+    }
+    return feeDiscountAmount;
+  };
+
+  // ✅ NEW: compute total paid toward a specific fee by a specific student
+  const getPaidForFee = (fee, studentId = null) => {
+    if (!fee || !Array.isArray(payments)) return 0;
+    return payments
+      .filter(p => p.feeId === fee.id && (!studentId || p.studentId === studentId))
+      .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+  };
+
+  // ✅ NEW: compute outstanding balance for a fee (optionally per student)
+  const getBalanceForFee = (fee, studentId = null) => {
+    const amount = parseFloat(fee?.amount) || 0;
+    const discount = getDiscountForFee(fee, studentId);
+    const paid = getPaidForFee(fee, studentId);
+    return amount - discount - paid;
   };
 
   // ==================== 9. HANDLERS ====================
   const handleEdit = (fee) => {
-    if (!canEdit) {
-      alert('You do not have permission to edit fees');
-      return;
-    }
+    if (!canEdit) { alert('You do not have permission to edit fees'); return; }
     
     setForm({
       name: fee.name || '',
@@ -29821,11 +29799,13 @@ const FeesModule = ({
       module: fee.module || (isTVET ? 1 : null),
       classId: fee.classId || '',
       isOptional: fee.isOptional || false,
-      isRecurring: fee.isRecurring || false
+      isRecurring: fee.isRecurring || false,
+      // ✅ NEW
+      discountAmount: fee.discountAmount || 0,
+      discountPercent: fee.discountPercent || 0
     });
     
     setAllocationType(fee.allocationType || 'AUTO');
-    
     if (isUniversity && fee.facultyId) setSelectedFaculty(fee.facultyId);
     if (isUniversity && fee.departmentId) setSelectedDepartment(fee.departmentId);
     if (isUniversity && fee.courseId) setSelectedCourse(fee.courseId);
@@ -29837,24 +29817,18 @@ const FeesModule = ({
   };
 
   const handleDeleteClick = (fee) => {
-    if (!canDelete) {
-      alert('You do not have permission to delete fees');
-      return;
-    }
+    if (!canDelete) { alert('You do not have permission to delete fees'); return; }
     setDeleteConfirm(fee);
   };
 
   const confirmDelete = async () => {
     if (!deleteConfirm) return;
-    setLoading(true);
-    setApiError('');
+    setLoading(true); setApiError('');
     try {
       const paymentsForFee = payments?.filter(p => p.feeId === deleteConfirm.id) || [];
       if (paymentsForFee.length > 0) {
         if (!window.confirm(`This fee has ${paymentsForFee.length} payment(s) associated with it. Continue?`)) {
-          setDeleteConfirm(null);
-          setLoading(false);
-          return;
+          setDeleteConfirm(null); setLoading(false); return;
         }
       }
       await onDelete(deleteConfirm.id);
@@ -29870,50 +29844,24 @@ const FeesModule = ({
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!canManage) { 
-      alert('You do not have permission to create fees'); 
-      return; 
-    }
-    setLoading(true);
-    setApiError('');
-    setAllocationMessage('');
+    if (!canManage) { alert('You do not have permission to create fees'); return; }
+    setLoading(true); setApiError(''); setAllocationMessage('');
     try {
-      if (isUniversity && !form.courseId) { 
-        alert('Please select a course'); 
-        setLoading(false);
-        return; 
-      }
-      if (isTVET && !form.programId) { 
-        alert('Please select a program'); 
-        setLoading(false);
-        return; 
-      }
-      if (isPrimarySecondary && !form.classId) { 
-        alert('Please select a class'); 
-        setLoading(false);
-        return; 
-      }
-      if (!form.name) {
-        alert('Please enter a fee name');
-        setLoading(false);
-        return;
-      }
-      if (!form.amount || parseFloat(form.amount) <= 0) {
-        alert('Please enter a valid amount');
-        setLoading(false);
-        return;
-      }
+      if (isUniversity && !form.courseId) { alert('Please select a course'); setLoading(false); return; }
+      if (isTVET && !form.programId) { alert('Please select a program'); setLoading(false); return; }
+      if (isPrimarySecondary && !form.classId) { alert('Please select a class'); setLoading(false); return; }
+      if (!form.name) { alert('Please enter a fee name'); setLoading(false); return; }
+      if (!form.amount || parseFloat(form.amount) <= 0) { alert('Please enter a valid amount'); setLoading(false); return; }
       
       const submitData = { ...form, allocationType };
       const uuidFields = ['classId', 'courseId', 'programId', 'facultyId', 'departmentId', 'transportRouteId'];
-      uuidFields.forEach(field => { 
-        if (submitData[field] === '') submitData[field] = null; 
-      });
+      uuidFields.forEach(field => { if (submitData[field] === '') submitData[field] = null; });
       if (submitData.amount === '') submitData.amount = 0;
       if (submitData.year === '') submitData.year = isUniversity ? 1 : null;
-      if (isTVET && submitData.term) {
-        submitData.module = parseInt(submitData.term);
-      }
+      if (isTVET && submitData.term) submitData.module = parseInt(submitData.term);
+      // ✅ NEW: normalize discount fields
+      submitData.discountAmount = parseFloat(submitData.discountAmount) || 0;
+      submitData.discountPercent = parseFloat(submitData.discountPercent) || 0;
       
       console.log('📤 Submitting fee data:', submitData);
       
@@ -29931,10 +29879,8 @@ const FeesModule = ({
       
       setShowForm(false);
       setEditingId(null);
-      setSelectedFaculty('');
-      setSelectedDepartment('');
-      setSelectedCourse('');
-      setSelectedProgram('');
+      setSelectedFaculty(''); setSelectedDepartment('');
+      setSelectedCourse(''); setSelectedProgram('');
       setAllocationType('AUTO');
     } catch (error) {
       console.error('Error saving fee:', error);
@@ -29945,35 +29891,103 @@ const FeesModule = ({
   };
 
   const handleCancel = () => {
-    setShowForm(false);
-    setEditingId(null);
-    setSelectedFaculty('');
-    setSelectedDepartment('');
-    setSelectedCourse('');
-    setSelectedProgram('');
-    setAllocationType('AUTO');
-    setAllocationMessage('');
+    setShowForm(false); setEditingId(null);
+    setSelectedFaculty(''); setSelectedDepartment('');
+    setSelectedCourse(''); setSelectedProgram('');
+    setAllocationType('AUTO'); setAllocationMessage('');
     setForm({
-      name: '', 
-      amount: '', 
-      term: '', // ✅ EMPTY by default
-      academicYear: new Date().getFullYear().toString(), 
-      dueDate: '', 
-      category: 'TUITION',
-      allocationType: 'AUTO', 
-      appliesTo: ['ALL'], 
-      transportRouteId: null,
-      courseId: '', 
-      programId: '',
-      facultyId: '', 
-      departmentId: '', 
-      year: isUniversity ? 1 : null, 
-      semester: isUniversity ? 1 : null, 
+      name: '', amount: '', term: '',
+      academicYear: new Date().getFullYear().toString(),
+      dueDate: '', category: 'TUITION',
+      allocationType: 'AUTO', appliesTo: ['ALL'], transportRouteId: null,
+      courseId: '', programId: '', facultyId: '', departmentId: '',
+      year: isUniversity ? 1 : null,
+      semester: isUniversity ? 1 : null,
       module: isTVET ? 1 : null,
       classId: '',
-      isOptional: false, 
-      isRecurring: false
+      isOptional: false, isRecurring: false,
+      // ✅ NEW
+      discountAmount: 0, discountPercent: 0
     });
+  };
+
+  // ✅ NEW: open discount modal for a student+fee
+  const openDiscountModal = (student, fee = null) => {
+    if (!canGrantDiscount) { alert('You do not have permission to grant discounts'); return; }
+    setDiscountStudent(student || null);
+    setDiscountFee(fee || null);
+    // Pre-fill if an existing discount exists
+    const existing = Array.isArray(discounts) && student && fee
+      ? discounts.find(d => d.feeId === fee.id && d.studentId === student.id)
+      : null;
+    setDiscountForm({
+      type: existing?.type || 'AMOUNT',
+      value: existing?.value || '',
+      reason: existing?.reason || '',
+      academicYear: existing?.academicYear || new Date().getFullYear().toString(),
+      term: existing?.term || ''
+    });
+    setShowDiscountModal(true);
+  };
+
+  // ✅ NEW: save discount
+  const handleSaveDiscount = async () => {
+    if (!canGrantDiscount) { alert('You do not have permission to grant discounts'); return; }
+    if (!discountStudent) { alert('Please select a student'); return; }
+    if (!discountForm.value || parseFloat(discountForm.value) <= 0) {
+      alert('Please enter a valid discount value'); return;
+    }
+    setLoading(true); setApiError('');
+    try {
+      const payload = {
+        studentId: discountStudent.id,
+        feeId: discountFee?.id || null, // null = applies to all fees for the student
+        type: discountForm.type,
+        value: parseFloat(discountForm.value),
+        reason: discountForm.reason || '',
+        academicYear: discountForm.academicYear,
+        term: discountForm.term || null,
+        schoolId: currentSchool?.id
+      };
+
+      // Find existing discount to update
+      const existing = Array.isArray(discounts)
+        ? discounts.find(d =>
+            d.studentId === discountStudent.id &&
+            (d.feeId || null) === (discountFee?.id || null)
+          )
+        : null;
+
+      let response;
+      if (existing && existing.id) {
+        response = await api.put(`/discounts/${existing.id}`, payload);
+        if (setDiscounts) {
+          setDiscounts(discounts.map(d =>
+            d.id === existing.id ? { ...d, ...payload } : d
+          ));
+        }
+        alert('✅ Discount updated successfully!');
+      } else {
+        response = await api.post('/discounts', payload);
+        const newDiscount = response.data?.discount || { id: `temp-${Date.now()}`, ...payload };
+        if (setDiscounts) setDiscounts([...(discounts || []), newDiscount]);
+        alert('✅ Discount applied successfully!');
+      }
+
+      setShowDiscountModal(false);
+      setDiscountStudent(null);
+      setDiscountFee(null);
+      setDiscountForm({
+        type: 'AMOUNT', value: '', reason: '',
+        academicYear: new Date().getFullYear().toString(), term: ''
+      });
+    } catch (error) {
+      console.error('Error saving discount:', error);
+      alert('❌ Failed to save discount: ' + (error.response?.data?.message || error.message));
+      setApiError(error.response?.data?.message || error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   // ==================== 10. RENDER ====================
@@ -29986,14 +30000,30 @@ const FeesModule = ({
     );
   }
 
+  // ✅ NEW: summary totals now account for discounts
+  const totalBilled = fees.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
+  const totalDiscounts = fees.reduce((sum, f) => {
+    // fee-level discount for all students + per-student discounts
+    const feeLevel = getDiscountForFee(f);
+    const perStudent = Array.isArray(discounts)
+      ? discounts
+          .filter(d => d.feeId === f.id)
+          .reduce((s, d) => {
+            const v = parseFloat(d.value) || 0;
+            return s + (d.type === 'PERCENT' ? (parseFloat(f.amount) || 0) * (v / 100) : v);
+          }, 0)
+      : 0;
+    return sum + feeLevel + perStudent;
+  }, 0);
+  const totalPaid = payments?.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0) || 0;
+
   return (
     <div className="space-y-6">
-      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse"></div>}
+      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
       
       {apiError && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-          <i className="fas fa-exclamation-circle mr-2"></i>
-          {apiError}
+          <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
         </div>
       )}
       
@@ -30006,18 +30036,26 @@ const FeesModule = ({
       
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">{getFeeTitle()}</h2>
-        {canManage && (
-          <button 
-            onClick={() => {
-              handleCancel();
-              setShowForm(true);
-            }} 
-            className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center"
-          >
-            <i className="fas fa-plus mr-2"></i>
-            {editingId ? 'Cancel' : 'Create Fee'}
-          </button>
-        )}
+        <div className="flex space-x-2">
+          {/* ✅ NEW: Grant Discount button */}
+          {canGrantDiscount && (
+            <button
+              onClick={() => openDiscountModal(null, null)}
+              className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 flex items-center"
+            >
+              <i className="fas fa-percent mr-2"></i>Grant Discount
+            </button>
+          )}
+          {canManage && (
+            <button 
+              onClick={() => { handleCancel(); setShowForm(true); }} 
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center"
+            >
+              <i className="fas fa-plus mr-2"></i>
+              {editingId ? 'Cancel' : 'Create Fee'}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ==================== CREATE/EDIT FEE FORM ==================== */}
@@ -30033,220 +30071,105 @@ const FeesModule = ({
                 value={form.name || ''} 
                 onChange={(e) => setForm({...form, name: e.target.value})} 
                 placeholder={isUniversity ? "e.g., Semester 1 Tuition" : (isTVET ? "e.g., Module 1 Workshop Fee" : "e.g., Term 1 Tuition")} 
-                required 
-                disabled={loading} 
+                required disabled={loading} 
               />
               
-              {isUniversity && (
-                <>
-                  <SearchableSelect 
-                    label="Faculty" 
-                    value={form.facultyId || ''} 
-                    onChange={(e) => { 
-                      setForm({...form, facultyId: e.target.value, departmentId: '', courseId: ''}); 
-                      setSelectedFaculty(e.target.value); 
-                      setSelectedDepartment('');
-                      setSelectedCourse('');
-                    }} 
-                    options={facultyOptions} 
-                    required 
-                    disabled={loading} 
-                    placeholder="Search faculty..."
-                  />
-                  
-                  <SearchableSelect 
-                    label="Department" 
-                    value={form.departmentId || ''} 
-                    onChange={(e) => { 
-                      setForm({...form, departmentId: e.target.value, courseId: ''}); 
-                      setSelectedDepartment(e.target.value);
-                      setSelectedCourse('');
-                    }} 
-                    options={departmentOptions} 
-                    required 
-                    disabled={loading || !selectedFaculty} 
-                    placeholder="Search department..."
-                  />
-                  
-                  <SearchableSelect 
-                    label="Course *" 
-                    value={form.courseId || ''} 
-                    onChange={(e) => { 
-                      setForm({...form, courseId: e.target.value}); 
-                      setSelectedCourse(e.target.value);
-                    }} 
-                    options={courseOptions} 
-                    required 
-                    disabled={loading || !selectedDepartment} 
-                    placeholder="Search course..."
-                  />
-                  
-                  <SearchableSelect 
-                    label="Year of Study *" 
-                    value={form.year || ''} 
-                    onChange={(e) => setForm({...form, year: parseInt(e.target.value) || ''})} 
-                    options={yearOptions} 
-                    required 
-                    disabled={loading} 
-                    placeholder="Select year..."
-                  />
-                  
-                  <SearchableSelect 
-                    label="Semester *" 
-                    value={form.term || ''} 
-                    onChange={(e) => setForm({...form, term: e.target.value})} 
-                    options={termOptions} 
-                    required 
-                    disabled={loading} 
-                    placeholder="Select semester..."
-                  />
-                </>
-              )}
+              {isUniversity && (<>
+                <SearchableSelect label="Faculty" value={form.facultyId || ''}
+                  onChange={(e) => { setForm({...form, facultyId: e.target.value, departmentId: '', courseId: ''}); setSelectedFaculty(e.target.value); setSelectedDepartment(''); setSelectedCourse(''); }}
+                  options={facultyOptions} required disabled={loading} placeholder="Search faculty..." />
+                <SearchableSelect label="Department" value={form.departmentId || ''}
+                  onChange={(e) => { setForm({...form, departmentId: e.target.value, courseId: ''}); setSelectedDepartment(e.target.value); setSelectedCourse(''); }}
+                  options={departmentOptions} required disabled={loading || !selectedFaculty} placeholder="Search department..." />
+                <SearchableSelect label="Course *" value={form.courseId || ''}
+                  onChange={(e) => { setForm({...form, courseId: e.target.value}); setSelectedCourse(e.target.value); }}
+                  options={courseOptions} required disabled={loading || !selectedDepartment} placeholder="Search course..." />
+                <SearchableSelect label="Year of Study *" value={form.year || ''}
+                  onChange={(e) => setForm({...form, year: parseInt(e.target.value) || ''})}
+                  options={yearOptions} required disabled={loading} placeholder="Select year..." />
+                <SearchableSelect label="Semester *" value={form.term || ''}
+                  onChange={(e) => setForm({...form, term: e.target.value})}
+                  options={termOptions} required disabled={loading} placeholder="Select semester..." />
+              </>)}
               
-              {isTVET && (
-                <>
-                  <SearchableSelect 
-                    label="Department" 
-                    value={form.departmentId || ''} 
-                    onChange={(e) => { 
-                      setForm({...form, departmentId: e.target.value, programId: ''}); 
-                      setSelectedDepartment(e.target.value);
-                      setSelectedProgram('');
-                    }} 
-                    options={departmentOptions} 
-                    required 
-                    disabled={loading} 
-                    placeholder="Search department..."
-                  />
-                  
-                  <SearchableSelect 
-                    label="Program *" 
-                    value={form.programId || ''} 
-                    onChange={(e) => { 
-                      setForm({...form, programId: e.target.value}); 
-                      setSelectedProgram(e.target.value);
-                    }} 
-                    options={programOptions} 
-                    required 
-                    disabled={loading || !selectedDepartment} 
-                    placeholder="Search program..."
-                  />
-                  
-                  <SearchableSelect 
-                    label="Module Level *" 
-                    value={form.term || ''} 
-                    onChange={(e) => setForm({...form, term: e.target.value})} 
-                    options={termOptions} 
-                    required 
-                    disabled={loading || !form.programId} 
-                    placeholder="Select module..."
-                  />
-                  
-                  <SearchableSelect 
-                    label="Level" 
-                    value={form.level || ''} 
-                    onChange={(e) => setForm({...form, level: e.target.value})} 
-                    options={levelOptions} 
-                    disabled={loading} 
-                    placeholder="Select level..."
-                  />
-                </>
-              )}
+              {isTVET && (<>
+                <SearchableSelect label="Department" value={form.departmentId || ''}
+                  onChange={(e) => { setForm({...form, departmentId: e.target.value, programId: ''}); setSelectedDepartment(e.target.value); setSelectedProgram(''); }}
+                  options={departmentOptions} required disabled={loading} placeholder="Search department..." />
+                <SearchableSelect label="Program *" value={form.programId || ''}
+                  onChange={(e) => { setForm({...form, programId: e.target.value}); setSelectedProgram(e.target.value); }}
+                  options={programOptions} required disabled={loading || !selectedDepartment} placeholder="Search program..." />
+                <SearchableSelect label="Module Level *" value={form.term || ''}
+                  onChange={(e) => setForm({...form, term: e.target.value})}
+                  options={termOptions} required disabled={loading || !form.programId} placeholder="Select module..." />
+                <SearchableSelect label="Level" value={form.level || ''}
+                  onChange={(e) => setForm({...form, level: e.target.value})}
+                  options={levelOptions} disabled={loading} placeholder="Select level..." />
+              </>)}
               
-              {isPrimarySecondary && (
-                <>
-                  <SearchableSelect 
-                    label="Class *" 
-                    value={form.classId || ''} 
-                    onChange={(e) => setForm({...form, classId: e.target.value})} 
-                    options={classOptions} 
-                    required 
-                    disabled={loading} 
-                    placeholder="Search class..."
-                  />
-                  
-                  <SearchableSelect 
-                    label="Term *" 
-                    value={form.term || ''} 
-                    onChange={(e) => setForm({...form, term: e.target.value})} 
-                    options={termOptions} 
-                    required 
-                    disabled={loading} 
-                    placeholder="Select term..."
-                  />
-                </>
-              )}
+              {isPrimarySecondary && (<>
+                <SearchableSelect label="Class *" value={form.classId || ''}
+                  onChange={(e) => setForm({...form, classId: e.target.value})}
+                  options={classOptions} required disabled={loading} placeholder="Search class..." />
+                <SearchableSelect label="Term *" value={form.term || ''}
+                  onChange={(e) => setForm({...form, term: e.target.value})}
+                  options={termOptions} required disabled={loading} placeholder="Select term..." />
+              </>)}
               
-              <InputField 
-                label="Amount (KES) *" 
-                type="number" 
-                value={form.amount === '' ? '' : form.amount} 
-                onChange={(e) => setForm({...form, amount: e.target.value === '' ? '' : parseFloat(e.target.value)})} 
-                required 
-                disabled={loading} 
-                min="0"
-                step="0.01"
+              <InputField label="Amount (KES) *" type="number"
+                value={form.amount === '' ? '' : form.amount}
+                onChange={(e) => setForm({...form, amount: e.target.value === '' ? '' : parseFloat(e.target.value)})}
+                required disabled={loading} min="0" step="0.01" />
+              
+              <InputField label="Academic Year"
+                value={form.academicYear || new Date().getFullYear().toString()}
+                onChange={(e) => setForm({...form, academicYear: e.target.value})}
+                placeholder="2026" required disabled={loading} />
+              
+              <InputField label="Due Date" type="date"
+                value={form.dueDate || ''}
+                onChange={(e) => setForm({...form, dueDate: e.target.value})}
+                required disabled={loading} />
+              
+              <SearchableSelect label="Category" value={form.category || ''}
+                onChange={(e) => setForm({...form, category: e.target.value})}
+                options={categoryOptions} disabled={loading} placeholder="Select category..." />
+              
+              <SearchableSelect label="Transport Route" value={form.transportRouteId || ''}
+                onChange={(e) => setForm({...form, transportRouteId: e.target.value || null})}
+                options={routeOptions} disabled={loading} placeholder="Search route..." />
+
+              {/* ✅ NEW: Fee-level default discount */}
+              <InputField
+                label="Default Discount Amount (KES)"
+                type="number"
+                value={form.discountAmount === '' ? '' : (form.discountAmount || 0)}
+                onChange={(e) => setForm({...form, discountAmount: e.target.value === '' ? '' : parseFloat(e.target.value)})}
+                placeholder="e.g., 3000 (applies to all students)"
+                disabled={loading} min="0" step="0.01"
               />
-              
-              <InputField 
-                label="Academic Year" 
-                value={form.academicYear || new Date().getFullYear().toString()} 
-                onChange={(e) => setForm({...form, academicYear: e.target.value})} 
-                placeholder="2026" 
-                required 
-                disabled={loading} 
-              />
-              
-              <InputField 
-                label="Due Date" 
-                type="date" 
-                value={form.dueDate || ''} 
-                onChange={(e) => setForm({...form, dueDate: e.target.value})} 
-                required 
-                disabled={loading} 
-              />
-              
-              <SearchableSelect 
-                label="Category" 
-                value={form.category || ''} 
-                onChange={(e) => setForm({...form, category: e.target.value})} 
-                options={categoryOptions} 
-                disabled={loading} 
-                placeholder="Select category..."
-              />
-              
-              <SearchableSelect 
-                label="Transport Route" 
-                value={form.transportRouteId || ''} 
-                onChange={(e) => setForm({...form, transportRouteId: e.target.value || null})} 
-                options={routeOptions} 
-                disabled={loading} 
-                placeholder="Search route..."
+              <InputField
+                label="Default Discount (%)"
+                type="number"
+                value={form.discountPercent === '' ? '' : (form.discountPercent || 0)}
+                onChange={(e) => setForm({...form, discountPercent: e.target.value === '' ? '' : parseFloat(e.target.value)})}
+                placeholder="e.g., 10 (takes precedence over amount)"
+                disabled={loading} min="0" max="100" step="0.01"
               />
             </div>
             
             {/* ===== ALLOCATION TYPE SELECTOR ===== */}
             <div className="border-t pt-4 mt-2">
-              <label className="block text-sm font-medium text-gray-700 mb-3">
-                Allocation Type
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-3">Allocation Type</label>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div 
                   className={`border rounded-lg p-4 cursor-pointer transition-all ${
-                    allocationType === 'AUTO' 
-                      ? 'border-green-500 bg-green-50 ring-2 ring-green-500' 
-                      : 'border-gray-200 hover:border-green-300'
+                    allocationType === 'AUTO' ? 'border-green-500 bg-green-50 ring-2 ring-green-500' : 'border-gray-200 hover:border-green-300'
                   }`}
-                  onClick={() => setAllocationType('AUTO')}
-                >
+                  onClick={() => setAllocationType('AUTO')}>
                   <div className="flex items-start">
-                    <input
-                      type="radio"
-                      value="AUTO"
-                      checked={allocationType === 'AUTO'}
-                      onChange={(e) => setAllocationType(e.target.value)}
-                      className="mt-1 mr-3"
-                    />
+                    <input type="radio" value="AUTO" checked={allocationType === 'AUTO'}
+                      onChange={(e) => setAllocationType(e.target.value)} className="mt-1 mr-3" />
                     <div>
                       <div className="font-medium text-green-700">🔄 Auto Allocation</div>
                       <p className="text-sm text-gray-600 mt-1">
@@ -30258,23 +30181,14 @@ const FeesModule = ({
                     </div>
                   </div>
                 </div>
-                
                 <div 
                   className={`border rounded-lg p-4 cursor-pointer transition-all ${
-                    allocationType === 'MANUAL' 
-                      ? 'border-yellow-500 bg-yellow-50 ring-2 ring-yellow-500' 
-                      : 'border-gray-200 hover:border-yellow-300'
+                    allocationType === 'MANUAL' ? 'border-yellow-500 bg-yellow-50 ring-2 ring-yellow-500' : 'border-gray-200 hover:border-yellow-300'
                   }`}
-                  onClick={() => setAllocationType('MANUAL')}
-                >
+                  onClick={() => setAllocationType('MANUAL')}>
                   <div className="flex items-start">
-                    <input
-                      type="radio"
-                      value="MANUAL"
-                      checked={allocationType === 'MANUAL'}
-                      onChange={(e) => setAllocationType(e.target.value)}
-                      className="mt-1 mr-3"
-                    />
+                    <input type="radio" value="MANUAL" checked={allocationType === 'MANUAL'}
+                      onChange={(e) => setAllocationType(e.target.value)} className="mt-1 mr-3" />
                     <div>
                       <div className="font-medium text-yellow-700">✋ Manual Allocation</div>
                       <p className="text-sm text-gray-600 mt-1">
@@ -30287,7 +30201,6 @@ const FeesModule = ({
                   </div>
                 </div>
               </div>
-              
               <div className="mt-3 p-3 bg-gray-50 rounded-lg">
                 <p className="text-xs text-gray-500">
                   <i className="fas fa-info-circle mr-1"></i>
@@ -30300,48 +30213,174 @@ const FeesModule = ({
             
             <div className="flex items-center space-x-4">
               <label className="flex items-center space-x-2">
-                <input 
-                  type="checkbox" 
-                  checked={form.isOptional || false} 
-                  onChange={(e) => setForm({...form, isOptional: e.target.checked})} 
-                  className="rounded" 
-                  disabled={loading} 
-                />
+                <input type="checkbox" checked={form.isOptional || false}
+                  onChange={(e) => setForm({...form, isOptional: e.target.checked})}
+                  className="rounded" disabled={loading} />
                 <span>This fee is optional</span>
               </label>
-              
               <label className="flex items-center space-x-2">
-                <input 
-                  type="checkbox" 
-                  checked={form.isRecurring || false} 
-                  onChange={(e) => setForm({...form, isRecurring: e.target.checked})} 
-                  className="rounded" 
-                  disabled={loading} 
-                />
-                <span>
-                  {isTVET ? 'Applies to all modules' : 'Recurring (charged every term/semester)'}
-                </span>
+                <input type="checkbox" checked={form.isRecurring || false}
+                  onChange={(e) => setForm({...form, isRecurring: e.target.checked})}
+                  className="rounded" disabled={loading} />
+                <span>{isTVET ? 'Applies to all modules' : 'Recurring (charged every term/semester)'}</span>
               </label>
             </div>
             
             <div className="flex space-x-2 pt-4 border-t">
-              <button 
-                type="submit" 
-                className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50" 
-                disabled={loading}
-              >
+              <button type="submit"
+                className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                disabled={loading}>
                 {loading ? 'Saving...' : (editingId ? 'Update Fee' : 'Create Fee')}
               </button>
-              <button 
-                type="button" 
-                onClick={handleCancel}
-                className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600" 
-                disabled={loading}
-              >
+              <button type="button" onClick={handleCancel}
+                className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
+                disabled={loading}>Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ==================== ✅ NEW: DISCOUNT MODAL ==================== */}
+      {showDiscountModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                <i className="fas fa-percent text-purple-600 mr-2"></i>
+                Grant Discount
+              </h3>
+              <button onClick={() => setShowDiscountModal(false)} className="text-gray-400 hover:text-gray-600">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <SearchableSelect
+                label="Student *"
+                value={discountStudent?.id || ''}
+                onChange={(e) => {
+                  const s = (students || []).find(x => x.id === e.target.value);
+                  setDiscountStudent(s || null);
+                }}
+                options={studentOptions}
+                placeholder="Search student..."
+                disabled={!!discountStudent && !!discountFee} // lock if opened from a specific row
+              />
+
+              {/* Optionally scope to a specific fee */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Applies To
+                </label>
+                <select
+                  value={discountFee?.id || ''}
+                  onChange={(e) => {
+                    const f = fees.find(x => x.id === e.target.value);
+                    setDiscountFee(f || null);
+                  }}
+                  className="w-full px-3 py-2 border rounded-lg"
+                >
+                  <option value="">All fees for this student</option>
+                  {fees.map(f => (
+                    <option key={f.id} value={f.id}>
+                      {f.name} — {formatCurrency(f.amount)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Discount Type *
+                  </label>
+                  <select
+                    value={discountForm.type}
+                    onChange={(e) => setDiscountForm({ ...discountForm, type: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="AMOUNT">Fixed Amount (KES)</option>
+                    <option value="PERCENT">Percentage (%)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    {discountForm.type === 'PERCENT' ? 'Percentage (%) *' : 'Amount (KES) *'}
+                  </label>
+                  <input
+                    type="number"
+                    value={discountForm.value}
+                    onChange={(e) => setDiscountForm({ ...discountForm, value: e.target.value })}
+                    placeholder={discountForm.type === 'PERCENT' ? 'e.g., 10' : 'e.g., 3000'}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    min="0"
+                    step="0.01"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Reason / Notes
+                </label>
+                <input
+                  type="text"
+                  value={discountForm.reason}
+                  onChange={(e) => setDiscountForm({ ...discountForm, reason: e.target.value })}
+                  placeholder="e.g., Bursary, Staff child, Sibling discount"
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+
+              {/* Live preview */}
+              {discountStudent && (
+                <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-sm">
+                  <p className="font-medium text-purple-800 mb-1">Preview:</p>
+                  {discountFee ? (
+                    <ul className="text-xs text-purple-700 space-y-0.5">
+                      <li>Fee: <strong>{discountFee.name}</strong> — {formatCurrency(discountFee.amount)}</li>
+                      <li>
+                        Discount:{' '}
+                        <strong>
+                          {discountForm.type === 'PERCENT'
+                            ? `${discountForm.value || 0}% (${formatCurrency(
+                                (parseFloat(discountFee.amount) || 0) * ((parseFloat(discountForm.value) || 0) / 100)
+                              )})`
+                            : formatCurrency(parseFloat(discountForm.value) || 0)}
+                        </strong>
+                      </li>
+                      <li>
+                        Amount to pay:{' '}
+                        <strong className="text-green-700">
+                          {formatCurrency(
+                            (parseFloat(discountFee.amount) || 0) -
+                            (discountForm.type === 'PERCENT'
+                              ? (parseFloat(discountFee.amount) || 0) * ((parseFloat(discountForm.value) || 0) / 100)
+                              : (parseFloat(discountForm.value) || 0))
+                          )}
+                        </strong>
+                      </li>
+                    </ul>
+                  ) : (
+                    <p className="text-xs text-purple-700">
+                      Discount will apply across the student's fee statement.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="flex space-x-2 mt-6 pt-4 border-t">
+              <button onClick={handleSaveDiscount} disabled={loading}
+                className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 disabled:opacity-50">
+                {loading ? 'Saving...' : 'Apply Discount'}
+              </button>
+              <button onClick={() => setShowDiscountModal(false)}
+                className="flex-1 bg-gray-500 text-white py-2 rounded-lg hover:bg-gray-600">
                 Cancel
               </button>
             </div>
-          </form>
+          </div>
         </div>
       )}
 
@@ -30360,17 +30399,12 @@ const FeesModule = ({
               <p className="text-sm text-red-600 mt-2">This action cannot be undone.</p>
             </div>
             <div className="flex space-x-2">
-              <button 
-                onClick={confirmDelete} 
-                disabled={loading} 
-                className="flex-1 bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 disabled:opacity-50"
-              >
+              <button onClick={confirmDelete} disabled={loading}
+                className="flex-1 bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 disabled:opacity-50">
                 {loading ? 'Deleting...' : 'Yes, Delete'}
               </button>
-              <button 
-                onClick={() => setDeleteConfirm(null)} 
-                className="flex-1 bg-gray-500 text-white py-2 rounded-lg hover:bg-gray-600"
-              >
+              <button onClick={() => setDeleteConfirm(null)}
+                className="flex-1 bg-gray-500 text-white py-2 rounded-lg hover:bg-gray-600">
                 Cancel
               </button>
             </div>
@@ -30378,31 +30412,28 @@ const FeesModule = ({
         </div>
       )}
 
-      {/* ==================== SUMMARY CARDS ==================== */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      {/* ==================== SUMMARY CARDS (with discounts) ==================== */}
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <div className="bg-white p-4 rounded-xl shadow-sm">
           <p className="text-sm text-gray-500">Total Fees</p>
           <p className="text-2xl font-bold">{fees.length}</p>
         </div>
         <div className="bg-white p-4 rounded-xl shadow-sm">
-          <p className="text-sm text-gray-500">Total Amount</p>
-          <p className="text-2xl font-bold text-green-600">
-            {formatCurrency(fees.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0))}
-          </p>
+          <p className="text-sm text-gray-500">Billed Amount</p>
+          <p className="text-2xl font-bold text-green-600">{formatCurrency(totalBilled)}</p>
+        </div>
+        <div className="bg-white p-4 rounded-xl shadow-sm">
+          <p className="text-sm text-gray-500">Discounts</p>
+          <p className="text-2xl font-bold text-purple-600">−{formatCurrency(totalDiscounts)}</p>
         </div>
         <div className="bg-white p-4 rounded-xl shadow-sm">
           <p className="text-sm text-gray-500">Collected</p>
-          <p className="text-2xl font-bold text-blue-600">
-            {formatCurrency(payments?.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0) || 0)}
-          </p>
+          <p className="text-2xl font-bold text-blue-600">{formatCurrency(totalPaid)}</p>
         </div>
         <div className="bg-white p-4 rounded-xl shadow-sm">
           <p className="text-sm text-gray-500">Outstanding</p>
           <p className="text-2xl font-bold text-red-600">
-            {formatCurrency(
-              fees.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0) - 
-              (payments?.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0) || 0)
-            )}
+            {formatCurrency(Math.max(0, totalBilled - totalDiscounts - totalPaid))}
           </p>
         </div>
       </div>
@@ -30422,11 +30453,12 @@ const FeesModule = ({
                   {isTVET ? 'Module' : (isUniversity ? 'Semester' : 'Term')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Discount</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Year</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due Date</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Allocation</th>
-                {(canEdit || canDelete) && (
+                {(canEdit || canDelete || canGrantDiscount) && (
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
                 )}
               </tr>
@@ -30434,73 +30466,85 @@ const FeesModule = ({
             <tbody className="divide-y divide-gray-200">
               {fees.length === 0 ? (
                 <tr>
-                  <td colSpan={isUniversity ? 12 : (isTVET ? 13 : 12)} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={isUniversity ? 13 : (isTVET ? 14 : 13)} className="px-6 py-8 text-center text-gray-500">
                     <i className="fas fa-file-invoice text-4xl text-gray-300 mb-2"></i>
                     <p>No fees created yet.</p>
                     {canManage && (
-                      <button
-                        onClick={() => setShowForm(true)}
-                        className="mt-2 text-indigo-600 hover:text-indigo-800"
-                      >
+                      <button onClick={() => setShowForm(true)}
+                        className="mt-2 text-indigo-600 hover:text-indigo-800">
                         Click here to create your first fee
                       </button>
                     )}
                   </td>
                 </tr>
               ) : (
-                fees.map(fee => (
-                  <tr key={fee.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap font-medium">{fee.name}</td>
-                    {isUniversity && <td className="px-6 py-4 whitespace-nowrap">{getCourseName(fee.courseId)}</td>}
-                    {isTVET && <td className="px-6 py-4 whitespace-nowrap">{getProgramName(fee.programId)}</td>}
-                    {isTVET && <td className="px-6 py-4 whitespace-nowrap">{fee.module ? `Module ${fee.module}` : 'N/A'}</td>}
-                    {isPrimarySecondary && <td className="px-6 py-4 whitespace-nowrap">{getClassName(fee.classId)}</td>}
-                    <td className="px-6 py-4 whitespace-nowrap">{getModuleDisplay(fee)}</td>
-                    <td className="px-6 py-4 whitespace-nowrap font-medium text-green-600">
-                      {formatCurrency(fee.amount)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">{fee.academicYear}</td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {fee.dueDate ? new Date(fee.dueDate).toLocaleDateString() : 'N/A'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
-                        {fee.category || 'TUITION'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 rounded-full text-xs ${
-                        fee.allocationType === 'AUTO' 
-                          ? 'bg-green-100 text-green-800' 
-                          : 'bg-yellow-100 text-yellow-800'
-                      }`}>
-                        {fee.allocationType}
-                      </span>
-                    </td>
-                    {(canEdit || canDelete) && (
-                      <td className="px-6 py-4 whitespace-nowrap text-right space-x-2">
-                        {canEdit && (
-                          <button
-                            onClick={() => handleEdit(fee)}
-                            className="text-indigo-600 hover:text-indigo-900 p-2 hover:bg-indigo-50 rounded-lg transition-colors"
-                            title="Edit Fee"
-                          >
-                            <i className="fas fa-edit"></i>
-                          </button>
-                        )}
-                        {canDelete && (
-                          <button
-                            onClick={() => handleDeleteClick(fee)}
-                            className="text-red-600 hover:text-red-900 p-2 hover:bg-red-50 rounded-lg transition-colors"
-                            title="Delete Fee"
-                          >
-                            <i className="fas fa-trash"></i>
-                          </button>
+                fees.map(fee => {
+                  const feeDiscount = getDiscountForFee(fee);
+                  return (
+                    <tr key={fee.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap font-medium">{fee.name}</td>
+                      {isUniversity && <td className="px-6 py-4 whitespace-nowrap">{getCourseName(fee.courseId)}</td>}
+                      {isTVET && <td className="px-6 py-4 whitespace-nowrap">{getProgramName(fee.programId)}</td>}
+                      {isTVET && <td className="px-6 py-4 whitespace-nowrap">{fee.module ? `Module ${fee.module}` : 'N/A'}</td>}
+                      {isPrimarySecondary && <td className="px-6 py-4 whitespace-nowrap">{getClassName(fee.classId)}</td>}
+                      <td className="px-6 py-4 whitespace-nowrap">{getModuleDisplay(fee)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap font-medium text-green-600">
+                        {formatCurrency(fee.amount)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {feeDiscount > 0 ? (
+                          <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-medium">
+                            −{formatCurrency(feeDiscount)}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-xs">—</span>
                         )}
                       </td>
-                    )}
-                  </tr>
-                ))
+                      <td className="px-6 py-4 whitespace-nowrap">{fee.academicYear}</td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {fee.dueDate ? new Date(fee.dueDate).toLocaleDateString() : 'N/A'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
+                          {fee.category || 'TUITION'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-2 py-1 rounded-full text-xs ${
+                          fee.allocationType === 'AUTO' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          {fee.allocationType}
+                        </span>
+                      </td>
+                      {(canEdit || canDelete || canGrantDiscount) && (
+                        <td className="px-6 py-4 whitespace-nowrap text-right space-x-2">
+                          {canGrantDiscount && (
+                            <button
+                              onClick={() => openDiscountModal(null, fee)}
+                              className="text-purple-600 hover:text-purple-900 p-2 hover:bg-purple-50 rounded-lg transition-colors"
+                              title="Grant discount on this fee">
+                              <i className="fas fa-percent"></i>
+                            </button>
+                          )}
+                          {canEdit && (
+                            <button onClick={() => handleEdit(fee)}
+                              className="text-indigo-600 hover:text-indigo-900 p-2 hover:bg-indigo-50 rounded-lg transition-colors"
+                              title="Edit Fee">
+                              <i className="fas fa-edit"></i>
+                            </button>
+                          )}
+                          {canDelete && (
+                            <button onClick={() => handleDeleteClick(fee)}
+                              className="text-red-600 hover:text-red-900 p-2 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Delete Fee">
+                              <i className="fas fa-trash"></i>
+                            </button>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -30512,10 +30556,11 @@ const FeesModule = ({
         <div className="flex items-start">
           <i className="fas fa-info-circle text-indigo-500 mt-0.5 mr-2"></i>
           <div>
-            <p className="font-medium text-gray-700">About Fee Allocation:</p>
+            <p className="font-medium text-gray-700">About Fee Allocation & Discounts:</p>
             <ul className="list-disc list-inside mt-1 space-y-1 text-xs">
               <li><span className="font-medium text-green-600">Auto Allocation:</span> Fee is automatically assigned to all eligible students when created.</li>
               <li><span className="font-medium text-yellow-600">Manual Allocation:</span> Fee is not assigned automatically. Use the Fee Allocation module to assign.</li>
+              <li><span className="font-medium text-purple-600">Discounts:</span> Applied before payments. Outstanding = Amount − Discount − Paid. A student who pays the discounted amount will show as cleared.</li>
             </ul>
           </div>
         </div>
