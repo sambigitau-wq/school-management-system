@@ -4297,7 +4297,7 @@ const ClassModule = ({
     </div>
   );
 };
-// ==================== COMPLETE STUDENT MODULE WITH EMPTY SEARCHABLE SELECTS ====================
+// ==================== COMPLETE STUDENT MODULE (PARENT PORTAL OPTIONAL) ====================
 const StudentModule = ({ 
   students, setStudents, 
   classes, routes, courses, faculties, departments, programs,
@@ -4315,16 +4315,10 @@ const StudentModule = ({
   setAttendance,
   user
 }) => {
-  // ==================== SEARCHABLE SELECT COMPONENT - EMPTY BY DEFAULT ====================
+  // ==================== SEARCHABLE SELECT COMPONENT ====================
   const SearchableSelect = ({ 
-    label, 
-    value, 
-    onChange, 
-    options = [], 
-    placeholder = "Search...", 
-    disabled,
-    required,
-    className,
+    label, value, onChange, options = [], placeholder = "Search...", 
+    disabled, required, className,
     noOptionsMessage = "No results found",
     emptyMessage = "No options available"
   }) => {
@@ -4334,12 +4328,8 @@ const StudentModule = ({
     const dropdownRef = useRef(null);
 
     const filteredOptions = useMemo(() => {
-      if (!options || options.length === 0) {
-        return [];
-      }
-      if (!search.trim()) {
-        return options;
-      }
+      if (!options || options.length === 0) return [];
+      if (!search.trim()) return options;
       const searchLower = search.toLowerCase();
       return options.filter(opt => {
         if (!opt) return false;
@@ -4370,9 +4360,7 @@ const StudentModule = ({
     }, []);
 
     useEffect(() => {
-      if (!isOpen) {
-        setSearch('');
-      }
+      if (!isOpen) setSearch('');
     }, [isOpen]);
 
     const handleSelect = (selectedValue) => {
@@ -4383,8 +4371,7 @@ const StudentModule = ({
     };
 
     const handleInputChange = (e) => {
-      const value = e.target.value;
-      setSearch(value);
+      setSearch(e.target.value);
       setIsOpen(true);
       setIsFocused(true);
     };
@@ -4393,9 +4380,7 @@ const StudentModule = ({
       if (disabled) return;
       setIsFocused(true);
       setIsOpen(true);
-      if (selectedOption) {
-        setSearch(selectedOption.label);
-      }
+      if (selectedOption) setSearch(selectedOption.label);
     };
 
     const handleClear = (e) => {
@@ -4407,11 +4392,8 @@ const StudentModule = ({
     };
 
     let displayValue = '';
-    if (isFocused) {
-      displayValue = search;
-    } else if (selectedOption) {
-      displayValue = selectedOption.label;
-    }
+    if (isFocused) displayValue = search;
+    else if (selectedOption) displayValue = selectedOption.label;
 
     return (
       <div className="relative" ref={dropdownRef}>
@@ -4436,9 +4418,7 @@ const StudentModule = ({
                 if (!dropdownRef.current?.contains(document.activeElement)) {
                   setIsOpen(false);
                   setIsFocused(false);
-                  if (!selectedOption) {
-                    setSearch('');
-                  }
+                  if (!selectedOption) setSearch('');
                 }
               }, 200);
             }}
@@ -4469,9 +4449,7 @@ const StudentModule = ({
         {isOpen && !disabled && (
           <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
             {options && options.length === 0 ? (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {emptyMessage}
-              </div>
+              <div className="px-3 py-4 text-center text-gray-500 text-sm">{emptyMessage}</div>
             ) : filteredOptions.length > 0 ? (
               filteredOptions.map((opt) => (
                 <div
@@ -4479,17 +4457,11 @@ const StudentModule = ({
                   className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
                     opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
                   } ${opt.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  onClick={() => {
-                    if (!opt.disabled) {
-                      handleSelect(opt.value);
-                    }
-                  }}
+                  onClick={() => { if (!opt.disabled) handleSelect(opt.value); }}
                   onMouseDown={(e) => e.preventDefault()}
                 >
                   <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && (
-                    <div className="text-xs text-gray-500">{opt.subLabel}</div>
-                  )}
+                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
                 </div>
               ))
             ) : (
@@ -4511,7 +4483,16 @@ const StudentModule = ({
   const isTVET = schoolCategory === 'COLLEGE_TVET';
   const isSecondary = schoolCategory === 'SENIOR_SECONDARY';
   const isPrimary = schoolCategory === 'ECDE_PRIMARY_JSS';
-  
+
+  // ==================== OPTIONAL PARENT PORTAL ====================
+  // Parent linking UI is only shown if the school has explicitly enabled it.
+  // Accepts several common shapes so it works regardless of how your backend
+  // stores the setting.
+  const enableParentPortal =
+    currentSchool?.enableParentPortal === true ||
+    currentSchool?.settings?.enableParentPortal === true ||
+    currentSchool?.features?.parentPortal === true;
+
   // ==================== ROLE PERMISSIONS ====================
   const isStudent = user?.role === 'STUDENT';
   const isParent = user?.role === 'PARENT';
@@ -4572,25 +4553,27 @@ const StudentModule = ({
   });
   
   const [searchParent, setSearchParent] = useState('');
-  const [createNewParent, setCreateNewParent] = useState(false);
+  const [createNewParent, setCreateNewParent] = useState(true);
   const [selectedExistingParent, setSelectedExistingParent] = useState(null);
   const [newParentUser, setNewParentUser] = useState({
-    email: '',
-    password: '',
-    firstName: '',
-    lastName: '',
-    phone: ''
+    email: '', password: '', firstName: '', lastName: '', phone: ''
   });
 
+  // ==================== OPTIONAL PARENT SECTION STATE ====================
+  // Per-student toggle inside the Add/Edit form. Defaults to ON when the
+  // school has the parent portal enabled, otherwise hidden entirely.
+  const [showParentSection, setShowParentSection] = useState(enableParentPortal);
+
+  // Sync toggle when school setting changes
+  useEffect(() => {
+    setShowParentSection(enableParentPortal);
+  }, [enableParentPortal]);
 
   // ==================== LOAD STUDENT'S OWN DATA ====================
   useEffect(() => {
     if (isStudent) {
-      if (!admissionNumber) {
-        setShowAdmissionModal(true);
-      } else {
-        loadMyStudentData();
-      }
+      if (!admissionNumber) setShowAdmissionModal(true);
+      else loadMyStudentData();
     }
   }, [isStudent, admissionNumber]);
 
@@ -4598,7 +4581,6 @@ const StudentModule = ({
     setLoadingMyData(true);
     try {
       console.log('🔍 Loading data for student with admission:', admissionNumber);
-      
       const studentRes = await api.get(`/students/by-admission/${admissionNumber}`);
       console.log('📥 Student response:', studentRes.data);
       
@@ -4609,23 +4591,17 @@ const StudentModule = ({
         try {
           const resultsRes = await api.get(`/results?studentId=${myStudent.id}`);
           setStudentResults(resultsRes.data.results || []);
-        } catch (error) {
-          console.error('Error fetching results:', error);
-        }
+        } catch (error) { console.error('Error fetching results:', error); }
         
         try {
           const attendanceRes = await api.get(`/attendance?studentId=${myStudent.id}`);
           setStudentAttendance(attendanceRes.data.attendance || []);
-        } catch (error) {
-          console.error('Error fetching attendance:', error);
-        }
+        } catch (error) { console.error('Error fetching attendance:', error); }
         
         try {
           const paymentsRes = await api.get(`/payments?studentId=${myStudent.id}`);
           setStudentPayments(paymentsRes.data.payments || []);
-        } catch (error) {
-          console.error('Error fetching payments:', error);
-        }
+        } catch (error) { console.error('Error fetching payments:', error); }
       }
     } catch (error) {
       console.error('❌ Error loading student data:', error);
@@ -4638,7 +4614,7 @@ const StudentModule = ({
     }
   };
 
-  // ==================== GRADE CALCULATION FUNCTIONS ====================
+  // ==================== GRADE CALCULATION ====================
   const getUniversityGrade = (marks) => {
     if (!marks && marks !== 0) return { grade: '-', points: 0 };
     if (marks >= 70) return { grade: 'A', points: 5.0 };
@@ -4684,19 +4660,12 @@ const StudentModule = ({
 
   const getGrade = (marks) => {
     if (marks === null || marks === undefined || marks === '') return { grade: '-', points: 0 };
-    
     const numMarks = Number(marks);
     if (isNaN(numMarks)) return { grade: '-', points: 0 };
-    
-    if (isUniversity) {
-      return getUniversityGrade(numMarks);
-    } else if (isTVET) {
-      return getTVETGrade(numMarks);
-    } else if (isPrimary) {
-      return getPrimaryGrade(numMarks);
-    } else {
-      return getSecondaryGrade(numMarks);
-    }
+    if (isUniversity) return getUniversityGrade(numMarks);
+    if (isTVET) return getTVETGrade(numMarks);
+    if (isPrimary) return getPrimaryGrade(numMarks);
+    return getSecondaryGrade(numMarks);
   };
 
   const getGradeColor = (grade) => {
@@ -4714,9 +4683,9 @@ const StudentModule = ({
     return 'bg-gray-100 text-gray-800';
   };
 
-  // ==================== PARENT SEARCH FUNCTIONS ====================
+  // ==================== PARENT SEARCH (only used when portal enabled) ====================
   const parentUsers = React.useMemo(() => {
-    if (!parents) return [];
+    if (!enableParentPortal || !parents) return [];
     const uniqueParents = new Map();
     parents.forEach(p => {
       if (p.User && !uniqueParents.has(p.userId)) {
@@ -4731,43 +4700,45 @@ const StudentModule = ({
       }
     });
     return Array.from(uniqueParents.values());
-  }, [parents]);
+  }, [parents, enableParentPortal]);
 
   const filteredParentUsers = React.useMemo(() => {
     if (!parentUsers) return [];
     if (!searchParent.trim()) return parentUsers;
-    const searchLower = searchParent.toLowerCase();
+    const s = searchParent.toLowerCase();
     return parentUsers.filter(p => 
-      (p.firstName?.toLowerCase() || '').includes(searchLower) ||
-      (p.lastName?.toLowerCase() || '').includes(searchLower) ||
-      (p.email?.toLowerCase() || '').includes(searchLower) ||
-      `${p.firstName} ${p.lastName}`.toLowerCase().includes(searchLower)
+      (p.firstName?.toLowerCase() || '').includes(s) ||
+      (p.lastName?.toLowerCase() || '').includes(s) ||
+      (p.email?.toLowerCase() || '').includes(s) ||
+      `${p.firstName} ${p.lastName}`.toLowerCase().includes(s)
     );
   }, [parentUsers, searchParent]);
 
-  // ==================== HELPER FUNCTIONS ====================
+  // ==================== HELPER ====================
   const prepareFormData = (data) => {
     const uuidFields = ['classId', 'courseId', 'programId', 'facultyId', 'departmentId', 'transportRouteId'];
     const prepared = { ...data };
     uuidFields.forEach(field => {
       if (prepared[field] === '') prepared[field] = null;
     });
+    // Strip parent payload when portal disabled
+    if (!enableParentPortal) {
+      delete prepared.parent;
+      delete prepared.parentId;
+    }
     return prepared;
   };
 
   // ==================== FILTERED STUDENTS ====================
   const filteredStudents = React.useMemo(() => {
-    if (isStudent && myStudentRecord) {
-      return [myStudentRecord];
-    }
+    if (isStudent && myStudentRecord) return [myStudentRecord];
     
     if (isParent) {
       const myChildrenIds = parents?.filter(p => p.userId === user?.id).map(p => p.studentId) || [];
-      const childrenStudents = students.filter(s => myChildrenIds.includes(s.id));
-      return childrenStudents;
+      return students.filter(s => myChildrenIds.includes(s.id));
     }
     
-    let filtered = students.filter(student => {
+    return students.filter(student => {
       if (student.schoolId !== currentSchool?.id) return false;
       
       const matchesSearch = searchTerm === '' || 
@@ -4795,8 +4766,6 @@ const StudentModule = ({
 
       return matchesSearch && matchesClass && matchesStatus;
     });
-    
-    return filtered;
   }, [students, searchTerm, selectedClass, selectedCourse, selectedProgram, selectedYear, selectedModule, selectedStatus, isUniversity, isTVET, isStudent, myStudentRecord, isParent, parents, user, currentSchool]);
 
   // ==================== LOAD STUDENT DETAILS ====================
@@ -4812,43 +4781,31 @@ const StudentModule = ({
       try { 
         const feeRes = await api.get(`/students/${student.id}/fee-statement`); 
         setStudentFeeSummary(feeRes.data.statement.summary); 
-      } catch (error) { 
-        console.error('Error fetching fee statement:', error); 
-        setStudentFeeSummary(null); 
-      }
+      } catch (e) { console.error(e); setStudentFeeSummary(null); }
       
       try { 
         const paymentsRes = await api.get(`/payments?studentId=${student.id}`); 
         setStudentPayments(paymentsRes.data.payments || []); 
-      } catch (error) { 
-        console.error('Error fetching payments:', error); 
-        setStudentPayments([]); 
-      }
+      } catch (e) { console.error(e); setStudentPayments([]); }
       
-      try { 
-        const parentsRes = await api.get(`/parents?studentId=${student.id}`); 
-        setStudentParents(parentsRes.data.parents || []); 
-      } catch (error) { 
-        console.error('Error fetching parents:', error); 
-        setStudentParents([]); 
+      if (enableParentPortal) {
+        try { 
+          const parentsRes = await api.get(`/parents?studentId=${student.id}`); 
+          setStudentParents(parentsRes.data.parents || []); 
+        } catch (e) { console.error(e); setStudentParents([]); }
+      } else {
+        setStudentParents([]);
       }
       
       try { 
         const resultsRes = await api.get(`/results?studentId=${student.id}`); 
-        const fetchedResults = resultsRes.data.results || []; 
-        setStudentResults(fetchedResults); 
-      } catch (error) { 
-        console.error('Error fetching results:', error); 
-        setStudentResults([]); 
-      }
+        setStudentResults(resultsRes.data.results || []); 
+      } catch (e) { console.error(e); setStudentResults([]); }
       
       try { 
         const attendanceRes = await api.get(`/attendance?studentId=${student.id}&limit=100`); 
         setStudentAttendance(attendanceRes.data.attendance || []); 
-      } catch (error) { 
-        console.error('Error fetching attendance:', error); 
-        setStudentAttendance([]); 
-      }
+      } catch (e) { console.error(e); setStudentAttendance([]); }
       
       setShowDetailsModal(true);
     } catch (error) { 
@@ -4859,12 +4816,9 @@ const StudentModule = ({
     }
   };
 
-  // ==================== EDIT HANDLERS ====================
+  // ==================== EDIT HANDLER ====================
   const handleEditClick = (student) => {
-    if (!canEdit) { 
-      alert('You do not have permission to edit students'); 
-      return; 
-    }
+    if (!canEdit) { alert('You do not have permission to edit students'); return; }
     setSelectedStudent(student);
     
     const editFormData = { 
@@ -4882,28 +4836,31 @@ const StudentModule = ({
     };
     
     setForm(editFormData);
+    setShowParentSection(enableParentPortal && !!student.parentId);
     setShowEditModal(true);
   };
 
   const handleUpdateSubmit = async (e) => {
     e.preventDefault();
-    if (!canEdit) { 
-      alert('You do not have permission to update students'); 
-      return; 
-    }
+    if (!canEdit) { alert('You do not have permission to update students'); return; }
     setLoading(true);
     try {
       const updateData = { ...form };
       
       if (isTVET) {
         if (updateData.programId) {
-          updateData.programId = updateData.programId;
           delete updateData.courseId;
         } else {
           alert('Please select a program');
           setLoading(false);
           return;
         }
+      }
+      
+      // Strip parent payload if portal disabled or toggle off
+      if (!enableParentPortal || !showParentSection) {
+        delete updateData.parent;
+        delete updateData.parentId;
       }
       
       await handleUpdate('/students', selectedStudent.id, prepareFormData(updateData), setStudents, students);
@@ -4920,10 +4877,7 @@ const StudentModule = ({
 
   // ==================== DELETE HANDLERS ====================
   const handleDeleteClick = (student) => {
-    if (!canDelete) { 
-      alert('You do not have permission to delete students'); 
-      return; 
-    }
+    if (!canDelete) { alert('You do not have permission to delete students'); return; }
     setSelectedStudent(student);
     setShowDeleteConfirm(true);
   };
@@ -4946,10 +4900,8 @@ const StudentModule = ({
 
   // ==================== ADD PARENT HANDLERS ====================
   const handleAddParentClick = (student) => {
-    if (!canEdit) { 
-      alert('You do not have permission to add parents'); 
-      return; 
-    }
+    if (!enableParentPortal) { alert('Parent portal is disabled for this school'); return; }
+    if (!canEdit) { alert('You do not have permission to add parents'); return; }
     setSelectedStudentForParent(student);
     setParentForm({ ...parentForm, studentId: student.id });
     setCreateNewParent(true);
@@ -4960,19 +4912,17 @@ const StudentModule = ({
   };
 
   const handleAddParent = async () => {
+    if (!enableParentPortal) return;
     if (!canEdit) return;
     setLoading(true);
     try {
       let userId = parentForm.userId;
-      if (!createNewParent && selectedExistingParent) { 
-        userId = selectedExistingParent.userId; 
-      }
+      if (!createNewParent && selectedExistingParent) userId = selectedExistingParent.userId;
       
       if (createNewParent) {
         if (!newParentUser.firstName || !newParentUser.lastName || !newParentUser.email || !newParentUser.password) { 
           alert('Please fill in all required fields for the parent account'); 
-          setLoading(false); 
-          return; 
+          setLoading(false); return; 
         }
         const userRes = await api.post('/users', { 
           email: newParentUser.email, 
@@ -4986,11 +4936,7 @@ const StudentModule = ({
         userId = userRes.data.user.id;
       }
       
-      if (!userId) { 
-        alert('Please select a parent or create a new one'); 
-        setLoading(false); 
-        return; 
-      }
+      if (!userId) { alert('Please select a parent or create a new one'); setLoading(false); return; }
       
       await api.post('/parents', { 
         userId, 
@@ -5026,91 +4972,67 @@ const StudentModule = ({
     }
   };
 
-  // ==================== UNIQUE VALUES FOR FILTERS ====================
+  // ==================== UNIQUE VALUES ====================
   const uniqueClasses = [...new Set(students.map(s => s.classId).filter(Boolean))];
   const uniqueCourses = [...new Set(students.map(s => s.courseId).filter(Boolean))];
   const uniquePrograms = [...new Set(students.map(s => s.programId).filter(Boolean))];
   const uniqueYears = [...new Set(students.map(s => s.currentYear).filter(Boolean))];
   const uniqueModules = [...new Set(students.map(s => s.currentModule).filter(Boolean))];
 
-  // ==================== CREATE OPTIONS FOR SEARCHABLE SELECTS - EMPTY BY DEFAULT ====================
+  // ==================== OPTIONS FOR SEARCHABLE SELECTS ====================
   const classOptions = useMemo(() => {
-    if (!classes || classes.length === 0) return [];
+    if (!classes?.length) return [];
     return classes.map(c => ({
-      value: c.id,
-      label: c.name,
+      value: c.id, label: c.name,
       subLabel: `Capacity: ${c.capacity || 'N/A'} • Streams: ${c.streams?.length || 0}`
     }));
   }, [classes]);
 
   const courseOptions = useMemo(() => {
-    if (!courses || courses.length === 0) return [];
-    return courses.map(c => ({
-      value: c.id,
-      label: c.name,
-      subLabel: c.code || ''
-    }));
+    if (!courses?.length) return [];
+    return courses.map(c => ({ value: c.id, label: c.name, subLabel: c.code || '' }));
   }, [courses]);
 
   const programOptions = useMemo(() => {
-    if (!programs || programs.length === 0) return [];
-    return programs.map(p => ({
-      value: p.id,
-      label: p.name,
-      subLabel: p.code || `Level: ${p.level || 'N/A'}`
-    }));
+    if (!programs?.length) return [];
+    return programs.map(p => ({ value: p.id, label: p.name, subLabel: p.code || `Level: ${p.level || 'N/A'}` }));
   }, [programs]);
 
   const facultyOptions = useMemo(() => {
-    if (!faculties || faculties.length === 0) return [];
-    return faculties.map(f => ({
-      value: f.id,
-      label: f.name,
-      subLabel: `Dean: ${f.dean || 'N/A'}`
-    }));
+    if (!faculties?.length) return [];
+    return faculties.map(f => ({ value: f.id, label: f.name, subLabel: `Dean: ${f.dean || 'N/A'}` }));
   }, [faculties]);
 
   const departmentOptions = useMemo(() => {
-    if (!departments || departments.length === 0) return [];
-    return departments.map(d => ({
-      value: d.id,
-      label: d.name,
-      subLabel: d.faculty?.name || 'No Faculty'
-    }));
+    if (!departments?.length) return [];
+    return departments.map(d => ({ value: d.id, label: d.name, subLabel: d.faculty?.name || 'No Faculty' }));
   }, [departments]);
 
   const routeOptions = useMemo(() => {
-    if (!routes || routes.length === 0) return [];
-    return routes.map(r => ({
-      value: r.id,
-      label: r.name,
-      subLabel: `Fee: ${r.fee || 0}`
-    }));
+    if (!routes?.length) return [];
+    return routes.map(r => ({ value: r.id, label: r.name, subLabel: `Fee: ${r.fee || 0}` }));
   }, [routes]);
 
   const parentUserOptions = useMemo(() => {
-    if (!parentUsers || parentUsers.length === 0) return [];
+    if (!enableParentPortal || !parentUsers?.length) return [];
     return parentUsers.map(p => ({
-      value: p.userId,
-      label: `${p.firstName} ${p.lastName}`,
+      value: p.userId, label: `${p.firstName} ${p.lastName}`,
       subLabel: `${p.email} • ${p.existingRelationships?.join(', ') || 'No existing relationships'}`
     }));
-  }, [parentUsers]);
+  }, [parentUsers, enableParentPortal]);
 
   const yearOptions = useMemo(() => {
-    if (!uniqueYears || uniqueYears.length === 0) return [];
+    if (!uniqueYears?.length) return [];
     return uniqueYears.sort().map(y => ({
-      value: y.toString(),
-      label: `Year ${y}`,
+      value: y.toString(), label: `Year ${y}`,
       subLabel: `${students.filter(s => s.currentYear === y).length} students`
     }));
   }, [uniqueYears, students]);
 
   const moduleOptions = useMemo(() => {
-    if (!uniqueModules || uniqueModules.length === 0) return [];
+    if (!uniqueModules?.length) return [];
     return uniqueModules.sort().map(m => ({
-      value: m,
-      label: m,
+      value: m, label: m,
       subLabel: `${students.filter(s => s.currentModule === m).length} students`
     }));
   }, [uniqueModules, students]);
@@ -5128,11 +5050,7 @@ const StudentModule = ({
                   <i className="fas fa-times"></i>
                 </button>
               </div>
-              
-              <p className="text-gray-600 mb-6">
-                Please enter your admission number to access your student dashboard.
-              </p>
-              
+              <p className="text-gray-600 mb-6">Please enter your admission number to access your student dashboard.</p>
               <div className="space-y-4">
                 <InputField
                   label="Admission Number"
@@ -5141,7 +5059,6 @@ const StudentModule = ({
                   placeholder="e.g., BCM-05"
                   required
                 />
-                
                 <button
                   onClick={loadMyStudentData}
                   disabled={loadingMyData || !admissionNumber}
@@ -5156,7 +5073,6 @@ const StudentModule = ({
         
         <div className="space-y-6">
           {loadingMyData && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
-          
           <h2 className="text-2xl font-bold">My Student Profile</h2>
           
           {myStudentRecord ? (
@@ -5192,13 +5108,11 @@ const StudentModule = ({
                     }}
                     className="text-white text-sm hover:text-indigo-200 transition-colors"
                   >
-                    <i className="fas fa-sign-out-alt mr-1"></i>
-                    Switch Account
+                    <i className="fas fa-sign-out-alt mr-1"></i>Switch Account
                   </button>
                 </div>
               </div>
 
-              {/* Quick stats */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-6">
                 <div className="bg-blue-50 p-4 rounded-lg">
                   <i className="fas fa-file-alt text-2xl text-blue-600 mb-2"></i>
@@ -5222,7 +5136,6 @@ const StudentModule = ({
                 </div>
               </div>
 
-              {/* Contact Information */}
               <div className="px-6 pb-6">
                 <h3 className="font-semibold text-lg mb-3">Contact Information</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-50 p-4 rounded-lg">
@@ -5241,7 +5154,6 @@ const StudentModule = ({
                 </div>
               </div>
 
-              {/* Recent results preview */}
               {studentResults.length > 0 && (
                 <div className="px-6 pb-6">
                   <h3 className="font-semibold text-lg mb-3">Recent Results</h3>
@@ -5266,7 +5178,6 @@ const StudentModule = ({
                             const subject = subjects?.find(s => s.id === result.subjectId);
                             itemName = subject?.name || 'Unknown Subject';
                           }
-                          
                           return (
                             <tr key={result.id}>
                               <td className="px-4 py-2">{exam?.name || 'Unknown Exam'}</td>
@@ -5291,35 +5202,18 @@ const StudentModule = ({
                 </div>
               )}
 
-              {/* Quick action buttons */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-6 pt-0">
-                <button
-                  onClick={() => window.location.href = '/results'}
-                  className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors"
-                >
-                  <i className="fas fa-file-alt mr-2"></i>
-                  View All Results
+                <button onClick={() => window.location.href = '/results'} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors">
+                  <i className="fas fa-file-alt mr-2"></i>View All Results
                 </button>
-                <button
-                  onClick={() => window.location.href = '/attendance'}
-                  className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
-                >
-                  <i className="fas fa-calendar-check mr-2"></i>
-                  View Attendance
+                <button onClick={() => window.location.href = '/attendance'} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">
+                  <i className="fas fa-calendar-check mr-2"></i>View Attendance
                 </button>
-                <button
-                  onClick={() => window.location.href = '/fees'}
-                  className="bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors"
-                >
-                  <i className="fas fa-money-bill-wave mr-2"></i>
-                  Fee Statement
+                <button onClick={() => window.location.href = '/fees'} className="bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors">
+                  <i className="fas fa-money-bill-wave mr-2"></i>Fee Statement
                 </button>
-                <button
-                  onClick={() => window.location.href = '/exam-cards'}
-                  className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors"
-                >
-                  <i className="fas fa-id-card mr-2"></i>
-                  Exam Card
+                <button onClick={() => window.location.href = '/exam-cards'} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors">
+                  <i className="fas fa-id-card mr-2"></i>Exam Card
                 </button>
               </div>
             </div>
@@ -5327,10 +5221,7 @@ const StudentModule = ({
             <div className="bg-white p-12 rounded-xl shadow-sm text-center">
               <i className="fas fa-user-graduate text-6xl text-gray-300 mb-4"></i>
               <p className="text-gray-500 text-lg">No student record found for your account.</p>
-              <button
-                onClick={() => setShowAdmissionModal(true)}
-                className="mt-4 bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700"
-              >
+              <button onClick={() => setShowAdmissionModal(true)} className="mt-4 bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700">
                 Enter Admission Number
               </button>
             </div>
@@ -5345,35 +5236,26 @@ const StudentModule = ({
     <div className="space-y-6">
       {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
       
-      {/* Header with action buttons */}
+      {/* Header */}
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">Student Management</h2>
         <div className="flex space-x-2">
-          <button 
-            onClick={() => setShowFilters(!showFilters)} 
-            className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 flex items-center"
-          >
+          <button onClick={() => setShowFilters(!showFilters)} className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 flex items-center">
             <i className="fas fa-filter mr-2"></i>Filters
           </button>
-          <button 
-            onClick={() => setViewMode(viewMode === 'grid' ? 'table' : 'grid')} 
-            className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 flex items-center"
-          >
+          <button onClick={() => setViewMode(viewMode === 'grid' ? 'table' : 'grid')} className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 flex items-center">
             <i className={`fas fa-${viewMode === 'grid' ? 'table' : 'th-large'} mr-2`}></i>
             {viewMode === 'grid' ? 'Table View' : 'Grid View'}
           </button>
           {canAdd && (
-            <button 
-              onClick={() => setShowAddModal(true)} 
-              className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center"
-            >
+            <button onClick={() => setShowAddModal(true)} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center">
               <i className="fas fa-plus mr-2"></i>Add Student
             </button>
           )}
         </div>
       </div>
 
-      {/* Enhanced Filters with Searchable Selects - EMPTY BY DEFAULT */}
+      {/* Filters */}
       {showFilters && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">🔍 Filter Students</h3>
@@ -5393,55 +5275,20 @@ const StudentModule = ({
             
             {isUniversity && (
               <>
-                <SearchableSelect 
-                  label="Course" 
-                  value={selectedCourse} 
-                  onChange={(e) => setSelectedCourse(e.target.value)} 
-                  options={courseOptions}
-                  placeholder="Search courses..."
-                  emptyMessage="No courses available"
-                />
-                <SearchableSelect 
-                  label="Year" 
-                  value={selectedYear} 
-                  onChange={(e) => setSelectedYear(e.target.value)} 
-                  options={yearOptions}
-                  placeholder="All Years"
-                  emptyMessage="No years available"
-                />
+                <SearchableSelect label="Course" value={selectedCourse} onChange={(e) => setSelectedCourse(e.target.value)} options={courseOptions} placeholder="Search courses..." emptyMessage="No courses available" />
+                <SearchableSelect label="Year" value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} options={yearOptions} placeholder="All Years" emptyMessage="No years available" />
               </>
             )}
             
             {isTVET && (
               <>
-                <SearchableSelect 
-                  label="Program" 
-                  value={selectedProgram} 
-                  onChange={(e) => setSelectedProgram(e.target.value)} 
-                  options={programOptions}
-                  placeholder="Search programs..."
-                  emptyMessage="No programs available"
-                />
-                <SearchableSelect 
-                  label="Module" 
-                  value={selectedModule} 
-                  onChange={(e) => setSelectedModule(e.target.value)} 
-                  options={moduleOptions}
-                  placeholder="All Modules"
-                  emptyMessage="No modules available"
-                />
+                <SearchableSelect label="Program" value={selectedProgram} onChange={(e) => setSelectedProgram(e.target.value)} options={programOptions} placeholder="Search programs..." emptyMessage="No programs available" />
+                <SearchableSelect label="Module" value={selectedModule} onChange={(e) => setSelectedModule(e.target.value)} options={moduleOptions} placeholder="All Modules" emptyMessage="No modules available" />
               </>
             )}
             
             {!isUniversity && !isTVET && (
-              <SearchableSelect 
-                label="Class" 
-                value={selectedClass} 
-                onChange={(e) => setSelectedClass(e.target.value)} 
-                options={classOptions}
-                placeholder="Search classes..."
-                emptyMessage="No classes available"
-              />
+              <SearchableSelect label="Class" value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)} options={classOptions} placeholder="Search classes..." emptyMessage="No classes available" />
             )}
             
             <SelectField 
@@ -5459,13 +5306,8 @@ const StudentModule = ({
           <div className="mt-4 flex justify-end space-x-2">
             <button 
               onClick={() => { 
-                setSearchTerm(''); 
-                setSelectedClass(''); 
-                setSelectedCourse(''); 
-                setSelectedProgram(''); 
-                setSelectedYear(''); 
-                setSelectedModule(''); 
-                setSelectedStatus('all'); 
+                setSearchTerm(''); setSelectedClass(''); setSelectedCourse(''); 
+                setSelectedProgram(''); setSelectedYear(''); setSelectedModule(''); setSelectedStatus('all'); 
               }} 
               className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600"
             >
@@ -5478,7 +5320,7 @@ const StudentModule = ({
         </div>
       )}
 
-      {/* Add Student Modal - Updated with Searchable Selects - EMPTY BY DEFAULT */}
+      {/* ==================== ADD STUDENT MODAL ==================== */}
       {showAddModal && canAdd && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-white p-6 rounded-xl shadow-sm max-w-4xl w-full max-h-[90vh] overflow-y-auto">
@@ -5491,7 +5333,12 @@ const StudentModule = ({
             
             <form onSubmit={(e) => { 
               e.preventDefault(); 
-              onSubmit(e, prepareFormData(form)); 
+              const payload = prepareFormData(form);
+              if (!enableParentPortal || !showParentSection) {
+                delete payload.parent;
+                delete payload.parentId;
+              }
+              onSubmit(e, payload); 
               setShowAddModal(false); 
             }} className="space-y-4">
               
@@ -5499,75 +5346,24 @@ const StudentModule = ({
               <div className="bg-gray-50 p-4 rounded-lg">
                 <h4 className="font-medium text-indigo-600 mb-3">Personal Details</h4>
                 <div className="grid grid-cols-2 gap-4">
-                  <InputField 
-                    label="First Name *" 
-                    value={form.firstName || ''} 
-                    onChange={(e) => setForm({...form, firstName: e.target.value})} 
-                    required 
-                  />
-                  <InputField 
-                    label="Middle Name" 
-                    value={form.middleName || ''} 
-                    onChange={(e) => setForm({...form, middleName: e.target.value})} 
-                  />
-                  <InputField 
-                    label="Last Name *" 
-                    value={form.lastName || ''} 
-                    onChange={(e) => setForm({...form, lastName: e.target.value})} 
-                    required 
-                  />
-                  <InputField 
-                    label="Date of Birth *" 
-                    type="date" 
-                    value={form.dateOfBirth || ''} 
-                    onChange={(e) => setForm({...form, dateOfBirth: e.target.value})} 
-                    required 
-                  />
-                  <SelectField 
-                    label="Gender *" 
-                    value={form.gender || 'MALE'} 
-                    onChange={(e) => setForm({...form, gender: e.target.value})} 
-                    options={['MALE', 'FEMALE']} 
-                  />
-                  <InputField 
-                    label="Nationality" 
-                    value={form.nationality || 'Kenyan'} 
-                    onChange={(e) => setForm({...form, nationality: e.target.value})} 
-                  />
-                  <InputField 
-                    label="Religion" 
-                    value={form.religion || ''} 
-                    onChange={(e) => setForm({...form, religion: e.target.value})} 
-                  />
+                  <InputField label="First Name *" value={form.firstName || ''} onChange={(e) => setForm({...form, firstName: e.target.value})} required />
+                  <InputField label="Middle Name" value={form.middleName || ''} onChange={(e) => setForm({...form, middleName: e.target.value})} />
+                  <InputField label="Last Name *" value={form.lastName || ''} onChange={(e) => setForm({...form, lastName: e.target.value})} required />
+                  <InputField label="Date of Birth *" type="date" value={form.dateOfBirth || ''} onChange={(e) => setForm({...form, dateOfBirth: e.target.value})} required />
+                  <SelectField label="Gender *" value={form.gender || 'MALE'} onChange={(e) => setForm({...form, gender: e.target.value})} options={['MALE', 'FEMALE']} />
+                  <InputField label="Nationality" value={form.nationality || 'Kenyan'} onChange={(e) => setForm({...form, nationality: e.target.value})} />
+                  <InputField label="Religion" value={form.religion || ''} onChange={(e) => setForm({...form, religion: e.target.value})} />
                 </div>
               </div>
 
-              {/* Contact Information */}
+              {/* Contact Info */}
               <div className="bg-gray-50 p-4 rounded-lg">
                 <h4 className="font-medium text-indigo-600 mb-3">Contact Information</h4>
                 <div className="grid grid-cols-2 gap-4">
-                  <InputField 
-                    label="Email Address" 
-                    type="email" 
-                    value={form.email || ''} 
-                    onChange={(e) => setForm({...form, email: e.target.value})} 
-                    placeholder="student@example.com"
-                  />
-                  <InputField 
-                    label="Phone Number" 
-                    value={form.phone || ''} 
-                    onChange={(e) => setForm({...form, phone: e.target.value})} 
-                    placeholder="e.g., 0712345678"
-                  />
+                  <InputField label="Email Address" type="email" value={form.email || ''} onChange={(e) => setForm({...form, email: e.target.value})} placeholder="student@example.com" />
+                  <InputField label="Phone Number" value={form.phone || ''} onChange={(e) => setForm({...form, phone: e.target.value})} placeholder="e.g., 0712345678" />
                   <div className="col-span-2">
-                    <InputField 
-                      label="Physical Address" 
-                      value={form.address || ''} 
-                      onChange={(e) => setForm({...form, address: e.target.value})} 
-                      placeholder="e.g., 123 Main Street, Nairobi"
-                      textarea
-                      rows="2"
-                    />
+                    <InputField label="Physical Address" value={form.address || ''} onChange={(e) => setForm({...form, address: e.target.value})} placeholder="e.g., 123 Main Street, Nairobi" textarea rows="2" />
                   </div>
                 </div>
               </div>
@@ -5576,223 +5372,83 @@ const StudentModule = ({
               <div className="bg-gray-50 p-4 rounded-lg">
                 <h4 className="font-medium text-indigo-600 mb-3">Identification</h4>
                 <div className="grid grid-cols-2 gap-4">
-                  <InputField 
-                    label="Admission Number" 
-                    value={form.admissionNumber || ''} 
-                    onChange={(e) => setForm({...form, admissionNumber: e.target.value})} 
-                    placeholder="Leave blank to auto-generate" 
-                  />
-                  <SelectField 
-                    label="ID Type" 
-                    value={form.idType || 'NATIONAL_ID'} 
-                    onChange={(e) => setForm({...form, idType: e.target.value})} 
-                    options={['NATIONAL_ID', 'BIRTH_CERTIFICATE', 'PASSPORT', 'SCHOOL_ID', 'OTHER']} 
-                  />
-                  <InputField 
-                    label="ID/Birth Certificate Number" 
-                    value={form.idNumber || ''} 
-                    onChange={(e) => setForm({...form, idNumber: e.target.value})} 
-                  />
+                  <InputField label="Admission Number" value={form.admissionNumber || ''} onChange={(e) => setForm({...form, admissionNumber: e.target.value})} placeholder="Leave blank to auto-generate" />
+                  <SelectField label="ID Type" value={form.idType || 'NATIONAL_ID'} onChange={(e) => setForm({...form, idType: e.target.value})} options={['NATIONAL_ID', 'BIRTH_CERTIFICATE', 'PASSPORT', 'SCHOOL_ID', 'OTHER']} />
+                  <InputField label="ID/Birth Certificate Number" value={form.idNumber || ''} onChange={(e) => setForm({...form, idNumber: e.target.value})} />
                 </div>
               </div>
 
-              {/* Academic Information - With Searchable Selects - EMPTY BY DEFAULT */}
+              {/* Academic Info */}
               <div className="bg-gray-50 p-4 rounded-lg">
                 <h4 className="font-medium text-indigo-600 mb-3">Academic Information</h4>
                 <div className="grid grid-cols-2 gap-4">
                   
                   {isUniversity && (
                     <>
-                      <SearchableSelect 
-                        label="Faculty" 
-                        value={form.facultyId || ''} 
-                        onChange={(e) => setForm({...form, facultyId: e.target.value, departmentId: '', courseId: ''})} 
-                        options={facultyOptions}
-                        placeholder="Search faculty..."
-                        emptyMessage="No faculties available"
-                        required 
-                      />
-                      <SearchableSelect 
-                        label="Department" 
-                        value={form.departmentId || ''} 
-                        onChange={(e) => setForm({...form, departmentId: e.target.value, courseId: ''})} 
-                        options={departmentOptions}
-                        placeholder="Search department..."
-                        emptyMessage="No departments available"
-                        required 
-                        disabled={!form.facultyId}
-                      />
-                      <SearchableSelect 
-                        label="Course" 
-                        value={form.courseId || ''} 
-                        onChange={(e) => setForm({...form, courseId: e.target.value})} 
-                        options={courseOptions}
-                        placeholder="Search course..."
-                        emptyMessage="No courses available"
-                        required 
-                        disabled={!form.departmentId}
-                      />
-                      <InputField 
-                        label="Year of Study" 
-                        type="number" 
-                        value={form.currentYear || 1} 
-                        onChange={(e) => setForm({...form, currentYear: parseInt(e.target.value)})} 
-                        min="1" 
-                        max="6" 
-                        required 
-                      />
-                      <InputField 
-                        label="Semester" 
-                        type="number" 
-                        value={form.currentSemester || 1} 
-                        onChange={(e) => setForm({...form, currentSemester: parseInt(e.target.value)})} 
-                        min="1" 
-                        max="3" 
-                      />
+                      <SearchableSelect label="Faculty" value={form.facultyId || ''} onChange={(e) => setForm({...form, facultyId: e.target.value, departmentId: '', courseId: ''})} options={facultyOptions} placeholder="Search faculty..." emptyMessage="No faculties available" required />
+                      <SearchableSelect label="Department" value={form.departmentId || ''} onChange={(e) => setForm({...form, departmentId: e.target.value, courseId: ''})} options={departmentOptions} placeholder="Search department..." emptyMessage="No departments available" required disabled={!form.facultyId} />
+                      <SearchableSelect label="Course" value={form.courseId || ''} onChange={(e) => setForm({...form, courseId: e.target.value})} options={courseOptions} placeholder="Search course..." emptyMessage="No courses available" required disabled={!form.departmentId} />
+                      <InputField label="Year of Study" type="number" value={form.currentYear || 1} onChange={(e) => setForm({...form, currentYear: parseInt(e.target.value)})} min="1" max="6" required />
+                      <InputField label="Semester" type="number" value={form.currentSemester || 1} onChange={(e) => setForm({...form, currentSemester: parseInt(e.target.value)})} min="1" max="3" />
                     </>
                   )}
                   
                   {isTVET && (
                     <>
-                      <SearchableSelect 
-                        label="Department" 
-                        value={form.departmentId || ''} 
-                        onChange={(e) => setForm({...form, departmentId: e.target.value, programId: ''})} 
-                        options={departmentOptions}
-                        placeholder="Search department..."
-                        emptyMessage="No departments available"
-                        required 
-                      />
-                      
-                      <SearchableSelect 
-                        label="Program *" 
-                        value={form.programId || ''} 
-                        onChange={(e) => {
-                          const selectedId = e.target.value;
-                          console.log('📝 Selected program:', programs?.find(p => p.id === selectedId));
-                          setForm({
-                            ...form, 
-                            programId: selectedId,
-                          });
-                        }} 
-                        options={programOptions}
-                        placeholder="Search program by name or code..."
-                        emptyMessage="No programs available"
-                        required 
-                        disabled={!form.departmentId}
-                      />
-                      
+                      <SearchableSelect label="Department" value={form.departmentId || ''} onChange={(e) => setForm({...form, departmentId: e.target.value, programId: ''})} options={departmentOptions} placeholder="Search department..." emptyMessage="No departments available" required />
+                      <SearchableSelect label="Program *" value={form.programId || ''} onChange={(e) => setForm({...form, programId: e.target.value})} options={programOptions} placeholder="Search program by name or code..." emptyMessage="No programs available" required disabled={!form.departmentId} />
                       {(!programs || programs.length === 0) && (
                         <div className="col-span-2 p-3 bg-yellow-50 text-yellow-800 rounded-lg">
                           <i className="fas fa-exclamation-triangle mr-2"></i>
                           No programs found. Please create a program first in the Programs section.
                         </div>
                       )}
-                      
-                      <SearchableSelect 
-                        label="Module Level *" 
-                        value={form.currentModule || ''} 
-                        onChange={(e) => setForm({...form, currentModule: e.target.value})} 
-                        options={[
-                          { value: 'Module 1', label: 'Module 1', subLabel: 'Level 1' },
-                          { value: 'Module 2', label: 'Module 2', subLabel: 'Level 2' },
-                          { value: 'Module 3', label: 'Module 3', subLabel: 'Level 3' },
-                          { value: 'Module 4', label: 'Module 4', subLabel: 'Level 4' }
-                        ]}
-                        placeholder="Select module..."
-                        emptyMessage="No modules available"
-                        required 
-                        disabled={!form.programId}
-                      />
+                      <SearchableSelect label="Module Level *" value={form.currentModule || ''} onChange={(e) => setForm({...form, currentModule: e.target.value})} options={[
+                        { value: 'Module 1', label: 'Module 1', subLabel: 'Level 1' },
+                        { value: 'Module 2', label: 'Module 2', subLabel: 'Level 2' },
+                        { value: 'Module 3', label: 'Module 3', subLabel: 'Level 3' },
+                        { value: 'Module 4', label: 'Module 4', subLabel: 'Level 4' }
+                      ]} placeholder="Select module..." emptyMessage="No modules available" required disabled={!form.programId} />
                     </>
                   )}
                   
                   {!isUniversity && !isTVET && (
-                    <SearchableSelect 
-                      label="Class" 
-                      value={form.classId || ''} 
-                      onChange={(e) => setForm({...form, classId: e.target.value})} 
-                      options={classOptions}
-                      placeholder="Search class..."
-                      emptyMessage="No classes available"
-                      required 
-                    />
+                    <SearchableSelect label="Class" value={form.classId || ''} onChange={(e) => setForm({...form, classId: e.target.value})} options={classOptions} placeholder="Search class..." emptyMessage="No classes available" required />
                   )}
                   
-                  <SelectField 
-                    label="Boarding Status" 
-                    value={form.boardingStatus || 'DAY'} 
-                    onChange={(e) => setForm({...form, boardingStatus: e.target.value})} 
-                    options={['DAY', 'BOARDING', 'WEEKLY']} 
-                  />
-                  
-                  <SearchableSelect 
-                    label="Transport Route" 
-                    value={form.transportRouteId || ''} 
-                    onChange={(e) => setForm({...form, transportRouteId: e.target.value || null})} 
-                    options={routeOptions}
-                    placeholder="Search transport route..."
-                    emptyMessage="No transport routes available"
-                  />
+                  <SelectField label="Boarding Status" value={form.boardingStatus || 'DAY'} onChange={(e) => setForm({...form, boardingStatus: e.target.value})} options={['DAY', 'BOARDING', 'WEEKLY']} />
+                  <SearchableSelect label="Transport Route" value={form.transportRouteId || ''} onChange={(e) => setForm({...form, transportRouteId: e.target.value || null})} options={routeOptions} placeholder="Search transport route..." emptyMessage="No transport routes available" />
                 </div>
               </div>
 
-              {/* Medical Information */}
+              {/* Medical Info */}
               <div className="bg-gray-50 p-4 rounded-lg">
                 <h4 className="font-medium text-indigo-600 mb-3">Medical Information</h4>
                 <div className="grid grid-cols-2 gap-4">
-                  <SearchableSelect 
-                    label="Blood Group" 
-                    value={form.medicalInfo?.bloodGroup || ''} 
-                    onChange={(e) => setForm({
-                      ...form, 
-                      medicalInfo: { ...form.medicalInfo, bloodGroup: e.target.value }
-                    })} 
-                    options={[
-                      { value: 'A+', label: 'A+', subLabel: 'Positive' },
-                      { value: 'A-', label: 'A-', subLabel: 'Negative' },
-                      { value: 'B+', label: 'B+', subLabel: 'Positive' },
-                      { value: 'B-', label: 'B-', subLabel: 'Negative' },
-                      { value: 'O+', label: 'O+', subLabel: 'Positive' },
-                      { value: 'O-', label: 'O-', subLabel: 'Negative' },
-                      { value: 'AB+', label: 'AB+', subLabel: 'Positive' },
-                      { value: 'AB-', label: 'AB-', subLabel: 'Negative' },
-                      { value: 'Unknown', label: 'Unknown', subLabel: 'Not specified' }
-                    ]}
-                    placeholder="Select blood group..."
-                    emptyMessage="No blood groups available"
-                  />
-                  
-                  <InputField 
-                    label="Allergies" 
-                    value={form.medicalInfo?.allergies || ''} 
-                    onChange={(e) => setForm({
-                      ...form, 
-                        medicalInfo: { ...form.medicalInfo, allergies: e.target.value }
-                    })} 
-                    placeholder="e.g., Peanuts, Penicillin, Dust" 
-                  />
-                  
-                  <SelectField 
-                    label="Disabilities" 
-                    value={form.medicalInfo?.disabilities || ''} 
-                    onChange={(e) => setForm({
-                      ...form, 
-                      medicalInfo: { ...form.medicalInfo, disabilities: e.target.value }
-                    })} 
-                    options={[
-                      { value: 'None', label: 'None' },
-                      { value: 'Physical', label: 'Physical Disability' },
-                      { value: 'Visual', label: 'Visual Impairment' },
-                      { value: 'Hearing', label: 'Hearing Impairment' },
-                      { value: 'Speech', label: 'Speech Impairment' },
-                      { value: 'Learning', label: 'Learning Disability' },
-                      { value: 'Cognitive', label: 'Cognitive Disability' },
-                      { value: 'Mental Health', label: 'Mental Health Condition' },
-                      { value: 'Chronic Illness', label: 'Chronic Illness' },
-                      { value: 'Other', label: 'Other' }
-                    ]} 
-                  />
+                  <SearchableSelect label="Blood Group" value={form.medicalInfo?.bloodGroup || ''} onChange={(e) => setForm({...form, medicalInfo: { ...form.medicalInfo, bloodGroup: e.target.value }})} options={[
+                    { value: 'A+', label: 'A+', subLabel: 'Positive' },
+                    { value: 'A-', label: 'A-', subLabel: 'Negative' },
+                    { value: 'B+', label: 'B+', subLabel: 'Positive' },
+                    { value: 'B-', label: 'B-', subLabel: 'Negative' },
+                    { value: 'O+', label: 'O+', subLabel: 'Positive' },
+                    { value: 'O-', label: 'O-', subLabel: 'Negative' },
+                    { value: 'AB+', label: 'AB+', subLabel: 'Positive' },
+                    { value: 'AB-', label: 'AB-', subLabel: 'Negative' },
+                    { value: 'Unknown', label: 'Unknown', subLabel: 'Not specified' }
+                  ]} placeholder="Select blood group..." emptyMessage="No blood groups available" />
+                  <InputField label="Allergies" value={form.medicalInfo?.allergies || ''} onChange={(e) => setForm({...form, medicalInfo: { ...form.medicalInfo, allergies: e.target.value }})} placeholder="e.g., Peanuts, Penicillin, Dust" />
+                  <SelectField label="Disabilities" value={form.medicalInfo?.disabilities || ''} onChange={(e) => setForm({...form, medicalInfo: { ...form.medicalInfo, disabilities: e.target.value }})} options={[
+                    { value: 'None', label: 'None' },
+                    { value: 'Physical', label: 'Physical Disability' },
+                    { value: 'Visual', label: 'Visual Impairment' },
+                    { value: 'Hearing', label: 'Hearing Impairment' },
+                    { value: 'Speech', label: 'Speech Impairment' },
+                    { value: 'Learning', label: 'Learning Disability' },
+                    { value: 'Cognitive', label: 'Cognitive Disability' },
+                    { value: 'Mental Health', label: 'Mental Health Condition' },
+                    { value: 'Chronic Illness', label: 'Chronic Illness' },
+                    { value: 'Other', label: 'Other' }
+                  ]} />
                 </div>
               </div>
 
@@ -5800,158 +5456,80 @@ const StudentModule = ({
               <div className="bg-gray-50 p-4 rounded-lg">
                 <h4 className="font-medium text-indigo-600 mb-3">Student Account</h4>
                 <div className="flex items-center space-x-2 mb-3">
-                  <input 
-                    type="checkbox" 
-                    id="createStudentAccount" 
-                    checked={form.studentLogin?.createAccount || false} 
-                    onChange={(e) => setForm({
-                      ...form, 
-                      studentLogin: { ...form.studentLogin, createAccount: e.target.checked }
-                    })} 
-                    className="rounded" 
-                  />
+                  <input type="checkbox" id="createStudentAccount" checked={form.studentLogin?.createAccount || false} onChange={(e) => setForm({...form, studentLogin: { ...form.studentLogin, createAccount: e.target.checked }})} className="rounded" />
                   <label htmlFor="createStudentAccount">Create login account for student</label>
                 </div>
-                
                 {form.studentLogin?.createAccount && (
                   <div className="grid grid-cols-2 gap-4 mt-2">
-                    <InputField 
-                      label="Student Email *" 
-                      type="email" 
-                      value={form.studentLogin?.email || ''} 
-                      onChange={(e) => setForm({
-                        ...form, 
-                        studentLogin: { ...form.studentLogin, email: e.target.value }
-                      })} 
-                      required 
-                      placeholder="student@example.com"
-                    />
-                    <InputField 
-                      label="Student Password *" 
-                      type="password" 
-                      value={form.studentLogin?.password || ''} 
-                      onChange={(e) => setForm({
-                        ...form, 
-                        studentLogin: { ...form.studentLogin, password: e.target.value }
-                      })} 
-                      required 
-                    />
+                    <InputField label="Student Email *" type="email" value={form.studentLogin?.email || ''} onChange={(e) => setForm({...form, studentLogin: { ...form.studentLogin, email: e.target.value }})} required placeholder="student@example.com" />
+                    <InputField label="Student Password *" type="password" value={form.studentLogin?.password || ''} onChange={(e) => setForm({...form, studentLogin: { ...form.studentLogin, password: e.target.value }})} required />
                   </div>
                 )}
               </div>
 
-              {/* Parent Information */}
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="font-medium text-indigo-600 mb-3">Parent/Guardian Information</h4>
-                
-                <div className="flex items-center space-x-4 mb-3">
-                  <label className="flex items-center">
-                    <input 
-                      type="radio" 
-                      checked={!form.parent?.useExisting} 
-                      onChange={() => setForm({
-                        ...form, 
-                        parent: { ...form.parent, useExisting: false, existingUserId: null }
-                      })} 
-                      className="mr-2" 
-                    />
-                    Create New Parent
-                  </label>
-                  <label className="flex items-center">
-                    <input 
-                      type="radio" 
-                      checked={form.parent?.useExisting} 
-                      onChange={() => setForm({
-                        ...form, 
-                        parent: { ...form.parent, useExisting: true }
-                      })} 
-                      className="mr-2" 
-                    />
-                    Use Existing Parent
-                  </label>
+              {/* ==================== PARENT INFORMATION (OPTIONAL) ==================== */}
+              {enableParentPortal ? (
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <div className="flex justify-between items-center mb-3">
+                    <h4 className="font-medium text-indigo-600">Parent/Guardian Information</h4>
+                    <label className="flex items-center text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showParentSection}
+                        onChange={(e) => setShowParentSection(e.target.checked)}
+                        className="mr-2 rounded"
+                      />
+                      Include parent details
+                    </label>
+                  </div>
+
+                  {showParentSection ? (
+                    <>
+                      <div className="flex items-center space-x-4 mb-3">
+                        <label className="flex items-center">
+                          <input type="radio" checked={!form.parent?.useExisting} onChange={() => setForm({...form, parent: { ...form.parent, useExisting: false, existingUserId: null }})} className="mr-2" />
+                          Create New Parent
+                        </label>
+                        <label className="flex items-center">
+                          <input type="radio" checked={form.parent?.useExisting} onChange={() => setForm({...form, parent: { ...form.parent, useExisting: true }})} className="mr-2" />
+                          Use Existing Parent
+                        </label>
+                      </div>
+
+                      {form.parent?.useExisting ? (
+                        <SearchableSelect 
+                          label="Select Existing Parent" 
+                          value={form.parent?.existingUserId || ''} 
+                          onChange={(e) => setForm({...form, parent: { ...form.parent, existingUserId: e.target.value }})} 
+                          options={parentUserOptions}
+                          placeholder="Search parents by name or email..."
+                          emptyMessage="No parents available"
+                        />
+                      ) : (
+                        <div className="grid grid-cols-2 gap-4">
+                          <InputField label="Parent First Name" value={form.parent?.firstName || ''} onChange={(e) => setForm({...form, parent: { ...form.parent, firstName: e.target.value }})} />
+                          <InputField label="Parent Last Name" value={form.parent?.lastName || ''} onChange={(e) => setForm({...form, parent: { ...form.parent, lastName: e.target.value }})} />
+                          <InputField label="Parent Email" type="email" value={form.parent?.email || ''} onChange={(e) => setForm({...form, parent: { ...form.parent, email: e.target.value }})} />
+                          <InputField label="Parent Phone" value={form.parent?.phone || ''} onChange={(e) => setForm({...form, parent: { ...form.parent, phone: e.target.value }})} />
+                          <InputField label="Parent Password" type="password" value={form.parent?.password || ''} onChange={(e) => setForm({...form, parent: { ...form.parent, password: e.target.value }})} />
+                          <SelectField label="Relationship" value={form.parent?.relationship || 'Parent'} onChange={(e) => setForm({...form, parent: { ...form.parent, relationship: e.target.value }})} options={['Parent', 'Guardian', 'Grandparent', 'Sibling', 'Other']} />
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-sm text-gray-500 italic">
+                      Parent details skipped. You can link a parent later from the student's profile.
+                    </p>
+                  )}
                 </div>
+              ) : (
+                <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg text-sm text-blue-800">
+                  <i className="fas fa-info-circle mr-2"></i>
+                  Parent portal is disabled for this school. Student can be registered without parent details.
+                </div>
+              )}
 
-                {form.parent?.useExisting ? (
-                  <SearchableSelect 
-                    label="Select Existing Parent" 
-                    value={form.parent?.existingUserId || ''} 
-                    onChange={(e) => setForm({
-                      ...form, 
-                      parent: { ...form.parent, existingUserId: e.target.value }
-                    })} 
-                    options={parentUserOptions}
-                    placeholder="Search parents by name or email..."
-                    emptyMessage="No parents available"
-                    required 
-                  />
-                ) : (
-                  <>
-                    <div className="grid grid-cols-2 gap-4">
-                      <InputField 
-                        label="Parent First Name *" 
-                        value={form.parent?.firstName || ''} 
-                        onChange={(e) => setForm({
-                          ...form, 
-                          parent: { ...form.parent, firstName: e.target.value }
-                        })} 
-                        required 
-                      />
-                      <InputField 
-                        label="Parent Last Name *" 
-                        value={form.parent?.lastName || ''} 
-                        onChange={(e) => setForm({
-                          ...form, 
-                          parent: { ...form.parent, lastName: e.target.value }
-                        })} 
-                        required 
-                      />
-                      <InputField 
-                        label="Parent Email *" 
-                        type="email" 
-                        value={form.parent?.email || ''} 
-                        onChange={(e) => setForm({
-                          ...form, 
-                          parent: { ...form.parent, email: e.target.value }
-                        })} 
-                        required 
-                      />
-                      <InputField 
-                        label="Parent Phone" 
-                        value={form.parent?.phone || ''} 
-                        onChange={(e) => setForm({
-                          ...form, 
-                          parent: { ...form.parent, phone: e.target.value }
-                        })} 
-                      />
-                      <InputField 
-                        label="Parent Password *" 
-                        type="password" 
-                        value={form.parent?.password || ''} 
-                        onChange={(e) => setForm({
-                          ...form, 
-                          parent: { ...form.parent, password: e.target.value }
-                        })} 
-                        required 
-                      />
-                      <SelectField 
-                        label="Relationship" 
-                        value={form.parent?.relationship || 'Parent'} 
-                        onChange={(e) => setForm({
-                          ...form, 
-                          parent: { ...form.parent, relationship: e.target.value }
-                        })} 
-                        options={['Parent', 'Guardian', 'Grandparent', 'Sibling', 'Other']} 
-                      />
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Submit button */}
-              <button 
-                type="submit" 
-                className="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 font-medium"
-              >
+              <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 font-medium">
                 Register Student
               </button>
             </form>
@@ -5959,7 +5537,99 @@ const StudentModule = ({
         </div>
       )}
 
-      {/* Student List - Grid View */}
+      {/* ==================== EDIT STUDENT MODAL ==================== */}
+      {showEditModal && selectedStudent && canEdit && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
+          <div className="bg-white p-6 rounded-xl shadow-sm max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold">Edit Student</h3>
+              <button onClick={() => { setShowEditModal(false); setSelectedStudent(null); }} className="text-gray-500 hover:text-gray-700">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+            
+            <form onSubmit={handleUpdateSubmit} className="space-y-4">
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h4 className="font-medium text-indigo-600 mb-3">Personal Details</h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <InputField label="First Name *" value={form.firstName || ''} onChange={(e) => setForm({...form, firstName: e.target.value})} required />
+                  <InputField label="Middle Name" value={form.middleName || ''} onChange={(e) => setForm({...form, middleName: e.target.value})} />
+                  <InputField label="Last Name *" value={form.lastName || ''} onChange={(e) => setForm({...form, lastName: e.target.value})} required />
+                  <InputField label="Date of Birth *" type="date" value={form.dateOfBirth?.split('T')[0] || ''} onChange={(e) => setForm({...form, dateOfBirth: e.target.value})} required />
+                  <SelectField label="Gender *" value={form.gender || 'MALE'} onChange={(e) => setForm({...form, gender: e.target.value})} options={['MALE', 'FEMALE']} />
+                  <InputField label="Email" type="email" value={form.email || ''} onChange={(e) => setForm({...form, email: e.target.value})} />
+                  <InputField label="Phone" value={form.phone || ''} onChange={(e) => setForm({...form, phone: e.target.value})} />
+                  <InputField label="Address" value={form.address || ''} onChange={(e) => setForm({...form, address: e.target.value})} />
+                </div>
+              </div>
+
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h4 className="font-medium text-indigo-600 mb-3">Academic Information</h4>
+                <div className="grid grid-cols-2 gap-4">
+                  {isUniversity && (
+                    <>
+                      <SearchableSelect label="Faculty" value={form.facultyId || ''} onChange={(e) => setForm({...form, facultyId: e.target.value})} options={facultyOptions} placeholder="Search faculty..." emptyMessage="No faculties available" />
+                      <SearchableSelect label="Department" value={form.departmentId || ''} onChange={(e) => setForm({...form, departmentId: e.target.value})} options={departmentOptions} placeholder="Search department..." emptyMessage="No departments available" />
+                      <SearchableSelect label="Course" value={form.courseId || ''} onChange={(e) => setForm({...form, courseId: e.target.value})} options={courseOptions} placeholder="Search course..." emptyMessage="No courses available" />
+                      <InputField label="Year of Study" type="number" value={form.currentYear || 1} onChange={(e) => setForm({...form, currentYear: parseInt(e.target.value)})} min="1" max="6" />
+                    </>
+                  )}
+                  {isTVET && (
+                    <>
+                      <SearchableSelect label="Department" value={form.departmentId || ''} onChange={(e) => setForm({...form, departmentId: e.target.value})} options={departmentOptions} placeholder="Search department..." emptyMessage="No departments available" />
+                      <SearchableSelect label="Program" value={form.programId || ''} onChange={(e) => setForm({...form, programId: e.target.value})} options={programOptions} placeholder="Search program..." emptyMessage="No programs available" />
+                      <SearchableSelect label="Module Level" value={form.currentModule || ''} onChange={(e) => setForm({...form, currentModule: e.target.value})} options={[
+                        { value: 'Module 1', label: 'Module 1' },
+                        { value: 'Module 2', label: 'Module 2' },
+                        { value: 'Module 3', label: 'Module 3' },
+                        { value: 'Module 4', label: 'Module 4' }
+                      ]} placeholder="Select module..." emptyMessage="No modules available" />
+                    </>
+                  )}
+                  {!isUniversity && !isTVET && (
+                    <SearchableSelect label="Class" value={form.classId || ''} onChange={(e) => setForm({...form, classId: e.target.value})} options={classOptions} placeholder="Search class..." emptyMessage="No classes available" />
+                  )}
+                  <SelectField label="Boarding Status" value={form.boardingStatus || 'DAY'} onChange={(e) => setForm({...form, boardingStatus: e.target.value})} options={['DAY', 'BOARDING', 'WEEKLY']} />
+                  <SearchableSelect label="Transport Route" value={form.transportRouteId || ''} onChange={(e) => setForm({...form, transportRouteId: e.target.value || null})} options={routeOptions} placeholder="Search transport route..." emptyMessage="No transport routes available" />
+                  <SelectField label="Status" value={form.isActive !== false ? 'active' : 'inactive'} onChange={(e) => setForm({...form, isActive: e.target.value === 'active'})} options={[
+                    { value: 'active', label: 'Active' },
+                    { value: 'inactive', label: 'Inactive' }
+                  ]} />
+                </div>
+              </div>
+
+              {/* Parent section in edit — optional */}
+              {enableParentPortal && (
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <div className="flex justify-between items-center mb-3">
+                    <h4 className="font-medium text-indigo-600">Link Parent (optional)</h4>
+                    <label className="flex items-center text-sm cursor-pointer">
+                      <input type="checkbox" checked={showParentSection} onChange={(e) => setShowParentSection(e.target.checked)} className="mr-2 rounded" />
+                      Add parent now
+                    </label>
+                  </div>
+                  {showParentSection && (
+                    <SearchableSelect
+                      label="Select Existing Parent"
+                      value={form.parent?.existingUserId || ''}
+                      onChange={(e) => setForm({ ...form, parent: { ...form.parent, useExisting: true, existingUserId: e.target.value } })}
+                      options={parentUserOptions}
+                      placeholder="Search parents..."
+                      emptyMessage="No parents available"
+                    />
+                  )}
+                </div>
+              )}
+
+              <button type="submit" disabled={loading} className="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 font-medium disabled:opacity-50">
+                {loading ? 'Updating...' : 'Update Student'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== STUDENT LIST ==================== */}
       {viewMode === 'grid' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredStudents.length === 0 ? (
@@ -5967,22 +5637,6 @@ const StudentModule = ({
               <i className="fas fa-users text-4xl text-gray-300 mb-2"></i>
               <p>No students found</p>
               <p className="text-sm mt-1">Try adjusting your filters</p>
-              {searchTerm && (
-                <button
-                  onClick={() => {
-                    setSearchTerm('');
-                    setSelectedClass('');
-                    setSelectedCourse('');
-                    setSelectedProgram('');
-                    setSelectedYear('');
-                    setSelectedModule('');
-                    setSelectedStatus('all');
-                  }}
-                  className="mt-2 text-indigo-600 hover:text-indigo-800 text-sm font-medium"
-                >
-                  Clear all filters
-                </button>
-              )}
             </div>
           ) : (
             filteredStudents.map(student => {
@@ -6005,28 +5659,16 @@ const StudentModule = ({
                       </div>
                     </div>
                     <div className="flex space-x-1">
-                      <button 
-                        onClick={() => loadStudentDetails(student)} 
-                        className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" 
-                        title="View Details"
-                      >
+                      <button onClick={() => loadStudentDetails(student)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="View Details">
                         <i className="fas fa-eye"></i>
                       </button>
                       {canEdit && (
-                        <button 
-                          onClick={() => handleEditClick(student)} 
-                          className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg" 
-                          title="Edit"
-                        >
+                        <button onClick={() => handleEditClick(student)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg" title="Edit">
                           <i className="fas fa-edit"></i>
                         </button>
                       )}
                       {canDelete && (
-                        <button 
-                          onClick={() => handleDeleteClick(student)} 
-                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg" 
-                          title="Delete"
-                        >
+                        <button onClick={() => handleDeleteClick(student)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
                           <i className="fas fa-trash"></i>
                         </button>
                       )}
@@ -6040,57 +5682,29 @@ const StudentModule = ({
                        isTVET ? (studentProgram?.name || 'No Program') : 
                        (studentClass?.name || 'No Class')}
                     </p>
-                    
                     {isUniversity && student.currentYear && (
-                      <p className="text-gray-600">
-                        <i className="fas fa-calendar w-5 text-gray-400"></i>
-                        Year {student.currentYear}, Sem {student.currentSemester || 1}
-                      </p>
+                      <p className="text-gray-600"><i className="fas fa-calendar w-5 text-gray-400"></i>Year {student.currentYear}, Sem {student.currentSemester || 1}</p>
                     )}
-                    
                     {isTVET && student.currentModule && (
-                      <p className="text-gray-600">
-                        <i className="fas fa-layer-group w-5 text-gray-400"></i>
-                        {student.currentModule}
-                      </p>
+                      <p className="text-gray-600"><i className="fas fa-layer-group w-5 text-gray-400"></i>{student.currentModule}</p>
                     )}
-                    
                     {student.email && (
-                      <p className="text-gray-600">
-                        <i className="fas fa-envelope w-5 text-gray-400"></i>
-                        {student.email}
-                      </p>
+                      <p className="text-gray-600"><i className="fas fa-envelope w-5 text-gray-400"></i>{student.email}</p>
                     )}
-                    
                     {student.phone && (
-                      <p className="text-gray-600">
-                        <i className="fas fa-phone w-5 text-gray-400"></i>
-                        {student.phone}
-                      </p>
+                      <p className="text-gray-600"><i className="fas fa-phone w-5 text-gray-400"></i>{student.phone}</p>
                     )}
-                    
                     {student.idNumber && (
-                      <p className="text-gray-600">
-                        <i className="fas fa-id-card w-5 text-gray-400"></i>
-                        {student.idType}: {student.idNumber}
-                      </p>
+                      <p className="text-gray-600"><i className="fas fa-id-card w-5 text-gray-400"></i>{student.idType}: {student.idNumber}</p>
                     )}
-                    
-                    <p className="text-gray-600">
-                      <i className="fas fa-home w-5 text-gray-400"></i>
-                      {student.boardingStatus}
-                    </p>
+                    <p className="text-gray-600"><i className="fas fa-home w-5 text-gray-400"></i>{student.boardingStatus}</p>
                   </div>
                   
                   <div className="mt-3 pt-3 border-t flex justify-between items-center">
-                    <span className={`px-2 py-1 rounded-full text-xs ${
-                      student.isActive !== false ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                    }`}>
+                    <span className={`px-2 py-1 rounded-full text-xs ${student.isActive !== false ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                       {student.isActive !== false ? 'Active' : 'Inactive'}
                     </span>
-                    <span className="text-xs text-gray-400">
-                      ID: {student.id.substring(0, 8)}...
-                    </span>
+                    <span className="text-xs text-gray-400">ID: {student.id.substring(0, 8)}...</span>
                   </div>
                 </div>
               );
@@ -6098,7 +5712,6 @@ const StudentModule = ({
           )}
         </div>
       ) : (
-        /* Student List - Table View */
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -6111,12 +5724,8 @@ const StudentModule = ({
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                     {isUniversity ? 'Course' : isTVET ? 'Program' : 'Class'}
                   </th>
-                  {isUniversity && (
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Year/Sem</th>
-                  )}
-                  {isTVET && (
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Module</th>
-                  )}
+                  {isUniversity && <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Year/Sem</th>}
+                  {isTVET && <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Module</th>}
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID Number</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
@@ -6124,17 +5733,12 @@ const StudentModule = ({
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {filteredStudents.length === 0 ? (
-                  <tr>
-                    <td colSpan={10} className="px-4 py-8 text-center text-gray-500">
-                      No students found
-                    </td>
-                  </tr>
+                  <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-500">No students found</td></tr>
                 ) : (
                   filteredStudents.map(student => {
                     const studentClass = classes.find(c => c.id === student.classId);
                     const studentCourse = courses.find(c => c.id === student.courseId);
                     const studentProgram = programs?.find(p => p.id === student.programId);
-                    
                     return (
                       <tr key={student.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 font-mono text-sm">{student.admissionNumber}</td>
@@ -6146,45 +5750,25 @@ const StudentModule = ({
                            isTVET ? (studentProgram?.name || 'N/A') : 
                            (studentClass?.name || 'N/A')}
                         </td>
-                        {isUniversity && (
-                          <td className="px-4 py-3">
-                            Year {student.currentYear || 1}, Sem {student.currentSemester || 1}
-                          </td>
-                        )}
-                        {isTVET && (
-                          <td className="px-4 py-3">{student.currentModule || 'N/A'}</td>
-                        )}
+                        {isUniversity && <td className="px-4 py-3">Year {student.currentYear || 1}, Sem {student.currentSemester || 1}</td>}
+                        {isTVET && <td className="px-4 py-3">{student.currentModule || 'N/A'}</td>}
                         <td className="px-4 py-3 text-sm text-gray-600">{student.idNumber || 'N/A'}</td>
                         <td className="px-4 py-3">
-                          <span className={`px-2 py-1 rounded-full text-xs ${
-                            student.isActive !== false ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                          }`}>
+                          <span className={`px-2 py-1 rounded-full text-xs ${student.isActive !== false ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                             {student.isActive !== false ? 'Active' : 'Inactive'}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-right space-x-2">
-                          <button 
-                            onClick={() => loadStudentDetails(student)} 
-                            className="text-blue-600 hover:text-blue-800 p-1 hover:bg-blue-50 rounded" 
-                            title="View Details"
-                          >
+                          <button onClick={() => loadStudentDetails(student)} className="text-blue-600 hover:text-blue-800 p-1 hover:bg-blue-50 rounded" title="View Details">
                             <i className="fas fa-eye"></i>
                           </button>
                           {canEdit && (
-                            <button 
-                              onClick={() => handleEditClick(student)} 
-                              className="text-indigo-600 hover:text-indigo-800 p-1 hover:bg-indigo-50 rounded" 
-                              title="Edit"
-                            >
+                            <button onClick={() => handleEditClick(student)} className="text-indigo-600 hover:text-indigo-800 p-1 hover:bg-indigo-50 rounded" title="Edit">
                               <i className="fas fa-edit"></i>
                             </button>
                           )}
                           {canDelete && (
-                            <button 
-                              onClick={() => handleDeleteClick(student)} 
-                              className="text-red-600 hover:text-red-800 p-1 hover:bg-red-50 rounded" 
-                              title="Delete"
-                            >
+                            <button onClick={() => handleDeleteClick(student)} className="text-red-600 hover:text-red-800 p-1 hover:bg-red-50 rounded" title="Delete">
                               <i className="fas fa-trash"></i>
                             </button>
                           )}
@@ -6210,7 +5794,6 @@ const StudentModule = ({
               </button>
             </div>
             
-            {/* Student Header */}
             <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-lg mb-6">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
@@ -6227,9 +5810,7 @@ const StudentModule = ({
                 </div>
                 <div>
                   <p className="text-sm text-gray-600">Status</p>
-                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                    studentDetails.isActive !== false ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                  }`}>
+                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${studentDetails.isActive !== false ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                     {studentDetails.isActive !== false ? 'Active' : 'Inactive'}
                   </span>
                 </div>
@@ -6239,44 +5820,21 @@ const StudentModule = ({
             {/* Tabs */}
             <div className="border-b mb-6">
               <div className="flex space-x-4 overflow-x-auto">
-                <button 
-                  onClick={() => setActiveDetailTab('overview')} 
-                  className={`px-4 py-2 font-medium whitespace-nowrap transition-colors ${
-                    activeDetailTab === 'overview' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
+                <button onClick={() => setActiveDetailTab('overview')} className={`px-4 py-2 font-medium whitespace-nowrap transition-colors ${activeDetailTab === 'overview' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
                   Overview
                 </button>
-                <button 
-                  onClick={() => setActiveDetailTab('academic')} 
-                  className={`px-4 py-2 font-medium whitespace-nowrap transition-colors ${
-                    activeDetailTab === 'academic' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
+                <button onClick={() => setActiveDetailTab('academic')} className={`px-4 py-2 font-medium whitespace-nowrap transition-colors ${activeDetailTab === 'academic' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
                   Academic ({studentResults.length})
                 </button>
-                <button 
-                  onClick={() => setActiveDetailTab('fees')} 
-                  className={`px-4 py-2 font-medium whitespace-nowrap transition-colors ${
-                    activeDetailTab === 'fees' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
+                <button onClick={() => setActiveDetailTab('fees')} className={`px-4 py-2 font-medium whitespace-nowrap transition-colors ${activeDetailTab === 'fees' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
                   Fees & Payments ({studentPayments.length})
                 </button>
-                <button 
-                  onClick={() => setActiveDetailTab('parents')} 
-                  className={`px-4 py-2 font-medium whitespace-nowrap transition-colors ${
-                    activeDetailTab === 'parents' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  Parents ({studentParents.length})
-                </button>
-                <button 
-                  onClick={() => setActiveDetailTab('attendance')} 
-                  className={`px-4 py-2 font-medium whitespace-nowrap transition-colors ${
-                    activeDetailTab === 'attendance' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
+                {enableParentPortal && (
+                  <button onClick={() => setActiveDetailTab('parents')} className={`px-4 py-2 font-medium whitespace-nowrap transition-colors ${activeDetailTab === 'parents' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
+                    Parents ({studentParents.length})
+                  </button>
+                )}
+                <button onClick={() => setActiveDetailTab('attendance')} className={`px-4 py-2 font-medium whitespace-nowrap transition-colors ${activeDetailTab === 'attendance' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
                   Attendance ({studentAttendance.length})
                 </button>
               </div>
@@ -6284,60 +5842,28 @@ const StudentModule = ({
 
             {/* Tab Content */}
             <div className="space-y-6">
-              {/* OVERVIEW TAB */}
+              {/* OVERVIEW */}
               {activeDetailTab === 'overview' && (
                 <div className="grid grid-cols-2 gap-6">
                   <div className="bg-gray-50 p-4 rounded-lg">
                     <h3 className="font-semibold text-lg mb-3">Personal Information</h3>
                     <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Full Name:</span>
-                        <span className="font-medium">{studentDetails.firstName} {studentDetails.middleName || ''} {studentDetails.lastName}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Date of Birth:</span>
-                        <span className="font-medium">
-                          {studentDetails.dateOfBirth ? new Date(studentDetails.dateOfBirth).toLocaleDateString() : 'N/A'}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Gender:</span>
-                        <span className="font-medium">{studentDetails.gender}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Nationality:</span>
-                        <span className="font-medium">{studentDetails.nationality || 'Kenyan'}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Religion:</span>
-                        <span className="font-medium">{studentDetails.religion || 'N/A'}</span>
-                      </div>
+                      <div className="flex justify-between"><span className="text-gray-600">Full Name:</span><span className="font-medium">{studentDetails.firstName} {studentDetails.middleName || ''} {studentDetails.lastName}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-600">Date of Birth:</span><span className="font-medium">{studentDetails.dateOfBirth ? new Date(studentDetails.dateOfBirth).toLocaleDateString() : 'N/A'}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-600">Gender:</span><span className="font-medium">{studentDetails.gender}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-600">Nationality:</span><span className="font-medium">{studentDetails.nationality || 'Kenyan'}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-600">Religion:</span><span className="font-medium">{studentDetails.religion || 'N/A'}</span></div>
                     </div>
                   </div>
 
                   <div className="bg-gray-50 p-4 rounded-lg">
                     <h3 className="font-semibold text-lg mb-3">Contact & Identification</h3>
                     <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Email:</span>
-                        <span className="font-medium">{studentDetails.email || 'N/A'}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Phone:</span>
-                        <span className="font-medium">{studentDetails.phone || 'N/A'}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Address:</span>
-                        <span className="font-medium">{studentDetails.address || 'N/A'}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">ID Type:</span>
-                        <span className="font-medium">{studentDetails.idType}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">ID Number:</span>
-                        <span className="font-medium">{studentDetails.idNumber || 'N/A'}</span>
-                      </div>
+                      <div className="flex justify-between"><span className="text-gray-600">Email:</span><span className="font-medium">{studentDetails.email || 'N/A'}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-600">Phone:</span><span className="font-medium">{studentDetails.phone || 'N/A'}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-600">Address:</span><span className="font-medium">{studentDetails.address || 'N/A'}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-600">ID Type:</span><span className="font-medium">{studentDetails.idType}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-600">ID Number:</span><span className="font-medium">{studentDetails.idNumber || 'N/A'}</span></div>
                     </div>
                   </div>
 
@@ -6356,56 +5882,30 @@ const StudentModule = ({
                       </div>
                       {isUniversity && (
                         <>
-                          <div className="flex justify-between">
-                            <span className="text-gray-600">Year of Study:</span>
-                            <span className="font-medium">Year {studentDetails.currentYear || 1}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-600">Current Semester:</span>
-                            <span className="font-medium">Semester {studentDetails.currentSemester || 1}</span>
-                          </div>
+                          <div className="flex justify-between"><span className="text-gray-600">Year of Study:</span><span className="font-medium">Year {studentDetails.currentYear || 1}</span></div>
+                          <div className="flex justify-between"><span className="text-gray-600">Current Semester:</span><span className="font-medium">Semester {studentDetails.currentSemester || 1}</span></div>
                         </>
                       )}
                       {isTVET && (
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Current Module:</span>
-                          <span className="font-medium">{studentDetails.currentModule || 'N/A'}</span>
-                        </div>
+                        <div className="flex justify-between"><span className="text-gray-600">Current Module:</span><span className="font-medium">{studentDetails.currentModule || 'N/A'}</span></div>
                       )}
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Boarding Status:</span>
-                        <span className="font-medium">{studentDetails.boardingStatus}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Transport Route:</span>
-                        <span className="font-medium">
-                          {routes?.find(r => r.id === studentDetails.transportRouteId)?.name || 'N/A'}
-                        </span>
-                      </div>
+                      <div className="flex justify-between"><span className="text-gray-600">Boarding Status:</span><span className="font-medium">{studentDetails.boardingStatus}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-600">Transport Route:</span><span className="font-medium">{routes?.find(r => r.id === studentDetails.transportRouteId)?.name || 'N/A'}</span></div>
                     </div>
                   </div>
 
                   <div className="bg-gray-50 p-4 rounded-lg">
                     <h3 className="font-semibold text-lg mb-3">Medical Information</h3>
                     <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Blood Group:</span>
-                        <span className="font-medium">{studentDetails.medicalInfo?.bloodGroup || 'N/A'}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Allergies:</span>
-                        <span className="font-medium">{studentDetails.medicalInfo?.allergies || 'None'}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Disabilities:</span>
-                        <span className="font-medium">{studentDetails.medicalInfo?.disabilities || 'None'}</span>
-                      </div>
+                      <div className="flex justify-between"><span className="text-gray-600">Blood Group:</span><span className="font-medium">{studentDetails.medicalInfo?.bloodGroup || 'N/A'}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-600">Allergies:</span><span className="font-medium">{studentDetails.medicalInfo?.allergies || 'None'}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-600">Disabilities:</span><span className="font-medium">{studentDetails.medicalInfo?.disabilities || 'None'}</span></div>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* ACADEMIC TAB */}
+              {/* ACADEMIC */}
               {activeDetailTab === 'academic' && (
                 <div>
                   {studentResults.length > 0 ? (
@@ -6432,19 +5932,14 @@ const StudentModule = ({
                               const subject = subjects?.find(s => s.id === result.subjectId);
                               itemName = subject?.name || 'Unknown Subject';
                             }
-                            
                             return (
                               <tr key={result.id} className="hover:bg-gray-50">
                                 <td className="px-4 py-2">{exam?.name || 'Unknown Exam'}</td>
                                 <td className="px-4 py-2">{itemName}</td>
-                                <td className="px-4 py-2">
-                                  {exam?.date ? new Date(exam.date).toLocaleDateString() : 'N/A'}
-                                </td>
+                                <td className="px-4 py-2">{exam?.date ? new Date(exam.date).toLocaleDateString() : 'N/A'}</td>
                                 <td className="px-4 py-2 font-bold">{result.marks}</td>
                                 <td className="px-4 py-2">
-                                  <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(result.grade)}`}>
-                                    {result.grade}
-                                  </span>
+                                  <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(result.grade)}`}>{result.grade}</span>
                                 </td>
                                 <td className="px-4 py-2">{result.points}</td>
                               </tr>
@@ -6462,7 +5957,7 @@ const StudentModule = ({
                 </div>
               )}
 
-              {/* FEES TAB */}
+              {/* FEES */}
               {activeDetailTab === 'fees' && (
                 <div className="space-y-6">
                   {studentFeeSummary && (
@@ -6523,8 +6018,8 @@ const StudentModule = ({
                 </div>
               )}
 
-              {/* PARENTS TAB */}
-              {activeDetailTab === 'parents' && (
+              {/* PARENTS (only when portal enabled) */}
+              {enableParentPortal && activeDetailTab === 'parents' && (
                 <div>
                   {studentParents.length > 0 ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -6540,20 +6035,12 @@ const StudentModule = ({
                               <h4 className="font-semibold">{parent.User?.firstName} {parent.User?.lastName}</h4>
                               <p className="text-sm text-gray-600">{parent.relationship}</p>
                               {parent.isPrimary && (
-                                <span className="inline-block mt-1 px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">
-                                  Primary Contact
-                                </span>
+                                <span className="inline-block mt-1 px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">Primary Contact</span>
                               )}
                               <div className="mt-2 text-sm space-y-1">
-                                {parent.User?.email && (
-                                  <p><i className="fas fa-envelope mr-2 text-gray-400"></i>{parent.User.email}</p>
-                                )}
-                                {parent.User?.phone && (
-                                  <p><i className="fas fa-phone mr-2 text-gray-400"></i>{parent.User.phone}</p>
-                                )}
-                                {parent.occupation && (
-                                  <p><i className="fas fa-briefcase mr-2 text-gray-400"></i>{parent.occupation}</p>
-                                )}
+                                {parent.User?.email && <p><i className="fas fa-envelope mr-2 text-gray-400"></i>{parent.User.email}</p>}
+                                {parent.User?.phone && <p><i className="fas fa-phone mr-2 text-gray-400"></i>{parent.User.phone}</p>}
+                                {parent.occupation && <p><i className="fas fa-briefcase mr-2 text-gray-400"></i>{parent.occupation}</p>}
                               </div>
                             </div>
                           </div>
@@ -6565,10 +6052,7 @@ const StudentModule = ({
                       <i className="fas fa-users text-5xl text-gray-400 mb-4"></i>
                       <p className="text-gray-600">No parents linked to this student</p>
                       {canEdit && (
-                        <button
-                          onClick={() => handleAddParentClick(selectedStudent)}
-                          className="mt-4 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
-                        >
+                        <button onClick={() => handleAddParentClick(selectedStudent)} className="mt-4 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
                           Add Parent
                         </button>
                       )}
@@ -6577,7 +6061,7 @@ const StudentModule = ({
                 </div>
               )}
 
-              {/* ATTENDANCE TAB */}
+              {/* ATTENDANCE */}
               {activeDetailTab === 'attendance' && (
                 <div>
                   {studentAttendance.length > 0 ? (
@@ -6589,21 +6073,15 @@ const StudentModule = ({
                         </div>
                         <div className="bg-green-50 p-4 rounded-lg text-center">
                           <p className="text-sm text-green-600">Present</p>
-                          <p className="text-2xl font-bold text-green-700">
-                            {studentAttendance.filter(a => a.status === 'PRESENT').length}
-                          </p>
+                          <p className="text-2xl font-bold text-green-700">{studentAttendance.filter(a => a.status === 'PRESENT').length}</p>
                         </div>
                         <div className="bg-red-50 p-4 rounded-lg text-center">
                           <p className="text-sm text-red-600">Absent</p>
-                          <p className="text-2xl font-bold text-red-700">
-                            {studentAttendance.filter(a => a.status === 'ABSENT').length}
-                          </p>
+                          <p className="text-2xl font-bold text-red-700">{studentAttendance.filter(a => a.status === 'ABSENT').length}</p>
                         </div>
                         <div className="bg-yellow-50 p-4 rounded-lg text-center">
                           <p className="text-sm text-yellow-600">Late</p>
-                          <p className="text-2xl font-bold text-yellow-700">
-                            {studentAttendance.filter(a => a.status === 'LATE').length}
-                          </p>
+                          <p className="text-2xl font-bold text-yellow-700">{studentAttendance.filter(a => a.status === 'LATE').length}</p>
                         </div>
                       </div>
 
@@ -6656,35 +6134,18 @@ const StudentModule = ({
               {!isStudent && !isParent && (
                 <>
                   {canEdit && (
-                    <button
-                      onClick={() => {
-                        setShowDetailsModal(false);
-                        handleEditClick(selectedStudent);
-                      }}
-                      className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center"
-                    >
-                      <i className="fas fa-edit mr-2"></i>
-                      Edit Student
+                    <button onClick={() => { setShowDetailsModal(false); handleEditClick(selectedStudent); }} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center">
+                      <i className="fas fa-edit mr-2"></i>Edit Student
                     </button>
                   )}
                   {canDelete && (
-                    <button
-                      onClick={() => {
-                        setShowDetailsModal(false);
-                        handleDeleteClick(selectedStudent);
-                      }}
-                      className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 flex items-center"
-                    >
-                      <i className="fas fa-trash mr-2"></i>
-                      Delete Student
+                    <button onClick={() => { setShowDetailsModal(false); handleDeleteClick(selectedStudent); }} className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 flex items-center">
+                      <i className="fas fa-trash mr-2"></i>Delete Student
                     </button>
                   )}
                 </>
               )}
-              <button
-                onClick={() => setShowDetailsModal(false)}
-                className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600"
-              >
+              <button onClick={() => setShowDetailsModal(false)} className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600">
                 Close
               </button>
             </div>
@@ -6692,14 +6153,12 @@ const StudentModule = ({
         </div>
       )}
 
-      {/* Add Parent Modal - With Searchable Select for Parent Search - EMPTY BY DEFAULT */}
-      {showAddParentModal && selectedStudentForParent && canEdit && (
+      {/* ==================== ADD PARENT MODAL (only when portal enabled) ==================== */}
+      {enableParentPortal && showAddParentModal && selectedStudentForParent && canEdit && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold">
-                Add Parent for {selectedStudentForParent.firstName} {selectedStudentForParent.lastName}
-              </h3>
+              <h3 className="text-xl font-bold">Add Parent for {selectedStudentForParent.firstName} {selectedStudentForParent.lastName}</h3>
               <button onClick={() => setShowAddParentModal(false)} className="text-gray-500 hover:text-gray-700">
                 <i className="fas fa-times"></i>
               </button>
@@ -6708,28 +6167,11 @@ const StudentModule = ({
             <div className="space-y-4">
               <div className="flex space-x-4 mb-4">
                 <label className="flex items-center">
-                  <input 
-                    type="radio" 
-                    checked={!createNewParent} 
-                    onChange={() => {
-                      setCreateNewParent(false);
-                      setSelectedExistingParent(null);
-                    }} 
-                    className="mr-2" 
-                  />
+                  <input type="radio" checked={!createNewParent} onChange={() => { setCreateNewParent(false); setSelectedExistingParent(null); }} className="mr-2" />
                   Select Existing Parent
                 </label>
                 <label className="flex items-center">
-                  <input 
-                    type="radio" 
-                    checked={createNewParent} 
-                    onChange={() => {
-                      setCreateNewParent(true);
-                      setSelectedExistingParent(null);
-                      setSearchParent('');
-                    }} 
-                    className="mr-2" 
-                  />
+                  <input type="radio" checked={createNewParent} onChange={() => { setCreateNewParent(true); setSelectedExistingParent(null); setSearchParent(''); }} className="mr-2" />
                   Create New Parent
                 </label>
               </div>
@@ -6747,53 +6189,22 @@ const StudentModule = ({
                     placeholder="Search parents by name or email..."
                     emptyMessage="No parents available"
                   />
-
                   {selectedExistingParent && (
                     <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
-                      <p className="text-sm font-medium text-blue-800">
-                        Selected: {selectedExistingParent.firstName} {selectedExistingParent.lastName}
-                      </p>
+                      <p className="text-sm font-medium text-blue-800">Selected: {selectedExistingParent.firstName} {selectedExistingParent.lastName}</p>
                       <p className="text-xs text-blue-600">{selectedExistingParent.email}</p>
-                      <p className="text-xs text-blue-600">
-                        Existing relationships: {selectedExistingParent.existingRelationships?.join(', ') || 'None'}
-                      </p>
+                      <p className="text-xs text-blue-600">Existing relationships: {selectedExistingParent.existingRelationships?.join(', ') || 'None'}</p>
                     </div>
                   )}
                 </div>
               ) : (
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
-                    <InputField
-                      label="First Name"
-                      value={newParentUser.firstName}
-                      onChange={(e) => setNewParentUser({...newParentUser, firstName: e.target.value})}
-                      required
-                    />
-                    <InputField
-                      label="Last Name"
-                      value={newParentUser.lastName}
-                      onChange={(e) => setNewParentUser({...newParentUser, lastName: e.target.value})}
-                      required
-                    />
-                    <InputField
-                      label="Email"
-                      type="email"
-                      value={newParentUser.email}
-                      onChange={(e) => setNewParentUser({...newParentUser, email: e.target.value})}
-                      required
-                    />
-                    <InputField
-                      label="Phone"
-                      value={newParentUser.phone}
-                      onChange={(e) => setNewParentUser({...newParentUser, phone: e.target.value})}
-                    />
-                    <InputField
-                      label="Password"
-                      type="password"
-                      value={newParentUser.password}
-                      onChange={(e) => setNewParentUser({...newParentUser, password: e.target.value})}
-                      required
-                    />
+                    <InputField label="First Name" value={newParentUser.firstName} onChange={(e) => setNewParentUser({...newParentUser, firstName: e.target.value})} required />
+                    <InputField label="Last Name" value={newParentUser.lastName} onChange={(e) => setNewParentUser({...newParentUser, lastName: e.target.value})} required />
+                    <InputField label="Email" type="email" value={newParentUser.email} onChange={(e) => setNewParentUser({...newParentUser, email: e.target.value})} required />
+                    <InputField label="Phone" value={newParentUser.phone} onChange={(e) => setNewParentUser({...newParentUser, phone: e.target.value})} />
+                    <InputField label="Password" type="password" value={newParentUser.password} onChange={(e) => setNewParentUser({...newParentUser, password: e.target.value})} required />
                   </div>
                 </div>
               )}
@@ -6801,65 +6212,28 @@ const StudentModule = ({
               <div className="border-t pt-4">
                 <h4 className="font-semibold mb-3">Relationship Details</h4>
                 <div className="grid grid-cols-2 gap-4">
-                  <SelectField
-                    label="Relationship"
-                    value={parentForm.relationship}
-                    onChange={(e) => setParentForm({...parentForm, relationship: e.target.value})}
-                    options={['Parent', 'Guardian', 'Grandparent', 'Sibling', 'Other']}
-                  />
-                  
+                  <SelectField label="Relationship" value={parentForm.relationship} onChange={(e) => setParentForm({...parentForm, relationship: e.target.value})} options={['Parent', 'Guardian', 'Grandparent', 'Sibling', 'Other']} />
                   <div className="flex items-center space-x-4">
                     <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={parentForm.isPrimary}
-                        onChange={(e) => setParentForm({...parentForm, isPrimary: e.target.checked})}
-                        className="mr-2 rounded"
-                      />
+                      <input type="checkbox" checked={parentForm.isPrimary} onChange={(e) => setParentForm({...parentForm, isPrimary: e.target.checked})} className="mr-2 rounded" />
                       Primary Contact
                     </label>
                     <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={parentForm.emergencyContact}
-                        onChange={(e) => setParentForm({...parentForm, emergencyContact: e.target.checked})}
-                        className="mr-2 rounded"
-                      />
+                      <input type="checkbox" checked={parentForm.emergencyContact} onChange={(e) => setParentForm({...parentForm, emergencyContact: e.target.checked})} className="mr-2 rounded" />
                       Emergency Contact
                     </label>
                   </div>
-
-                  <InputField
-                    label="Occupation"
-                    value={parentForm.occupation}
-                    onChange={(e) => setParentForm({...parentForm, occupation: e.target.value})}
-                  />
-                  <InputField
-                    label="Employer"
-                    value={parentForm.employer}
-                    onChange={(e) => setParentForm({...parentForm, employer: e.target.value})}
-                  />
-                  <InputField
-                    label="Monthly Income (KES)"
-                    type="number"
-                    value={parentForm.monthlyIncome}
-                    onChange={(e) => setParentForm({...parentForm, monthlyIncome: e.target.value})}
-                  />
+                  <InputField label="Occupation" value={parentForm.occupation} onChange={(e) => setParentForm({...parentForm, occupation: e.target.value})} />
+                  <InputField label="Employer" value={parentForm.employer} onChange={(e) => setParentForm({...parentForm, employer: e.target.value})} />
+                  <InputField label="Monthly Income (KES)" type="number" value={parentForm.monthlyIncome} onChange={(e) => setParentForm({...parentForm, monthlyIncome: e.target.value})} />
                 </div>
               </div>
 
               <div className="flex space-x-2 pt-4">
-                <button
-                  onClick={handleAddParent}
-                  disabled={loading || (!createNewParent && !selectedExistingParent) || (createNewParent && !newParentUser.firstName)}
-                  className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-                >
+                <button onClick={handleAddParent} disabled={loading || (!createNewParent && !selectedExistingParent) || (createNewParent && !newParentUser.firstName)} className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
                   {loading ? 'Adding...' : 'Add Parent'}
                 </button>
-                <button
-                  onClick={() => setShowAddParentModal(false)}
-                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
-                >
+                <button onClick={() => setShowAddParentModal(false)} className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
                   Cancel
                 </button>
               </div>
@@ -6868,7 +6242,7 @@ const StudentModule = ({
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* ==================== DELETE CONFIRM ==================== */}
       {showDeleteConfirm && selectedStudent && canDelete && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
@@ -6880,22 +6254,13 @@ const StudentModule = ({
               <p className="text-gray-600 mt-2">
                 Are you sure you want to delete <span className="font-semibold">{selectedStudent.firstName} {selectedStudent.lastName}</span>?
               </p>
-              <p className="text-sm text-red-600 mt-2">
-                This action cannot be undone. All associated records will also be deleted.
-              </p>
+              <p className="text-sm text-red-600 mt-2">This action cannot be undone. All associated records will also be deleted.</p>
             </div>
             <div className="flex space-x-2">
-              <button 
-                onClick={confirmDelete} 
-                disabled={loading} 
-                className="flex-1 bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 disabled:opacity-50"
-              >
+              <button onClick={confirmDelete} disabled={loading} className="flex-1 bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 disabled:opacity-50">
                 {loading ? 'Deleting...' : 'Yes, Delete'}
               </button>
-              <button 
-                onClick={() => setShowDeleteConfirm(false)} 
-                className="flex-1 bg-gray-500 text-white py-2 rounded-lg hover:bg-gray-600"
-              >
+              <button onClick={() => setShowDeleteConfirm(false)} className="flex-1 bg-gray-500 text-white py-2 rounded-lg hover:bg-gray-600">
                 Cancel
               </button>
             </div>
