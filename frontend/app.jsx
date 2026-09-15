@@ -36530,23 +36530,21 @@ const SettingsModule = ({
     </div>
   );
 };
-// ==================== COMPLETE STAFF ATTENDANCE MODULE WITH SEARCHABLE SELECT ====================
+// ==================== COMPLETE STAFF ATTENDANCE MODULE (FULL REWRITE) ====================
 const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user }) => {
   console.log('👤 StaffAttendanceModule initialized');
   console.log('👤 Current user:', user);
   console.log('👥 Staff list:', staff);
-  
+
   // ==================== FIND CURRENT STAFF MEMBER ====================
   const currentStaffMember = staff?.find(s => s.userId === user?.id);
-  console.log('🔍 Current staff member:', currentStaffMember);
-  
   const isUserInStaff = !!currentStaffMember;
 
   // ==================== SCHOOL SETTINGS FOR LATE TIME ====================
   const schoolStartTime = currentSchool?.startTime || '08:00';
   const lateThreshold = currentSchool?.lateThreshold || 30;
   const schoolEndTime = currentSchool?.endTime || '17:00';
-  
+
   const calculateLateTime = () => {
     const [hours, minutes] = schoolStartTime.split(':').map(Number);
     const totalMinutes = hours * 60 + minutes + lateThreshold;
@@ -36554,7 +36552,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
     const lateMinutes = totalMinutes % 60;
     return `${lateHours.toString().padStart(2, '0')}:${lateMinutes.toString().padStart(2, '0')}`;
   };
-  
+
   const lateTime = calculateLateTime();
 
   // ==================== PERMISSIONS ====================
@@ -36566,24 +36564,14 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
   const isAccountant = user?.role === 'ACCOUNTANT' || currentStaffMember?.department === 'Finance';
   const isDepartmentHead = currentStaffMember?.jobTitle?.includes('Head') || currentStaffMember?.jobTitle?.includes('HOD');
   const isDean = currentStaffMember?.jobTitle === 'Dean' || user?.role === 'DEAN';
-  
+
   const canMarkOwnAttendance = isUserInStaff;
   const canApproveAttendance = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || isHR;
   const canViewAllAttendance = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || isHR || isAccountant || isDepartmentHead || isDean;
 
-
-
   // ==================== SEARCHABLE SELECT COMPONENT ====================
   const SearchableSelect = ({ 
-    label, 
-    value, 
-    onChange, 
-    options, 
-    placeholder, 
-    disabled, 
-    required, 
-    className,
-    showClear = true 
+    label, value, onChange, options = [], placeholder, disabled, required, className, showClear = true 
   }) => {
     const [search, setSearch] = useState('');
     const [isOpen, setIsOpen] = useState(false);
@@ -36600,7 +36588,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
     const filteredOptions = useMemo(() => {
       if (!search.trim()) return optionsWithEmpty;
       const searchLower = search.toLowerCase();
-      return optionsWithEmpty.filter(opt => 
+      return optionsWithEmpty.filter(opt =>
         opt.label?.toLowerCase().includes(searchLower) ||
         opt.subLabel?.toLowerCase().includes(searchLower) ||
         opt.value?.toString().toLowerCase().includes(searchLower)
@@ -36621,11 +36609,8 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
     }, []);
 
     useEffect(() => {
-      if (selectedOption && !isFocused) {
-        setSearch(selectedOption.label);
-      } else if (!selectedOption && !isFocused) {
-        setSearch('');
-      }
+      if (selectedOption && !isFocused) setSearch(selectedOption.label);
+      else if (!selectedOption && !isFocused) setSearch('');
     }, [value, selectedOption, isFocused]);
 
     const handleSelect = (selectedValue) => {
@@ -36634,9 +36619,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
       setSearch(selected ? selected.label : '');
       setIsOpen(false);
       setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
+      if (inputRef.current) inputRef.current.focus();
     };
 
     const handleInputChange = (e) => {
@@ -36644,9 +36627,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
       setSearch(newValue);
       setIsOpen(true);
       setIsFocused(true);
-      if (newValue === '') {
-        onChange({ target: { value: '' } });
-      }
+      if (newValue === '') onChange({ target: { value: '' } });
     };
 
     const handleFocus = () => {
@@ -36656,18 +36637,13 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
 
     const handleBlur = (e) => {
       const relatedTarget = e.relatedTarget;
-      if (dropdownRef.current && dropdownRef.current.contains(relatedTarget)) {
-        return;
-      }
+      if (dropdownRef.current && dropdownRef.current.contains(relatedTarget)) return;
       setTimeout(() => {
         if (document.activeElement !== inputRef.current) {
           setIsOpen(false);
           setIsFocused(false);
-          if (selectedOption) {
-            setSearch(selectedOption.label);
-          } else {
-            setSearch('');
-          }
+          if (selectedOption) setSearch(selectedOption.label);
+          else setSearch('');
         }
       }, 150);
     };
@@ -36678,9 +36654,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
       setSearch('');
       setIsOpen(false);
       setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
+      if (inputRef.current) inputRef.current.focus();
     };
 
     const getDisplayValue = () => {
@@ -36693,8 +36667,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
       <div className="relative" ref={dropdownRef}>
         {label && (
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
+            {label}{required && <span className="text-red-500 ml-1">*</span>}
           </label>
         )}
         <div className="relative">
@@ -36777,6 +36750,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
   const [timeInLoading, setTimeInLoading] = useState(false);
   const [timeOutLoading, setTimeOutLoading] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [leaveType, setLeaveType] = useState('');
   const [schoolSettings, setSchoolSettings] = useState({
     startTime: schoolStartTime,
     lateThreshold: lateThreshold,
@@ -36785,365 +36759,41 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
 
   // ==================== OPTIONS GENERATORS ====================
   const leaveTypeOptions = useMemo(() => [
-    { value: '', label: '' },
     { value: 'ANNUAL', label: 'Annual Leave', subLabel: 'Paid vacation leave' },
     { value: 'SICK', label: 'Sick Leave', subLabel: 'Medical leave with doctor\'s note' },
-    { value: 'MATERNITY', label: 'Maternity Leave', subLabel: 'Maternity/pregnancy leave' },
-    { value: 'PATERNITY', label: 'Paternity Leave', subLabel: 'Paternity/paternity leave' },
+    { value: 'MATERNITY', label: 'Maternity Leave', subLabel: 'Maternity / pregnancy leave' },
+    { value: 'PATERNITY', label: 'Paternity Leave', subLabel: 'Paternity / paternity leave' },
     { value: 'BEREAVEMENT', label: 'Bereavement Leave', subLabel: 'Family bereavement' },
-    { value: 'STUDY', label: 'Study Leave', subLabel: 'Educational/professional development' },
+    { value: 'STUDY', label: 'Study Leave', subLabel: 'Educational / professional development' },
     { value: 'COMPASSIONATE', label: 'Compassionate Leave', subLabel: 'Compassionate circumstances' },
     { value: 'OTHER', label: 'Other', subLabel: 'Other types of leave' }
   ], []);
 
   const departmentOptions = useMemo(() => {
-    const opts = [{ value: '', label: '' }];
-    const depts = [...new Set(staff.map(s => s.department).filter(Boolean))];
+    const opts = [{ value: '', label: 'All Departments' }];
+    const depts = [...new Set((staff || []).map(s => s.department).filter(Boolean))];
     depts.forEach(dept => {
-      opts.push({ value: dept, label: dept, subLabel: `${staff.filter(s => s.department === dept).length} staff` });
+      opts.push({
+        value: dept,
+        label: dept,
+        subLabel: `${staff.filter(s => s.department === dept).length} staff`
+      });
     });
     return opts;
   }, [staff]);
 
-  // ==================== GET CURRENT TIME ====================
+  // ==================== TIME HELPERS ====================
   const getCurrentTime = () => {
     const now = new Date();
     return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
   };
 
-  // ==================== CHECK IF TIME IS LATE ====================
   const isTimeLate = (timeIn) => {
     const [inHours, inMinutes] = timeIn.split(':').map(Number);
-    const [startHours, startMinutes] = schoolStartTime.split(':').map(Number);
     const [lateHours, lateMinutes] = lateTime.split(':').map(Number);
-    
-    const timeInMinutes = inHours * 60 + inMinutes;
-    const lateTimeMinutes = lateHours * 60 + lateMinutes;
-    
-    return timeInMinutes > lateTimeMinutes;
+    return (inHours * 60 + inMinutes) > (lateHours * 60 + lateMinutes);
   };
 
-  // ==================== LOAD TODAY'S ATTENDANCE ====================
-  const loadTodayAttendance = async () => {
-    if (!currentStaffMember) return;
-    
-    try {
-      const today = new Date().toISOString().split('T')[0];
-      const res = await api.get('/staff-attendance', { 
-        params: { 
-          staffId: currentStaffMember.id,
-          startDate: today,
-          endDate: today
-        } 
-      });
-      
-      const todayAttendance = res.data.attendance?.[0] || null;
-      setTodayRecord(todayAttendance);
-      return todayAttendance;
-    } catch (error) {
-      console.error('Error loading today attendance:', error);
-      return null;
-    }
-  };
-
-  // ==================== LOAD MY ATTENDANCE ====================
-  const loadMyAttendance = async () => {
-    if (!currentStaffMember) return;
-    
-    setLoading(true);
-    try {
-      const res = await api.get('/staff-attendance', { 
-        params: { 
-          staffId: currentStaffMember.id,
-          startDate: dateRange.start,
-          endDate: dateRange.end
-        } 
-      });
-      
-      const attendance = res.data.attendance || [];
-      setMyAttendance(attendance);
-      
-      const total = attendance.length;
-      const present = attendance.filter(a => a.status === 'PRESENT' && a.approved).length;
-      const absent = attendance.filter(a => a.status === 'ABSENT' && a.approved).length;
-      const late = attendance.filter(a => a.status === 'LATE' && a.approved).length;
-      const leave = attendance.filter(a => a.status === 'LEAVE' && a.approved).length;
-      
-      setMyAttendanceSummary({
-        total,
-        present,
-        absent,
-        late,
-        leave,
-        presentPercentage: total > 0 ? Math.round((present / total) * 100) : 0
-      });
-      
-    } catch (error) {
-      console.error('Error loading my attendance:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ==================== LOAD MY PENDING REQUESTS ====================
-  const loadMyPendingRequests = async () => {
-    if (!currentStaffMember) return;
-    
-    try {
-      const res = await api.get('/staff-attendance/my-pending');
-      setMyPendingRequests(res.data.pending || []);
-    } catch (error) {
-      console.error('Error loading my pending requests:', error);
-    }
-  };
-
-  // ==================== LOAD PENDING APPROVALS ====================
-  const loadPendingApprovals = async () => {
-    if (!canApproveAttendance) return;
-    
-    setLoading(true);
-    try {
-      const params = {};
-      if (selectedDepartment) params.department = selectedDepartment;
-      
-      const res = await api.get('/staff-attendance/pending', { params });
-      setPendingApprovals(res.data.pending || []);
-    } catch (error) {
-      console.error('Error loading pending approvals:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ==================== LOAD TEAM ATTENDANCE ====================
-  const loadTeamAttendance = async () => {
-    if (!canViewAllAttendance) return;
-    
-    setLoading(true);
-    try {
-      let params = { 
-        startDate: dateRange.start,
-        endDate: dateRange.end
-      };
-      
-      if (isDepartmentHead && currentStaffMember?.department) {
-        params.department = currentStaffMember.department;
-      } else if (selectedDepartment) {
-        params.department = selectedDepartment;
-      }
-      
-      const res = await api.get('/staff-attendance', { params });
-      setAttendanceList(res.data.attendance || []);
-    } catch (error) {
-      console.error('Error loading team attendance:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ==================== LOAD ATTENDANCE REPORT ====================
-  const loadAttendanceReport = async () => {
-    if (!canViewAllAttendance) return;
-    
-    setLoading(true);
-    try {
-      const params = {
-        startDate: dateRange.start,
-        endDate: dateRange.end
-      };
-      
-      if (selectedDepartment) {
-        params.department = selectedDepartment;
-      }
-      
-      const res = await api.get('/staff-attendance/report', { params });
-      setAttendanceReport(res.data);
-    } catch (error) {
-      console.error('Error loading report:', error);
-      alert('Failed to load attendance report');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ==================== UPDATE SCHOOL SETTINGS ====================
-  const updateSchoolSettings = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      await api.patch(`/schools/${currentSchool?.id}`, {
-        startTime: schoolSettings.startTime,
-        lateThreshold: parseInt(schoolSettings.lateThreshold),
-        endTime: schoolSettings.endTime
-      });
-      
-      alert('✅ School attendance settings updated successfully!');
-      setShowSettingsModal(false);
-      window.location.reload();
-    } catch (error) {
-      console.error('Error updating settings:', error);
-      alert('❌ Failed to update settings');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ==================== MARK TIME IN ====================
-  const handleTimeIn = async () => {
-    if (!currentStaffMember) {
-      alert('Staff record not found');
-      return;
-    }
-    
-    if (todayRecord && todayRecord.timeIn) {
-      alert('You have already clocked in today');
-      return;
-    }
-    
-    setTimeInLoading(true);
-    try {
-      const now = new Date();
-      const timeIn = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-      const date = now.toISOString().split('T')[0];
-      
-      const isLate = isTimeLate(timeIn);
-      const status = isLate ? 'LATE' : 'PRESENT';
-      
-      const record = {
-        date,
-        timeIn,
-        status,
-        remarks: isLate ? `Arrived at ${timeIn} (School starts at ${schoolStartTime}, grace period ends at ${lateTime})` : ''
-      };
-      
-      const res = await api.post('/staff-attendance/time-in', record);
-      
-      const lateMessage = isLate ? ` (LATE - School starts at ${schoolStartTime}, grace period ends at ${lateTime})` : '';
-      alert(`✅ Time In recorded at ${timeIn}${lateMessage}`);
-      
-      await loadTodayAttendance();
-      await loadMyAttendance();
-      await loadMyPendingRequests();
-      
-    } catch (error) {
-      console.error('Error clocking in:', error);
-      alert(error.response?.data?.message || '❌ Failed to record Time In');
-    } finally {
-      setTimeInLoading(false);
-    }
-  };
-
-  // ==================== MARK TIME OUT ====================
-  const handleTimeOut = async () => {
-    if (!currentStaffMember) {
-      alert('Staff record not found');
-      return;
-    }
-    
-    if (!todayRecord || !todayRecord.timeIn) {
-      alert('Please clock in first');
-      return;
-    }
-    
-    if (todayRecord.timeOut) {
-      alert('You have already clocked out today');
-      return;
-    }
-    
-    setTimeOutLoading(true);
-    try {
-      const now = new Date();
-      const timeOut = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-      
-      const res = await api.patch(`/staff-attendance/${todayRecord.id}/time-out`, { timeOut });
-      
-      const [inHours, inMinutes] = todayRecord.timeIn.split(':').map(Number);
-      const [outHours, outMinutes] = timeOut.split(':').map(Number);
-      const hoursWorked = ((outHours * 60 + outMinutes) - (inHours * 60 + inMinutes)) / 60;
-      
-      alert(`✅ Time Out recorded at ${timeOut} (${hoursWorked.toFixed(1)} hours worked)`);
-      await loadTodayAttendance();
-      await loadMyAttendance();
-      await loadMyPendingRequests();
-      
-    } catch (error) {
-      console.error('Error clocking out:', error);
-      alert(error.response?.data?.message || '❌ Failed to record Time Out');
-    } finally {
-      setTimeOutLoading(false);
-    }
-  };
-
-  // ==================== SUBMIT LEAVE REQUEST ====================
-  const handleLeaveRequest = async (e) => {
-    e.preventDefault();
-    
-    if (!currentStaffMember) {
-      alert('Staff record not found');
-      return;
-    }
-    
-    if (todayRecord && (todayRecord.timeIn || todayRecord.status === 'LEAVE')) {
-      alert('You already have a record for today');
-      return;
-    }
-    
-    setLoading(true);
-    try {
-      const formData = new FormData(e.target);
-      const leaveType = formData.get('leaveType');
-      const remarks = formData.get('remarks');
-      const date = selectedDate;
-      
-      const record = {
-        date,
-        status: 'LEAVE',
-        leaveType,
-        remarks: remarks || `Leave request: ${leaveType}`,
-        timeIn: null,
-        timeOut: null
-      };
-      
-      const res = await api.post('/staff-attendance/leave-request', record);
-      
-      alert('✅ Leave request submitted for approval');
-      await loadTodayAttendance();
-      await loadMyAttendance();
-      await loadMyPendingRequests();
-      
-      e.target.reset();
-      
-    } catch (error) {
-      console.error('Error submitting leave request:', error);
-      alert(error.response?.data?.message || '❌ Failed to submit leave request');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ==================== APPROVE/REJECT ATTENDANCE ====================
-  const handleApprove = async (attendanceId, action) => {
-    if (!canApproveAttendance) {
-      alert('You do not have permission');
-      return;
-    }
-    
-    setLoading(true);
-    try {
-      await api.patch(`/staff-attendance/${attendanceId}/approve`, { action });
-      
-      alert(`✅ ${action.toLowerCase()}d successfully`);
-      loadPendingApprovals();
-      loadTeamAttendance();
-    } catch (error) {
-      console.error('Error:', error);
-      alert('❌ Failed to process');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ==================== STATUS COLOR HELPER ====================
   const getStatusColor = (status) => {
     const colors = {
       'PRESENT': 'bg-green-100 text-green-800',
@@ -37157,7 +36807,249 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
 
-  // ==================== LOAD ALL DATA ON MOUNT ====================
+  // ==================== DATA LOADERS ====================
+  const loadTodayAttendance = async () => {
+    if (!currentStaffMember) return null;
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const res = await api.get('/staff-attendance', {
+        params: { staffId: currentStaffMember.id, startDate: today, endDate: today }
+      });
+      const todayAttendance = res.data.attendance?.[0] || null;
+      setTodayRecord(todayAttendance);
+      return todayAttendance;
+    } catch (error) {
+      console.error('Error loading today attendance:', error);
+      return null;
+    }
+  };
+
+  const loadMyAttendance = async () => {
+    if (!currentStaffMember) return;
+    setLoading(true);
+    try {
+      const res = await api.get('/staff-attendance', {
+        params: {
+          staffId: currentStaffMember.id,
+          startDate: dateRange.start,
+          endDate: dateRange.end
+        }
+      });
+      const attendance = res.data.attendance || [];
+      setMyAttendance(attendance);
+
+      const total = attendance.length;
+      const present = attendance.filter(a => a.status === 'PRESENT' && a.approved).length;
+      const absent = attendance.filter(a => a.status === 'ABSENT' && a.approved).length;
+      const late = attendance.filter(a => a.status === 'LATE' && a.approved).length;
+      const leave = attendance.filter(a => a.status === 'LEAVE' && a.approved).length;
+
+      setMyAttendanceSummary({
+        total, present, absent, late, leave,
+        presentPercentage: total > 0 ? Math.round((present / total) * 100) : 0
+      });
+    } catch (error) {
+      console.error('Error loading my attendance:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadMyPendingRequests = async () => {
+    if (!currentStaffMember) return;
+    try {
+      const res = await api.get('/staff-attendance/my-pending');
+      setMyPendingRequests(res.data.pending || []);
+    } catch (error) {
+      console.error('Error loading my pending requests:', error);
+    }
+  };
+
+  const loadPendingApprovals = async () => {
+    if (!canApproveAttendance) return;
+    setLoading(true);
+    try {
+      const params = {};
+      if (selectedDepartment) params.department = selectedDepartment;
+      const res = await api.get('/staff-attendance/pending', { params });
+      setPendingApprovals(res.data.pending || []);
+    } catch (error) {
+      console.error('Error loading pending approvals:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadTeamAttendance = async () => {
+    if (!canViewAllAttendance) return;
+    setLoading(true);
+    try {
+      let params = { startDate: dateRange.start, endDate: dateRange.end };
+      if (isDepartmentHead && currentStaffMember?.department) {
+        params.department = currentStaffMember.department;
+      } else if (selectedDepartment) {
+        params.department = selectedDepartment;
+      }
+      const res = await api.get('/staff-attendance', { params });
+      setAttendanceList(res.data.attendance || []);
+    } catch (error) {
+      console.error('Error loading team attendance:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadAttendanceReport = async () => {
+    if (!canViewAllAttendance) return;
+    setLoading(true);
+    try {
+      const params = { startDate: dateRange.start, endDate: dateRange.end };
+      if (selectedDepartment) params.department = selectedDepartment;
+      const res = await api.get('/staff-attendance/report', { params });
+      setAttendanceReport(res.data);
+    } catch (error) {
+      console.error('Error loading report:', error);
+      alert('Failed to load attendance report');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==================== ACTIONS ====================
+  const updateSchoolSettings = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await api.patch(`/schools/${currentSchool?.id}`, {
+        startTime: schoolSettings.startTime,
+        lateThreshold: parseInt(schoolSettings.lateThreshold),
+        endTime: schoolSettings.endTime
+      });
+      alert('✅ School attendance settings updated successfully!');
+      setShowSettingsModal(false);
+      window.location.reload();
+    } catch (error) {
+      console.error('Error updating settings:', error);
+      alert('❌ Failed to update settings');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleTimeIn = async () => {
+    if (!currentStaffMember) return alert('Staff record not found');
+    if (todayRecord && todayRecord.timeIn) return alert('You have already clocked in today');
+
+    setTimeInLoading(true);
+    try {
+      const now = new Date();
+      const timeIn = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+      const date = now.toISOString().split('T')[0];
+      const isLate = isTimeLate(timeIn);
+      const status = isLate ? 'LATE' : 'PRESENT';
+
+      await api.post('/staff-attendance/time-in', {
+        date,
+        timeIn,
+        status,
+        remarks: isLate
+          ? `Arrived at ${timeIn} (School starts at ${schoolStartTime}, grace ends at ${lateTime})`
+          : ''
+      });
+
+      alert(`✅ Time In recorded at ${timeIn}${isLate ? ` (LATE)` : ''}`);
+      await loadTodayAttendance();
+      await loadMyAttendance();
+      await loadMyPendingRequests();
+    } catch (error) {
+      console.error('Error clocking in:', error);
+      alert(error.response?.data?.message || '❌ Failed to record Time In');
+    } finally {
+      setTimeInLoading(false);
+    }
+  };
+
+  const handleTimeOut = async () => {
+    if (!currentStaffMember) return alert('Staff record not found');
+    if (!todayRecord || !todayRecord.timeIn) return alert('Please clock in first');
+    if (todayRecord.timeOut) return alert('You have already clocked out today');
+
+    setTimeOutLoading(true);
+    try {
+      const now = new Date();
+      const timeOut = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+
+      await api.patch(`/staff-attendance/${todayRecord.id}/time-out`, { timeOut });
+
+      const [inHours, inMinutes] = todayRecord.timeIn.split(':').map(Number);
+      const [outHours, outMinutes] = timeOut.split(':').map(Number);
+      const hoursWorked = ((outHours * 60 + outMinutes) - (inHours * 60 + inMinutes)) / 60;
+
+      alert(`✅ Time Out recorded at ${timeOut} (${hoursWorked.toFixed(1)} hours worked)`);
+      await loadTodayAttendance();
+      await loadMyAttendance();
+      await loadMyPendingRequests();
+    } catch (error) {
+      console.error('Error clocking out:', error);
+      alert(error.response?.data?.message || '❌ Failed to record Time Out');
+    } finally {
+      setTimeOutLoading(false);
+    }
+  };
+
+  const handleLeaveRequest = async (e) => {
+    e.preventDefault();
+    if (!currentStaffMember) return alert('Staff record not found');
+    if (!leaveType) return alert('Please select a leave type');
+    if (todayRecord && (todayRecord.timeIn || todayRecord.status === 'LEAVE')) {
+      return alert('You already have a record for today');
+    }
+
+    setLoading(true);
+    try {
+      const formData = new FormData(e.target);
+      const remarks = formData.get('remarks');
+
+      await api.post('/staff-attendance/leave-request', {
+        date: selectedDate,
+        status: 'LEAVE',
+        leaveType,
+        remarks: remarks || `Leave request: ${leaveType}`,
+        timeIn: null,
+        timeOut: null
+      });
+
+      alert('✅ Leave request submitted for approval');
+      await loadTodayAttendance();
+      await loadMyAttendance();
+      await loadMyPendingRequests();
+      e.target.reset();
+      setLeaveType('');
+    } catch (error) {
+      console.error('Error submitting leave request:', error);
+      alert(error.response?.data?.message || '❌ Failed to submit leave request');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApprove = async (attendanceId, action) => {
+    if (!canApproveAttendance) return alert('You do not have permission');
+    setLoading(true);
+    try {
+      await api.patch(`/staff-attendance/${attendanceId}/approve`, { action });
+      alert(`✅ ${action.toLowerCase()}d successfully`);
+      loadPendingApprovals();
+      loadTeamAttendance();
+    } catch (error) {
+      console.error('Error:', error);
+      alert('❌ Failed to process');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==================== EFFECTS ====================
   useEffect(() => {
     if (viewMode === 'self' && isUserInStaff) {
       loadTodayAttendance();
@@ -37170,32 +37062,38 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
     } else if (viewMode === 'reports' && canViewAllAttendance) {
       loadAttendanceReport();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode]);
 
   // ==================== RENDER ====================
   return (
     <div className="space-y-6">
-      {loading && <div className="h-1 bg-indigo-600 animate-pulse fixed top-0 left-0 w-full" />}
-      
+      {loading && <div className="h-1 bg-indigo-600 animate-pulse fixed top-0 left-0 w-full z-50" />}
+
+      {/* ==================== HEADER ==================== */}
       <div className="flex justify-between items-center flex-wrap gap-4">
         <div>
           <h2 className="text-2xl font-bold">Staff Attendance</h2>
           <p className="text-sm text-gray-500 mt-1">
             <i className="fas fa-clock mr-1"></i>
-            Work hours: {schoolStartTime} - {schoolEndTime} | 
-            Late after: {lateTime} ({lateThreshold} min grace period)
+            Work hours: {schoolStartTime} – {schoolEndTime} |
+            Late after: {lateTime} ({lateThreshold} min grace)
           </p>
         </div>
-        
+
         {currentStaffMember && (
           <div className="bg-indigo-50 px-4 py-2 rounded-lg">
             <span className="text-sm text-indigo-700">
               <i className="fas fa-id-badge mr-2"></i>
-              {currentStaffMember.jobTitle || 'Staff'} • {currentStaffMember.department || 'No Department'}
+              {(currentStaffMember.jobTitle && currentStaffMember.jobTitle.length > 2)
+                ? currentStaffMember.jobTitle
+                : (currentStaffMember.staffType || 'Staff')}
+              {' • '}
+              {currentStaffMember.department || 'No Department'}
             </span>
           </div>
         )}
-        
+
         {(isSuperAdmin || isSchoolAdmin || isPrincipal) && (
           <button
             onClick={() => setShowSettingsModal(true)}
@@ -37205,7 +37103,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
             <i className="fas fa-cog mr-2"></i>Settings
           </button>
         )}
-        
+
         <div className="flex flex-wrap gap-2">
           {isUserInStaff && (
             <button
@@ -37215,7 +37113,6 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
               <i className="fas fa-user-check mr-2"></i>My Attendance
             </button>
           )}
-          
           {canViewAllAttendance && (
             <button
               onClick={() => setViewMode('team')}
@@ -37224,13 +37121,9 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
               <i className="fas fa-users mr-2"></i>Team View
             </button>
           )}
-          
           {canApproveAttendance && (
             <button
-              onClick={() => {
-                setViewMode('approvals');
-                loadPendingApprovals();
-              }}
+              onClick={() => { setViewMode('approvals'); loadPendingApprovals(); }}
               className={`px-4 py-2 rounded-lg transition-all relative ${viewMode === 'approvals' ? 'bg-indigo-600 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
             >
               <i className="fas fa-check-double mr-2"></i>
@@ -37242,13 +37135,9 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
               )}
             </button>
           )}
-          
           {canViewAllAttendance && (
             <button
-              onClick={() => {
-                setViewMode('reports');
-                loadAttendanceReport();
-              }}
+              onClick={() => { setViewMode('reports'); loadAttendanceReport(); }}
               className={`px-4 py-2 rounded-lg transition-all ${viewMode === 'reports' ? 'bg-indigo-600 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
             >
               <i className="fas fa-chart-bar mr-2"></i>Reports
@@ -37257,7 +37146,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
         </div>
       </div>
 
-      {/* ==================== SCHOOL ATTENDANCE SETTINGS MODAL ==================== */}
+      {/* ==================== SETTINGS MODAL ==================== */}
       {showSettingsModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
@@ -37267,19 +37156,17 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                 <i className="fas fa-times"></i>
               </button>
             </div>
-            
             <form onSubmit={updateSchoolSettings} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">School Start Time</label>
                 <input
                   type="time"
                   value={schoolSettings.startTime}
-                  onChange={(e) => setSchoolSettings({...schoolSettings, startTime: e.target.value})}
+                  onChange={(e) => setSchoolSettings({ ...schoolSettings, startTime: e.target.value })}
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                   required
                 />
               </div>
-              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Grace Period (minutes)</label>
                 <input
@@ -37287,23 +37174,21 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                   min="0"
                   max="120"
                   value={schoolSettings.lateThreshold}
-                  onChange={(e) => setSchoolSettings({...schoolSettings, lateThreshold: parseInt(e.target.value)})}
+                  onChange={(e) => setSchoolSettings({ ...schoolSettings, lateThreshold: parseInt(e.target.value) })}
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                   required
                 />
               </div>
-              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">School End Time</label>
                 <input
                   type="time"
                   value={schoolSettings.endTime}
-                  onChange={(e) => setSchoolSettings({...schoolSettings, endTime: e.target.value})}
+                  onChange={(e) => setSchoolSettings({ ...schoolSettings, endTime: e.target.value })}
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                   required
                 />
               </div>
-              
               <div className="bg-blue-50 p-3 rounded-lg">
                 <p className="text-sm text-blue-800">
                   <i className="fas fa-info-circle mr-1"></i>
@@ -37316,20 +37201,13 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                   })()}</strong>
                 </p>
               </div>
-              
               <div className="flex justify-end space-x-2 pt-4">
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700"
-                >
+                <button type="submit" disabled={loading}
+                  className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700">
                   {loading ? 'Saving...' : 'Save Settings'}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setShowSettingsModal(false)}
-                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
-                >
+                <button type="button" onClick={() => setShowSettingsModal(false)}
+                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
                   Cancel
                 </button>
               </div>
@@ -37338,16 +37216,17 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
         </div>
       )}
 
-      {/* ==================== MY ATTENDANCE VIEW ==================== */}
+      {/* ==================== SELF VIEW ==================== */}
       {viewMode === 'self' && isUserInStaff && (
         <div className="space-y-6">
           {/* Today's Attendance Card */}
           <div className="bg-white rounded-xl shadow-sm overflow-hidden">
             <div className="bg-gradient-to-r from-indigo-500 to-purple-600 px-6 py-4">
               <h3 className="text-white font-semibold text-lg">Today's Attendance</h3>
-              <p className="text-indigo-100 text-sm">{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+              <p className="text-indigo-100 text-sm">
+                {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+              </p>
             </div>
-            
             <div className="p-6">
               {!todayRecord ? (
                 <div className="text-center py-8">
@@ -37360,11 +37239,9 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                     disabled={timeInLoading}
                     className="bg-green-600 text-white px-8 py-3 rounded-lg hover:bg-green-700 transition-all flex items-center justify-center mx-auto gap-2"
                   >
-                    {timeInLoading ? (
-                      <><i className="fas fa-spinner fa-spin"></i> Processing...</>
-                    ) : (
-                      <><i className="fas fa-sign-in-alt"></i> Clock In</>
-                    )}
+                    {timeInLoading
+                      ? <><i className="fas fa-spinner fa-spin"></i> Processing...</>
+                      : <><i className="fas fa-sign-in-alt"></i> Clock In</>}
                   </button>
                 </div>
               ) : (
@@ -37375,7 +37252,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                         <div>
                           <p className="text-sm text-gray-500">Time In</p>
                           <p className="text-3xl font-bold text-gray-800">
-                            {todayRecord.timeIn ? todayRecord.timeIn.substring(0,5) : '--:--'}
+                            {todayRecord.timeIn ? todayRecord.timeIn.substring(0, 5) : '--:--'}
                           </p>
                           {todayRecord.status === 'LATE' && (
                             <span className="inline-block mt-1 px-2 py-0.5 bg-yellow-100 text-yellow-800 text-xs rounded-full">
@@ -37388,13 +37265,12 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                         </div>
                       </div>
                     </div>
-                    
                     <div className={`rounded-xl p-4 ${todayRecord.timeOut ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50'}`}>
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-sm text-gray-500">Time Out</p>
                           <p className="text-3xl font-bold text-gray-800">
-                            {todayRecord.timeOut ? todayRecord.timeOut.substring(0,5) : '--:--'}
+                            {todayRecord.timeOut ? todayRecord.timeOut.substring(0, 5) : '--:--'}
                           </p>
                           {todayRecord.timeOut && (
                             <p className="text-xs text-gray-500 mt-1">
@@ -37413,34 +37289,34 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                       </div>
                     </div>
                   </div>
-                  
+
                   {todayRecord.timeIn && !todayRecord.timeOut && (
                     <button
                       onClick={handleTimeOut}
                       disabled={timeOutLoading}
                       className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition-all flex items-center justify-center gap-2"
                     >
-                      {timeOutLoading ? (
-                        <><i className="fas fa-spinner fa-spin"></i> Processing...</>
-                      ) : (
-                        <><i className="fas fa-sign-out-alt"></i> Clock Out</>
-                      )}
+                      {timeOutLoading
+                        ? <><i className="fas fa-spinner fa-spin"></i> Processing...</>
+                        : <><i className="fas fa-sign-out-alt"></i> Clock Out</>}
                     </button>
                   )}
-                  
+
                   <div className="flex justify-between items-center pt-2 border-t">
                     <span className="text-sm text-gray-500">Status</span>
                     <span className={`px-3 py-1 rounded-full text-sm ${getStatusColor(todayRecord.status)}`}>
                       {todayRecord.status}
                     </span>
                   </div>
-                  
+
                   {!todayRecord.approved && (
                     <div className="bg-yellow-50 p-3 rounded-lg">
                       <div className="flex items-center gap-2">
                         <i className="fas fa-hourglass-half text-yellow-600"></i>
                         <span className="text-sm text-yellow-800">
-                          {todayRecord.approvalStatus === 'REJECTED' ? 'Rejected - Please contact HR' : 'Pending approval from HR'}
+                          {todayRecord.approvalStatus === 'REJECTED'
+                            ? 'Rejected — please contact HR'
+                            : 'Pending approval from HR'}
                         </span>
                       </div>
                     </div>
@@ -37450,13 +37326,13 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
             </div>
           </div>
 
-          {/* Leave Request Form with Searchable Select */}
+          {/* Leave Request Form */}
           <div className="bg-white rounded-xl shadow-sm p-6">
             <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
               <i className="fas fa-umbrella-beach text-blue-500"></i>
               Request Leave
             </h3>
-            
+
             <form onSubmit={handleLeaveRequest} className="space-y-4 max-w-md">
               <div>
                 <label className="block text-sm font-medium mb-1">Leave Date</label>
@@ -37469,27 +37345,16 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                   required
                 />
               </div>
-              
-              <div>
-                <SearchableSelect
-                  label="Leave Type"
-                  value={document.querySelector('select[name="leaveType"]')?.value || ''}
-                  onChange={(e) => {
-                    const select = document.querySelector('select[name="leaveType"]');
-                    if (select) select.value = e.target.value;
-                  }}
-                  options={leaveTypeOptions}
-                  placeholder="Select leave type..."
-                  required
-                />
-                {/* Hidden select for form submission */}
-                <select name="leaveType" className="hidden" required>
-                  {leaveTypeOptions.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </div>
-              
+
+              <SearchableSelect
+                label="Leave Type"
+                value={leaveType}
+                onChange={(e) => setLeaveType(e.target.value)}
+                options={leaveTypeOptions}
+                placeholder="Select leave type..."
+                required
+              />
+
               <div>
                 <label className="block text-sm font-medium mb-1">Reason / Remarks</label>
                 <textarea
@@ -37499,32 +37364,155 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                   placeholder="Please provide reason for leave..."
                 />
               </div>
-              
+
               <button
                 type="submit"
-                disabled={loading}
-                className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-all"
+                disabled={loading || !leaveType}
+                className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-all disabled:opacity-50"
               >
                 {loading ? 'Submitting...' : 'Submit Leave Request'}
               </button>
             </form>
           </div>
 
-          {/* Rest of the component (my pending requests, history, etc.) remains the same */}
+          {/* My Pending Requests */}
           {myPendingRequests.length > 0 && (
             <div className="bg-white p-6 rounded-xl shadow-sm">
               <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
                 <i className="fas fa-clock text-yellow-500"></i>
                 My Pending Requests ({myPendingRequests.length})
               </h3>
-              {/* ... table remains the same ... */}
+              <div className="overflow-x-auto border rounded-lg">
+                <table className="w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time In</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time Out</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Remarks</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {myPendingRequests.map((record) => (
+                      <tr key={record.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-2">{new Date(record.date).toLocaleDateString()}</td>
+                        <td className="px-4 py-2">
+                          <span className={`px-2 py-1 rounded-full text-xs ${getStatusColor(record.status)}`}>
+                            {record.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 font-mono">{record.timeIn?.substring(0, 5) || '—'}</td>
+                        <td className="px-4 py-2 font-mono">{record.timeOut?.substring(0, 5) || '—'}</td>
+                        <td className="px-4 py-2 text-sm text-gray-500">{record.remarks || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
-          {/* My Attendance History - remains the same */}
+          {/* My Attendance History */}
           <div className="bg-white p-6 rounded-xl shadow-sm">
-            <h3 className="text-lg font-semibold mb-4">My Attendance History</h3>
-            {/* ... history table remains the same ... */}
+            <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
+              <h3 className="text-lg font-semibold">My Attendance History</h3>
+              <div className="flex gap-2 flex-wrap">
+                <input
+                  type="date"
+                  value={dateRange.start}
+                  onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+                  className="px-3 py-1.5 border rounded-lg text-sm"
+                />
+                <input
+                  type="date"
+                  value={dateRange.end}
+                  onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+                  className="px-3 py-1.5 border rounded-lg text-sm"
+                />
+                <button
+                  onClick={loadMyAttendance}
+                  className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-indigo-700"
+                >
+                  Load
+                </button>
+              </div>
+            </div>
+
+            {myAttendanceSummary && (
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+                <div className="bg-blue-50 p-3 rounded-lg text-center">
+                  <p className="text-xs text-blue-600">Total</p>
+                  <p className="text-xl font-bold text-blue-700">{myAttendanceSummary.total}</p>
+                </div>
+                <div className="bg-green-50 p-3 rounded-lg text-center">
+                  <p className="text-xs text-green-600">Present</p>
+                  <p className="text-xl font-bold text-green-700">{myAttendanceSummary.present}</p>
+                </div>
+                <div className="bg-red-50 p-3 rounded-lg text-center">
+                  <p className="text-xs text-red-600">Absent</p>
+                  <p className="text-xl font-bold text-red-700">{myAttendanceSummary.absent}</p>
+                </div>
+                <div className="bg-yellow-50 p-3 rounded-lg text-center">
+                  <p className="text-xs text-yellow-600">Late</p>
+                  <p className="text-xl font-bold text-yellow-700">{myAttendanceSummary.late}</p>
+                </div>
+                <div className="bg-purple-50 p-3 rounded-lg text-center">
+                  <p className="text-xs text-purple-600">Leave</p>
+                  <p className="text-xl font-bold text-purple-700">{myAttendanceSummary.leave}</p>
+                </div>
+              </div>
+            )}
+
+            {myAttendance.length > 0 ? (
+              <div className="overflow-x-auto border rounded-lg">
+                <table className="w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time In</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time Out</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Hours</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Approval</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Remarks</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {myAttendance.map((record) => {
+                      const hours = record.timeIn && record.timeOut
+                        ? ((new Date(`1970-01-01T${record.timeOut}`) - new Date(`1970-01-01T${record.timeIn}`)) / (1000 * 60 * 60)).toFixed(1)
+                        : '—';
+                      return (
+                        <tr key={record.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-2">{new Date(record.date).toLocaleDateString()}</td>
+                          <td className="px-4 py-2">
+                            <span className={`px-2 py-1 rounded-full text-xs ${getStatusColor(record.status)}`}>
+                              {record.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 font-mono">{record.timeIn?.substring(0, 5) || '—'}</td>
+                          <td className="px-4 py-2 font-mono">{record.timeOut?.substring(0, 5) || '—'}</td>
+                          <td className="px-4 py-2">{hours !== '—' ? `${hours}h` : '—'}</td>
+                          <td className="px-4 py-2">
+                            {record.approved ? (
+                              <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">Approved</span>
+                            ) : record.approvalStatus === 'REJECTED' ? (
+                              <span className="px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs">Rejected</span>
+                            ) : (
+                              <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs">Pending</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2 text-sm text-gray-500 max-w-xs truncate">{record.remarks || '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-gray-500 text-center py-8">No attendance records found</p>
+            )}
           </div>
         </div>
       )}
@@ -37533,16 +37521,18 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
       {viewMode === 'team' && canViewAllAttendance && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">
-            {isDepartmentHead ? `${currentStaffMember?.department} Department Attendance` : 'Team Attendance'}
+            {isDepartmentHead
+              ? `${currentStaffMember?.department} Department Attendance`
+              : 'Team Attendance'}
           </h3>
-          
-          <div className="grid grid-cols-3 gap-4 mb-6">
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             <div>
               <label className="block text-sm font-medium mb-1">Start Date</label>
               <input
                 type="date"
                 value={dateRange.start}
-                onChange={(e) => setDateRange({...dateRange, start: e.target.value})}
+                onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
                 className="w-full px-3 py-2 border rounded-lg"
               />
             </div>
@@ -37551,21 +37541,18 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
               <input
                 type="date"
                 value={dateRange.end}
-                onChange={(e) => setDateRange({...dateRange, end: e.target.value})}
+                onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
                 className="w-full px-3 py-2 border rounded-lg"
               />
             </div>
-            
             {!isDepartmentHead && (
-              <div>
-                <SearchableSelect
-                  label="Department"
-                  value={selectedDepartment}
-                  onChange={(e) => setSelectedDepartment(e.target.value)}
-                  options={departmentOptions}
-                  placeholder="All Departments"
-                />
-              </div>
+              <SearchableSelect
+                label="Department"
+                value={selectedDepartment}
+                onChange={(e) => setSelectedDepartment(e.target.value)}
+                options={departmentOptions}
+                placeholder="All Departments"
+              />
             )}
           </div>
 
@@ -37573,32 +37560,30 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
             onClick={loadTeamAttendance}
             className="mb-4 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
           >
-            Load Attendance
+            <i className="fas fa-sync-alt mr-2"></i>Load Attendance
           </button>
 
-          {/* Attendance table remains the same */}
           {attendanceList.length > 0 ? (
             <div className="overflow-x-auto border rounded-lg">
               <table className="w-full">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-2 text-left">Employee</th>
-                    <th className="px-4 py-2 text-left">Department</th>
-                    <th className="px-4 py-2 text-left">Date</th>
-                    <th className="px-4 py-2 text-left">Status</th>
-                    <th className="px-4 py-2 text-left">Time In</th>
-                    <th className="px-4 py-2 text-left">Time Out</th>
-                    <th className="px-4 py-2 text-left">Hours</th>
-                    <th className="px-4 py-2 text-left">Approval</th>
-                    <th className="px-4 py-2 text-left">Remarks</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Department</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time In</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time Out</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Hours</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Approval</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Remarks</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {attendanceList.map(record => {
-                    const hours = record.timeIn && record.timeOut 
+                    const hours = record.timeIn && record.timeOut
                       ? ((new Date(`1970-01-01T${record.timeOut}`) - new Date(`1970-01-01T${record.timeIn}`)) / (1000 * 60 * 60)).toFixed(1)
                       : '—';
-
                     return (
                       <tr key={record.id} className="hover:bg-gray-50">
                         <td className="px-4 py-2 font-medium">
@@ -37611,8 +37596,8 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                             {record.status}
                           </span>
                         </td>
-                        <td className="px-4 py-2 font-mono">{record.timeIn?.substring(0,5) || '—'}</td>
-                        <td className="px-4 py-2 font-mono">{record.timeOut?.substring(0,5) || '—'}</td>
+                        <td className="px-4 py-2 font-mono">{record.timeIn?.substring(0, 5) || '—'}</td>
+                        <td className="px-4 py-2 font-mono">{record.timeOut?.substring(0, 5) || '—'}</td>
                         <td className="px-4 py-2">{hours !== '—' ? `${hours}h` : '—'}</td>
                         <td className="px-4 py-2">
                           {record.approved ? (
@@ -37640,15 +37625,12 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
       {viewMode === 'approvals' && canApproveAttendance && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">Pending Approvals</h3>
-          
-          <div className="mb-4">
+
+          <div className="mb-4 max-w-sm">
             <SearchableSelect
               label="Filter by Department"
               value={selectedDepartment}
-              onChange={(e) => {
-                setSelectedDepartment(e.target.value);
-                loadPendingApprovals();
-              }}
+              onChange={(e) => { setSelectedDepartment(e.target.value); }}
               options={departmentOptions}
               placeholder="All Departments"
             />
@@ -37659,14 +37641,14 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
               <table className="w-full">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-2 text-left">Employee</th>
-                    <th className="px-4 py-2 text-left">Department</th>
-                    <th className="px-4 py-2 text-left">Date</th>
-                    <th className="px-4 py-2 text-left">Status</th>
-                    <th className="px-4 py-2 text-left">Time In</th>
-                    <th className="px-4 py-2 text-left">Time Out</th>
-                    <th className="px-4 py-2 text-left">Remarks</th>
-                    <th className="px-4 py-2 text-left">Actions</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Department</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time In</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time Out</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Remarks</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -37682,8 +37664,8 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                           {record.status}
                         </span>
                       </td>
-                      <td className="px-4 py-2 font-mono">{record.timeIn?.substring(0,5) || '—'}</td>
-                      <td className="px-4 py-2 font-mono">{record.timeOut?.substring(0,5) || '—'}</td>
+                      <td className="px-4 py-2 font-mono">{record.timeIn?.substring(0, 5) || '—'}</td>
+                      <td className="px-4 py-2 font-mono">{record.timeOut?.substring(0, 5) || '—'}</td>
                       <td className="px-4 py-2 text-sm text-gray-500 max-w-xs">{record.remarks || '—'}</td>
                       <td className="px-4 py-2">
                         <div className="flex space-x-2">
@@ -37718,16 +37700,16 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
       {/* ==================== REPORTS VIEW ==================== */}
       {viewMode === 'reports' && canViewAllAttendance && (
         <div className="space-y-6">
+          {/* Filters */}
           <div className="bg-white p-6 rounded-xl shadow-sm">
             <h3 className="text-lg font-semibold mb-4">Attendance Reports</h3>
-            
-            <div className="grid grid-cols-4 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
               <div>
                 <label className="block text-sm font-medium mb-1">Start Date</label>
                 <input
                   type="date"
                   value={dateRange.start}
-                  onChange={(e) => setDateRange({...dateRange, start: e.target.value})}
+                  onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
                   className="w-full px-3 py-2 border rounded-lg"
                 />
               </div>
@@ -37736,25 +37718,23 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                 <input
                   type="date"
                   value={dateRange.end}
-                  onChange={(e) => setDateRange({...dateRange, end: e.target.value})}
+                  onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
                   className="w-full px-3 py-2 border rounded-lg"
                 />
               </div>
-              <div>
-                <SearchableSelect
-                  label="Department"
-                  value={selectedDepartment}
-                  onChange={(e) => setSelectedDepartment(e.target.value)}
-                  options={departmentOptions}
-                  placeholder="All Departments"
-                />
-              </div>
+              <SearchableSelect
+                label="Department"
+                value={selectedDepartment}
+                onChange={(e) => setSelectedDepartment(e.target.value)}
+                options={departmentOptions}
+                placeholder="All Departments"
+              />
               <div className="flex items-end">
                 <button
                   onClick={loadAttendanceReport}
                   className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
                 >
-                  Generate Report
+                  <i className="fas fa-chart-bar mr-2"></i>Generate Report
                 </button>
               </div>
             </div>
@@ -37763,7 +37743,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
           {attendanceReport && (
             <>
               {/* Summary Cards */}
-              <div className="grid grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-6 text-white">
                   <p className="text-sm opacity-90">Total Staff</p>
                   <p className="text-3xl font-bold">{attendanceReport.summary?.totalStaff || 0}</p>
@@ -37771,7 +37751,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                 <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl p-6 text-white">
                   <p className="text-sm opacity-90">Present</p>
                   <p className="text-3xl font-bold">{attendanceReport.summary?.totalPresent || 0}</p>
-                  <p className="text-xs opacity-75">{attendanceReport.summary?.presentPercentage || 0}%</p>
+                  <p className="text-xs opacity-75">{attendanceReport.summary?.overallAttendanceRate || 0}% rate</p>
                 </div>
                 <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-xl p-6 text-white">
                   <p className="text-sm opacity-90">Absent</p>
@@ -37788,7 +37768,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
               </div>
 
               {/* Pending & Rejected Stats */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="bg-yellow-50 p-4 rounded-lg">
                   <p className="text-sm text-yellow-600">Pending Approvals</p>
                   <p className="text-2xl font-bold text-yellow-700">{attendanceReport.summary?.pendingApprovals || 0}</p>
@@ -37798,7 +37778,149 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                   <p className="text-2xl font-bold text-red-700">{attendanceReport.summary?.rejectedApprovals || 0}</p>
                 </div>
               </div>
+
+              {/* ============ PER-STAFF BREAKDOWN TABLE ============ */}
+              {attendanceReport.perStaff && attendanceReport.perStaff.length > 0 && (
+                <div className="bg-white p-6 rounded-xl shadow-sm">
+                  <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
+                    <h3 className="text-lg font-semibold">
+                      👥 Staff Breakdown ({attendanceReport.perStaff.length})
+                    </h3>
+                    <span className="text-xs text-gray-500">
+                      {attendanceReport.period?.startDate} → {attendanceReport.period?.endDate}
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto border rounded-lg">
+                    <table className="w-full">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee ID</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Department</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Job Title</th>
+                          <th className="px-4 py-3 text-center text-xs font-medium text-green-600 uppercase">Present</th>
+                          <th className="px-4 py-3 text-center text-xs font-medium text-red-600 uppercase">Absent</th>
+                          <th className="px-4 py-3 text-center text-xs font-medium text-yellow-600 uppercase">Late</th>
+                          <th className="px-4 py-3 text-center text-xs font-medium text-blue-600 uppercase">Leave</th>
+                          <th className="px-4 py-3 text-center text-xs font-medium text-orange-600 uppercase">Pending</th>
+                          <th className="px-4 py-3 text-center text-xs font-medium text-gray-600 uppercase">Rate</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {attendanceReport.perStaff.map(s => (
+                          <tr key={s.staffId} className="hover:bg-gray-50">
+                            <td className="px-4 py-3">
+                              <div className="font-medium text-gray-800">{s.name}</div>
+                              {s.email && <div className="text-xs text-gray-500">{s.email}</div>}
+                            </td>
+                            <td className="px-4 py-3 font-mono text-sm">{s.employeeId || '—'}</td>
+                            <td className="px-4 py-3 text-sm">{s.department}</td>
+                            <td className="px-4 py-3 text-sm">{s.jobTitle}</td>
+                            <td className="px-4 py-3 text-center">
+                              <span className="px-2 py-1 rounded-full text-xs bg-green-100 text-green-800 font-medium">
+                                {s.totals.present}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <span className="px-2 py-1 rounded-full text-xs bg-red-100 text-red-800 font-medium">
+                                {s.totals.absent}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <span className="px-2 py-1 rounded-full text-xs bg-yellow-100 text-yellow-800 font-medium">
+                                {s.totals.late}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800 font-medium">
+                                {s.totals.leave}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                s.totals.pending > 0 ? 'bg-orange-100 text-orange-800' : 'bg-gray-100 text-gray-500'
+                              }`}>
+                                {s.totals.pending}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <div className="flex-1 bg-gray-200 rounded-full h-2 min-w-[60px]">
+                                  <div
+                                    className="bg-green-500 h-2 rounded-full transition-all"
+                                    style={{ width: `${s.attendanceRate}%` }}
+                                  />
+                                </div>
+                                <span className="text-xs font-medium text-gray-700 w-10">
+                                  {s.attendanceRate}%
+                                </span>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* ============ DEPARTMENT BREAKDOWN ============ */}
+              {attendanceReport.byDepartment && attendanceReport.byDepartment.length > 0 && (
+                <div className="bg-white p-6 rounded-xl shadow-sm">
+                  <h3 className="text-lg font-semibold mb-4">🏢 Department Breakdown</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {attendanceReport.byDepartment.map(dept => (
+                      <div key={dept.department} className="border rounded-lg p-4">
+                        <div className="flex justify-between items-center mb-3">
+                          <h4 className="font-semibold text-gray-800">{dept.department}</h4>
+                          <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">
+                            {dept.staffCount} staff
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-sm">
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Present:</span>
+                            <span className="font-medium text-green-600">{dept.present}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Absent:</span>
+                            <span className="font-medium text-red-600">{dept.absent}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Late:</span>
+                            <span className="font-medium text-yellow-600">{dept.late}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Leave:</span>
+                            <span className="font-medium text-blue-600">{dept.leave}</span>
+                          </div>
+                          <div className="flex justify-between col-span-2 pt-2 border-t mt-2">
+                            <span className="text-gray-500">Pending:</span>
+                            <span className="font-medium text-orange-600">{dept.pending}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Empty state if report has no per-staff data */}
+              {(!attendanceReport.perStaff || attendanceReport.perStaff.length === 0) && (
+                <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+                  <i className="fas fa-users text-5xl text-gray-300 mb-3"></i>
+                  <p className="text-gray-500">No staff attendance records found for this period.</p>
+                </div>
+              )}
             </>
+          )}
+
+          {!attendanceReport && !loading && (
+            <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+              <i className="fas fa-chart-bar text-5xl text-gray-300 mb-3"></i>
+              <p className="text-gray-500">Select a date range and click "Generate Report".</p>
+            </div>
           )}
         </div>
       )}
