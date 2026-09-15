@@ -3191,14 +3191,27 @@ Attendance.belongsTo(User, { as: 'markedByUser', foreignKey: 'markedBy' });
 Attendance.belongsTo(Course, { foreignKey: 'courseId' });
 Attendance.belongsTo(Program, { foreignKey: 'programId' });
 Program.hasMany(Attendance, { foreignKey: 'programId' });
-
+// ==================== STAFF ATTENDANCE ASSOCIATIONS ====================
 AuditLog.belongsTo(User, { foreignKey: 'userId' });
-StaffAttendance.belongsTo(Staff, { foreignKey: 'staffId' });
+
+// Staff ↔ StaffAttendance (both directions are REQUIRED)
+StaffAttendance.belongsTo(Staff, { 
+  foreignKey: 'staffId',
+  as: 'Staff'
+});
+Staff.hasMany(StaffAttendance, { 
+  foreignKey: 'staffId', 
+  as: 'attendances' 
+});
+
+// Approver (User)
 StaffAttendance.belongsTo(User, { 
   as: 'approvedByUser', 
   foreignKey: 'approvedBy', 
   constraints: false 
 });
+
+Sponsor.belongsTo(School, { foreignKey: 'schoolId' });
 
 Sponsor.belongsTo(School, { foreignKey: 'schoolId' });
 Sponsor.belongsToMany(Student, { through: StudentSponsor, foreignKey: 'sponsorId' });
