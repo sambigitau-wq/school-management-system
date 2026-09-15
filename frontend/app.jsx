@@ -29375,7 +29375,183 @@ const TimetableModule = ({
     </div>
   );
 };
-// ==================== FEES MODULE WITH SEARCHABLE SELECT + DISCOUNTS ====================
+// ==================== SHARED: SEARCHABLE SELECT (MODULE SCOPE) ====================
+// ⚠️ MUST be at module scope — defining this inside FeesModule causes remounts on
+//    every render, which destroys focus and makes typing impossible.
+const FeesSearchableSelect = ({ 
+  label, value, onChange, options = [], placeholder, 
+  disabled, required, className, showClear = true 
+}) => {
+  const [search, setSearch] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const dropdownRef = useRef(null);
+  const inputRef = useRef(null);
+
+  const optionsWithEmpty = useMemo(() => {
+    const hasEmpty = options.some(opt => opt.value === '' || opt.value === null || opt.value === undefined);
+    if (hasEmpty) return options;
+    return [{ value: '', label: '' }, ...options];
+  }, [options]);
+
+  const filteredOptions = useMemo(() => {
+    if (!search.trim()) return optionsWithEmpty;
+    const searchLower = search.toLowerCase();
+    return optionsWithEmpty.filter(opt => 
+      opt.label?.toLowerCase().includes(searchLower) ||
+      opt.subLabel?.toLowerCase().includes(searchLower) ||
+      opt.value?.toString().toLowerCase().includes(searchLower)
+    );
+  }, [optionsWithEmpty, search]);
+
+  const selectedOption = optionsWithEmpty.find(opt => opt.value === value);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+        setIsFocused(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Sync input text with selected value ONLY when not focused.
+  // Never push the placeholder into the input's value.
+  useEffect(() => {
+    if (isFocused) return;
+    if (selectedOption && selectedOption.label) {
+      setSearch(selectedOption.label);
+    } else {
+      setSearch('');
+    }
+  }, [value, selectedOption, isFocused]);
+
+  const handleSelect = (selectedValue) => {
+    onChange({ target: { value: selectedValue } });
+    const selected = optionsWithEmpty.find(opt => opt.value === selectedValue);
+    setSearch(selected ? selected.label : '');
+    setIsOpen(false);
+    setIsFocused(false);
+    if (inputRef.current) inputRef.current.focus();
+  };
+
+  const handleInputChange = (e) => {
+    // Keep typing purely local — do NOT call parent onChange here
+    setSearch(e.target.value);
+    setIsOpen(true);
+    setIsFocused(true);
+  };
+
+  const handleFocus = () => { 
+    setIsFocused(true); 
+    setIsOpen(true); 
+  };
+
+  const handleBlur = () => {
+    setTimeout(() => {
+      if (!dropdownRef.current?.contains(document.activeElement)) {
+        setIsOpen(false);
+        setIsFocused(false);
+      }
+    }, 150);
+  };
+
+  const handleClear = (e) => {
+    e.stopPropagation();
+    onChange({ target: { value: '' } });
+    setSearch(''); 
+    setIsOpen(false); 
+    setIsFocused(false);
+    if (inputRef.current) inputRef.current.focus();
+  };
+
+  const displayValue = isFocused ? search : (selectedOption?.label || '');
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      {label && (
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          {label}{required && <span className="text-red-500 ml-1">*</span>}
+        </label>
+      )}
+      <div className="relative">
+        <input
+          ref={inputRef}
+          type="text"
+          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
+            disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
+          } ${className || ''}`}
+          value={displayValue}
+          onChange={handleInputChange}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
+          placeholder={placeholder || "Search and select..."}
+          disabled={disabled}
+          autoComplete="off"
+        />
+        {value && showClear && !disabled && (
+          <button type="button" onClick={handleClear}
+            className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-red-500 z-10"
+            title="Clear selection">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
+        <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
+          <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </div>
+      {isOpen && !disabled && (
+        <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
+          {filteredOptions.length > 0 ? (
+            filteredOptions.map((opt, idx) => (
+              <div key={opt.value || `empty-${idx}`}
+                className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
+                  opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
+                }`}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handleSelect(opt.value)}>
+                <div className="font-medium">{opt.label || '\u00A0'}</div>
+                {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+              </div>
+            ))
+          ) : (
+            <div className="px-3 py-4 text-center text-gray-500 text-sm">
+              {search.trim() ? 'No results found' : 'Type to search...'}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ==================== SHARED: INPUT FIELD (MODULE SCOPE) ====================
+const FeesInputField = ({ label, type, value, onChange, placeholder, required, disabled, min, step }) => (
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-1">
+      {label}{required && <span className="text-red-500 ml-1">*</span>}
+    </label>
+    <input
+      type={type || 'text'}
+      value={value !== undefined && value !== null ? value : ''}
+      onChange={onChange}
+      placeholder={placeholder}
+      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+      disabled={disabled}
+      min={min}
+      step={step}
+    />
+  </div>
+);
+
+
+// ==================== FEES MODULE ====================
 const FeesModule = ({ 
   fees, setFees, 
   payments, setPayments, 
@@ -29427,182 +29603,10 @@ const FeesModule = ({
   const isTVET = schoolCategory === 'COLLEGE_TVET';
   const isPrimarySecondary = !isUniversity && !isTVET;
 
-  // ==================== 3. SEARCHABLE SELECT ====================
-  const SearchableSelect = ({ 
-    label, value, onChange, options, placeholder, 
-    disabled, required, className, showClear = true 
-  }) => {
-    const [search, setSearch] = useState('');
-    const [isOpen, setIsOpen] = useState(false);
-    const [isFocused, setIsFocused] = useState(false);
-    const dropdownRef = useRef(null);
-    const inputRef = useRef(null);
-
-    const optionsWithEmpty = useMemo(() => {
-      const hasEmpty = options.some(opt => opt.value === '' || opt.value === null || opt.value === undefined);
-      if (hasEmpty) return options;
-      return [{ value: '', label: '' }, ...options];
-    }, [options]);
-
-    const filteredOptions = useMemo(() => {
-      if (!search.trim()) return optionsWithEmpty;
-      const searchLower = search.toLowerCase();
-      return optionsWithEmpty.filter(opt => 
-        opt.label?.toLowerCase().includes(searchLower) ||
-        opt.subLabel?.toLowerCase().includes(searchLower) ||
-        opt.value?.toString().toLowerCase().includes(searchLower)
-      );
-    }, [optionsWithEmpty, search]);
-
-    const selectedOption = optionsWithEmpty.find(opt => opt.value === value);
-
-    useEffect(() => {
-      const handleClickOutside = (event) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-          setIsOpen(false);
-          setIsFocused(false);
-        }
-      };
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
-
-    // ✅ Sync input display with selected value ONLY when not focused.
-    //    Never put the placeholder string into the input's `value` attribute.
-    useEffect(() => {
-      if (isFocused) return;
-      if (selectedOption && selectedOption.label) {
-        setSearch(selectedOption.label);
-      } else {
-        setSearch('');
-      }
-    }, [value, selectedOption, isFocused]);
-
-    const handleSelect = (selectedValue) => {
-      onChange({ target: { value: selectedValue } });
-      const selected = optionsWithEmpty.find(opt => opt.value === selectedValue);
-      setSearch(selected ? selected.label : '');
-      setIsOpen(false);
-      setIsFocused(false);
-      if (inputRef.current) inputRef.current.focus();
-    };
-
-    const handleInputChange = (e) => {
-      // ✅ Never call parent onChange here — keep typing purely local
-      setSearch(e.target.value);
-      setIsOpen(true);
-      setIsFocused(true);
-    };
-
-    const handleFocus = () => { 
-      setIsFocused(true); 
-      setIsOpen(true); 
-    };
-
-    const handleBlur = () => {
-      setTimeout(() => {
-        if (!dropdownRef.current?.contains(document.activeElement)) {
-          setIsOpen(false);
-          setIsFocused(false);
-          // Restore handled by the sync effect above
-        }
-      }, 150);
-    };
-
-    const handleClear = (e) => {
-      e.stopPropagation();
-      onChange({ target: { value: '' } });
-      setSearch(''); 
-      setIsOpen(false); 
-      setIsFocused(false);
-      if (inputRef.current) inputRef.current.focus();
-    };
-
-    // ✅ FIXED: never return the placeholder as the input's value
-    const displayValue = isFocused
-      ? search
-      : (selectedOption?.label || '');
-
-    return (
-      <div className="relative" ref={dropdownRef}>
-        {label && (
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}{required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-        )}
-        <div className="relative">
-          <input
-            ref={inputRef}
-            type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
-            } ${className || ''}`}
-            value={displayValue}
-            onChange={handleInputChange}
-            onFocus={handleFocus}
-            onBlur={handleBlur}
-            placeholder={placeholder || "Search and select..."}
-            disabled={disabled}
-            autoComplete="off"
-          />
-          {value && showClear && !disabled && (
-            <button type="button" onClick={handleClear}
-              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-red-500 z-10"
-              title="Clear selection">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-        </div>
-        {isOpen && !disabled && (
-          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-            {filteredOptions.length > 0 ? (
-              filteredOptions.map((opt, idx) => (
-                <div key={opt.value || `empty-${idx}`}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
-                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
-                  }`}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => handleSelect(opt.value)}>
-                  <div className="font-medium">{opt.label || '\u00A0'}</div>
-                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
-                </div>
-              ))
-            ) : (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {search.trim() ? 'No results found' : 'Type to search...'}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // ==================== 4. INPUT FIELD ====================
-  const InputField = ({ label, type, value, onChange, placeholder, required, disabled, min, step }) => (
-    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">
-        {label}{required && <span className="text-red-500 ml-1">*</span>}
-      </label>
-      <input
-        type={type || 'text'}
-        value={value !== undefined && value !== null ? value : ''}
-        onChange={onChange}
-        placeholder={placeholder}
-        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-        disabled={disabled}
-        min={min}
-        step={step}
-      />
-    </div>
-  );
+  // ==================== 3. LOCAL ALIASES FOR SHARED COMPONENTS ====================
+  // Keeps the rest of the file unchanged — JSX still uses <SearchableSelect> / <InputField>.
+  const SearchableSelect = FeesSearchableSelect;
+  const InputField = FeesInputField;
 
   // ==================== 5. OPTIONS GENERATORS ====================
   const termOptions = useMemo(() => {
@@ -29756,11 +29760,9 @@ const FeesModule = ({
   };
 
   // ✅ Compute discount amount for a given fee (optionally per student)
-  // Priority: per-student → student-wide → fee-level default → 0
   const getDiscountForFee = (fee, studentId = null) => {
     if (!fee) return 0;
 
-    // 1) Per-student discount (needs a studentId)
     if (studentId && Array.isArray(discounts)) {
       const perFeeDiscount = discounts.find(d =>
         d.studentId === studentId && d.feeId === fee.id && d.isActive !== false
@@ -29780,11 +29782,10 @@ const FeesModule = ({
       }
     }
 
-    // 2) Fee-level default discount (applies to all students)
     return getFeeLevelDiscount(fee);
   };
 
-  // ✅ Fee-level default discount ONLY (no per-student logic)
+  // ✅ Fee-level default discount ONLY
   const getFeeLevelDiscount = (fee) => {
     if (!fee) return 0;
     const amount = parseFloat(fee.amount) || 0;
@@ -29939,13 +29940,11 @@ const FeesModule = ({
     });
   };
 
-  // ✅ Open discount modal
   const openDiscountModal = (student = null, fee = null) => {
     if (!canGrantDiscount) { alert('You do not have permission to grant discounts'); return; }
     setDiscountStudent(student || null);
     setDiscountFee(fee || null);
 
-    // Try to pre-fill if we already know both student AND fee
     let existing = null;
     if (student && fee && Array.isArray(discounts)) {
       existing = discounts.find(d =>
@@ -29964,11 +29963,10 @@ const FeesModule = ({
     setShowDiscountModal(true);
   };
 
-  // ✅ Pre-fill discount form when both student and fee are chosen in the modal
   useEffect(() => {
     if (!showDiscountModal) return;
     if (!discountStudent) return;
-    if (discountForm.value) return; // user already typing — don't overwrite
+    if (discountForm.value) return;
 
     const existing = Array.isArray(discounts)
       ? discounts.find(d =>
@@ -29990,7 +29988,6 @@ const FeesModule = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showDiscountModal, discountStudent, discountFee]);
 
-  // ✅ Save discount
   const handleSaveDiscount = async () => {
     if (!canGrantDiscount) { alert('You do not have permission to grant discounts'); return; }
     if (!discountStudent) { alert('Please select a student'); return; }
@@ -30050,7 +30047,6 @@ const FeesModule = ({
     }
   };
 
-  // ✅ Remove a fee-level discount (clears discountAmount + discountPercent on the fee)
   const handleRemoveFeeLevelDiscount = async (fee) => {
     if (!canGrantDiscount) { alert('You do not have permission to remove discounts'); return; }
     if (!window.confirm(`Remove the default discount on "${fee.name}"?`)) return;
@@ -30081,14 +30077,10 @@ const FeesModule = ({
     );
   }
 
-  // ✅ Summary totals — fee-level and per-student discounts counted exactly once
   const totalBilled = fees.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
 
   const totalDiscounts = fees.reduce((sum, f) => {
-    // Fee-level default discount (applies to everyone)
     const feeLevel = getFeeLevelDiscount(f);
-
-    // Per-student discounts (each attached to a specific student+fee)
     const perStudent = Array.isArray(discounts)
       ? discounts
           .filter(d => d.feeId === f.id && d.isActive !== false)
@@ -30099,7 +30091,6 @@ const FeesModule = ({
               : v);
           }, 0)
       : 0;
-
     return sum + feeLevel + perStudent;
   }, 0);
 
