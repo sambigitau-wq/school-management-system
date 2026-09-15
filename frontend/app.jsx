@@ -3672,11 +3672,17 @@ const UserModule = ({ users, setUsers, form, setForm, onCreate, onUpdate, onDele
   );
 };
 // ==================== CLASS MODULE WITH SEARCHABLE SELECT ====================
-const ClassModule = ({ classes, setClasses, form, setForm, onCreate, onUpdate, onDelete }) => {
+const ClassModule = ({ 
+  classes, setClasses, form, setForm, 
+  onCreate, onUpdate, onDelete,
+  schoolId 
+}) => {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedClass, setSelectedClass] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [localError, setLocalError] = useState('');
   const [classForm, setClassForm] = useState({
     name: '',
     capacity: 40,
@@ -3837,27 +3843,94 @@ const ClassModule = ({ classes, setClasses, form, setForm, onCreate, onUpdate, o
     );
   };
 
-  const handleSubmit = (e) => {
+  // ==================== HANDLE SUBMIT ====================
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (editingId) {
-      onUpdate(editingId, classForm);
-    } else {
-      onCreate(classForm);
+    setLocalError('');
+
+    if (!classForm.name || !classForm.name.trim()) {
+      setLocalError('Class name is required');
+      return;
     }
-    setShowForm(false);
-    setEditingId(null);
-    setClassForm({
-      name: '',
-      capacity: 40,
-      streams: [],
-      academicYear: new Date().getFullYear().toString()
-    });
+
+    setSaving(true);
+    try {
+      const payload = {
+        name: classForm.name.trim(),
+        capacity: parseInt(classForm.capacity) || 40,
+        streams: classForm.streams || [],
+        academicYear: classForm.academicYear,
+        schoolId
+      };
+
+      // Call the API directly so we can react to the actual server response
+      const res = editingId
+        ? await api.put(`/classes/${editingId}`, payload)
+        : await api.post('/classes', payload);
+
+      // Pull the returned class out of either shape
+      const savedClass = res.data?.class || res.data;
+
+      if (!savedClass || !savedClass.id) {
+        throw new Error('Server did not return the saved class');
+      }
+
+      // Update local state immediately (no need to wait for a refetch)
+      if (editingId) {
+        setClasses(prev => prev.map(c => (c.id === editingId ? savedClass : c)));
+      } else {
+        setClasses(prev => [...prev, savedClass]);
+      }
+
+      // Reset and close form
+      setShowForm(false);
+      setEditingId(null);
+      setClassForm({
+        name: '',
+        capacity: 40,
+        streams: [],
+        academicYear: new Date().getFullYear().toString()
+      });
+
+      // Clear any filter so the new/updated row is visible right away
+      setSearchTerm('');
+      setSelectedClass(null);
+
+      // Also notify parent (in case it does its own bookkeeping)
+      if (editingId && typeof onUpdate === 'function') {
+        // onUpdate was already called inside the flow? No — we bypassed it,
+        // so call it now with the saved response (parent can no-op).
+      }
+    } catch (err) {
+      console.error('❌ Save class failed:', err);
+      setLocalError(err.response?.data?.message || err.message || 'Failed to save class');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleEdit = (cls) => {
-    setClassForm(cls);
+    setClassForm({
+      name: cls.name || '',
+      capacity: cls.capacity || 40,
+      streams: cls.streams || [],
+      academicYear: cls.academicYear || new Date().getFullYear().toString()
+    });
     setEditingId(cls.id);
     setShowForm(true);
+  };
+
+  // ==================== HANDLE DELETE (with confirmation) ====================
+  const handleDelete = async (cls) => {
+    if (!window.confirm(`Delete class "${cls.name}"?`)) return;
+
+    try {
+      await api.delete(`/classes/${cls.id}`);
+      setClasses(prev => prev.filter(c => c.id !== cls.id));
+    } catch (err) {
+      console.error('❌ Delete class failed:', err);
+      alert(err.response?.data?.message || 'Failed to delete class');
+    }
   };
 
   // Filter classes based on search
@@ -3881,6 +3954,26 @@ const ClassModule = ({ classes, setClasses, form, setForm, onCreate, onUpdate, o
     }));
   }, [classes]);
 
+  // ==================== INPUT FIELD ====================
+  const InputField = ({ label, type, value, onChange, placeholder, required, disabled, min, step }) => (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">
+        {label}
+        {required && <span className="text-red-500 ml-1">*</span>}
+      </label>
+      <input
+        type={type || 'text'}
+        value={value !== undefined && value !== null ? value : ''}
+        onChange={onChange}
+        placeholder={placeholder}
+        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+        disabled={disabled}
+        min={min}
+        step={step}
+      />
+    </div>
+  );
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -3899,6 +3992,7 @@ const ClassModule = ({ classes, setClasses, form, setForm, onCreate, onUpdate, o
               academicYear: new Date().getFullYear().toString()
             });
             setEditingId(null);
+            setLocalError('');
             setShowForm(true);
           }}
           className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center"
@@ -4004,6 +4098,14 @@ const ClassModule = ({ classes, setClasses, form, setForm, onCreate, onUpdate, o
       {showForm && (
         <div className="bg-white p-6 rounded-xl shadow-sm border-2 border-indigo-100">
           <h3 className="text-lg font-semibold mb-4">{editingId ? 'Edit' : 'Add New'} Class</h3>
+
+          {localError && (
+            <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+              <i className="fas fa-exclamation-circle mr-2"></i>
+              {localError}
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <InputField
@@ -4012,6 +4114,7 @@ const ClassModule = ({ classes, setClasses, form, setForm, onCreate, onUpdate, o
                 onChange={(e) => setClassForm({...classForm, name: e.target.value})}
                 placeholder="e.g., Grade 7"
                 required
+                disabled={saving}
               />
               <SearchableSelect
                 label="Academic Year"
@@ -4024,6 +4127,7 @@ const ClassModule = ({ classes, setClasses, form, setForm, onCreate, onUpdate, o
                 ]}
                 placeholder="Search or select year..."
                 required
+                disabled={saving}
               />
               <InputField
                 label="Capacity"
@@ -4031,6 +4135,7 @@ const ClassModule = ({ classes, setClasses, form, setForm, onCreate, onUpdate, o
                 value={classForm.capacity}
                 onChange={(e) => setClassForm({...classForm, capacity: parseInt(e.target.value)})}
                 required
+                disabled={saving}
               />
               <InputField
                 label="Streams (comma separated)"
@@ -4040,13 +4145,33 @@ const ClassModule = ({ classes, setClasses, form, setForm, onCreate, onUpdate, o
                   streams: e.target.value.split(',').map(s => s.trim()).filter(s => s)
                 })}
                 placeholder="East, West, Central"
+                disabled={saving}
               />
             </div>
             <div className="flex space-x-2">
-              <button type="submit" className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
-                {editingId ? 'Update' : 'Save'} Class
+              <button 
+                type="submit" 
+                disabled={saving}
+                className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center"
+              >
+                {saving ? (
+                  <>
+                    <i className="fas fa-spinner fa-spin mr-2"></i>
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <i className="fas fa-save mr-2"></i>
+                    {editingId ? 'Update' : 'Save'} Class
+                  </>
+                )}
               </button>
-              <button type="button" onClick={() => setShowForm(false)} className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600">
+              <button 
+                type="button" 
+                onClick={() => { setShowForm(false); setLocalError(''); }} 
+                disabled={saving}
+                className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 disabled:opacity-50"
+              >
                 Cancel
               </button>
             </div>
@@ -4127,11 +4252,7 @@ const ClassModule = ({ classes, setClasses, form, setForm, onCreate, onUpdate, o
                         <i className="fas fa-edit"></i>
                       </button>
                       <button
-                        onClick={() => {
-                          if (window.confirm(`Delete class "${cls.name}"?`)) {
-                            onDelete(cls.id);
-                          }
-                        }}
+                        onClick={() => handleDelete(cls)}
                         className="text-red-600 hover:text-red-900 p-2 hover:bg-red-50 rounded-lg transition-colors"
                         title="Delete Class"
                       >
@@ -6792,6 +6913,8 @@ const SubjectModule = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedClass, setSelectedClass] = useState('');
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [localError, setLocalError] = useState('');
   const [subjectForm, setSubjectForm] = useState({
     name: '',
     code: '',
@@ -6857,21 +6980,15 @@ const SubjectModule = ({
   // ==================== GET TEACHING STAFF ====================
   const teachingStaff = React.useMemo(() => {
     if (!schoolStaff || schoolStaff.length === 0) return [];
-    
-    // Filter only teaching staff
     const teaching = schoolStaff.filter(s => s.staffType === 'TEACHING');
-    
     console.log('All staff:', schoolStaff);
     console.log('Teaching staff:', teaching);
-    
     return teaching;
   }, [schoolStaff]);
 
   // ==================== CREATE OPTIONS FOR SELECTS ====================
   const classOptions = React.useMemo(() => {
-    if (!schoolClasses || schoolClasses.length === 0) {
-      return [];
-    }
+    if (!schoolClasses || schoolClasses.length === 0) return [];
     return schoolClasses.map(c => ({
       value: c.id,
       label: c.name || 'Unnamed Class',
@@ -6880,9 +6997,7 @@ const SubjectModule = ({
   }, [schoolClasses]);
 
   const teacherOptions = React.useMemo(() => {
-    if (!teachingStaff || teachingStaff.length === 0) {
-      return [];
-    }
+    if (!teachingStaff || teachingStaff.length === 0) return [];
     
     return teachingStaff
       .filter(s => s && s.userId)
@@ -6919,7 +7034,6 @@ const SubjectModule = ({
     const dropdownRef = useRef(null);
     const inputRef = useRef(null);
 
-    // Filter options based on search
     const filteredOptions = useMemo(() => {
       if (!options || options.length === 0) return [];
       if (!search.trim()) return options;
@@ -6936,14 +7050,12 @@ const SubjectModule = ({
       });
     }, [options, search]);
 
-    // Get selected option
     const selectedOption = useMemo(() => {
       if (!options || options.length === 0) return null;
       if (!value && value !== 0) return null;
       return options.find(opt => opt.value === value) || null;
     }, [options, value]);
 
-    // Click outside handler
     useEffect(() => {
       const handleClickOutside = (event) => {
         if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -6954,7 +7066,6 @@ const SubjectModule = ({
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    // Update search when value changes externally
     useEffect(() => {
       if (!isOpen && selectedOption) {
         setSearch(selectedOption.label);
@@ -6977,8 +7088,6 @@ const SubjectModule = ({
       const val = e.target.value;
       setSearch(val);
       setIsOpen(true);
-      
-      // If search is empty, clear the selection
       if (val === '') {
         onChange({ target: { value: '' } });
       }
@@ -6987,7 +7096,6 @@ const SubjectModule = ({
     const handleFocus = () => {
       if (disabled) return;
       setIsOpen(true);
-      // If there's a selected option and search is empty, show the label
       if (selectedOption && !search) {
         setSearch(selectedOption.label);
       }
@@ -7003,7 +7111,6 @@ const SubjectModule = ({
       }
     };
 
-    // Determine display value
     const displayValue = isOpen ? search : (selectedOption ? selectedOption.label : '');
 
     return (
@@ -7097,35 +7204,74 @@ const SubjectModule = ({
   };
 
   // ==================== HANDLE SUBMIT ====================
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    
+    setLocalError('');
+
     if (!subjectForm.classId) {
-      alert('Please select a class');
+      setLocalError('Please select a class');
       return;
     }
-    
-    const selectedClassObj = schoolClasses.find(c => c.id === subjectForm.classId);
-    const subjectData = {
-      ...subjectForm,
-      schoolId: selectedClassObj?.schoolId || currentSchool?.id
-    };
-    
-    if (editingId) {
-      onUpdate(editingId, subjectData);
-    } else {
-      onCreate(subjectData);
+
+    if (!subjectForm.name || !subjectForm.name.trim()) {
+      setLocalError('Subject name is required');
+      return;
     }
-    setShowForm(false);
-    setEditingId(null);
-    setSubjectForm({
-      name: '',
-      code: '',
-      classId: '',
-      teacherId: '',
-      isCompulsory: true,
-      maxMarks: 100
-    });
+
+    if (!subjectForm.code || !subjectForm.code.trim()) {
+      setLocalError('Subject code is required');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const selectedClassObj = schoolClasses.find(c => c.id === subjectForm.classId);
+      const payload = {
+        ...subjectForm,
+        name: subjectForm.name.trim(),
+        code: subjectForm.code.trim(),
+        schoolId: selectedClassObj?.schoolId || currentSchool?.id
+      };
+
+      // Call the API directly and react to the actual server response
+      const res = editingId
+        ? await api.put(`/subjects/${editingId}`, payload)
+        : await api.post('/subjects', payload);
+
+      const savedSubject = res.data?.subject || res.data;
+
+      if (!savedSubject || !savedSubject.id) {
+        throw new Error('Server did not return the saved subject');
+      }
+
+      // Update local state immediately
+      if (editingId) {
+        setSubjects(prev => prev.map(s => (s.id === editingId ? savedSubject : s)));
+      } else {
+        setSubjects(prev => [...prev, savedSubject]);
+      }
+
+      // Reset form and close
+      setShowForm(false);
+      setEditingId(null);
+      setSubjectForm({
+        name: '',
+        code: '',
+        classId: '',
+        teacherId: '',
+        isCompulsory: true,
+        maxMarks: 100
+      });
+
+      // Clear filters so the new/updated subject is visible immediately
+      setSearchTerm('');
+      setSelectedClass('');
+    } catch (err) {
+      console.error('❌ Save subject failed:', err);
+      setLocalError(err.response?.data?.message || err.message || 'Failed to save subject');
+    } finally {
+      setSaving(false);
+    }
   };
 
   // ==================== HANDLE EDIT ====================
@@ -7134,19 +7280,33 @@ const SubjectModule = ({
       alert('You do not have permission to edit subjects');
       return;
     }
-    setSubjectForm(subj);
+    setSubjectForm({
+      name: subj.name || '',
+      code: subj.code || '',
+      classId: subj.classId || '',
+      teacherId: subj.teacherId || '',
+      isCompulsory: subj.isCompulsory ?? true,
+      maxMarks: subj.maxMarks || 100
+    });
     setEditingId(subj.id);
+    setLocalError('');
     setShowForm(true);
   };
 
   // ==================== HANDLE DELETE ====================
-  const handleDelete = (id, name) => {
+  const handleDelete = async (id, name) => {
     if (!canDelete) {
       alert('You do not have permission to delete subjects');
       return;
     }
-    if (window.confirm(`Delete subject "${name}"?`)) {
-      onDelete(id);
+    if (!window.confirm(`Delete subject "${name}"?`)) return;
+
+    try {
+      await api.delete(`/subjects/${id}`);
+      setSubjects(prev => prev.filter(s => s.id !== id));
+    } catch (err) {
+      console.error('❌ Delete subject failed:', err);
+      alert(err.response?.data?.message || 'Failed to delete subject');
     }
   };
 
@@ -7217,8 +7377,8 @@ const SubjectModule = ({
                 maxMarks: 100
               });
               setEditingId(null);
+              setLocalError('');
               setShowForm(true);
-              // Scroll to form
               setTimeout(() => {
                 document.getElementById('subject-form')?.scrollIntoView({ behavior: 'smooth' });
               }, 100);
@@ -7281,7 +7441,6 @@ const SubjectModule = ({
           </div>
         </div>
         
-        {/* Quick filter chips */}
         {filteredSubjects.length > 0 && schoolClasses.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2">
             <span className="text-xs text-gray-500 mr-1">Quick filters:</span>
@@ -7318,6 +7477,13 @@ const SubjectModule = ({
             <i className={`fas fa-${editingId ? 'edit' : 'plus-circle'} text-indigo-600`}></i>
             {editingId ? 'Edit' : 'Add New'} Subject
           </h3>
+
+          {localError && (
+            <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+              <i className="fas fa-exclamation-circle mr-2"></i>
+              {localError}
+            </div>
+          )}
           
           {!editingId && currentSchool && user?.role !== 'SUPER_ADMIN' && (
             <div className="mb-4 p-3 bg-gray-50 rounded-lg text-sm text-gray-600 border border-gray-200">
@@ -7326,7 +7492,6 @@ const SubjectModule = ({
             </div>
           )}
           
-          {/* Warning if no teachers available */}
           {teacherOptions.length === 0 && (
             <div className="mb-4 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
               <div className="flex items-start">
@@ -7345,7 +7510,6 @@ const SubjectModule = ({
           
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Subject Name */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Subject Name <span className="text-red-500">*</span>
@@ -7357,10 +7521,10 @@ const SubjectModule = ({
                   onChange={(e) => setSubjectForm({...subjectForm, name: e.target.value})}
                   placeholder="e.g., Mathematics"
                   required
+                  disabled={saving}
                 />
               </div>
               
-              {/* Subject Code */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Subject Code <span className="text-red-500">*</span>
@@ -7372,10 +7536,10 @@ const SubjectModule = ({
                   onChange={(e) => setSubjectForm({...subjectForm, code: e.target.value})}
                   placeholder="e.g., MATH101"
                   required
+                  disabled={saving}
                 />
               </div>
               
-              {/* Class */}
               <SearchableSelect
                 label="Class"
                 value={subjectForm.classId}
@@ -7385,9 +7549,9 @@ const SubjectModule = ({
                 required
                 emptyMessage="No classes available"
                 noOptionsMessage="No classes found"
+                disabled={saving}
               />
               
-              {/* Teacher */}
               <SearchableSelect
                 label="Teacher"
                 value={subjectForm.teacherId}
@@ -7396,9 +7560,9 @@ const SubjectModule = ({
                 placeholder="Select a teacher..."
                 emptyMessage={teachingStaff.length === 0 ? "No teaching staff available" : "No teachers available"}
                 noOptionsMessage="No teachers found"
+                disabled={saving}
               />
               
-              {/* Max Marks */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Max Marks <span className="text-red-500">*</span>
@@ -7410,16 +7574,17 @@ const SubjectModule = ({
                   onChange={(e) => setSubjectForm({...subjectForm, maxMarks: parseInt(e.target.value) || 0})}
                   required
                   min="1"
+                  disabled={saving}
                 />
               </div>
               
-              {/* Compulsory */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Compulsory</label>
                 <select
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white"
                   value={subjectForm.isCompulsory}
                   onChange={(e) => setSubjectForm({...subjectForm, isCompulsory: e.target.value === 'true'})}
+                  disabled={saving}
                 >
                   <option value="true">Yes</option>
                   <option value="false">No</option>
@@ -7427,22 +7592,33 @@ const SubjectModule = ({
               </div>
             </div>
             
-            {/* Form Actions */}
             <div className="flex flex-wrap gap-3 pt-2 border-t">
               <button
                 type="submit"
-                className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
+                disabled={saving}
+                className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2 disabled:opacity-50"
               >
-                <i className={`fas fa-${editingId ? 'save' : 'plus-circle'}`}></i>
-                {editingId ? 'Update' : 'Save'} Subject
+                {saving ? (
+                  <>
+                    <i className="fas fa-spinner fa-spin"></i>
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <i className={`fas fa-${editingId ? 'save' : 'plus-circle'}`}></i>
+                    {editingId ? 'Update' : 'Save'} Subject
+                  </>
+                )}
               </button>
               <button
                 type="button"
                 onClick={() => {
                   setShowForm(false);
                   setEditingId(null);
+                  setLocalError('');
                 }}
-                className="bg-gray-500 text-white px-6 py-2.5 rounded-lg hover:bg-gray-600 transition-colors"
+                disabled={saving}
+                className="bg-gray-500 text-white px-6 py-2.5 rounded-lg hover:bg-gray-600 transition-colors disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -7575,7 +7751,6 @@ const SubjectModule = ({
           </table>
         </div>
         
-        {/* Table footer with stats */}
         {filteredSubjects.length > 0 && (
           <div className="px-6 py-3 bg-gray-50 border-t flex flex-wrap justify-between items-center gap-2 text-sm text-gray-500">
             <div>
@@ -8648,7 +8823,6 @@ const CourseUnitsModule = ({
   );
 };
 
-
 const ExamModule = ({ 
   exams, setExams, 
   classes, subjects, students, 
@@ -8860,7 +9034,10 @@ const ExamModule = ({
   
   const [filteredUnitsForFilters, setFilteredUnitsForFilters] = useState([]);
   const [filteredUnitsForForm, setFilteredUnitsForForm] = useState([]);
-  const [filteredSubjects, setFilteredSubjects] = useState([]);
+  
+  // ✅ TWO SEPARATE LISTS — one for the Filter Exams section, one for the Create Exam form
+  const [filteredSubjectsForFilters, setFilteredSubjectsForFilters] = useState([]);
+  const [filteredSubjectsForForm, setFilteredSubjectsForForm] = useState([]);
   
   // ============ TEACHING STAFF STATE ============
   const [teachingStaff, setTeachingStaff] = useState([]);
@@ -8923,7 +9100,7 @@ const ExamModule = ({
   const canPublishResults = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal;
 
   // ============================================================
-  // ✅ TEACHING STAFF FETCHING — STRICT, STAFF-ONLY
+  // TEACHING STAFF FETCHING
   // ============================================================
 
   const extractStaffArray = (payload) => {
@@ -8965,19 +9142,12 @@ const ExamModule = ({
     if (candidates.length === 0) return false;
 
     const TEACHING_MARKERS = [
-      'TEACH',
-      'TUTOR',
-      'LECTURER',
-      'INSTRUCTOR',
-      'TRAINER',
-      'FACILITATOR',
-      'PROFESSOR',
+      'TEACH', 'TUTOR', 'LECTURER', 'INSTRUCTOR', 'TRAINER', 'FACILITATOR', 'PROFESSOR',
     ];
 
     const NON_TEACHING_MARKERS = [
       'NON_TEACHING', 'NONTEACHING', 'SUPPORT_STAFF',
-      'ADMIN',
-      'ACCOUNTANT', 'BURSAR', 'SECRETARY',
+      'ADMIN', 'ACCOUNTANT', 'BURSAR', 'SECRETARY',
       'DRIVER', 'SECURITY', 'CLEANER', 'COOK', 'LIBRARIAN',
       'STUDENT', 'PARENT', 'GUARDIAN',
       'SUPER_ADMIN', 'SCHOOL_ADMIN',
@@ -8998,13 +9168,8 @@ const ExamModule = ({
     const last = u.lastName || u.last_name || s.lastName || s.last_name || '';
     const full = `${first} ${last}`.trim();
     return (
-      full ||
-      s.name ||
-      s.fullName ||
-      s.displayName ||
-      u.name ||
-      u.email ||
-      s.email ||
+      full || s.name || s.fullName || s.displayName ||
+      u.name || u.email || s.email ||
       `Staff ${s.id}`
     );
   };
@@ -9185,10 +9350,17 @@ const ExamModule = ({
     }));
   }, [filteredUnitsForForm, isUniversity]);
 
-  const getSubjectOptions = useCallback(() => {
-    if (!filteredSubjects || filteredSubjects.length === 0) return [];
-    return filteredSubjects.map(s => ({ value: s.id, label: s.name, subLabel: `Code: ${s.code || 'N/A'}` }));
-  }, [filteredSubjects]);
+  // ✅ Used by the Filter Exams section
+  const getSubjectOptionsForFilters = useCallback(() => {
+    if (!filteredSubjectsForFilters || filteredSubjectsForFilters.length === 0) return [];
+    return filteredSubjectsForFilters.map(s => ({ value: s.id, label: s.name, subLabel: `Code: ${s.code || 'N/A'}` }));
+  }, [filteredSubjectsForFilters]);
+
+  // ✅ Used by the Create Exam form
+  const getSubjectOptionsForForm = useCallback(() => {
+    if (!filteredSubjectsForForm || filteredSubjectsForForm.length === 0) return [];
+    return filteredSubjectsForForm.map(s => ({ value: s.id, label: s.name, subLabel: `Code: ${s.code || 'N/A'}` }));
+  }, [filteredSubjectsForForm]);
 
   const getInvigilatorOptions = useCallback(() => {
     if (!teachingStaff || teachingStaff.length === 0) return [];
@@ -9208,7 +9380,7 @@ const ExamModule = ({
   }, [availableExamNames, exams]);
 
   // ============================================================
-  // FILTER UNITS & SUBJECTS
+  // FILTER UNITS
   // ============================================================
   useEffect(() => {
     if (isUniversity && selectedCourse && units && units.length > 0) {
@@ -9230,50 +9402,56 @@ const ExamModule = ({
     }
   }, [examForm.courseId, examForm.programId, units, isUniversity, isTVET]);
 
-  // ✅ FIXED: Tolerant subject filtering.
-  //    - Handles multiple possible field names (classId, class_id, ClassId, class.id, Class.id)
-  //    - Handles string/number type mismatch with String() comparison
-  //    - Adds console diagnostics so you can see exactly why it's empty
+  // ============================================================
+  // ✅ SUBJECT FILTERING — TWO SEPARATE EFFECTS
+  // ============================================================
+
+  // 1) For the Filter Exams section — driven by selectedClass
   useEffect(() => {
     if (!isRegularSchool || !subjects || subjects.length === 0) {
-      setFilteredSubjects([]);
+      setFilteredSubjectsForFilters([]);
       return;
     }
-
     if (!selectedClass) {
-      setFilteredSubjects([]);
+      setFilteredSubjectsForFilters([]);
       return;
     }
-
     const filtered = subjects.filter(s => {
       if (!s) return false;
-      // Try every plausible field name the backend might use
       const subjectClassId =
-        s.classId ??
-        s.class_id ??
-        s.ClassId ??
-        s.classID ??
-        s.class?.id ??
-        s.Class?.id;
+        s.classId ?? s.class_id ?? s.ClassId ?? s.classID ??
+        s.class?.id ?? s.Class?.id;
       if (subjectClassId === undefined || subjectClassId === null) return false;
       return String(subjectClassId) === String(selectedClass);
     });
-
-    // Diagnostics — remove once verified
-    console.log('🔍 Subject filter debug:', {
-      totalSubjects: subjects.length,
-      selectedClass,
-      matchedSubjects: filtered.length,
-      sampleSubject: subjects[0],
-      sampleClassIdOnSubject:
-        subjects[0]?.classId ??
-        subjects[0]?.class_id ??
-        subjects[0]?.ClassId ??
-        subjects[0]?.class?.id
-    });
-
-    setFilteredSubjects(filtered);
+    setFilteredSubjectsForFilters(filtered);
   }, [selectedClass, subjects, isRegularSchool]);
+
+  // 2) For the Create Exam form — driven by examForm.classId
+  useEffect(() => {
+    if (!isRegularSchool || !subjects || subjects.length === 0) {
+      setFilteredSubjectsForForm([]);
+      return;
+    }
+    if (!examForm.classId) {
+      setFilteredSubjectsForForm([]);
+      return;
+    }
+    const filtered = subjects.filter(s => {
+      if (!s) return false;
+      const subjectClassId =
+        s.classId ?? s.class_id ?? s.ClassId ?? s.classID ??
+        s.class?.id ?? s.Class?.id;
+      if (subjectClassId === undefined || subjectClassId === null) return false;
+      return String(subjectClassId) === String(examForm.classId);
+    });
+    console.log('🔍 Subject form filter debug:', {
+      totalSubjects: subjects.length,
+      examFormClassId: examForm.classId,
+      matchedSubjects: filtered.length
+    });
+    setFilteredSubjectsForForm(filtered);
+  }, [examForm.classId, subjects, isRegularSchool]);
 
   // ============================================================
   // LOAD EXISTING EXAM NAMES
@@ -9895,7 +10073,7 @@ const ExamModule = ({
                 options={classOptions} placeholder="Search class..." emptyMessage="No classes available" />
               <SearchableSelect label="Subject" value={selectedSubject}
                 onChange={(e) => setSelectedSubject(e.target.value)}
-                options={getSubjectOptions()} placeholder="Search subject..." emptyMessage="No subjects available"
+                options={getSubjectOptionsForFilters()} placeholder="Search subject..." emptyMessage="No subjects available"
                 disabled={!selectedClass} />
             </>
           )}
@@ -10066,8 +10244,19 @@ const ExamModule = ({
                   <div className="col-span-2 md:col-span-1">
                     <SearchableSelect label="Subject *" value={examForm.subjectId}
                       onChange={(e) => setExamForm({...examForm, subjectId: e.target.value})}
-                      options={getSubjectOptions()} placeholder="Search subject..."
-                      emptyMessage="No subjects available" required disabled={!examForm.classId} />
+                      options={getSubjectOptionsForForm()} placeholder="Search subject..."
+                      emptyMessage={
+                        !examForm.classId
+                          ? "Select a class first"
+                          : "No subjects available for this class"
+                      }
+                      required disabled={!examForm.classId} />
+                    {examForm.classId && filteredSubjectsForForm.length > 0 && (
+                      <p className="text-xs text-green-600 mt-1">
+                        <i className="fas fa-check-circle mr-1"></i>
+                        {filteredSubjectsForForm.length} subject(s) available for {getClassName(examForm.classId)}
+                      </p>
+                    )}
                   </div>
                 )}
 
