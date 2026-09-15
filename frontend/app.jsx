@@ -6906,7 +6906,7 @@ const StudentModule = ({
   );
 };
 
-// ==================== SUBJECT MODULE WITH FIXED SEARCHABLE SELECTS ====================
+// ==================== SUBJECT MODULE WITH MULTI-CLASS SUPPORT ====================
 const SubjectModule = ({ 
   subjects, setSubjects, classes, staff, form, setForm, 
   onCreate, onUpdate, onDelete, user, currentSchool
@@ -6919,10 +6919,12 @@ const SubjectModule = ({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [localError, setLocalError] = useState('');
+
+  // ✅ Multi-class: an array of class IDs
   const [subjectForm, setSubjectForm] = useState({
     name: '',
     code: '',
-    classId: '',
+    classIds: [],       // ← was classId (single)
     teacherId: '',
     isCompulsory: true,
     maxMarks: 100
@@ -6935,13 +6937,8 @@ const SubjectModule = ({
   // ==================== FILTER SUBJECTS BY CURRENT SCHOOL ====================
   const schoolFilteredSubjects = React.useMemo(() => {
     if (!subjects || subjects.length === 0) return [];
-    
-    if (user?.role === 'SUPER_ADMIN') {
-      return subjects;
-    }
-    
+    if (user?.role === 'SUPER_ADMIN') return subjects;
     if (!currentSchool?.id) return [];
-    
     return subjects.filter(subject => {
       const classObj = classes?.find(c => c.id === subject.classId);
       return classObj?.schoolId === currentSchool.id;
@@ -6951,7 +6948,6 @@ const SubjectModule = ({
   // ==================== FILTER BY SEARCH AND CLASS ====================
   const filteredSubjects = React.useMemo(() => {
     let filtered = schoolFilteredSubjects;
-    
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       filtered = filtered.filter(s => 
@@ -6959,11 +6955,9 @@ const SubjectModule = ({
         s.code?.toLowerCase().includes(term)
       );
     }
-    
     if (selectedClass) {
       filtered = filtered.filter(s => s.classId === selectedClass);
     }
-    
     return filtered;
   }, [schoolFilteredSubjects, searchTerm, selectedClass]);
 
@@ -6984,10 +6978,7 @@ const SubjectModule = ({
   // ==================== GET TEACHING STAFF ====================
   const teachingStaff = React.useMemo(() => {
     if (!schoolStaff || schoolStaff.length === 0) return [];
-    const teaching = schoolStaff.filter(s => s.staffType === 'TEACHING');
-    console.log('All staff:', schoolStaff);
-    console.log('Teaching staff:', teaching);
-    return teaching;
+    return schoolStaff.filter(s => s.staffType === 'TEACHING');
   }, [schoolStaff]);
 
   // ==================== CREATE OPTIONS FOR SELECTS ====================
@@ -7002,7 +6993,6 @@ const SubjectModule = ({
 
   const teacherOptions = React.useMemo(() => {
     if (!teachingStaff || teachingStaff.length === 0) return [];
-    
     return teachingStaff
       .filter(s => s && s.userId)
       .map(s => {
@@ -7010,7 +7000,6 @@ const SubjectModule = ({
         const firstName = userData.firstName || '';
         const lastName = userData.lastName || '';
         const fullName = `${firstName} ${lastName}`.trim();
-        
         return {
           value: s.userId,
           label: fullName || 'Unknown Teacher',
@@ -7020,102 +7009,95 @@ const SubjectModule = ({
       .filter(opt => opt.value);
   }, [teachingStaff]);
 
-  // ==================== SIMPLIFIED SEARCHABLE SELECT ====================
-  const SearchableSelect = ({ 
-    label, 
-    value, 
-    onChange, 
-    options = [], 
-    placeholder = "Search...", 
+  // ==================== SEARCHABLE MULTI-SELECT ====================
+  // Behaves like the old single SearchableSelect, but shows checkboxes
+  // and keeps a set of selected values.
+  const SearchableMultiSelect = ({
+    label,
+    values = [],
+    onChange,
+    options = [],
+    placeholder = "Search...",
     disabled,
     required,
-    className,
     emptyMessage = "No options available",
     noOptionsMessage = "No results found"
   }) => {
     const [search, setSearch] = useState('');
     const [isOpen, setIsOpen] = useState(false);
+    const [isFocused, setIsFocused] = useState(false);
     const dropdownRef = useRef(null);
     const inputRef = useRef(null);
 
     const filteredOptions = useMemo(() => {
       if (!options || options.length === 0) return [];
       if (!search.trim()) return options;
-      
       const searchLower = search.toLowerCase();
       return options.filter(opt => {
         if (!opt) return false;
-        const label = (opt.label || '').toLowerCase();
-        const subLabel = (opt.subLabel || '').toLowerCase();
-        const valueStr = String(opt.value || '').toLowerCase();
-        return label.includes(searchLower) || 
-               subLabel.includes(searchLower) || 
-               valueStr.includes(searchLower);
+        const lbl = (opt.label || '').toLowerCase();
+        const sub = (opt.subLabel || '').toLowerCase();
+        const val = String(opt.value || '').toLowerCase();
+        return lbl.includes(searchLower) || sub.includes(searchLower) || val.includes(searchLower);
       });
     }, [options, search]);
 
-    const selectedOption = useMemo(() => {
-      if (!options || options.length === 0) return null;
-      if (!value && value !== 0) return null;
-      return options.find(opt => opt.value === value) || null;
-    }, [options, value]);
+    const selectedOptions = useMemo(
+      () => options.filter(opt => values.includes(opt.value)),
+      [options, values]
+    );
 
     useEffect(() => {
       const handleClickOutside = (event) => {
         if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
           setIsOpen(false);
+          setIsFocused(false);
         }
       };
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
+    // Reset display text when field is not focused
     useEffect(() => {
-      if (!isOpen && selectedOption) {
-        setSearch(selectedOption.label);
-      } else if (!isOpen && !selectedOption) {
+      if (!isFocused) {
+        // Show the selected chips text (or nothing) in the input area
         setSearch('');
       }
-    }, [selectedOption, isOpen]);
+    }, [isFocused, values]);
 
-    const handleSelect = (selectedValue) => {
-      onChange({ target: { value: selectedValue } });
-      const selected = options.find(opt => opt.value === selectedValue);
-      setSearch(selected ? selected.label : '');
-      setIsOpen(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
+    const toggleValue = (optValue) => {
+      const isSelected = values.includes(optValue);
+      const next = isSelected
+        ? values.filter(v => v !== optValue)
+        : [...values, optValue];
+      onChange({ target: { value: next } });
     };
 
     const handleInputChange = (e) => {
-      const val = e.target.value;
-      setSearch(val);
+      setSearch(e.target.value);
       setIsOpen(true);
-      if (val === '') {
-        onChange({ target: { value: '' } });
-      }
+      setIsFocused(true);
     };
 
     const handleFocus = () => {
       if (disabled) return;
       setIsOpen(true);
-      if (selectedOption && !search) {
-        setSearch(selectedOption.label);
-      }
+      setIsFocused(true);
     };
 
-    const handleClear = (e) => {
-      e.stopPropagation();
-      onChange({ target: { value: '' } });
-      setSearch('');
-      setIsOpen(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
+    const removeValue = (optValue) => {
+      const next = values.filter(v => v !== optValue);
+      onChange({ target: { value: next } });
     };
 
-    const displayValue = isOpen ? search : (selectedOption ? selectedOption.label : '');
+    // Display text in the input: while typing → show the search text;
+    // otherwise → show "N classes selected" summary
+    const displayValue = isFocused
+      ? search
+      : (values.length > 0
+          ? `${values.length} class${values.length !== 1 ? 'es' : ''} selected`
+          : '');
 
     return (
       <div className="relative" ref={dropdownRef}>
@@ -7125,14 +7107,40 @@ const SubjectModule = ({
             {required && <span className="text-red-500 ml-1">*</span>}
           </label>
         )}
-        
+
+        {/* Selected chips */}
+        {selectedOptions.length > 0 && !isFocused && (
+          <div className="flex flex-wrap gap-1 mb-1">
+            {selectedOptions.slice(0, 6).map(opt => (
+              <span
+                key={opt.value}
+                className="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-full text-xs"
+              >
+                {opt.label}
+                {!disabled && (
+                  <button
+                    type="button"
+                    onClick={() => removeValue(opt.value)}
+                    className="text-indigo-600 hover:text-indigo-800"
+                  >
+                    ×
+                  </button>
+                )}
+              </span>
+            ))}
+            {selectedOptions.length > 6 && (
+              <span className="text-xs text-gray-500">+{selectedOptions.length - 6} more</span>
+            )}
+          </div>
+        )}
+
         <div className="relative">
           <input
             ref={inputRef}
             type="text"
             className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
               disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
-            } ${className || ''}`}
+            }`}
             value={displayValue}
             onChange={handleInputChange}
             onFocus={handleFocus}
@@ -7140,29 +7148,14 @@ const SubjectModule = ({
               setTimeout(() => {
                 if (!dropdownRef.current?.contains(document.activeElement)) {
                   setIsOpen(false);
-                  if (!selectedOption) {
-                    setSearch('');
-                  }
+                  setIsFocused(false);
                 }
               }, 200);
             }}
-            placeholder={placeholder}
+            placeholder={values.length === 0 ? placeholder : ''}
             disabled={disabled}
             autoComplete="off"
           />
-          
-          {value && !disabled && (
-            <button
-              type="button"
-              onClick={handleClear}
-              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-          
           <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
             <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -7172,28 +7165,146 @@ const SubjectModule = ({
 
         {isOpen && !disabled && (
           <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-            {options && options.length === 0 ? (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {emptyMessage}
+            {/* Quick actions */}
+            {options.length > 0 && (
+              <div className="px-3 py-2 border-b flex items-center justify-between text-xs bg-gray-50">
+                <button
+                  type="button"
+                  className="text-indigo-600 hover:text-indigo-800 font-medium"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => onChange({ target: { value: options.map(o => o.value) } })}
+                >
+                  Select all ({options.length})
+                </button>
+                <button
+                  type="button"
+                  className="text-gray-500 hover:text-gray-700 font-medium"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => onChange({ target: { value: [] } })}
+                >
+                  Clear
+                </button>
               </div>
+            )}
+
+            {options && options.length === 0 ? (
+              <div className="px-3 py-4 text-center text-gray-500 text-sm">{emptyMessage}</div>
             ) : filteredOptions.length > 0 ? (
-              filteredOptions.map((opt) => (
+              filteredOptions.map(opt => {
+                const checked = values.includes(opt.value);
+                return (
+                  <div
+                    key={opt.value || opt.key || opt.id}
+                    className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors flex items-center gap-2 ${
+                      checked ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
+                    }`}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => toggleValue(opt.value)}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      readOnly
+                      className="rounded border-gray-300 text-indigo-600"
+                    />
+                    <div className="flex-1">
+                      <div className="font-medium">{opt.label}</div>
+                      {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="px-3 py-4 text-center text-gray-500 text-sm">
+                {search.trim() ? `No results for "${search}"` : noOptionsMessage}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ==================== SIMPLE SEARCHABLE SELECT (for filters) ====================
+  const SearchableSelect = ({ 
+    label, value, onChange, options = [], placeholder = "Search...", 
+    disabled, required, emptyMessage = "No options available", noOptionsMessage = "No results found"
+  }) => {
+    const [search, setSearch] = useState('');
+    const [isOpen, setIsOpen] = useState(false);
+    const dropdownRef = useRef(null);
+
+    const filteredOptions = useMemo(() => {
+      if (!options || options.length === 0) return [];
+      if (!search.trim()) return options;
+      const s = search.toLowerCase();
+      return options.filter(opt =>
+        (opt.label || '').toLowerCase().includes(s) ||
+        (opt.subLabel || '').toLowerCase().includes(s)
+      );
+    }, [options, search]);
+
+    const selectedOption = options.find(opt => opt.value === value);
+
+    useEffect(() => {
+      const handler = (e) => {
+        if (dropdownRef.current && !dropdownRef.current.contains(e.target)) setIsOpen(false);
+      };
+      document.addEventListener('mousedown', handler);
+      return () => document.removeEventListener('mousedown', handler);
+    }, []);
+
+    return (
+      <div className="relative" ref={dropdownRef}>
+        {label && (
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            {label}{required && <span className="text-red-500 ml-1">*</span>}
+          </label>
+        )}
+        <div className="relative">
+          <input
+            type="text"
+            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
+            }`}
+            value={isOpen ? search : (selectedOption?.label || '')}
+            onChange={(e) => { setSearch(e.target.value); setIsOpen(true); }}
+            onFocus={() => { setIsOpen(true); if (selectedOption) setSearch(selectedOption.label); }}
+            onBlur={() => setTimeout(() => {
+              if (!dropdownRef.current?.contains(document.activeElement)) {
+                setIsOpen(false);
+                setSearch('');
+              }
+            }, 200)}
+            placeholder={placeholder}
+            disabled={disabled}
+            autoComplete="off"
+          />
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+        </div>
+        {isOpen && !disabled && (
+          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
+            {options.length === 0 ? (
+              <div className="px-3 py-4 text-center text-gray-500 text-sm">{emptyMessage}</div>
+            ) : filteredOptions.length > 0 ? (
+              filteredOptions.map(opt => (
                 <div
-                  key={opt.value || opt.key || opt.id || Math.random().toString()}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
+                  key={opt.value}
+                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 ${
                     opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
-                  } ${opt.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  }`}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
-                    if (!opt.disabled) {
-                      handleSelect(opt.value);
-                    }
+                    onChange({ target: { value: opt.value } });
+                    setIsOpen(false); setSearch('');
                   }}
                 >
                   <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && (
-                    <div className="text-xs text-gray-500">{opt.subLabel}</div>
-                  )}
+                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
                 </div>
               ))
             ) : (
@@ -7207,69 +7318,137 @@ const SubjectModule = ({
     );
   };
 
-  // ==================== HANDLE SUBMIT ====================
+  // ==================== HANDLE SUBMIT (MULTI-CLASS) ====================
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLocalError('');
 
-    if (!subjectForm.classId) {
-      setLocalError('Please select a class');
+    if (!subjectForm.classIds || subjectForm.classIds.length === 0) {
+      setLocalError('Please select at least one class');
       return;
     }
-
-    if (!subjectForm.name || !subjectForm.name.trim()) {
+    if (!subjectForm.name?.trim()) {
       setLocalError('Subject name is required');
       return;
     }
-
-    if (!subjectForm.code || !subjectForm.code.trim()) {
+    if (!subjectForm.code?.trim()) {
       setLocalError('Subject code is required');
       return;
     }
 
     setSaving(true);
     try {
-      const selectedClassObj = schoolClasses.find(c => c.id === subjectForm.classId);
-      const payload = {
-        ...subjectForm,
-        name: subjectForm.name.trim(),
-        code: subjectForm.code.trim(),
-        schoolId: selectedClassObj?.schoolId || currentSchool?.id
-      };
-
-      // Call the API directly and react to the actual server response
-      const res = editingId
-        ? await api.put(`/subjects/${editingId}`, payload)
-        : await api.post('/subjects', payload);
-
-      const savedSubject = res.data?.subject || res.data;
-
-      if (!savedSubject || !savedSubject.id) {
-        throw new Error('Server did not return the saved subject');
-      }
-
-      // Update local state immediately
       if (editingId) {
+        // ---- EDIT MODE: update a single subject in place ----
+        // When editing, only one class is allowed (as before).
+        const selectedClassObj = schoolClasses.find(c => c.id === subjectForm.classIds[0]);
+        const payload = {
+          name: subjectForm.name.trim(),
+          code: subjectForm.code.trim(),
+          classId: subjectForm.classIds[0],
+          teacherId: subjectForm.teacherId || null,
+          isCompulsory: subjectForm.isCompulsory,
+          maxMarks: subjectForm.maxMarks,
+          schoolId: selectedClassObj?.schoolId || currentSchool?.id
+        };
+
+        const res = await api.put(`/subjects/${editingId}`, payload);
+        const savedSubject = res.data?.subject || res.data;
+        if (!savedSubject || !savedSubject.id) {
+          throw new Error('Server did not return the updated subject');
+        }
         setSubjects(prev => prev.map(s => (s.id === editingId ? savedSubject : s)));
+
       } else {
-        setSubjects(prev => [...prev, savedSubject]);
+        // ---- CREATE MODE: create one subject record per selected class ----
+        const createdSubjects = [];
+        const failures = [];
+
+        for (const classId of subjectForm.classIds) {
+          const selectedClassObj = schoolClasses.find(c => c.id === classId);
+
+          // Skip if this subject already exists for this class
+          const duplicate = subjects.find(
+            s => s.classId === classId &&
+                 s.name?.toLowerCase() === subjectForm.name.trim().toLowerCase() &&
+                 s.code?.toLowerCase() === subjectForm.code.trim().toLowerCase()
+          );
+          if (duplicate) {
+            failures.push({
+              classId,
+              className: selectedClassObj?.name || classId,
+              reason: 'Subject with this name & code already exists'
+            });
+            continue;
+          }
+
+          const payload = {
+            name: subjectForm.name.trim(),
+            code: subjectForm.code.trim(),
+            classId,
+            teacherId: subjectForm.teacherId || null,
+            isCompulsory: subjectForm.isCompulsory,
+            maxMarks: subjectForm.maxMarks,
+            schoolId: selectedClassObj?.schoolId || currentSchool?.id
+          };
+
+          try {
+            const res = await api.post('/subjects', payload);
+            const saved = res.data?.subject || res.data;
+            if (saved && saved.id) {
+              createdSubjects.push(saved);
+            } else {
+              failures.push({
+                classId,
+                className: selectedClassObj?.name || classId,
+                reason: 'Server did not return the created subject'
+              });
+            }
+          } catch (err) {
+            failures.push({
+              classId,
+              className: selectedClassObj?.name || classId,
+              reason: err.response?.data?.message || err.message || 'Request failed'
+            });
+          }
+        }
+
+        if (createdSubjects.length > 0) {
+          setSubjects(prev => [...prev, ...createdSubjects]);
+        }
+
+        if (createdSubjects.length === 0) {
+          throw new Error(
+            'Failed to create any subject. ' +
+            failures.map(f => `${f.className}: ${f.reason}`).join(' | ')
+          );
+        }
+
+        if (failures.length > 0) {
+          setLocalError(
+            `Created ${createdSubjects.length} of ${subjectForm.classIds.length}. ` +
+            `Failures: ${failures.map(f => `${f.className} (${f.reason})`).join('; ')}`
+          );
+          // Don't close the form so the user can see the error and adjust
+          setSaving(false);
+          return;
+        }
       }
 
-      // Reset form and close
+      // Success — close form, reset state
       setShowForm(false);
       setEditingId(null);
       setSubjectForm({
         name: '',
         code: '',
-        classId: '',
+        classIds: [],
         teacherId: '',
         isCompulsory: true,
         maxMarks: 100
       });
-
-      // Clear filters so the new/updated subject is visible immediately
       setSearchTerm('');
       setSelectedClass('');
+
     } catch (err) {
       console.error('❌ Save subject failed:', err);
       setLocalError(err.response?.data?.message || err.message || 'Failed to save subject');
@@ -7287,7 +7466,7 @@ const SubjectModule = ({
     setSubjectForm({
       name: subj.name || '',
       code: subj.code || '',
-      classId: subj.classId || '',
+      classIds: subj.classId ? [subj.classId] : [], // single class on edit
       teacherId: subj.teacherId || '',
       isCompulsory: subj.isCompulsory ?? true,
       maxMarks: subj.maxMarks || 100
@@ -7304,7 +7483,6 @@ const SubjectModule = ({
       return;
     }
     if (!window.confirm(`Delete subject "${name}"?`)) return;
-
     try {
       await api.delete(`/subjects/${id}`);
       setSubjects(prev => prev.filter(s => s.id !== id));
@@ -7318,7 +7496,7 @@ const SubjectModule = ({
   return (
     <div className="space-y-6">
       {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
-      
+
       {/* School Info Badge */}
       {currentSchool && user?.role !== 'SUPER_ADMIN' && (
         <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
@@ -7339,7 +7517,7 @@ const SubjectModule = ({
           </div>
         </div>
       )}
-      
+
       {/* Super Admin Info */}
       {user?.role === 'SUPER_ADMIN' && (
         <div className="bg-purple-50 p-3 rounded-lg border border-purple-200">
@@ -7360,7 +7538,7 @@ const SubjectModule = ({
           </div>
         </div>
       )}
-      
+
       {/* Header */}
       <div className="flex flex-wrap justify-between items-center gap-4">
         <div>
@@ -7375,7 +7553,7 @@ const SubjectModule = ({
               setSubjectForm({
                 name: '',
                 code: '',
-                classId: '',
+                classIds: [],
                 teacherId: '',
                 isCompulsory: true,
                 maxMarks: 100
@@ -7409,9 +7587,8 @@ const SubjectModule = ({
             }))}
             placeholder="Search by name or code..."
             emptyMessage="No subjects available"
-            noOptionsMessage="No results found"
           />
-          
+
           <SearchableSelect
             label="Filter by Class"
             value={selectedClass}
@@ -7419,23 +7596,16 @@ const SubjectModule = ({
             options={classOptions}
             placeholder="All Classes"
             emptyMessage="No classes available"
-            noOptionsMessage="No classes found"
           />
-          
+
           <div className="flex items-end">
             <div className="bg-gray-100 px-4 py-2 rounded-lg flex items-center gap-2 w-full">
               <span className="text-sm text-gray-600">
                 <span className="font-bold">{filteredSubjects.length}</span> of {schoolFilteredSubjects.length} subjects
-                {user?.role === 'SUPER_ADMIN' && schoolFilteredSubjects.length !== subjects?.length && 
-                  ` (from ${subjects?.length} total)`
-                }
               </span>
               {(searchTerm || selectedClass) && (
                 <button
-                  onClick={() => {
-                    setSearchTerm('');
-                    setSelectedClass('');
-                  }}
+                  onClick={() => { setSearchTerm(''); setSelectedClass(''); }}
                   className="text-xs text-indigo-600 hover:text-indigo-800 font-medium ml-2"
                 >
                   Clear
@@ -7444,34 +7614,6 @@ const SubjectModule = ({
             </div>
           </div>
         </div>
-        
-        {filteredSubjects.length > 0 && schoolClasses.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-2">
-            <span className="text-xs text-gray-500 mr-1">Quick filters:</span>
-            <button
-              onClick={() => setSelectedClass('')}
-              className={`text-xs px-2 py-1 rounded-full transition ${
-                !selectedClass ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-            >
-              All Classes
-            </button>
-            {schoolClasses.slice(0, 5).map(c => (
-              <button
-                key={c.id}
-                onClick={() => setSelectedClass(c.id)}
-                className={`text-xs px-2 py-1 rounded-full transition ${
-                  selectedClass === c.id ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                {c.name}
-              </button>
-            ))}
-            {schoolClasses.length > 5 && (
-              <span className="text-xs text-gray-400">+{schoolClasses.length - 5} more</span>
-            )}
-          </div>
-        )}
       </div>
 
       {/* ==================== ADD/EDIT FORM ==================== */}
@@ -7483,19 +7625,48 @@ const SubjectModule = ({
           </h3>
 
           {localError && (
-            <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+            <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm whitespace-pre-wrap">
               <i className="fas fa-exclamation-circle mr-2"></i>
               {localError}
             </div>
           )}
-          
+
           {!editingId && currentSchool && user?.role !== 'SUPER_ADMIN' && (
             <div className="mb-4 p-3 bg-gray-50 rounded-lg text-sm text-gray-600 border border-gray-200">
               <i className="fas fa-school mr-2 text-indigo-500"></i>
               Subject will be created for: <strong>{currentSchool.name}</strong>
             </div>
           )}
-          
+
+          {/* Multi-class hint (only shown when creating) */}
+          {!editingId && (
+            <div className="mb-4 p-3 bg-indigo-50 rounded-lg border border-indigo-200">
+              <div className="flex items-start">
+                <i className="fas fa-info-circle text-indigo-500 mt-0.5 mr-2"></i>
+                <div className="text-xs text-indigo-800">
+                  <p className="font-medium">You can assign this subject to multiple classes at once</p>
+                  <p className="mt-1">
+                    e.g., "Mathematics" can be added to Grade 7, Grade 8, and Grade 9 in one go.
+                    One subject record will be created for each class you select.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Edit mode hint */}
+          {editingId && (
+            <div className="mb-4 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
+              <div className="flex items-start">
+                <i className="fas fa-info-circle text-yellow-500 mt-0.5 mr-2"></i>
+                <div className="text-xs text-yellow-800">
+                  You are editing an existing subject. Only one class is allowed per record.
+                  To add this subject to additional classes, create a new subject and select those classes.
+                </div>
+              </div>
+            </div>
+          )}
+
           {teacherOptions.length === 0 && (
             <div className="mb-4 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
               <div className="flex items-start">
@@ -7504,16 +7675,16 @@ const SubjectModule = ({
                   <p className="text-sm text-yellow-800 font-medium">No teachers available</p>
                   <p className="text-xs text-yellow-700 mt-1">
                     You need to add teaching staff before assigning teachers to subjects.
-                    <br />
-                    <span className="font-medium">Staff Type must be set to "Teaching"</span>
                   </p>
                 </div>
               </div>
             </div>
           )}
-          
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+              {/* Subject Name — RAW input */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Subject Name <span className="text-red-500">*</span>
@@ -7522,13 +7693,15 @@ const SubjectModule = ({
                   type="text"
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
                   value={subjectForm.name}
-                  onChange={(e) => setSubjectForm({...subjectForm, name: e.target.value})}
+                  onChange={(e) => setSubjectForm({ ...subjectForm, name: e.target.value })}
                   placeholder="e.g., Mathematics"
                   required
                   disabled={saving}
+                  autoFocus
                 />
               </div>
-              
+
+              {/* Subject Code — RAW input */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Subject Code <span className="text-red-500">*</span>
@@ -7537,36 +7710,61 @@ const SubjectModule = ({
                   type="text"
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
                   value={subjectForm.code}
-                  onChange={(e) => setSubjectForm({...subjectForm, code: e.target.value})}
+                  onChange={(e) => setSubjectForm({ ...subjectForm, code: e.target.value })}
                   placeholder="e.g., MATH101"
                   required
                   disabled={saving}
                 />
               </div>
-              
-              <SearchableSelect
-                label="Class"
-                value={subjectForm.classId}
-                onChange={(e) => setSubjectForm({...subjectForm, classId: e.target.value})}
-                options={classOptions}
-                placeholder="Select a class..."
-                required
-                emptyMessage="No classes available"
-                noOptionsMessage="No classes found"
-                disabled={saving}
-              />
-              
+
+              {/* ✅ Multi-class selector */}
+              <div className="md:col-span-2">
+                <SearchableMultiSelect
+                  label={`Class${editingId ? '' : 'es'}${!editingId ? ' (select one or more)' : ''}`}
+                  values={subjectForm.classIds}
+                  onChange={(e) => {
+                    // In edit mode, keep only one class
+                    const nextValue = editingId
+                      ? (Array.isArray(e.target.value) ? e.target.value.slice(-1) : [e.target.value])
+                      : e.target.value;
+                    setSubjectForm({ ...subjectForm, classIds: nextValue });
+                  }}
+                  options={classOptions}
+                  placeholder="Search classes... (you can pick multiple)"
+                  required
+                  emptyMessage="No classes available"
+                  disabled={saving}
+                />
+
+                {subjectForm.classIds.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    <span className="text-xs text-gray-500 mr-1">
+                      {editingId ? 'Assigned to:' : `Will create ${subjectForm.classIds.length} subject record${subjectForm.classIds.length !== 1 ? 's' : ''} for:`}
+                    </span>
+                    {subjectForm.classIds.map(cid => {
+                      const cls = schoolClasses.find(c => c.id === cid);
+                      return cls ? (
+                        <span key={cid} className="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-full text-xs">
+                          {cls.name}
+                        </span>
+                      ) : null;
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Teacher — single SearchableSelect */}
               <SearchableSelect
                 label="Teacher"
                 value={subjectForm.teacherId}
-                onChange={(e) => setSubjectForm({...subjectForm, teacherId: e.target.value})}
+                onChange={(e) => setSubjectForm({ ...subjectForm, teacherId: e.target.value })}
                 options={teacherOptions}
                 placeholder="Select a teacher..."
                 emptyMessage={teachingStaff.length === 0 ? "No teaching staff available" : "No teachers available"}
-                noOptionsMessage="No teachers found"
                 disabled={saving}
               />
-              
+
+              {/* Max Marks — RAW input */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Max Marks <span className="text-red-500">*</span>
@@ -7575,19 +7773,20 @@ const SubjectModule = ({
                   type="number"
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
                   value={subjectForm.maxMarks}
-                  onChange={(e) => setSubjectForm({...subjectForm, maxMarks: parseInt(e.target.value) || 0})}
+                  onChange={(e) => setSubjectForm({ ...subjectForm, maxMarks: parseInt(e.target.value) || 0 })}
                   required
                   min="1"
                   disabled={saving}
                 />
               </div>
-              
+
+              {/* Compulsory — plain select */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Compulsory</label>
                 <select
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
                   value={subjectForm.isCompulsory}
-                  onChange={(e) => setSubjectForm({...subjectForm, isCompulsory: e.target.value === 'true'})}
+                  onChange={(e) => setSubjectForm({ ...subjectForm, isCompulsory: e.target.value === 'true' })}
                   disabled={saving}
                 >
                   <option value="true">Yes</option>
@@ -7595,7 +7794,7 @@ const SubjectModule = ({
                 </select>
               </div>
             </div>
-            
+
             <div className="flex flex-wrap gap-3 pt-2 border-t">
               <button
                 type="submit"
@@ -7603,24 +7802,19 @@ const SubjectModule = ({
                 className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2 disabled:opacity-50"
               >
                 {saving ? (
-                  <>
-                    <i className="fas fa-spinner fa-spin"></i>
-                    Saving...
-                  </>
+                  <><i className="fas fa-spinner fa-spin"></i> Saving...</>
                 ) : (
                   <>
                     <i className={`fas fa-${editingId ? 'save' : 'plus-circle'}`}></i>
-                    {editingId ? 'Update' : 'Save'} Subject
+                    {editingId
+                      ? 'Update Subject'
+                      : `Create Subject${subjectForm.classIds.length > 1 ? ` for ${subjectForm.classIds.length} Classes` : ''}`}
                   </>
                 )}
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setShowForm(false);
-                  setEditingId(null);
-                  setLocalError('');
-                }}
+                onClick={() => { setShowForm(false); setEditingId(null); setLocalError(''); }}
                 disabled={saving}
                 className="bg-gray-500 text-white px-6 py-2.5 rounded-lg hover:bg-gray-600 transition-colors disabled:opacity-50"
               >
@@ -7654,24 +7848,12 @@ const SubjectModule = ({
                       <>
                         <i className="fas fa-search text-4xl text-gray-300 mb-2 block"></i>
                         <p>No subjects match your search criteria</p>
-                        <p className="text-sm mt-1">Try adjusting your filters</p>
                         <button
-                          onClick={() => {
-                            setSearchTerm('');
-                            setSelectedClass('');
-                          }}
+                          onClick={() => { setSearchTerm(''); setSelectedClass(''); }}
                           className="mt-2 text-indigo-600 hover:text-indigo-800 text-sm font-medium"
                         >
                           Clear filters
                         </button>
-                      </>
-                    ) : schoolFilteredSubjects.length === 0 ? (
-                      <>
-                        <i className="fas fa-book text-4xl text-gray-300 mb-2 block"></i>
-                        <p>No subjects found for {currentSchool?.name || 'this school'}</p>
-                        {canEdit && (
-                          <p className="text-sm mt-1">Click "Add New Subject" to create your first subject</p>
-                        )}
                       </>
                     ) : (
                       <>
@@ -7688,44 +7870,28 @@ const SubjectModule = ({
                 filteredSubjects.map(subject => {
                   const teacher = schoolStaff.find(s => s.userId === subject.teacherId);
                   const className = schoolClasses.find(c => c.id === subject.classId);
-                  
                   let teacherName = 'Not assigned';
                   if (teacher) {
-                    const userData = teacher.user || teacher.User || {};
-                    const firstName = userData.firstName || '';
-                    const lastName = userData.lastName || '';
-                    teacherName = `${firstName} ${lastName}`.trim() || 'Unknown Teacher';
+                    const ud = teacher.user || teacher.User || {};
+                    teacherName = `${ud.firstName || ''} ${ud.lastName || ''}`.trim() || 'Unknown Teacher';
                   }
-                  
                   return (
                     <tr key={subject.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-6 py-4 whitespace-nowrap font-mono text-sm font-medium text-indigo-600">
-                        {subject.code}
-                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap font-mono text-sm font-medium text-indigo-600">{subject.code}</td>
                       <td className="px-6 py-4 whitespace-nowrap font-medium">{subject.name}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         {className ? (
-                          <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
-                            {className.name}
-                          </span>
-                        ) : (
-                          <span className="text-gray-400 text-sm">N/A</span>
-                        )}
+                          <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">{className.name}</span>
+                        ) : <span className="text-gray-400 text-sm">N/A</span>}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        {teacher ? (
-                          <span className="text-sm">{teacherName}</span>
-                        ) : (
-                          <span className="text-gray-400 text-sm">Not assigned</span>
-                        )}
+                        {teacher ? <span className="text-sm">{teacherName}</span> : <span className="text-gray-400 text-sm">Not assigned</span>}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">{subject.maxMarks}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        {subject.isCompulsory ? (
-                          <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">Yes</span>
-                        ) : (
-                          <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded-full text-xs">No</span>
-                        )}
+                        {subject.isCompulsory
+                          ? <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">Yes</span>
+                          : <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded-full text-xs">No</span>}
                       </td>
                       {canEdit && (
                         <td className="px-6 py-4 whitespace-nowrap text-right space-x-2">
@@ -7754,22 +7920,11 @@ const SubjectModule = ({
             </tbody>
           </table>
         </div>
-        
+
         {filteredSubjects.length > 0 && (
           <div className="px-6 py-3 bg-gray-50 border-t flex flex-wrap justify-between items-center gap-2 text-sm text-gray-500">
             <div>
               Showing <span className="font-medium">{filteredSubjects.length}</span> of <span className="font-medium">{schoolFilteredSubjects.length}</span> subjects
-              {(searchTerm || selectedClass) && (
-                <button
-                  onClick={() => {
-                    setSearchTerm('');
-                    setSelectedClass('');
-                  }}
-                  className="ml-2 text-indigo-600 hover:text-indigo-800 font-medium"
-                >
-                  Clear filters
-                </button>
-              )}
             </div>
             <div className="flex gap-4">
               <span>Compulsory: <span className="font-medium">{filteredSubjects.filter(s => s.isCompulsory).length}</span></span>
@@ -7781,6 +7936,7 @@ const SubjectModule = ({
     </div>
   );
 };
+
 const CourseUnitsModule = ({ 
   courses, programs, units, setUnits, 
   handleCreate, handleUpdate, handleDelete, user, currentSchool 
