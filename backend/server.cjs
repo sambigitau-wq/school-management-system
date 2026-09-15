@@ -3048,7 +3048,6 @@ StudentArrival.belongsTo(User, { as: 'markedByUser', foreignKey: 'markedBy' });
 Student.hasMany(StudentArrival, { foreignKey: 'studentId' });
 
 Staff.belongsTo(User, { foreignKey: 'userId' });
-User.hasOne(Staff, { foreignKey: 'userId' });
 School.hasMany(Vehicle, { foreignKey: 'schoolId' });
 Vehicle.belongsTo(School, { foreignKey: 'schoolId' });
 
@@ -3133,7 +3132,7 @@ Student.belongsTo(Program, { foreignKey: 'programId' });
 Student.belongsTo(Hostel, { foreignKey: 'hostelId' });
 
 User.hasOne(Staff, { foreignKey: 'userId' });
-Staff.belongsTo(User, { foreignKey: 'userId' });
+
 Staff.belongsTo(Department, { as: 'managedDepartment', foreignKey: 'managesDepartmentId' });
 Staff.belongsTo(Faculty, { as: 'managedFaculty', foreignKey: 'managesFacultyId' });
 Staff.belongsTo(Department, { foreignKey: 'departmentId' });
