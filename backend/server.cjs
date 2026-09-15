@@ -15634,25 +15634,60 @@ app.get('/api/dashboard/stats', authenticate, async (req, res) => {
       stats.attendance.present = todayAttendance.filter(a => a.status === 'PRESENT').length;
       stats.attendance.percentage = todayAttendance.length ? 
         ((stats.attendance.present / todayAttendance.length) * 100).toFixed(2) : 0;
+// ===== Total Fees Allocated (from FeeAllocation table) =====
+const allocations = await FeeAllocation.findAll({
+  where: {
+    schoolId,
+    isActive: true
+  },
+  include: [
+    {
+      model: Fee,
+      attributes: ['id', 'amount'],
+      required: false
+    },
+    {
+      model: Student,
+      attributes: [],
+      where: { schoolId },
+      required: true
+    }
+  ],
+  raw: true,
+  nest: true
+});
 
-      const totalFees = await Fee.sum('amount', { where: { schoolId } }) || 0;
-      
-      const payments = await Payment.findAll({
-        include: [{
-          model: Student,
-          where: { schoolId },
-          attributes: []
-        }],
-        attributes: [[sequelize.fn('SUM', sequelize.col('Payment.amount')), 'total']],
-        raw: true
-      });
+// Sum the allocated amount per student (allocation.amount is the per-student allocated value)
+const totalFeesAllocated = allocations.reduce(
+  (sum, a) => sum + (parseFloat(a.amount) || 0),
+  0
+);
 
-      const totalPayments = parseFloat(payments[0]?.total) || 0;
+// Total collected (payments)
+const payments = await Payment.findAll({
+  include: [{
+    model: Student,
+    where: { schoolId },
+    attributes: []
+  }],
+  attributes: [[sequelize.fn('SUM', sequelize.col('Payment.amount')), 'total']],
+  raw: true
+});
 
-      stats.finance.totalFees = totalFees;
-      stats.finance.totalPayments = totalPayments;
-      stats.finance.balance = totalFees - totalPayments;
-      stats.finance.collectionRate = totalFees ? ((totalPayments / totalFees) * 100).toFixed(2) : 0;
+const totalPayments = parseFloat(payments[0]?.total) || 0;
+
+// Outstanding balance
+const balance = totalFeesAllocated - totalPayments;
+
+// Collection rate based on allocated fees (not catalog fees)
+const collectionRate = totalFeesAllocated > 0
+  ? ((totalPayments / totalFeesAllocated) * 100).toFixed(2)
+  : 0;
+
+stats.finance.totalFees = totalFeesAllocated;
+stats.finance.totalPayments = totalPayments;
+stats.finance.balance = balance;
+stats.finance.collectionRate = collectionRate;
 
       stats.alerts.upcomingExams = await Exam.count({
         where: { schoolId, date: { [Op.gte]: new Date() } }
