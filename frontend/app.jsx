@@ -1455,7 +1455,7 @@ const handleSubmit = async (e) => {
   setLoading(true);
   setError('');
   try {
-    const res = await api.get(`/students/by-admission/${admissionNumber}`);
+ const res = await api.get(`/students/by-admission/${encodeURIComponent(admissionNumber)}`);
     const student = res.data.student;
     if (!student) throw new Error('Student not found');
 
@@ -2091,7 +2091,7 @@ const DashboardModule = ({
             try {
               // ✅ REMOVED the interceptor - it's already in api.js
               // Just call the API directly
-              const response = await api.get(`/students/by-admission/${admission.toUpperCase()}`);
+            const response = await api.get(`/students/by-admission/${encodeURIComponent(admission.toUpperCase())}`);
               if (response.data.student) {
                 const student = response.data.student;
                 localStorage.setItem('studentAdmissionNumber', admission.toUpperCase());
@@ -4543,7 +4543,7 @@ const StudentModule = ({
   const loadMyStudentData = async () => {
     setLoadingMyData(true);
     try {
-      const studentRes = await api.get(`/students/by-admission/${admissionNumber}`);
+    const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(admissionNumber)}`);
       if (studentRes.data.student) {
         const myStudent = studentRes.data.student;
         setMyStudentRecord(myStudent);
@@ -10614,7 +10614,7 @@ const ResultsModule = ({
     setApiError('');
     try {
       console.log('🔍 Loading results for admission:', admNumber);
-      const resultsRes = await api.get(`/results/by-admission/${admNumber}`);
+     const resultsRes = await api.get(`/results/by-admission/${encodeURIComponent(admNumber)}`);
       const studentResults = resultsRes.data.results || [];
       const studentInfo = resultsRes.data.student;
       
@@ -10906,7 +10906,7 @@ const ResultsModule = ({
     setLoadingMyData(true);
     setApiError('');
     try {
-      const studentRes = await api.get(`/students/by-admission/${admissionNumber}`);
+      const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(admissionNumber)}`);
       
       if (studentRes.data.student) {
         const student = studentRes.data.student;
@@ -16945,13 +16945,13 @@ const LibraryModule = ({
     setLoadingMyData(true);
     try {
       // Get student info by admission number
-      const studentRes = await api.get(`/students/by-admission/${admissionNumber}`);
+   const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(admissionNumber)}`);
       const student = studentRes.data.student;
       setMyStudentRecord(student);
       setMyStudentId(student.id);
       
       // Get borrowed books for this student - FILTER BY SCHOOL ID
-      const borrowsRes = await api.get(`/library/by-admission/${admissionNumber}/borrowed`, {
+      const borrowsRes = await api.get(`/library/by-admission/${encodeURIComponent(admissionNumber)}/borrowed`, {
         params: { schoolId: currentSchool?.id }
       });
       setMyBorrows(borrowsRes.data.borrows || []);
@@ -17206,7 +17206,7 @@ const LibraryModule = ({
         setBooks(prev => prev.map(b => b.id === selectedBorrow.bookId ? { ...b, available: b.available + 1 } : b)); 
       }
       if (isStudent && myStudentId) {
-        const borrowsRes = await api.get(`/library/by-admission/${admissionNumber}/borrowed`, {
+     const borrowsRes = await api.get(`/library/by-admission/${encodeURIComponent(admissionNumber)}/borrowed`, {
           params: { schoolId: currentSchool?.id }
         });
         setMyBorrows(borrowsRes.data.borrows || []);
@@ -33670,7 +33670,7 @@ const ExamCardsModule = ({
     try {
       let studentData;
       if (studentAdmissionNumber) {
-        const studentRes = await api.get(`/students/by-admission/${studentAdmissionNumber}`);
+const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(studentAdmissionNumber)}`);
         studentData = studentRes.data.student;
       } else {
         const studentRes = await api.get(`/students/${studentId}`);
@@ -38869,7 +38869,7 @@ const FeeStatementModule = ({
     try {
       let studentData;
       if (studentAdmissionNumber) {
-        const studentRes = await api.get(`/students/by-admission/${studentAdmissionNumber}`);
+        const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(studentAdmissionNumber)}`);
         studentData = studentRes.data.student;
       } else {
         const studentRes = await api.get(`/students/${studentId}`);
