@@ -46428,7 +46428,6 @@ const FeeCollectionModule = ({
   currentSchool, 
   parents, 
   user,
-  // ✅ NEW: discounts passed from parent
   discounts = [],
   setDiscounts
 }) => {
@@ -46449,15 +46448,14 @@ const FeeCollectionModule = ({
   const [feeStructure, setFeeStructure] = useState([]);
   const [outstandingBalance, setOutstandingBalance] = useState(0);
   const [totalPaid, setTotalPaid] = useState(0);
-  const [totalDiscounts, setTotalDiscounts] = useState(0); // ✅ NEW
-  const [studentDiscounts, setStudentDiscounts] = useState([]); // ✅ NEW
+  const [totalDiscounts, setTotalDiscounts] = useState(0);
+  const [studentDiscounts, setStudentDiscounts] = useState([]);
   const [recentPayments, setRecentPayments] = useState([]);
   const [apiError, setApiError] = useState('');
   const [showReceipt, setShowReceipt] = useState(false);
   const [lastReceipt, setLastReceipt] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // ✅ NEW: modal for granting a discount from this screen
   const [showDiscountModal, setShowDiscountModal] = useState(false);
   const [discountForm, setDiscountForm] = useState({
     feeId: '',
@@ -46700,7 +46698,6 @@ const FeeCollectionModule = ({
     { value: 'CARD', label: 'Card', subLabel: 'Debit/Credit card' }
   ], []);
 
-  // ✅ NEW: fee options for the discount modal
   const feeOptions = useMemo(() => {
     const opts = [{ value: '', label: 'All fees for this student' }];
     (feeStructure || []).forEach(f => {
@@ -46713,22 +46710,27 @@ const FeeCollectionModule = ({
     return opts;
   }, [feeStructure]);
 
-  // ✅ NEW: compute the discount amount for a specific fee
+  // ✅ FIXED: read from the freshest source (state populated from API)
+  //    and fall back to the prop only if state is empty.
   const getDiscountForFee = (fee, studentId) => {
     if (!fee || !studentId) return { amount: 0, source: null };
 
-    // Priority: per-fee discount → student-wide discount → fee-level default
-    const perFee = discounts.find(d =>
+    const source = (studentDiscounts && studentDiscounts.length > 0)
+      ? studentDiscounts
+      : (discounts || []);
+
+    const perFee = source.find(d =>
       d.studentId === studentId && d.feeId === fee.id && d.isActive !== false
     );
     const studentWide = !perFee
-      ? discounts.find(d =>
-          d.studentId === studentId && d.feeId === null && d.isActive !== false
+      ? source.find(d =>
+          d.studentId === studentId &&
+          (d.feeId === null || d.feeId === undefined) &&
+          d.isActive !== false
         )
       : null;
 
     const active = perFee || studentWide;
-
     if (active) {
       const value = parseFloat(active.value) || 0;
       const amount = active.type === 'PERCENT'
@@ -46737,7 +46739,6 @@ const FeeCollectionModule = ({
       return { amount, source: active };
     }
 
-    // Fall back to fee-level default
     const feeAmount = parseFloat(fee.amount) || 0;
     if (parseFloat(fee.discountPercent) > 0) {
       return { amount: feeAmount * (parseFloat(fee.discountPercent) / 100), source: null };
@@ -46749,7 +46750,6 @@ const FeeCollectionModule = ({
     return { amount: 0, source: null };
   };
 
-  // ✅ NEW: compute amount paid for a specific fee by a specific student
   const getPaidForFee = (fee, studentId) => {
     if (!fee || !studentId) return 0;
     return (payments || [])
@@ -46788,7 +46788,6 @@ const FeeCollectionModule = ({
       const totalPaidAmount = studentPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
       setTotalPaid(totalPaidAmount);
 
-      // ✅ NEW: fetch discounts for this student
       let studentDiscountsList = [];
       try {
         const discountsRes = await api.get('/discounts', { params: { studentId: student.id } });
@@ -46799,15 +46798,37 @@ const FeeCollectionModule = ({
       }
       setStudentDiscounts(studentDiscountsList);
 
-      // ✅ NEW: compute total discount across the student's fees
+      // ✅ Now uses the freshly-fetched list directly (not the prop)
       let totalDiscountAmount = 0;
       studentFees.forEach(fee => {
-        const { amount: discountAmt } = getDiscountForFee(fee, student.id);
-        totalDiscountAmount += discountAmt;
+        const perFee = studentDiscountsList.find(d =>
+          d.studentId === student.id && d.feeId === fee.id && d.isActive !== false
+        );
+        const studentWide = !perFee
+          ? studentDiscountsList.find(d =>
+              d.studentId === student.id &&
+              (d.feeId === null || d.feeId === undefined) &&
+              d.isActive !== false
+            )
+          : null;
+        const active = perFee || studentWide;
+
+        if (active) {
+          const value = parseFloat(active.value) || 0;
+          totalDiscountAmount += active.type === 'PERCENT'
+            ? (parseFloat(fee.amount) || 0) * (value / 100)
+            : value;
+        } else {
+          const feeAmount = parseFloat(fee.amount) || 0;
+          if (parseFloat(fee.discountPercent) > 0) {
+            totalDiscountAmount += feeAmount * (parseFloat(fee.discountPercent) / 100);
+          } else if (parseFloat(fee.discountAmount) > 0) {
+            totalDiscountAmount += parseFloat(fee.discountAmount);
+          }
+        }
       });
       setTotalDiscounts(totalDiscountAmount);
 
-      // ✅ NEW: balance = total fees − total discounts − total paid
       const newBalance = Math.max(0, totalFeesAmount - totalDiscountAmount - totalPaidAmount);
       setOutstandingBalance(newBalance);
 
@@ -46906,7 +46927,6 @@ const FeeCollectionModule = ({
     }
   };
 
-  // ✅ NEW: open the discount modal
   const openDiscountModal = () => {
     if (!selectedStudent) {
       alert('Please select a student first');
@@ -46923,7 +46943,6 @@ const FeeCollectionModule = ({
     setShowDiscountModal(true);
   };
 
-  // ✅ NEW: save a discount
   const handleSaveDiscount = async () => {
     if (!selectedStudent) { alert('Please select a student'); return; }
     if (!discountForm.value || parseFloat(discountForm.value) <= 0) {
@@ -46947,7 +46966,6 @@ const FeeCollectionModule = ({
       const res = await api.post('/discounts', payload);
       const savedDiscount = res.data?.discount;
 
-      // Update local state
       if (savedDiscount) {
         setStudentDiscounts(prev => {
           const exists = prev.find(d => d.id === savedDiscount.id);
@@ -46977,7 +46995,6 @@ const FeeCollectionModule = ({
     }
   };
 
-  // ✅ NEW: remove a discount
   const handleRemoveDiscount = async (discountId) => {
     if (!canGrantDiscount) { alert('You do not have permission to remove discounts'); return; }
     if (!window.confirm('Remove this discount?')) return;
@@ -47008,7 +47025,6 @@ const FeeCollectionModule = ({
         />
       )}
 
-      {/* ✅ NEW: Discount Modal */}
       {showDiscountModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6">
@@ -47081,7 +47097,7 @@ const FeeCollectionModule = ({
                   value={discountForm.reason}
                   onChange={(e) => setDiscountForm({ ...discountForm, reason: e.target.value })}
                   placeholder="e.g., Bursary, Staff child, Sibling discount"
-                  className="w-full px-3 py-2 border rounded-lg"
+                  className="w-full px-3 py-2 rounded-lg border"
                 />
               </div>
             </div>
@@ -47161,7 +47177,6 @@ const FeeCollectionModule = ({
                   </span>
                 </div>
 
-                {/* ✅ NEW: discount row */}
                 {totalDiscounts > 0 && (
                   <div className="flex justify-between">
                     <span className="text-gray-600">Discount:</span>
@@ -47182,7 +47197,6 @@ const FeeCollectionModule = ({
                   </span>
                 </div>
 
-                {/* ✅ NEW: Grant Discount button */}
                 {canGrantDiscount && (
                   <button
                     type="button"
@@ -47195,7 +47209,6 @@ const FeeCollectionModule = ({
               </div>
             )}
 
-            {/* ✅ NEW: Existing discounts list */}
             {studentDetails && studentDiscounts.length > 0 && (
               <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
                 <p className="text-xs font-semibold text-purple-800 mb-2">
