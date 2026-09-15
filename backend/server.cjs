@@ -5701,7 +5701,6 @@ app.get('/api/students/by-user/:userId', authenticate, async (req, res) => {
     });
   }
 });
-
 // GET single student by ID
 app.get('/api/students/:id', authenticate, async (req, res) => {
   try {
@@ -5723,7 +5722,10 @@ app.get('/api/students/:id', authenticate, async (req, res) => {
 
     const school = await School.findByPk(req.user.schoolId);
     const include = [
-      { model: Parent, include: [{ model: User }], required: false },
+      // ✅ FIX: Parent association is aliased as 'parents' on Student,
+      // and Parent.belongsTo(User) uses alias 'User'.
+      // Both aliases are REQUIRED or Sequelize throws EagerLoadingError.
+      { model: Parent, as: 'parents', include: [{ model: User, as: 'User' }], required: false },
       { model: Result, include: [{ model: Exam }], required: false },
       { model: Attendance, required: false },
       { model: Payment, required: false },
@@ -7886,10 +7888,10 @@ app.get('/api/parents/:id', authenticate, async (req, res) => {
         id: req.params.id, 
         schoolId: req.user.schoolId 
       },
-      include: [
-        { model: User, attributes: ['id', 'firstName', 'lastName', 'email', 'phone'] },
-        { model: Student, attributes: ['id', 'firstName', 'lastName', 'admissionNumber'] }
-      ]
+  include: [
+  { model: User, as: 'User', attributes: ['id', 'firstName', 'lastName', 'email', 'phone'] },
+  { model: Student, as: 'student', attributes: ['id', 'firstName', 'lastName', 'admissionNumber'] }
+]
     });
     
     if (!parent) {
@@ -8004,11 +8006,12 @@ app.post('/api/parents', authenticate, async (req, res) => {
 
     await transaction.commit();
 
-    const full = await Parent.findByPk(parent.id, {
-      include: [
-        { model: User,    as: 'User',    attributes: ['id','firstName','lastName','email','phone'], required: false },
-        { model: Student, as: 'student', attributes: ['id','firstName','lastName','admissionNumber'], required: false },
-      ],
+   
+const full = await Parent.findByPk(parent.id, {
+  include: [
+    { model: User,    as: 'User',    attributes: ['id','firstName','lastName','email','phone'], required: false },
+    { model: Student, as: 'student', attributes: ['id','firstName','lastName','admissionNumber'], required: false },
+  ],
     });
 
     res.status(201).json({ success: true, parent: full, message: 'Parent linked successfully' });
@@ -8042,13 +8045,12 @@ app.put('/api/parents/:id', authenticate, async (req, res) => {
     const oldParent = { ...parent.toJSON() };
     await parent.update(req.body);
     await createAuditLog(req, 'UPDATE', 'PARENT', parent.id, oldParent, parent);
-
-    const updatedParent = await Parent.findByPk(parent.id, {
-      include: [
-        { model: User, attributes: ['id', 'firstName', 'lastName', 'email', 'phone'] },
-        { model: Student, attributes: ['id', 'firstName', 'lastName', 'admissionNumber'] }
-      ]
-    });
+const updatedParent = await Parent.findByPk(parent.id, {
+  include: [
+    { model: User, as: 'User', attributes: ['id', 'firstName', 'lastName', 'email', 'phone'] },
+    { model: Student, as: 'student', attributes: ['id', 'firstName', 'lastName', 'admissionNumber'] }
+  ]
+});
 
     res.json({ 
       success: true, 
