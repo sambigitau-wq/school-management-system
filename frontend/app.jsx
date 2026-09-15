@@ -37543,6 +37543,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
     </div>
   );
 };
+// ==================== COMPLETE ATTENDANCE MODULE ====================
 const AttendanceModule = ({ 
   attendance, setAttendance, 
   classes, students, courses, programs, units,
@@ -37554,7 +37555,7 @@ const AttendanceModule = ({
 }) => {
   console.log('📅 AttendanceModule initialized');
 
-  // ==================== HELPER FUNCTIONS ====================
+  // ==================== HELPERS ====================
   const getKenyanDate = () => {
     const now = new Date();
     const year = now.getFullYear();
@@ -37563,21 +37564,14 @@ const AttendanceModule = ({
     return `${year}-${month}-${day}`;
   };
 
-  // ==================== FIX: Prevent Infinite Loops ====================
-  const hasLoadedStudentAttendance = React.useRef(false);
-  const hasLoadedChildrenAttendance = React.useRef(false);
-  const hasLoadedInitialStudentData = React.useRef(false);
+  // ==================== GUARDS ====================
+  const hasLoadedStudentAttendance = useRef(false);
+  const hasLoadedChildrenAttendance = useRef(false);
+  const hasLoadedTeacherData = useRef(false);
 
-  // ==================== SEARCHABLE SELECT COMPONENT ====================
+  // ==================== SEARCHABLE SELECT ====================
   const SearchableSelect = ({ 
-    label, 
-    value, 
-    onChange, 
-    options, 
-    placeholder, 
-    disabled, 
-    required, 
-    className,
+    label, value, onChange, options = [], placeholder, disabled, required, className,
     showClear = true 
   }) => {
     const [search, setSearch] = useState('');
@@ -37594,88 +37588,37 @@ const AttendanceModule = ({
 
     const filteredOptions = useMemo(() => {
       if (!search.trim()) return optionsWithEmpty;
-      const searchLower = search.toLowerCase();
+      const s = search.toLowerCase();
       return optionsWithEmpty.filter(opt => 
-        opt.label?.toLowerCase().includes(searchLower) ||
-        opt.subLabel?.toLowerCase().includes(searchLower) ||
-        opt.value?.toString().toLowerCase().includes(searchLower)
+        opt.label?.toLowerCase().includes(s) ||
+        opt.subLabel?.toLowerCase().includes(s) ||
+        opt.value?.toString().toLowerCase().includes(s)
       );
     }, [optionsWithEmpty, search]);
 
     const selectedOption = optionsWithEmpty.find(opt => opt.value === value);
 
     useEffect(() => {
-      const handleClickOutside = (event) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-          setIsOpen(false);
-          setIsFocused(false);
+      const handler = (e) => {
+        if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+          setIsOpen(false); setIsFocused(false);
         }
       };
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
+      document.addEventListener('mousedown', handler);
+      return () => document.removeEventListener('mousedown', handler);
     }, []);
 
     useEffect(() => {
-      if (selectedOption && !isFocused) {
-        setSearch(selectedOption.label);
-      } else if (!selectedOption && !isFocused) {
-        setSearch('');
-      }
+      if (selectedOption && !isFocused) setSearch(selectedOption.label);
+      else if (!selectedOption && !isFocused) setSearch('');
     }, [value, selectedOption, isFocused]);
 
-    const handleSelect = (selectedValue) => {
-      onChange({ target: { value: selectedValue } });
-      const selected = optionsWithEmpty.find(opt => opt.value === selectedValue);
-      setSearch(selected ? selected.label : '');
-      setIsOpen(false);
-      setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
-    };
-
-    const handleInputChange = (e) => {
-      const newValue = e.target.value;
-      setSearch(newValue);
-      setIsOpen(true);
-      setIsFocused(true);
-      if (newValue === '') {
-        onChange({ target: { value: '' } });
-      }
-    };
-
-    const handleFocus = () => {
-      setIsFocused(true);
-      setIsOpen(true);
-    };
-
-    const handleBlur = (e) => {
-      const relatedTarget = e.relatedTarget;
-      if (dropdownRef.current && dropdownRef.current.contains(relatedTarget)) {
-        return;
-      }
-      setTimeout(() => {
-        if (document.activeElement !== inputRef.current) {
-          setIsOpen(false);
-          setIsFocused(false);
-          if (selectedOption) {
-            setSearch(selectedOption.label);
-          } else {
-            setSearch('');
-          }
-        }
-      }, 150);
-    };
-
-    const handleClear = (e) => {
-      e.stopPropagation();
-      onChange({ target: { value: '' } });
-      setSearch('');
-      setIsOpen(false);
-      setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
+    const handleSelect = (v) => {
+      onChange({ target: { value: v } });
+      const sel = optionsWithEmpty.find(o => o.value === v);
+      setSearch(sel ? sel.label : '');
+      setIsOpen(false); setIsFocused(false);
+      inputRef.current?.focus();
     };
 
     const getDisplayValue = () => {
@@ -37688,38 +37631,33 @@ const AttendanceModule = ({
       <div className="relative" ref={dropdownRef}>
         {label && (
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
+            {label}{required && <span className="text-red-500 ml-1">*</span>}
           </label>
         )}
         <div className="relative">
           <input
             ref={inputRef}
             type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
+            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
             } ${className || ''}`}
             value={getDisplayValue()}
-            onChange={handleInputChange}
-            onFocus={handleFocus}
-            onBlur={handleBlur}
-            placeholder={placeholder || "Search and select..."}
+            onChange={(e) => { setSearch(e.target.value); setIsOpen(true); setIsFocused(true); if (e.target.value === '') onChange({ target: { value: '' } }); }}
+            onFocus={() => { setIsFocused(true); setIsOpen(true); }}
+            onBlur={() => setTimeout(() => { if (!dropdownRef.current?.contains(document.activeElement)) { setIsOpen(false); setIsFocused(false); } }, 150)}
+            placeholder={placeholder || 'Search...'}
             disabled={disabled}
             autoComplete="off"
           />
           {value && showClear && !disabled && (
-            <button
-              type="button"
-              onClick={handleClear}
-              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-red-500 z-10"
-              title="Clear selection"
-            >
+            <button type="button" onClick={(e) => { e.stopPropagation(); onChange({ target: { value: '' } }); setSearch(''); }}
+              className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           )}
-          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
             <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
@@ -37729,14 +37667,12 @@ const AttendanceModule = ({
           <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
             {filteredOptions.length > 0 ? (
               filteredOptions.map((opt) => (
-                <div
-                  key={opt.value || Math.random().toString()}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
+                <div key={opt.value || Math.random().toString()}
+                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 ${
                     opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
                   }`}
                   onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => handleSelect(opt.value)}
-                >
+                  onClick={() => handleSelect(opt.value)}>
                   <div className="font-medium">{opt.label}</div>
                   {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
                 </div>
@@ -37752,65 +37688,16 @@ const AttendanceModule = ({
     );
   };
 
-  // ==================== STATE ====================
-  // ... (keep all existing state declarations)
-  const [selectedStudent, setSelectedStudent] = useState('');
-  const [attendanceDate, setAttendanceDate] = useState(getKenyanDate());
-  const [attendanceList, setAttendanceList] = useState([]);
-  const [attendanceHistory, setAttendanceHistory] = useState([]);
-  const [studentSearch, setStudentSearch] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [viewMode, setViewMode] = useState('mark');
-  const [dateRange, setDateRange] = useState({
-    start: new Date(new Date().setDate(1)).toISOString().split('T')[0],
-    end: new Date().toISOString().split('T')[0]
-  });
-  const [attendanceReport, setAttendanceReport] = useState(null);
-  const [timetableForDate, setTimetableForDate] = useState([]);
-  const [apiError, setApiError] = useState('');
-  const [editingAttendance, setEditingAttendance] = useState(null);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [unitAttendanceStats, setUnitAttendanceStats] = useState({});
-  
-  // University state
-  const [uniCourse, setUniCourse] = useState('');
-  const [uniYear, setUniYear] = useState('');
-  const [uniSemester, setUniSemester] = useState('');
-  const [uniUnit, setUniUnit] = useState('');
-  
-  // TVET state
-  const [tvetProgram, setTvetProgram] = useState('');
-  const [tvetModule, setTvetModule] = useState('');
-  const [tvetYear, setTvetYear] = useState('');
-  const [tvetUnit, setTvetUnit] = useState('');
-  
-  // Secondary/Primary state
-  const [regClass, setRegClass] = useState('');
-  const [regSubject, setRegSubject] = useState('');
-  
-  // Filtered options
-  const [filteredUnits, setFilteredUnits] = useState([]);
-  const [filteredSubjects, setFilteredSubjects] = useState([]);
-  const [filteredStudents, setFilteredStudents] = useState([]);
-  
-  // Student-specific states
-  const [myAttendance, setMyAttendance] = useState([]);
-  const [myAttendanceSummary, setMyAttendanceSummary] = useState(null);
-  const [myStudentRecord, setMyStudentRecord] = useState(null);
-  const [showAdmissionModal, setShowAdmissionModal] = useState(false);
-  const [admissionNumber, setAdmissionNumber] = useState(propAdmissionNumber || '');
-  const [admissionMessage, setAdmissionMessage] = useState('');
-  const [admissionInput, setAdmissionInput] = useState('');
-  const [tempAdmissionNumber, setTempAdmissionNumber] = useState('');
+  // ==================== INPUT FIELD ====================
+  const InputField = ({ label, type = 'text', value, onChange, required, disabled }) => (
+    <div>
+      {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
+      <input type={type} value={value} onChange={onChange} required={required} disabled={disabled}
+        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" />
+    </div>
+  );
 
-  // Parent-specific states
-  const [myChildren, setMyChildren] = useState([]);
-  const [selectedChild, setSelectedChild] = useState(null);
-  const [childAttendance, setChildAttendance] = useState([]);
-  const [loadingChildren, setLoadingChildren] = useState(false);
-
-
-  // ==================== SCHOOL TYPE DETECTION ====================
+  // ==================== SCHOOL / ROLE DETECTION ====================
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
   const isUniversity = schoolCategory === 'UNIVERSITY';
   const isTVET = schoolCategory === 'COLLEGE_TVET';
@@ -37818,7 +37705,6 @@ const AttendanceModule = ({
   const isPrimary = schoolCategory === 'ECDE_PRIMARY_JSS';
   const isRegularSchool = !isUniversity && !isTVET;
 
-  // ==================== PERMISSIONS ====================
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
   const isSchoolAdmin = user?.role === 'SCHOOL_ADMIN';
   const isPrincipal = user?.role === 'PRINCIPAL';
@@ -37834,249 +37720,138 @@ const AttendanceModule = ({
   const isParent = user?.role === 'PARENT';
 
   const canMarkAttendance = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || 
-                           isSeniorTeacher || isClassTeacher || isSubjectTeacher || 
-                           isLecturer || isInstructor || isDean || isHOD;
-  const canViewReports = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || 
-                        isSeniorTeacher || isClassTeacher || isSubjectTeacher || 
-                        isLecturer || isInstructor || isDean || isHOD || isParent || isStudent;
+    isSeniorTeacher || isClassTeacher || isSubjectTeacher || isLecturer || isInstructor || isDean || isHOD;
+  const canViewReports = canMarkAttendance || isParent || isStudent;
 
-  // ==================== OPTIONS GENERATORS ====================
+  // ==================== STATE ====================
+  const [selectedStudent, setSelectedStudent] = useState('');
+  const [attendanceDate, setAttendanceDate] = useState(getKenyanDate());
+  const [attendanceList, setAttendanceList] = useState([]);
+  const [attendanceHistory, setAttendanceHistory] = useState([]);
+  const [studentSearch, setStudentSearch] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [viewMode, setViewMode] = useState('mark');
+  const [dateRange, setDateRange] = useState({
+    start: new Date(new Date().setDate(1)).toISOString().split('T')[0],
+    end: new Date().toISOString().split('T')[0]
+  });
+  const [attendanceReport, setAttendanceReport] = useState(null);
+  const [apiError, setApiError] = useState('');
+  const [editingAttendance, setEditingAttendance] = useState(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+
+  const [uniCourse, setUniCourse] = useState('');
+  const [uniYear, setUniYear] = useState('');
+  const [uniSemester, setUniSemester] = useState('');
+  const [uniUnit, setUniUnit] = useState('');
+
+  const [tvetProgram, setTvetProgram] = useState('');
+  const [tvetModule, setTvetModule] = useState('');
+  const [tvetYear, setTvetYear] = useState('');
+  const [tvetUnit, setTvetUnit] = useState('');
+
+  const [regClass, setRegClass] = useState('');
+  const [regSubject, setRegSubject] = useState('');
+
+  const [filteredUnits, setFilteredUnits] = useState([]);
+  const [filteredSubjects, setFilteredSubjects] = useState([]);
+
+  // Parent state
+  const [myChildren, setMyChildren] = useState([]);
+  const [selectedChild, setSelectedChild] = useState(null);
+  const [childAttendance, setChildAttendance] = useState([]);
+  const [childSummary, setChildSummary] = useState(null);
+  const [loadingChildren, setLoadingChildren] = useState(false);
+
+  // Student state
+  const [myAttendance, setMyAttendance] = useState([]);
+  const [myAttendanceSummary, setMyAttendanceSummary] = useState(null);
+  const [myStudentRecord, setMyStudentRecord] = useState(null);
+  const [showAdmissionModal, setShowAdmissionModal] = useState(false);
+  const [admissionNumber, setAdmissionNumber] = useState(propAdmissionNumber || '');
+  const [tempAdmissionNumber, setTempAdmissionNumber] = useState(propAdmissionNumber || '');
+  const [loadingMyAttendance, setLoadingMyAttendance] = useState(false);
+
+  // ==================== OPTIONS ====================
   const courseOptions = useMemo(() => {
-    const opts = [{ value: '', label: '' }];
-    (courses || []).forEach(c => {
-      opts.push({
-        value: c.id,
-        label: c.name,
-        subLabel: c.code || 'Course'
-      });
-    });
+    const opts = [];
+    (courses || []).forEach(c => opts.push({ value: c.id, label: c.name, subLabel: c.code || 'Course' }));
     return opts;
   }, [courses]);
 
   const programOptions = useMemo(() => {
-    const opts = [{ value: '', label: '' }];
-    (programs || []).forEach(p => {
-      opts.push({
-        value: p.id,
-        label: p.name,
-        subLabel: p.code || p.level || 'Program'
-      });
-    });
+    const opts = [];
+    (programs || []).forEach(p => opts.push({ value: p.id, label: p.name, subLabel: p.code || p.level || 'Program' }));
     return opts;
   }, [programs]);
 
   const classOptions = useMemo(() => {
-    const opts = [{ value: '', label: '' }];
-    (classes || []).forEach(c => {
-      opts.push({
-        value: c.id,
-        label: c.name,
-        subLabel: c.capacity ? `Capacity: ${c.capacity}` : 'Class'
-      });
-    });
+    const opts = [];
+    (classes || []).forEach(c => opts.push({ value: c.id, label: c.name, subLabel: c.capacity ? `Capacity: ${c.capacity}` : 'Class' }));
     return opts;
   }, [classes]);
 
   const subjectOptions = useMemo(() => {
-    const opts = [{ value: '', label: '' }];
-    (filteredSubjects || []).forEach(s => {
-      opts.push({
-        value: s.id,
-        label: s.name,
-        subLabel: s.code || 'Subject'
-      });
-    });
+    const opts = [];
+    (filteredSubjects || []).forEach(s => opts.push({ value: s.id, label: s.name, subLabel: s.code || 'Subject' }));
     return opts;
   }, [filteredSubjects]);
 
   const unitOptions = useMemo(() => {
-    const opts = [{ value: '', label: '' }];
-    (filteredUnits || []).forEach(u => {
-      opts.push({
-        value: u.id,
-        label: u.name,
-        subLabel: isUniversity ? `Sem ${u.semester || 'N/A'}` : `Module ${u.module || 'N/A'}`
-      });
-    });
+    const opts = [];
+    (filteredUnits || []).forEach(u => opts.push({
+      value: u.id, label: u.name,
+      subLabel: isUniversity ? `Sem ${u.semester || 'N/A'}` : `Module ${u.module || 'N/A'}`
+    }));
     return opts;
   }, [filteredUnits, isUniversity]);
 
   const studentOptions = useMemo(() => {
-    const opts = [{ value: '', label: '' }];
-    (students || []).forEach(s => {
-      opts.push({
-        value: s.id,
-        label: `${s.firstName} ${s.lastName}`,
-        subLabel: s.admissionNumber
-      });
-    });
+    const opts = [];
+    (students || []).forEach(s => opts.push({
+      value: s.id, label: `${s.firstName} ${s.lastName}`, subLabel: s.admissionNumber
+    }));
     return opts;
   }, [students]);
 
   const yearOptions = useMemo(() => {
-    const opts = [{ value: '', label: '' }];
-    for (let i = 1; i <= 6; i++) {
-      opts.push({ value: i.toString(), label: `Year ${i}` });
-    }
+    const opts = [];
+    for (let i = 1; i <= 6; i++) opts.push({ value: i.toString(), label: `Year ${i}` });
     return opts;
   }, []);
 
-  const semesterOptions = useMemo(() => {
-    return [
-      { value: '', label: '' },
-      { value: '1', label: 'Semester 1' },
-      { value: '2', label: 'Semester 2' }
-    ];
-  }, []);
+  const semesterOptions = [
+    { value: '1', label: 'Semester 1' },
+    { value: '2', label: 'Semester 2' }
+  ];
 
   const moduleOptions = useMemo(() => {
-    const opts = [{ value: '', label: '' }];
-    for (let i = 1; i <= 6; i++) {
-      opts.push({ value: i.toString(), label: `Module ${i}` });
-    }
+    const opts = [];
+    for (let i = 1; i <= 6; i++) opts.push({ value: i.toString(), label: `Module ${i}` });
     return opts;
   }, []);
-
-  // ==================== INPUT FIELD COMPONENT ====================
-  const InputField = ({ label, type, value, onChange, required, disabled }) => (
-    <div>
-      {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
-      <input
-        type={type}
-        value={value}
-        onChange={onChange}
-        required={required}
-        disabled={disabled}
-        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-      />
-    </div>
-  );
 
   // ==================== GET ITEM NAME ====================
   const getItemName = (item) => {
     if (!item) return 'Unknown';
-    
     if (item.unit?.name) return item.unit.name;
     if (item.Unit?.name) return item.Unit.name;
     if (item.subject?.name) return item.subject.name;
     if (item.Subject?.name) return item.Subject.name;
     if (item.unitName) return item.unitName;
     if (item.subjectName) return item.subjectName;
-    
     if (item.unitId) {
       const unit = units?.find(u => u.id === item.unitId);
-      if (unit?.name) {
-        if (unit.module) return `${unit.name} (Module ${unit.module})`;
-        return unit.name;
-      }
+      if (unit?.name) return unit.module ? `${unit.name} (Module ${unit.module})` : unit.name;
     }
     if (item.subjectId) {
       const subject = subjects?.find(s => s.id === item.subjectId);
       if (subject?.name) return subject.name;
     }
-    
-    if (item.timetableId && timetable) {
-      const ttEntry = timetable.find(t => t.id === item.timetableId);
-      if (ttEntry) {
-        if (ttEntry.unit?.name) return ttEntry.unit.name;
-        if (ttEntry.subject?.name) return ttEntry.subject.name;
-      }
-    }
-    
     return 'Unknown';
   };
 
-  // ==================== FETCH TIMETABLE FOR SELECTED DATE ====================
-  const fetchTimetableForDate = async () => {
-    // ... keep existing function
-  };
-
-  // ==================== CHECK EXISTING ATTENDANCE ====================
-  const checkExistingAttendance = async (studentIds, date) => {
-    // ... keep existing function
-  };
-
-  // ==================== CHECK TIME CONFLICTS ====================
-  const checkTimeConflicts = async (students, timetableEntries, existingMap, date) => {
-    // ... keep existing function
-  };
-
-  // ==================== LOAD STUDENTS FOR ATTENDANCE MARKING ====================
-  const loadStudents = async () => {
-    // ... keep existing function
-  };
-
-  // ==================== LOAD MY ATTENDANCE WITH ADMISSION NUMBER ====================
-  const loadMyAttendanceWithAdmission = async (admNumber) => {
-    // ... keep existing function
-  };
-
-  // ==================== LOAD MY ATTENDANCE (WRAPPER) ====================
-  const loadMyAttendance = async () => {
-    // ... keep existing function
-  };
-
-  // ==================== HANDLE ADMISSION SUBMIT ====================
-  const handleAdmissionSubmit = async () => {
-    // ... keep existing function
-  };
-
-  // ==================== CLEAR SAVED ADMISSION ====================
-  const clearSavedAdmission = () => {
-    // ... keep existing function
-  };
-
-  // ==================== LOAD PARENT'S CHILDREN ====================
-  const loadMyChildren = async () => {
-    // ... keep existing function
-  };
-
-  // ==================== LOAD CHILD ATTENDANCE ====================
-  const loadChildAttendance = async (childAdmission) => {
-    // ... keep existing function
-  };
-
-  // ==================== LOAD ATTENDANCE HISTORY ====================
-  const loadAttendanceHistory = async () => {
-    // ... keep existing function
-  };
-
-  // ==================== LOAD ATTENDANCE REPORT ====================
-  const loadAttendanceReport = async () => {
-    // ... keep existing function
-  };
-
-  // ==================== MARK ALL STUDENTS ====================
-  const handleMarkAll = (status) => {
-    // ... keep existing function
-  };
-
-  // ==================== FILTER ATTENDANCE LIST ====================
-  const filteredAttendanceList = attendanceList.filter(item => 
-    item.studentName?.toLowerCase().includes(studentSearch.toLowerCase()) ||
-    item.admissionNumber?.toLowerCase().includes(studentSearch.toLowerCase())
-  );
-
-  // ==================== SUBMIT ATTENDANCE ====================
-  const handleSubmit = async (e) => {
-    // ... keep existing function
-  };
-
-  // ==================== EDIT ATTENDANCE ====================
-  const handleEditAttendance = (record) => {
-    // ... keep existing function
-  };
-
-  const handleUpdateAttendance = async () => {
-    // ... keep existing function
-  };
-
-  // ==================== DELETE ATTENDANCE ====================
-  const handleDeleteAttendance = async (id) => {
-    // ... keep existing function
-  };
-
-  // ==================== GET STATUS BADGE COLOR ====================
+  // ==================== STATUS BADGE ====================
   const getStatusBadge = (status) => {
     const colors = { 
       'PRESENT': 'bg-green-100 text-green-800', 
@@ -38089,233 +37864,567 @@ const AttendanceModule = ({
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
 
-  // ==================== RENDER STUDENT VIEW ====================
+  // ==================== FILTER UNITS / SUBJECTS ====================
+  useEffect(() => {
+    if (isUniversity && uniCourse && units) {
+      setFilteredUnits(units.filter(u => u.courseId === uniCourse));
+    } else if (isTVET && tvetProgram && units) {
+      const list = units.filter(u => u.programId === tvetProgram);
+      setFilteredUnits(tvetModule ? list.filter(u => String(u.module) === String(tvetModule)) : list);
+    } else {
+      setFilteredUnits([]);
+    }
+  }, [uniCourse, tvetProgram, tvetModule, units, isUniversity, isTVET]);
+
+  useEffect(() => {
+    if (isRegularSchool && regClass && subjects) {
+      setFilteredSubjects(subjects.filter(s => s.classId === regClass));
+    } else {
+      setFilteredSubjects([]);
+    }
+  }, [regClass, subjects, isRegularSchool]);
+
+  // ==================== LOAD MY CHILDREN (PARENT) ====================
+  const loadMyChildren = useCallback(async () => {
+    setLoadingChildren(true);
+    setApiError('');
+    try {
+      const res = await api.get('/parents/me/children');
+      const children = res.data.children || [];
+      setMyChildren(children);
+      if (children.length > 0) {
+        setSelectedChild(children[0]);
+        await loadChildAttendance(children[0].admissionNumber);
+      } else {
+        setSelectedChild(null);
+        setChildAttendance([]);
+        setChildSummary(null);
+      }
+    } catch (error) {
+      console.error('❌ Error loading children:', error);
+      setApiError(error.response?.data?.message || 'Failed to load your children');
+      setMyChildren([]);
+    } finally {
+      setLoadingChildren(false);
+    }
+  }, []);
+
+  // ==================== LOAD CHILD ATTENDANCE ====================
+  const loadChildAttendance = useCallback(async (childAdmission) => {
+    if (!childAdmission) return;
+    setLoading(true);
+    setApiError('');
+    try {
+      const res = await api.get(
+        `/parents/me/children/${encodeURIComponent(childAdmission)}/attendance`
+      );
+      const records = res.data.attendance || [];
+      setChildAttendance(records);
+
+      const total = records.length;
+      const present = records.filter(r => r.status === 'PRESENT').length;
+      const absent = records.filter(r => r.status === 'ABSENT').length;
+      const late = records.filter(r => r.status === 'LATE').length;
+
+      setChildSummary({
+        total,
+        present,
+        absent,
+        late,
+        presentPercentage: total > 0 ? ((present / total) * 100).toFixed(1) : 0
+      });
+    } catch (error) {
+      console.error('❌ Error loading child attendance:', error);
+      setApiError(error.response?.data?.message || 'Failed to load attendance');
+      setChildAttendance([]);
+      setChildSummary(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // ==================== LOAD MY ATTENDANCE (STUDENT) ====================
+  const loadMyAttendance = useCallback(async (adm) => {
+    if (!adm) return;
+    setLoadingMyAttendance(true);
+    setApiError('');
+    try {
+      const res = await api.get(`/attendance/by-admission/${encodeURIComponent(adm)}`);
+      const records = res.data.attendance || [];
+      const studentInfo = res.data.student;
+      const summary = res.data.summary;
+
+      setMyAttendance(records);
+      setMyStudentRecord(studentInfo);
+      setMyAttendanceSummary(summary);
+    } catch (error) {
+      console.error('❌ Error loading my attendance:', error);
+      setApiError(error.response?.data?.message || 'Failed to load your attendance');
+      setMyAttendance([]);
+    } finally {
+      setLoadingMyAttendance(false);
+    }
+  }, []);
+
+  // ==================== EFFECTS: PARENT ====================
+  useEffect(() => {
+    if (isParent && !hasLoadedChildrenAttendance.current) {
+      loadMyChildren();
+      hasLoadedChildrenAttendance.current = true;
+    }
+    if (!isParent) hasLoadedChildrenAttendance.current = false;
+  }, [isParent, loadMyChildren]);
+
+  // ==================== EFFECTS: STUDENT ====================
+  useEffect(() => {
+    if (!isStudent) return;
+    if (hasLoadedStudentAttendance.current) return;
+
+    const savedAdmission = localStorage.getItem('studentAdmissionNumber');
+    const initial = propAdmissionNumber || savedAdmission;
+
+    if (initial) {
+      setAdmissionNumber(initial);
+      setTempAdmissionNumber(initial);
+      loadMyAttendance(initial);
+      hasLoadedStudentAttendance.current = true;
+    } else {
+      setShowAdmissionModal(true);
+    }
+  }, [isStudent, propAdmissionNumber, loadMyAttendance]);
+
+  const handleAdmissionSubmit = async () => {
+    if (!tempAdmissionNumber) return;
+    const adm = tempAdmissionNumber.toUpperCase().trim();
+    setAdmissionNumber(adm);
+    localStorage.setItem('studentAdmissionNumber', adm);
+    await loadMyAttendance(adm);
+    setShowAdmissionModal(false);
+  };
+
+  // ==================== LOAD STUDENTS FOR MARKING ====================
+  const loadStudents = async () => {
+    setLoading(true);
+    setApiError('');
+    try {
+      let params = {};
+      if (isUniversity && uniCourse) params.courseId = uniCourse;
+      else if (isTVET && tvetProgram) params.programId = tvetProgram;
+      else if (isRegularSchool && regClass) params.classId = regClass;
+
+      const res = await api.get('/students', { params });
+      let list = res.data.students || [];
+
+      if (isUniversity && uniYear) list = list.filter(s => s.currentYear === parseInt(uniYear));
+      if (isTVET && tvetYear) list = list.filter(s => s.currentYear === parseInt(tvetYear));
+      if (isTVET && tvetModule) {
+        list = list.filter(s => 
+          s.currentModule === tvetModule || 
+          s.currentModule === `Module ${tvetModule}`
+        );
+      }
+
+      // Build attendance entries
+      const entries = list.map(s => ({
+        studentId: s.id,
+        studentName: `${s.firstName} ${s.lastName}`,
+        admissionNumber: s.admissionNumber,
+        status: 'PRESENT',
+        remarks: ''
+      }));
+
+      setAttendanceList(entries);
+    } catch (error) {
+      console.error('❌ Error loading students:', error);
+      setApiError(error.response?.data?.message || 'Failed to load students');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==================== SUBMIT ATTENDANCE ====================
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (attendanceList.length === 0) {
+      alert('No students to mark. Please load students first.');
+      return;
+    }
+
+    setLoading(true);
+    setApiError('');
+    try {
+      const records = attendanceList.map(entry => {
+        const record = {
+          studentId: entry.studentId,
+          date: attendanceDate,
+          status: entry.status,
+          remarks: entry.remarks || ''
+        };
+        if (isUniversity && uniCourse) {
+          record.courseId = uniCourse;
+          if (uniUnit) record.unitId = uniUnit;
+          if (uniYear) record.year = parseInt(uniYear);
+          if (uniSemester) record.semester = parseInt(uniSemester);
+        } else if (isTVET && tvetProgram) {
+          record.programId = tvetProgram;
+          if (tvetUnit) record.unitId = tvetUnit;
+          if (tvetModule) record.module = tvetModule;
+          if (tvetYear) record.year = parseInt(tvetYear);
+        } else if (regClass) {
+          record.classId = regClass;
+          if (regSubject) record.subjectId = regSubject;
+        }
+        return record;
+      });
+
+      await api.post('/attendance', records);
+      alert(`✅ Attendance marked for ${records.length} students`);
+
+      // Refresh
+      if (setAttendance) {
+        try {
+          const res = await api.get('/attendance');
+          setAttendance(res.data.attendance || []);
+        } catch (e) { /* ignore */ }
+      }
+    } catch (error) {
+      console.error('❌ Error submitting attendance:', error);
+      setApiError(error.response?.data?.message || 'Failed to submit attendance');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==================== UPDATE ATTENDANCE ====================
+  const handleUpdateAttendance = async () => {
+    if (!editingAttendance) return;
+    setLoading(true);
+    try {
+      await api.put(`/attendance/${editingAttendance.id}`, {
+        status: editingAttendance.status,
+        remarks: editingAttendance.remarks
+      });
+      alert('✅ Attendance updated');
+      setShowEditModal(false);
+      setEditingAttendance(null);
+      if (setAttendance) {
+        try {
+          const res = await api.get('/attendance');
+          setAttendance(res.data.attendance || []);
+        } catch (e) { /* ignore */ }
+      }
+    } catch (error) {
+      console.error('❌ Update attendance error:', error);
+      alert(error.response?.data?.message || 'Failed to update attendance');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==================== FILTERED LIST ====================
+  const filteredAttendanceList = attendanceList.filter(item => 
+    item.studentName?.toLowerCase().includes(studentSearch.toLowerCase()) ||
+    item.admissionNumber?.toLowerCase().includes(studentSearch.toLowerCase())
+  );
+
+  // ==================== STUDENT VIEW ====================
   if (isStudent) {
-    // ... keep existing student view render (it uses InputField, no selects)
     return (
-      <div>
-        {/* Student view - no changes needed */}
+      <div className="space-y-6">
+        {showAdmissionModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+              <h2 className="text-2xl font-bold mb-4">View My Attendance</h2>
+              <p className="text-gray-600 mb-4">Enter your admission number to view your attendance records.</p>
+              {apiError && (
+                <div className="bg-red-50 p-3 rounded-lg text-red-600 text-sm mb-4">
+                  <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
+                </div>
+              )}
+              <input
+                type="text"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 mb-4"
+                value={tempAdmissionNumber}
+                onChange={(e) => setTempAdmissionNumber(e.target.value.toUpperCase())}
+                placeholder="e.g., 2024-0001"
+                autoFocus
+              />
+              <button onClick={handleAdmissionSubmit} disabled={loadingMyAttendance || !tempAdmissionNumber}
+                className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                {loadingMyAttendance ? 'Loading...' : 'View Attendance'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {loadingMyAttendance && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse"></div>}
+
+        <div className="flex justify-between items-center">
+          <h2 className="text-2xl font-bold">📋 My Attendance</h2>
+          {myStudentRecord && (
+            <button onClick={() => { localStorage.removeItem('studentAdmissionNumber'); setMyStudentRecord(null); setMyAttendance([]); setShowAdmissionModal(true); }}
+              className="text-indigo-600 hover:text-indigo-800 text-sm">
+              <i className="fas fa-exchange-alt mr-1"></i>Switch Account
+            </button>
+          )}
+        </div>
+
+        {myStudentRecord ? (
+          <>
+            <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl p-6 text-white">
+              <div className="flex items-center space-x-4">
+                <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center">
+                  <span className="text-2xl font-bold text-indigo-600">
+                    {myStudentRecord.firstName?.[0]}{myStudentRecord.lastName?.[0]}
+                  </span>
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold">{myStudentRecord.firstName} {myStudentRecord.lastName}</h3>
+                  <p className="text-indigo-100">Admission: {myStudentRecord.admissionNumber}</p>
+                </div>
+              </div>
+            </div>
+
+            {myAttendanceSummary && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-white p-4 rounded-xl shadow-sm text-center">
+                  <p className="text-sm text-gray-500">Total Days</p>
+                  <p className="text-2xl font-bold">{myAttendanceSummary.total || 0}</p>
+                </div>
+                <div className="bg-green-50 p-4 rounded-xl shadow-sm text-center">
+                  <p className="text-sm text-green-600">Present</p>
+                  <p className="text-2xl font-bold text-green-700">{myAttendanceSummary.present || 0}</p>
+                </div>
+                <div className="bg-red-50 p-4 rounded-xl shadow-sm text-center">
+                  <p className="text-sm text-red-600">Absent</p>
+                  <p className="text-2xl font-bold text-red-700">{myAttendanceSummary.absent || 0}</p>
+                </div>
+                <div className="bg-yellow-50 p-4 rounded-xl shadow-sm text-center">
+                  <p className="text-sm text-yellow-600">Rate</p>
+                  <p className="text-2xl font-bold text-yellow-700">{myAttendanceSummary.presentPercentage || 0}%</p>
+                </div>
+              </div>
+            )}
+
+            {myAttendance.length > 0 ? (
+              <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+                <div className="overflow-x-auto max-h-96">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 sticky top-0">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                          {isUniversity || isTVET ? 'Unit/Module' : 'Subject'}
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time In</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Remarks</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {myAttendance.map((r, i) => (
+                        <tr key={r.id || i} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm">{new Date(r.date).toLocaleDateString()}</td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(r.status)}`}>{r.status}</span>
+                          </td>
+                          <td className="px-4 py-3 text-sm">{getItemName(r)}</td>
+                          <td className="px-4 py-3 text-sm">{r.timeIn?.substring(0,5) || '—'}</td>
+                          <td className="px-4 py-3 text-sm text-gray-500">{r.remarks || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+                <i className="fas fa-calendar-times text-5xl text-gray-300 mb-3"></i>
+                <p className="text-gray-500">No attendance records yet.</p>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+            <i className="fas fa-calendar-check text-6xl text-gray-300 mb-4"></i>
+            <p className="text-gray-500 text-lg">Enter your admission number to view attendance.</p>
+            <button onClick={() => setShowAdmissionModal(true)}
+              className="mt-4 bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700">
+              Enter Admission Number
+            </button>
+          </div>
+        )}
       </div>
     );
   }
-// ==================== RENDER PARENT VIEW ====================
-if (isParent) {
-  return (
-    <div className="space-y-6">
-      {loadingChildren && (
-        <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>
-      )}
 
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold flex items-center gap-2">
-          📋 My Children's Attendance
-          {myChildren.length > 0 && (
-            <span className="text-sm font-normal text-gray-500">
-              ({myChildren.length} child{myChildren.length !== 1 ? 'ren' : ''})
-            </span>
-          )}
-        </h2>
-        <button
-          onClick={loadMyChildren}
-          disabled={loadingChildren}
-          className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2 disabled:opacity-50"
-        >
-          <i className={`fas fa-sync-alt ${loadingChildren ? 'fa-spin' : ''}`}></i>
-          Refresh
-        </button>
-      </div>
+  // ==================== PARENT VIEW ====================
+  if (isParent) {
+    return (
+      <div className="space-y-6">
+        {(loadingChildren || loading) && (
+          <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>
+        )}
 
-      {myChildren.length === 0 ? (
-        <div className="bg-white p-12 rounded-xl shadow-sm text-center">
-          <i className="fas fa-child text-6xl text-gray-300 mb-4 block"></i>
-          <h3 className="text-lg font-semibold text-gray-700 mb-2">
-            No children linked to your account
-          </h3>
-          <p className="text-gray-500 text-sm">
-            Please contact the school administrator to link your children
-            so you can view their attendance records.
-          </p>
+        <div className="flex justify-between items-center">
+          <h2 className="text-2xl font-bold flex items-center gap-2">
+            📋 My Children's Attendance
+            {myChildren.length > 0 && (
+              <span className="text-sm font-normal text-gray-500">
+                ({myChildren.length} child{myChildren.length !== 1 ? 'ren' : ''})
+              </span>
+            )}
+          </h2>
+          <button onClick={loadMyChildren} disabled={loadingChildren}
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2 disabled:opacity-50">
+            <i className={`fas fa-sync-alt ${loadingChildren ? 'fa-spin' : ''}`}></i>
+            Refresh
+          </button>
         </div>
-      ) : (
-        <>
-          {/* Child Selector */}
-          <div className="bg-white p-6 rounded-xl shadow-sm">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Select Child
-            </label>
-            <select
-              value={selectedChild?.id || ''}
-              onChange={(e) => {
-                const child = myChildren.find(c => c.id === e.target.value);
-                setSelectedChild(child || null);
-                if (child) {
-                  loadChildAttendance(child.admissionNumber);
-                } else {
-                  setChildAttendance([]);
-                  setMyAttendanceSummary(null);
-                }
-              }}
-              className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-            >
-              <option value="">-- Select a child --</option>
-              {myChildren.map(child => (
-                <option key={child.id} value={child.id}>
-                  {child.firstName} {child.lastName} ({child.admissionNumber})
-                </option>
-              ))}
-            </select>
+
+        {apiError && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+            <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
           </div>
+        )}
 
-          {/* Attendance Display for Selected Child */}
-          {selectedChild && (
-            <>
-              {/* Child Info Header */}
-              <div className="bg-gradient-to-r from-purple-500 to-pink-600 rounded-xl p-6 text-white">
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center">
-                    <span className="text-2xl font-bold text-purple-600">
-                      {selectedChild.firstName?.[0]}{selectedChild.lastName?.[0]}
-                    </span>
-                  </div>
-                  <div>
-                    <h3 className="text-2xl font-bold">
-                      {selectedChild.firstName} {selectedChild.lastName}
-                    </h3>
-                    <p className="text-purple-100">
-                      Admission: {selectedChild.admissionNumber}
-                    </p>
-                    {selectedChild.class?.name && (
-                      <p className="text-purple-200 text-sm mt-1">
-                        Class: {selectedChild.class.name}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Summary Cards */}
-              {myAttendanceSummary && (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="bg-white p-4 rounded-xl shadow-sm text-center">
-                    <p className="text-sm text-gray-500">Total Days</p>
-                    <p className="text-2xl font-bold text-gray-800">
-                      {myAttendanceSummary.total || 0}
-                    </p>
-                  </div>
-                  <div className="bg-green-50 p-4 rounded-xl shadow-sm text-center">
-                    <p className="text-sm text-green-600">Present</p>
-                    <p className="text-2xl font-bold text-green-700">
-                      {myAttendanceSummary.present || 0}
-                    </p>
-                  </div>
-                  <div className="bg-red-50 p-4 rounded-xl shadow-sm text-center">
-                    <p className="text-sm text-red-600">Absent</p>
-                    <p className="text-2xl font-bold text-red-700">
-                      {myAttendanceSummary.absent || 0}
-                    </p>
-                  </div>
-                  <div className="bg-yellow-50 p-4 rounded-xl shadow-sm text-center">
-                    <p className="text-sm text-yellow-600">Attendance Rate</p>
-                    <p className="text-2xl font-bold text-yellow-700">
-                      {myAttendanceSummary.presentPercentage || 0}%
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* Attendance Records Table */}
-              {childAttendance.length > 0 ? (
-                <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-                  <div className="px-6 py-4 bg-gray-50 border-b">
-                    <h3 className="font-semibold text-lg">
-                      Attendance Records ({childAttendance.length})
-                    </h3>
-                  </div>
-                  <div className="overflow-x-auto max-h-96">
-                    <table className="w-full">
-                      <thead className="bg-gray-50 sticky top-0">
-                        <tr>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            Date
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            Status
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            {isUniversity || isTVET ? 'Unit/Module' : 'Subject'}
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            Time In
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            Remarks
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {childAttendance.map((record, idx) => (
-                          <tr key={record.id || idx} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 text-sm">
-                              {new Date(record.date).toLocaleDateString()}
-                            </td>
-                            <td className="px-4 py-3">
-                              <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(record.status)}`}>
-                                {record.status}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-sm">
-                              {getItemName(record)}
-                            </td>
-                            <td className="px-4 py-3 text-sm">
-                              {record.timeIn?.substring(0, 5) || '—'}
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-500">
-                              {record.remarks || '—'}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-white p-12 rounded-xl shadow-sm text-center">
-                  <i className="fas fa-calendar-times text-5xl text-gray-300 mb-3 block"></i>
-                  <p className="text-gray-500">
-                    No attendance records found for {selectedChild.firstName}.
-                  </p>
-                </div>
-              )}
-            </>
-          )}
-
-          {/* Empty State — child selected but nothing loaded yet */}
-          {!selectedChild && (
-            <div className="bg-white p-12 rounded-xl shadow-sm text-center">
-              <i className="fas fa-arrow-up text-4xl text-gray-300 mb-3 block"></i>
-              <p className="text-gray-500">
-                Select a child above to view their attendance history.
-              </p>
+        {myChildren.length === 0 ? (
+          <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+            <i className="fas fa-child text-6xl text-gray-300 mb-4 block"></i>
+            <h3 className="text-lg font-semibold text-gray-700 mb-2">No children linked to your account</h3>
+            <p className="text-gray-500 text-sm">
+              Please contact the school administrator to link your children so you can view their attendance records.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="bg-white p-6 rounded-xl shadow-sm">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Select Child</label>
+              <select value={selectedChild?.id || ''}
+                onChange={(e) => {
+                  const child = myChildren.find(c => c.id === e.target.value);
+                  setSelectedChild(child || null);
+                  if (child) loadChildAttendance(child.admissionNumber);
+                  else { setChildAttendance([]); setChildSummary(null); }
+                }}
+                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
+                <option value="">-- Select a child --</option>
+                {myChildren.map(child => (
+                  <option key={child.id} value={child.id}>
+                    {child.firstName} {child.lastName} ({child.admissionNumber})
+                  </option>
+                ))}
+              </select>
             </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
 
-  // ==================== RENDER TEACHER/ADMIN VIEW ====================
+            {selectedChild && (
+              <>
+                <div className="bg-gradient-to-r from-purple-500 to-pink-600 rounded-xl p-6 text-white">
+                  <div className="flex items-center gap-4">
+                    <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center">
+                      <span className="text-2xl font-bold text-purple-600">
+                        {selectedChild.firstName?.[0]}{selectedChild.lastName?.[0]}
+                      </span>
+                    </div>
+                    <div>
+                      <h3 className="text-2xl font-bold">{selectedChild.firstName} {selectedChild.lastName}</h3>
+                      <p className="text-purple-100">Admission: {selectedChild.admissionNumber}</p>
+                      {selectedChild.class?.name && (
+                        <p className="text-purple-200 text-sm mt-1">Class: {selectedChild.class.name}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {childSummary && (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-white p-4 rounded-xl shadow-sm text-center">
+                      <p className="text-sm text-gray-500">Total Days</p>
+                      <p className="text-2xl font-bold text-gray-800">{childSummary.total || 0}</p>
+                    </div>
+                    <div className="bg-green-50 p-4 rounded-xl shadow-sm text-center">
+                      <p className="text-sm text-green-600">Present</p>
+                      <p className="text-2xl font-bold text-green-700">{childSummary.present || 0}</p>
+                    </div>
+                    <div className="bg-red-50 p-4 rounded-xl shadow-sm text-center">
+                      <p className="text-sm text-red-600">Absent</p>
+                      <p className="text-2xl font-bold text-red-700">{childSummary.absent || 0}</p>
+                    </div>
+                    <div className="bg-yellow-50 p-4 rounded-xl shadow-sm text-center">
+                      <p className="text-sm text-yellow-600">Attendance Rate</p>
+                      <p className="text-2xl font-bold text-yellow-700">{childSummary.presentPercentage || 0}%</p>
+                    </div>
+                  </div>
+                )}
+
+                {childAttendance.length > 0 ? (
+                  <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+                    <div className="px-6 py-4 bg-gray-50 border-b">
+                      <h3 className="font-semibold text-lg">
+                        Attendance Records ({childAttendance.length})
+                      </h3>
+                    </div>
+                    <div className="overflow-x-auto max-h-96">
+                      <table className="w-full">
+                        <thead className="bg-gray-50 sticky top-0">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                              {isUniversity || isTVET ? 'Unit/Module' : 'Subject'}
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time In</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Remarks</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {childAttendance.map((r, i) => (
+                            <tr key={r.id || i} className="hover:bg-gray-50">
+                              <td className="px-4 py-3 text-sm">{new Date(r.date).toLocaleDateString()}</td>
+                              <td className="px-4 py-3">
+                                <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(r.status)}`}>{r.status}</span>
+                              </td>
+                              <td className="px-4 py-3 text-sm">{getItemName(r)}</td>
+                              <td className="px-4 py-3 text-sm">{r.timeIn?.substring(0,5) || '—'}</td>
+                              <td className="px-4 py-3 text-sm text-gray-500">{r.remarks || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+                    <i className="fas fa-calendar-times text-5xl text-gray-300 mb-3 block"></i>
+                    <p className="text-gray-500">No attendance records found for {selectedChild.firstName}.</p>
+                  </div>
+                )}
+              </>
+            )}
+
+            {!selectedChild && (
+              <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+                <i className="fas fa-arrow-up text-4xl text-gray-300 mb-3 block"></i>
+                <p className="text-gray-500">Select a child above to view their attendance.</p>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // ==================== TEACHER / ADMIN VIEW ====================
   return (
     <div className="space-y-6">
       {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
-      
+
       {apiError && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-          <i className="fas fa-exclamation-circle mr-2"></i>
-          {apiError}
+          <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
         </div>
       )}
-      
+
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-gray-800">
           {isUniversity ? '📚 Course Attendance Management' : 
@@ -38325,374 +38434,252 @@ if (isParent) {
         </h2>
         <div className="flex space-x-2">
           {canMarkAttendance && (
-            <button 
-              onClick={() => setViewMode('mark')} 
+            <button onClick={() => setViewMode('mark')}
               className={`px-4 py-2 rounded-lg transition-colors ${
                 viewMode === 'mark' ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-            >
+              }`}>
               <i className="fas fa-check-circle mr-2"></i>Mark Attendance
             </button>
           )}
           {canViewReports && (
-            <>
-              <button 
-                onClick={() => setViewMode('history')} 
-                className={`px-4 py-2 rounded-lg transition-colors ${
-                  viewMode === 'history' ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                }`}
-              >
-                <i className="fas fa-history mr-2"></i>View History
-              </button>
-              <button 
-                onClick={() => setViewMode('report')} 
-                className={`px-4 py-2 rounded-lg transition-colors ${
-                  viewMode === 'report' ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                }`}
-              >
-                <i className="fas fa-chart-bar mr-2"></i>Reports
-              </button>
-            </>
+            <button onClick={() => setViewMode('history')}
+              className={`px-4 py-2 rounded-lg transition-colors ${
+                viewMode === 'history' ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}>
+              <i className="fas fa-history mr-2"></i>View History
+            </button>
           )}
         </div>
       </div>
 
-      {/* ==================== MARK ATTENDANCE VIEW WITH SEARCHABLE SELECTS ==================== */}
+      {/* MARK ATTENDANCE VIEW */}
       {viewMode === 'mark' && canMarkAttendance && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">Mark Attendance for {attendanceDate}</h3>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
             {isUniversity && (
               <>
-                <SearchableSelect 
-                  label="Course *" 
-                  value={uniCourse} 
-                  onChange={(e) => {
-                    setUniCourse(e.target.value);
-                    setUniUnit('');
-                  }} 
-                  options={courseOptions} 
-                  placeholder="Search course..." 
-                />
-                <SearchableSelect 
-                  label="Year" 
-                  value={uniYear} 
-                  onChange={(e) => setUniYear(e.target.value)} 
-                  options={yearOptions} 
-                  placeholder="All Years" 
-                />
-                <SearchableSelect 
-                  label="Semester" 
-                  value={uniSemester} 
-                  onChange={(e) => setUniSemester(e.target.value)} 
-                  options={semesterOptions} 
-                  placeholder="All Semesters" 
-                />
-                <SearchableSelect
-                  label="Unit (Optional)"
-                  value={uniUnit}
-                  onChange={(e) => setUniUnit(e.target.value)}
-                  options={unitOptions}
-                  placeholder="Search unit..."
-                  disabled={!uniCourse}
-                />
+                <SearchableSelect label="Course *" value={uniCourse}
+                  onChange={(e) => { setUniCourse(e.target.value); setUniUnit(''); }}
+                  options={courseOptions} placeholder="Search course..." />
+                <SearchableSelect label="Year" value={uniYear}
+                  onChange={(e) => setUniYear(e.target.value)} options={yearOptions} placeholder="All Years" />
+                <SearchableSelect label="Semester" value={uniSemester}
+                  onChange={(e) => setUniSemester(e.target.value)} options={semesterOptions} placeholder="All Semesters" />
+                <SearchableSelect label="Unit (Optional)" value={uniUnit}
+                  onChange={(e) => setUniUnit(e.target.value)} options={unitOptions}
+                  placeholder="Search unit..." disabled={!uniCourse} />
               </>
             )}
-            
+
             {isTVET && (
               <>
-                <SearchableSelect 
-                  label="Program *" 
-                  value={tvetProgram} 
-                  onChange={(e) => {
-                    setTvetProgram(e.target.value);
-                    setTvetUnit('');
-                  }} 
-                  options={programOptions} 
-                  placeholder="Search program..." 
-                />
-                <SearchableSelect 
-                  label="Year" 
-                  value={tvetYear} 
-                  onChange={(e) => setTvetYear(e.target.value)} 
-                  options={yearOptions} 
-                  placeholder="All Years" 
-                />
-                <SearchableSelect 
-                  label="Module" 
-                  value={tvetModule} 
-                  onChange={(e) => {
-                    setTvetModule(e.target.value);
-                    setTvetUnit('');
-                  }} 
-                  options={moduleOptions} 
-                  placeholder="All Modules" 
-                />
-                <SearchableSelect
-                  label="Unit (Optional)"
-                  value={tvetUnit}
-                  onChange={(e) => setTvetUnit(e.target.value)}
-                  options={unitOptions}
-                  placeholder="Search unit..."
-                  disabled={!tvetProgram}
-                />
+                <SearchableSelect label="Program *" value={tvetProgram}
+                  onChange={(e) => { setTvetProgram(e.target.value); setTvetUnit(''); }}
+                  options={programOptions} placeholder="Search program..." />
+                <SearchableSelect label="Year" value={tvetYear}
+                  onChange={(e) => setTvetYear(e.target.value)} options={yearOptions} placeholder="All Years" />
+                <SearchableSelect label="Module" value={tvetModule}
+                  onChange={(e) => { setTvetModule(e.target.value); setTvetUnit(''); }}
+                  options={moduleOptions} placeholder="All Modules" />
+                <SearchableSelect label="Unit (Optional)" value={tvetUnit}
+                  onChange={(e) => setTvetUnit(e.target.value)} options={unitOptions}
+                  placeholder="Search unit..." disabled={!tvetProgram} />
               </>
             )}
-            
+
             {isRegularSchool && (
               <>
-                <SearchableSelect 
-                  label="Class *" 
-                  value={regClass} 
-                  onChange={(e) => {
-                    setRegClass(e.target.value);
-                    setRegSubject('');
-                  }} 
-                  options={classOptions} 
-                  placeholder="Search class..." 
-                />
-                <SearchableSelect 
-                  label="Subject (Optional)" 
-                  value={regSubject} 
-                  onChange={(e) => setRegSubject(e.target.value)} 
-                  options={subjectOptions} 
-                  placeholder="Search subject..." 
-                  disabled={!regClass}
-                />
+                <SearchableSelect label="Class *" value={regClass}
+                  onChange={(e) => { setRegClass(e.target.value); setRegSubject(''); }}
+                  options={classOptions} placeholder="Search class..." />
+                <SearchableSelect label="Subject (Optional)" value={regSubject}
+                  onChange={(e) => setRegSubject(e.target.value)} options={subjectOptions}
+                  placeholder="Search subject..." disabled={!regClass} />
               </>
             )}
-            
-            <SearchableSelect 
-              label="Student (Optional)" 
-              value={selectedStudent} 
-              onChange={(e) => setSelectedStudent(e.target.value)} 
-              options={studentOptions} 
-              placeholder="Search student..." 
-            />
-            
-            <InputField 
-              label="Date" 
-              type="date" 
-              value={attendanceDate} 
-              onChange={(e) => setAttendanceDate(e.target.value)} 
-              required 
-            />
+
+            <SearchableSelect label="Student (Optional)" value={selectedStudent}
+              onChange={(e) => setSelectedStudent(e.target.value)}
+              options={studentOptions} placeholder="Search student..." />
+
+            <InputField label="Date" type="date" value={attendanceDate}
+              onChange={(e) => setAttendanceDate(e.target.value)} required />
           </div>
 
           <div className="flex justify-end mb-4">
-            <button 
-              type="button" 
-              onClick={loadStudents} 
-              disabled={loading || 
-                (isUniversity && !uniCourse) || 
-                (isTVET && !tvetProgram) || 
-                (isRegularSchool && !regClass)
-              } 
-              className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center"
-            >
-              {loading ? (
-                <><i className="fas fa-spinner fa-spin mr-2"></i>Loading...</>
-              ) : (
-                <><i className="fas fa-users mr-2"></i>Load Students</>
-              )}
+            <button type="button" onClick={loadStudents}
+              disabled={loading || (isUniversity && !uniCourse) || (isTVET && !tvetProgram) || (isRegularSchool && !regClass)}
+              className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center">
+              {loading ? <><i className="fas fa-spinner fa-spin mr-2"></i>Loading...</> : <><i className="fas fa-users mr-2"></i>Load Students</>}
             </button>
           </div>
 
-          {/* ... rest of mark attendance view remains the same */}
+          {attendanceList.length > 0 && (
+            <>
+              <div className="flex gap-2 mb-4">
+                <button onClick={() => setAttendanceList(prev => prev.map(s => ({ ...s, status: 'PRESENT' })))}
+                  className="bg-green-100 text-green-700 px-3 py-1 rounded-lg text-sm hover:bg-green-200">
+                  Mark All Present
+                </button>
+                <button onClick={() => setAttendanceList(prev => prev.map(s => ({ ...s, status: 'ABSENT' })))}
+                  className="bg-red-100 text-red-700 px-3 py-1 rounded-lg text-sm hover:bg-red-200">
+                  Mark All Absent
+                </button>
+                <input type="text" placeholder="Search students..."
+                  value={studentSearch} onChange={(e) => setStudentSearch(e.target.value)}
+                  className="flex-1 px-3 py-1 border rounded-lg text-sm" />
+              </div>
+
+              <form onSubmit={handleSubmit}>
+                <div className="overflow-x-auto border rounded-lg">
+                  <table className="w-full">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-2 text-left text-xs text-gray-500 uppercase">Admission</th>
+                        <th className="px-4 py-2 text-left text-xs text-gray-500 uppercase">Name</th>
+                        <th className="px-4 py-2 text-left text-xs text-gray-500 uppercase">Status</th>
+                        <th className="px-4 py-2 text-left text-xs text-gray-500 uppercase">Remarks</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {filteredAttendanceList.map(entry => (
+                        <tr key={entry.studentId} className="hover:bg-gray-50">
+                          <td className="px-4 py-2 font-mono text-sm">{entry.admissionNumber}</td>
+                          <td className="px-4 py-2">{entry.studentName}</td>
+                          <td className="px-4 py-2">
+                            <select value={entry.status}
+                              onChange={(e) => setAttendanceList(prev => prev.map(s => s.studentId === entry.studentId ? { ...s, status: e.target.value } : s))}
+                              className="px-2 py-1 border rounded">
+                              <option value="PRESENT">Present</option>
+                              <option value="ABSENT">Absent</option>
+                              <option value="LATE">Late</option>
+                              <option value="PERMISSION">Permission</option>
+                              <option value="SICK">Sick</option>
+                              <option value="FIELD_TRIP">Field Trip</option>
+                            </select>
+                          </td>
+                          <td className="px-4 py-2">
+                            <input type="text" value={entry.remarks}
+                              onChange={(e) => setAttendanceList(prev => prev.map(s => s.studentId === entry.studentId ? { ...s, remarks: e.target.value } : s))}
+                              className="w-full px-2 py-1 border rounded text-sm" placeholder="Optional..." />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="mt-4 flex justify-end">
+                  <button type="submit" disabled={loading}
+                    className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center">
+                    {loading ? <><i className="fas fa-spinner fa-spin mr-2"></i>Saving...</> : <><i className="fas fa-save mr-2"></i>Save Attendance</>}
+                  </button>
+                </div>
+              </form>
+            </>
+          )}
+
+          {attendanceList.length === 0 && !loading && (
+            <div className="text-center py-12 text-gray-500">
+              <i className="fas fa-users text-4xl text-gray-300 mb-3 block"></i>
+              <p>Select a {isUniversity ? 'course' : isTVET ? 'program' : 'class'} and click "Load Students" to begin.</p>
+            </div>
+          )}
         </div>
       )}
 
-      {/* ==================== HISTORY VIEW WITH SEARCHABLE SELECTS ==================== */}
+      {/* HISTORY VIEW */}
       {viewMode === 'history' && canViewReports && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">Attendance History</h3>
-          
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-            <SearchableSelect 
-              label="Student" 
-              value={selectedStudent} 
-              onChange={(e) => setSelectedStudent(e.target.value)} 
-              options={studentOptions} 
-              placeholder="Search student..." 
-            />
-            
-            {isUniversity && (
-              <>
-                <SearchableSelect 
-                  label="Course" 
-                  value={uniCourse} 
-                  onChange={(e) => setUniCourse(e.target.value)} 
-                  options={courseOptions} 
-                  placeholder="Search course..." 
-                />
-                <SearchableSelect
-                  label="Unit"
-                  value={uniUnit}
-                  onChange={(e) => setUniUnit(e.target.value)}
-                  options={unitOptions}
-                  placeholder="Search unit..."
-                  disabled={!uniCourse}
-                />
-              </>
-            )}
-            
-            {isTVET && (
-              <>
-                <SearchableSelect 
-                  label="Program" 
-                  value={tvetProgram} 
-                  onChange={(e) => setTvetProgram(e.target.value)} 
-                  options={programOptions} 
-                  placeholder="Search program..." 
-                />
-                <SearchableSelect
-                  label="Unit"
-                  value={tvetUnit}
-                  onChange={(e) => setTvetUnit(e.target.value)}
-                  options={unitOptions}
-                  placeholder="Search unit..."
-                  disabled={!tvetProgram}
-                />
-              </>
-            )}
-            
-            {isRegularSchool && (
-              <>
-                <SearchableSelect 
-                  label="Class" 
-                  value={regClass} 
-                  onChange={(e) => setRegClass(e.target.value)} 
-                  options={classOptions} 
-                  placeholder="Search class..." 
-                />
-                <SearchableSelect 
-                  label="Subject" 
-                  value={regSubject} 
-                  onChange={(e) => setRegSubject(e.target.value)} 
-                  options={subjectOptions} 
-                  placeholder="Search subject..." 
-                  disabled={!regClass}
-                />
-              </>
-            )}
-            
-            <InputField 
-              label="Start Date" 
-              type="date" 
-              value={dateRange.start} 
-              onChange={(e) => setDateRange({...dateRange, start: e.target.value})} 
-            />
-            <InputField 
-              label="End Date" 
-              type="date" 
-              value={dateRange.end} 
-              onChange={(e) => setDateRange({...dateRange, end: e.target.value})} 
-            />
-          </div>
-          
-          <button 
-            onClick={loadAttendanceHistory} 
-            disabled={loading}
-            className="mb-4 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-          >
-            <i className="fas fa-search mr-2"></i>Load History
+          <p className="text-gray-500 text-sm mb-4">
+            Use the Reports view to inspect detailed attendance statistics for a student.
+          </p>
+          <button onClick={() => setViewMode('report')}
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
+            <i className="fas fa-chart-bar mr-2"></i>Go to Reports
           </button>
-
-          {/* ... rest of history view remains the same */}
         </div>
       )}
 
-      {/* ==================== REPORT VIEW WITH SEARCHABLE SELECTS ==================== */}
+      {/* REPORT VIEW */}
       {viewMode === 'report' && canViewReports && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">Attendance Report</h3>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-            <SearchableSelect 
-              label="Student *" 
-              value={selectedStudent} 
-              onChange={(e) => setSelectedStudent(e.target.value)} 
-              options={studentOptions} 
-              placeholder="Search student..." 
-              required 
-            />
-            
-            {isUniversity && (
-              <SearchableSelect 
-                label="Course (Optional)" 
-                value={uniCourse} 
-                onChange={(e) => setUniCourse(e.target.value)} 
-                options={courseOptions} 
-                placeholder="All Courses" 
-              />
-            )}
-            
-            {isTVET && (
-              <SearchableSelect 
-                label="Program (Optional)" 
-                value={tvetProgram} 
-                onChange={(e) => setTvetProgram(e.target.value)} 
-                options={programOptions} 
-                placeholder="All Programs" 
-              />
-            )}
-            
-            <InputField 
-              label="Start Date" 
-              type="date" 
-              value={dateRange.start} 
-              onChange={(e) => setDateRange({...dateRange, start: e.target.value})} 
-            />
-            <InputField 
-              label="End Date" 
-              type="date" 
-              value={dateRange.end} 
-              onChange={(e) => setDateRange({...dateRange, end: e.target.value})} 
-            />
+            <SearchableSelect label="Student *" value={selectedStudent}
+              onChange={(e) => setSelectedStudent(e.target.value)}
+              options={studentOptions} placeholder="Search student..." required />
+            <InputField label="Start Date" type="date" value={dateRange.start}
+              onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })} />
+            <InputField label="End Date" type="date" value={dateRange.end}
+              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })} />
           </div>
-          
-          <button 
-            onClick={loadAttendanceReport} 
-            disabled={!selectedStudent || loading} 
-            className="mb-6 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-          >
+
+          <button onClick={async () => {
+            if (!selectedStudent) return;
+            setLoading(true);
+            try {
+              const res = await api.get(`/attendance/report`, {
+                params: { studentId: selectedStudent, startDate: dateRange.start, endDate: dateRange.end }
+              });
+              setAttendanceReport(res.data.report);
+            } catch (error) {
+              alert(error.response?.data?.message || 'Failed to generate report');
+            } finally { setLoading(false); }
+          }}
+            disabled={!selectedStudent || loading}
+            className="mb-6 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
             <i className="fas fa-chart-pie mr-2"></i>Generate Report
           </button>
 
-          {/* ... rest of report view remains the same */}
+          {attendanceReport && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-blue-50 p-4 rounded-lg text-center">
+                  <p className="text-sm text-blue-600">Total Days</p>
+                  <p className="text-2xl font-bold text-blue-700">{attendanceReport.overall?.total || 0}</p>
+                </div>
+                <div className="bg-green-50 p-4 rounded-lg text-center">
+                  <p className="text-sm text-green-600">Present</p>
+                  <p className="text-2xl font-bold text-green-700">{attendanceReport.overall?.present || 0}</p>
+                </div>
+                <div className="bg-red-50 p-4 rounded-lg text-center">
+                  <p className="text-sm text-red-600">Absent</p>
+                  <p className="text-2xl font-bold text-red-700">{attendanceReport.overall?.absent || 0}</p>
+                </div>
+                <div className="bg-yellow-50 p-4 rounded-lg text-center">
+                  <p className="text-sm text-yellow-600">Rate</p>
+                  <p className="text-2xl font-bold text-yellow-700">{attendanceReport.overall?.presentPercentage || 0}%</p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Edit Attendance Modal - no changes needed */}
+      {/* EDIT ATTENDANCE MODAL */}
       {showEditModal && editingAttendance && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
             <h3 className="text-xl font-bold mb-4">Edit Attendance</h3>
-            
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Student</label>
                 <p className="px-3 py-2 bg-gray-100 rounded-lg">{editingAttendance.studentName} ({editingAttendance.admissionNumber})</p>
               </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Unit/Module</label>
-                <p className="px-3 py-2 bg-gray-100 rounded-lg">{editingAttendance.unitName}</p>
-              </div>
-              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
                 <p className="px-3 py-2 bg-gray-100 rounded-lg">{new Date(editingAttendance.date).toLocaleDateString()}</p>
               </div>
-              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                <select
-                  value={editingAttendance.status}
-                  onChange={(e) => setEditingAttendance({...editingAttendance, status: e.target.value})}
-                  className="w-full px-3 py-2 border rounded-lg"
-                >
+                <select value={editingAttendance.status}
+                  onChange={(e) => setEditingAttendance({ ...editingAttendance, status: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg">
                   <option value="PRESENT">Present</option>
                   <option value="ABSENT">Absent</option>
                   <option value="LATE">Late</option>
@@ -38701,32 +38688,19 @@ if (isParent) {
                   <option value="FIELD_TRIP">Field Trip</option>
                 </select>
               </div>
-              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Remarks</label>
-                <textarea
-                  value={editingAttendance.remarks}
-                  onChange={(e) => setEditingAttendance({...editingAttendance, remarks: e.target.value})}
-                  className="w-full px-3 py-2 border rounded-lg"
-                  rows="3"
-                />
+                <textarea value={editingAttendance.remarks || ''}
+                  onChange={(e) => setEditingAttendance({ ...editingAttendance, remarks: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg" rows="3" />
               </div>
-              
               <div className="flex space-x-2 pt-4">
-                <button
-                  onClick={handleUpdateAttendance}
-                  disabled={loading}
-                  className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-                >
+                <button onClick={handleUpdateAttendance} disabled={loading}
+                  className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
                   {loading ? 'Updating...' : 'Update Attendance'}
                 </button>
-                <button
-                  onClick={() => {
-                    setShowEditModal(false);
-                    setEditingAttendance(null);
-                  }}
-                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
-                >
+                <button onClick={() => { setShowEditModal(false); setEditingAttendance(null); }}
+                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
                   Cancel
                 </button>
               </div>
