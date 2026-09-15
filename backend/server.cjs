@@ -17973,69 +17973,147 @@ app.put('/api/staff-attendance/settings/:schoolId', authenticate, async (req, re
   }
 });
 
-// ==================== GET ATTENDANCE REPORT ====================
+// ==================== GET ATTENDANCE REPORT (DETAILED) ====================
 app.get('/api/staff-attendance/report', authenticate, async (req, res) => {
   try {
     const canView = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'HR_MANAGER', 'HR'].includes(req.user.role);
-    
     if (!canView) {
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
-    
+
     const { startDate, endDate, department } = req.query;
-    
-    let staffFilter = {};
-    if (department) {
-      staffFilter.department = department;
-    }
-    
+
+    const start = startDate || new Date(new Date().setDate(1)).toISOString().split('T')[0];
+    const end   = endDate   || new Date().toISOString().split('T')[0];
+
+    // ---- Staff filter ----
+    const staffWhere = { schoolId: req.user.schoolId };
+    if (department) staffWhere.department = department;
+
+    // ---- Fetch staff with their attendance in the range ----
     const staff = await Staff.findAll({
-      where: staffFilter,
+      where: staffWhere,
       include: [
-        {
-          model: User,
-          attributes: ['firstName', 'lastName']
-        },
+        { model: User, attributes: ['id', 'firstName', 'lastName', 'email', 'phone'] },
         {
           model: StaffAttendance,
           as: 'attendances',
           required: false,
           where: {
-            date: {
-              [Op.gte]: startDate || new Date(new Date().setDate(1)),
-              [Op.lte]: endDate || new Date()
+            date: { [Op.between]: [start, end] }
+          },
+          include: [
+            {
+              model: User,
+              as: 'approvedByUser',
+              attributes: ['id', 'firstName', 'lastName'],
+              required: false
             }
-          }
+          ]
         }
-      ]
+      ],
+      order: [['createdAt', 'ASC']]
     });
-    
+
+    // ---- Tally counts ----
     let totalPresent = 0;
     let totalAbsent = 0;
     let totalLate = 0;
     let totalLeave = 0;
     let pendingApprovals = 0;
     let rejectedApprovals = 0;
-    
-    staff.forEach(s => {
-      if (s.attendances && s.attendances.length) {
-        s.attendances.forEach(a => {
-          if (a.approved) {
-            if (a.status === 'PRESENT') totalPresent++;
-            else if (a.status === 'ABSENT') totalAbsent++;
-            else if (a.status === 'LATE') totalLate++;
-            else if (a.status === 'LEAVE') totalLeave++;
-          } else if (a.approvalStatus === 'PENDING') {
-            pendingApprovals++;
-          } else if (a.approvalStatus === 'REJECTED') {
-            rejectedApprovals++;
-          }
-        });
-      }
+
+    // ---- Per-staff breakdown ----
+    const perStaff = staff.map(s => {
+      const records = s.attendances || [];
+
+      const present = records.filter(a => a.status === 'PRESENT' && a.approved).length;
+      const absent  = records.filter(a => a.status === 'ABSENT'  && a.approved).length;
+      const late    = records.filter(a => a.status === 'LATE'    && a.approved).length;
+      const leave   = records.filter(a => a.status === 'LEAVE'   && a.approved).length;
+
+      const pending = records.filter(a => a.approvalStatus === 'PENDING').length;
+      const rejected = records.filter(a => a.approvalStatus === 'REJECTED').length;
+
+      totalPresent += present;
+      totalAbsent  += absent;
+      totalLate    += late;
+      totalLeave   += leave;
+      pendingApprovals  += pending;
+      rejectedApprovals += rejected;
+
+      const totalRecords = present + absent + late + leave;
+
+      return {
+        staffId: s.id,
+        employeeId: s.employeeId,
+        name: s.User
+          ? `${s.User.firstName || ''} ${s.User.lastName || ''}`.trim()
+          : `Staff ${s.id}`,
+        email: s.User?.email || null,
+        phone: s.User?.phone || null,
+        department: s.department || '—',
+        jobTitle: s.jobTitle || '—',
+        staffType: s.staffType || '—',
+        totals: {
+          present,
+          absent,
+          late,
+          leave,
+          pending,
+          rejected,
+          totalRecords
+        },
+        attendanceRate: totalRecords > 0
+          ? Math.round((present / totalRecords) * 100)
+          : 0,
+        // Full records so the UI can drill down if needed
+        records: records.map(a => ({
+          id: a.id,
+          date: a.date,
+          status: a.status,
+          timeIn: a.timeIn,
+          timeOut: a.timeOut,
+          remarks: a.remarks,
+          approved: a.approved,
+          approvalStatus: a.approvalStatus,
+          approvedBy: a.approvedByUser
+            ? `${a.approvedByUser.firstName || ''} ${a.approvedByUser.lastName || ''}`.trim()
+            : null,
+          approvedAt: a.approvedAt
+        }))
+      };
     });
-    
+
+    // ---- Department breakdown (bonus) ----
+    const byDepartment = {};
+    perStaff.forEach(s => {
+      const dept = s.department || 'Unassigned';
+      if (!byDepartment[dept]) {
+        byDepartment[dept] = {
+          department: dept,
+          staffCount: 0,
+          present: 0,
+          absent: 0,
+          late: 0,
+          leave: 0,
+          pending: 0,
+          rejected: 0
+        };
+      }
+      byDepartment[dept].staffCount += 1;
+      byDepartment[dept].present  += s.totals.present;
+      byDepartment[dept].absent   += s.totals.absent;
+      byDepartment[dept].late     += s.totals.late;
+      byDepartment[dept].leave    += s.totals.leave;
+      byDepartment[dept].pending  += s.totals.pending;
+      byDepartment[dept].rejected += s.totals.rejected;
+    });
+
     res.json({
       success: true,
+      period: { startDate: start, endDate: end },
+      filters: { department: department || null },
       summary: {
         totalStaff: staff.length,
         totalPresent,
@@ -18043,16 +18121,20 @@ app.get('/api/staff-attendance/report', authenticate, async (req, res) => {
         totalLate,
         totalLeave,
         pendingApprovals,
-        rejectedApprovals
-      }
+        rejectedApprovals,
+        overallAttendanceRate: (totalPresent + totalAbsent + totalLate + totalLeave) > 0
+          ? Math.round((totalPresent / (totalPresent + totalAbsent + totalLate + totalLeave)) * 100)
+          : 0
+      },
+      perStaff,                             // ← THE KEY NEW PIECE
+      byDepartment: Object.values(byDepartment)
     });
+
   } catch (error) {
     console.error('Error generating report:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
-// ADD THESE ROUTES to your backend:
-
 // GET /api/features - Get all features for a school
 app.get('/api/features', authenticate, async (req, res) => {
   try {
