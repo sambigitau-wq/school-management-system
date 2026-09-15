@@ -12867,6 +12867,1089 @@ const AllResultsPrintModal = ({ printData, onClose, currentSchool, isUniversity,
     </div>
   );
 };
+// ==================== COMPLETE TIMETABLE MODULE WITH SEARCHABLE SELECT ====================
+const TimetableModule = ({ 
+  timetable, setTimetable, 
+  classes, subjects, staff, courses, programs, units,
+  handleCreate, handleDelete, currentSchool, user,
+  students, enrollments
+}) => {
+  console.log('📅 TimetableModule initialized');
+  
+  const [selectedProgram, setSelectedProgram] = useState('');
+  const [selectedCourse, setSelectedCourse] = useState('');
+  const [selectedClass, setSelectedClass] = useState('');
+  const [selectedYear, setSelectedYear] = useState('');
+  const [selectedModule, setSelectedModule] = useState('');
+  const [selectedSemester, setSelectedSemester] = useState('');
+  const [showForm, setShowForm] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [filteredUnits, setFilteredUnits] = useState([]);
+  const [filteredSubjects, setFilteredSubjects] = useState([]);
+  const [conflicts, setConflicts] = useState([]);
+  const [showConflicts, setShowConflicts] = useState(false);
+  const [studentConflicts, setStudentConflicts] = useState([]);
+  const [loadingConflicts, setLoadingConflicts] = useState(false);
+  const [formData, setFormData] = useState({
+    classId: '',
+    courseId: '',
+    programId: '',
+    year: '',
+    semester: '',
+    module: '',
+    day: 'MONDAY',
+    period: '',
+    startTime: '08:00',
+    endTime: '08:40',
+    subjectId: '',
+    unitId: '',
+    teacherId: '',
+    room: ''
+  });
+
+  // Permissions
+  const canAdd = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'DEAN', 'HOD'].includes(user?.role);
+  const canDelete = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'DEAN', 'HOD'].includes(user?.role);
+
+  const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
+  const isUniversity = schoolCategory === 'UNIVERSITY';
+  const isTVET = schoolCategory === 'COLLEGE_TVET';
+  
+  const days = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+  const periods = [1, 2, 3, 4, 5, 6, 7, 8];
+
+  // ==================== SEARCHABLE SELECT COMPONENT ====================
+  const SearchableSelect = ({ label, value, onChange, options, placeholder, disabled, required, className }) => {
+    const [search, setSearch] = useState('');
+    const [isOpen, setIsOpen] = useState(false);
+    const [isFocused, setIsFocused] = useState(false);
+    const dropdownRef = useRef(null);
+    const inputRef = useRef(null);
+
+    const filteredOptions = useMemo(() => {
+      if (!search.trim()) return options;
+      const searchLower = search.toLowerCase();
+      return options.filter(opt => 
+        opt.label?.toLowerCase().includes(searchLower) ||
+        opt.subLabel?.toLowerCase().includes(searchLower) ||
+        opt.value?.toString().toLowerCase().includes(searchLower)
+      );
+    }, [options, search]);
+
+    const selectedOption = options.find(opt => opt.value === value);
+
+    useEffect(() => {
+      const handleClickOutside = (event) => {
+        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+          setIsOpen(false);
+          setIsFocused(false);
+        }
+      };
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const handleSelect = (selectedValue) => {
+      onChange({ target: { value: selectedValue } });
+      const selected = options.find(opt => opt.value === selectedValue);
+      setSearch(selected ? selected.label : '');
+      setIsOpen(false);
+      setIsFocused(false);
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
+    };
+
+    const handleInputChange = (e) => {
+      const newValue = e.target.value;
+      setSearch(newValue);
+      setIsOpen(true);
+      setIsFocused(true);
+      if (newValue === '') {
+        onChange({ target: { value: '' } });
+      }
+    };
+
+    const handleFocus = () => {
+      setIsFocused(true);
+      setIsOpen(true);
+      if (selectedOption && !search) {
+        setSearch(selectedOption.label);
+      }
+    };
+
+    const handleBlur = (e) => {
+      const relatedTarget = e.relatedTarget;
+      if (dropdownRef.current && dropdownRef.current.contains(relatedTarget)) {
+        return;
+      }
+      setTimeout(() => {
+        if (document.activeElement !== inputRef.current) {
+          setIsOpen(false);
+          setIsFocused(false);
+          if (selectedOption) {
+            setSearch(selectedOption.label);
+          } else {
+            setSearch('');
+          }
+        }
+      }, 150);
+    };
+
+    const handleClear = (e) => {
+      e.stopPropagation();
+      onChange({ target: { value: '' } });
+      setSearch('');
+      setIsOpen(false);
+      setIsFocused(false);
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
+    };
+
+    const getDisplayValue = () => {
+      if (isFocused) return search;
+      if (selectedOption) return selectedOption.label;
+      return search || '';
+    };
+
+    return (
+      <div className="relative" ref={dropdownRef}>
+        {label && (
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            {label}
+            {required && <span className="text-red-500 ml-1">*</span>}
+          </label>
+        )}
+        <div className="relative">
+          <input
+            ref={inputRef}
+            type="text"
+            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
+              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
+            } ${className || ''}`}
+            value={getDisplayValue()}
+            onChange={handleInputChange}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            placeholder={placeholder || "Search and select..."}
+            disabled={disabled}
+            autoComplete="off"
+          />
+          {value && !disabled && (
+            <button
+              type="button"
+              onClick={handleClear}
+              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
+            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+        </div>
+        {isOpen && !disabled && (
+          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
+            {filteredOptions.length > 0 ? (
+              filteredOptions.map((opt) => (
+                <div
+                  key={opt.value || Math.random().toString()}
+                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
+                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
+                  }`}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => handleSelect(opt.value)}
+                >
+                  <div className="font-medium">{opt.label}</div>
+                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+                </div>
+              ))
+            ) : (
+              <div className="px-3 py-4 text-center text-gray-500 text-sm">
+                {search.trim() ? 'No results found' : 'Type to search...'}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ==================== OPTIONS GENERATORS ====================
+  const programOptions = useMemo(() => {
+    const options = [];
+    (programs || []).forEach(p => {
+      options.push({
+        value: p.id,
+        label: p.name,
+        subLabel: p.code || 'Program'
+      });
+    });
+    return options;
+  }, [programs]);
+
+  const courseOptions = useMemo(() => {
+    const options = [];
+    (courses || []).forEach(c => {
+      options.push({
+        value: c.id,
+        label: c.name,
+        subLabel: c.code || 'Course'
+      });
+    });
+    return options;
+  }, [courses]);
+
+  const classOptions = useMemo(() => {
+    const options = [];
+    (classes || []).forEach(c => {
+      options.push({
+        value: c.id,
+        label: c.name,
+        subLabel: c.capacity ? `Capacity: ${c.capacity}` : ''
+      });
+    });
+    return options;
+  }, [classes]);
+
+  const unitOptions = useMemo(() => {
+    const options = [];
+    filteredUnits.forEach(u => {
+      const subLabels = [];
+      if (u.module) subLabels.push(`Module ${u.module}`);
+      if (u.semester) subLabels.push(`Sem ${u.semester}`);
+      if (u.year) subLabels.push(`Yr ${u.year}`);
+      if (u.credits) subLabels.push(`${u.credits} credits`);
+      
+      options.push({
+        value: u.id,
+        label: u.name,
+        subLabel: subLabels.join(' • ') || 'Unit'
+      });
+    });
+    return options;
+  }, [filteredUnits]);
+
+  const subjectOptions = useMemo(() => {
+    const options = [];
+    filteredSubjects.forEach(s => {
+      options.push({
+        value: s.id,
+        label: s.name,
+        subLabel: s.code || 'Subject'
+      });
+    });
+    return options;
+  }, [filteredSubjects]);
+
+  const teacherOptions = useMemo(() => {
+    const options = [];
+    (staff || []).filter(s => s.staffType === 'TEACHING' || s.staffType === 'ACADEMIC').forEach(s => {
+      if (s.User) {
+        const name = `${s.User.firstName || ''} ${s.User.lastName || ''}`.trim() || 'Unknown';
+        const subLabels = [];
+        if (s.jobTitle) subLabels.push(s.jobTitle);
+        if (s.academicTitle) subLabels.push(s.academicTitle);
+        if (s.specialization) subLabels.push(s.specialization);
+        
+        options.push({
+          value: s.userId,
+          label: name,
+          subLabel: subLabels.join(' • ') || 'Teacher'
+        });
+      }
+    });
+    return options;
+  }, [staff]);
+
+  const yearOptions = [
+    { value: '', label: 'Select Year' },
+    { value: '1', label: 'Year 1' },
+    { value: '2', label: 'Year 2' },
+    { value: '3', label: 'Year 3' },
+    { value: '4', label: 'Year 4' }
+  ];
+
+  const moduleOptions = [
+    { value: '', label: 'Select Module' },
+    { value: '1', label: 'Module 1' },
+    { value: '2', label: 'Module 2' },
+    { value: '3', label: 'Module 3' },
+    { value: '4', label: 'Module 4' }
+  ];
+
+  const semesterOptions = [
+    { value: '', label: 'Select Semester' },
+    { value: '1', label: 'Semester 1' },
+    { value: '2', label: 'Semester 2' }
+  ];
+
+  const dayOptions = days.map(d => ({ value: d, label: d }));
+  const periodOptions = periods.map(p => ({ value: p, label: `Period ${p}` }));
+
+  // ==================== CONFLICT DETECTION FUNCTIONS ====================
+  const checkTeacherConflicts = (teacherId, day, startTime, endTime, excludeId = null) => {
+    return timetable.filter(entry => {
+      if (excludeId && entry.id === excludeId) return false;
+      if (entry.teacherId !== teacherId) return false;
+      if (entry.day !== day) return false;
+      const entryStart = entry.startTime;
+      const entryEnd = entry.endTime;
+      const overlap = (startTime < entryEnd && endTime > entryStart);
+      return overlap;
+    });
+  };
+
+  const checkRoomConflicts = (room, day, startTime, endTime, excludeId = null) => {
+    if (!room) return [];
+    return timetable.filter(entry => {
+      if (excludeId && entry.id === excludeId) return false;
+      if (entry.room !== room) return false;
+      if (entry.day !== day) return false;
+      const entryStart = entry.startTime;
+      const entryEnd = entry.endTime;
+      const overlap = (startTime < entryEnd && endTime > entryStart);
+      return overlap;
+    });
+  };
+
+  const checkStudentConflicts = async (courseId, programId, classId, year, module, semester, day, startTime, endTime, excludeId = null) => {
+    setLoadingConflicts(true);
+    try {
+      let studentIds = [];
+      if (isTVET && programId) {
+        const studentsInProgram = students?.filter(s => s.programId === programId) || [];
+        if (year) {
+          studentIds = studentsInProgram.filter(s => s.currentYear === parseInt(year)).map(s => s.id);
+        } else {
+          studentIds = studentsInProgram.map(s => s.id);
+        }
+      } else if (isUniversity && courseId) {
+        const studentsInCourse = students?.filter(s => s.courseId === courseId) || [];
+        if (year) {
+          studentIds = studentsInCourse.filter(s => s.currentYear === parseInt(year)).map(s => s.id);
+        } else {
+          studentIds = studentsInCourse.map(s => s.id);
+        }
+      } else if (classId) {
+        studentIds = students?.filter(s => s.classId === classId).map(s => s.id) || [];
+      }
+      
+      if (studentIds.length === 0) return [];
+      
+      const conflictingStudents = [];
+      const checkedEntries = new Set();
+      
+      for (const studentId of studentIds) {
+        const studentEnrollments = enrollments?.filter(e => e.studentId === studentId && e.status === 'APPROVED') || [];
+        for (const enrollment of studentEnrollments) {
+          let studentTimetable = [];
+          if (isTVET && enrollment.programId) {
+            studentTimetable = timetable.filter(t => 
+              t.programId === enrollment.programId && 
+              (!enrollment.year || t.year === enrollment.year) &&
+              (!enrollment.module || t.module === enrollment.module)
+            );
+          } else if (isUniversity && enrollment.courseId) {
+            studentTimetable = timetable.filter(t => 
+              t.courseId === enrollment.courseId && 
+              (!enrollment.year || t.year === enrollment.year) &&
+              (!enrollment.semester || t.semester === enrollment.semester)
+            );
+          } else if (enrollment.classId) {
+            studentTimetable = timetable.filter(t => t.classId === enrollment.classId);
+          }
+          
+          for (const entry of studentTimetable) {
+            if (excludeId && entry.id === excludeId) continue;
+            if (entry.day !== day) continue;
+            const entryStart = entry.startTime;
+            const entryEnd = entry.endTime;
+            const overlap = (startTime < entryEnd && endTime > entryStart);
+            if (overlap && !checkedEntries.has(`${studentId}-${entry.id}`)) {
+              checkedEntries.add(`${studentId}-${entry.id}`);
+              conflictingStudents.push({
+                studentId,
+                studentName: students?.find(s => s.id === studentId)?.firstName + ' ' + students?.find(s => s.id === studentId)?.lastName,
+                admissionNumber: students?.find(s => s.id === studentId)?.admissionNumber,
+                conflictingEntry: entry,
+                conflictTime: `${entry.startTime} - ${entry.endTime}`,
+                conflictDay: entry.day,
+                conflictItem: entry.unit?.name || entry.subject?.name || 'Unknown'
+              });
+            }
+          }
+        }
+      }
+      return conflictingStudents;
+    } catch (error) {
+      console.error('Error checking student conflicts:', error);
+      return [];
+    } finally {
+      setLoadingConflicts(false);
+    }
+  };
+
+  const checkAllConflicts = async (formDataToCheck, excludeId = null) => {
+    const conflictsFound = { teacher: [], room: [], student: [] };
+    if (formDataToCheck.teacherId) {
+      conflictsFound.teacher = checkTeacherConflicts(
+        formDataToCheck.teacherId,
+        formDataToCheck.day,
+        formDataToCheck.startTime,
+        formDataToCheck.endTime,
+        excludeId
+      );
+    }
+    if (formDataToCheck.room) {
+      conflictsFound.room = checkRoomConflicts(
+        formDataToCheck.room,
+        formDataToCheck.day,
+        formDataToCheck.startTime,
+        formDataToCheck.endTime,
+        excludeId
+      );
+    }
+    conflictsFound.student = await checkStudentConflicts(
+      formDataToCheck.courseId,
+      formDataToCheck.programId,
+      formDataToCheck.classId,
+      formDataToCheck.year,
+      formDataToCheck.module,
+      formDataToCheck.semester,
+      formDataToCheck.day,
+      formDataToCheck.startTime,
+      formDataToCheck.endTime,
+      excludeId
+    );
+    setConflicts(conflictsFound);
+    return conflictsFound;
+  };
+
+  // ==================== AUTO-REFRESH FUNCTION ====================
+  const refreshTimetable = async () => {
+    try {
+      setLoading(true);
+      const params = {};
+      if (isTVET && selectedProgram) params.programId = selectedProgram;
+      if (isTVET && selectedYear) params.year = selectedYear;
+      if (isTVET && selectedModule) params.module = selectedModule;
+      if (isUniversity && selectedCourse) params.courseId = selectedCourse;
+      if (isUniversity && selectedYear) params.year = selectedYear;
+      if (isUniversity && selectedSemester) params.semester = selectedSemester;
+      if (!isUniversity && !isTVET && selectedClass) params.classId = selectedClass;
+      
+      const res = await api.get('/timetable', { params });
+      if (res.data.timetable) {
+        setTimetable(res.data.timetable);
+      }
+    } catch (error) {
+      console.error('Error refreshing timetable:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshTimetable();
+  }, [selectedProgram, selectedCourse, selectedClass, selectedYear, selectedModule, selectedSemester]);
+
+  // ==================== FILTER UNITS/SUBJECTS ====================
+  useEffect(() => {
+    if (isTVET && formData.programId) {
+      const unitsForProgram = units?.filter(u => u.programId === formData.programId) || [];
+      setFilteredUnits(unitsForProgram);
+    } else if (isUniversity && formData.courseId) {
+      const unitsForCourse = units?.filter(u => u.courseId === formData.courseId) || [];
+      setFilteredUnits(unitsForCourse);
+    } else {
+      setFilteredUnits([]);
+    }
+  }, [formData.programId, formData.courseId, units, isTVET, isUniversity]);
+
+  useEffect(() => {
+    if (!isUniversity && !isTVET && formData.classId) {
+      const subjectsForClass = subjects?.filter(s => s.classId === formData.classId) || [];
+      setFilteredSubjects(subjectsForClass);
+    } else {
+      setFilteredSubjects([]);
+    }
+  }, [formData.classId, subjects, isUniversity, isTVET]);
+
+  // ==================== HELPER FUNCTIONS ====================
+  const getUnitName = (entry) => {
+    if (entry.unit?.name) return entry.unit.name;
+    if (entry.Unit?.name) return entry.Unit.name;
+    if (entry.unitId) {
+      const foundUnit = units?.find(u => u.id === entry.unitId);
+      if (foundUnit?.name) return foundUnit.name;
+    }
+    if (entry.subject?.name) return entry.subject.name;
+    if (entry.Subject?.name) return entry.Subject.name;
+    if (entry.subjectId) {
+      const foundSubject = subjects?.find(s => s.id === entry.subjectId);
+      if (foundSubject?.name) return foundSubject.name;
+    }
+    return 'Unknown';
+  };
+
+  const getTeacherName = (entry) => {
+    if (entry.teacher?.User) {
+      return `${entry.teacher.User.firstName || ''} ${entry.teacher.User.lastName || ''}`.trim();
+    }
+    if (entry.Teacher?.User) {
+      return `${entry.Teacher.User.firstName || ''} ${entry.Teacher.User.lastName || ''}`.trim();
+    }
+    if (entry.teacherId) {
+      const foundStaff = staff?.find(s => s.id === entry.teacherId);
+      if (foundStaff?.User) {
+        return `${foundStaff.User.firstName || ''} ${foundStaff.User.lastName || ''}`.trim();
+      }
+    }
+    return 'Unknown';
+  };
+
+  // ==================== HANDLE SUBMIT ====================
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!canAdd) {
+      alert('You do not have permission to add timetable entries');
+      return;
+    }
+    setLoading(true);
+    
+    try {
+      if (!formData.teacherId) {
+        alert('Please select a teacher');
+        setLoading(false);
+        return;
+      }
+
+      const selectedStaff = staff.find(s => s.userId === formData.teacherId);
+      if (!selectedStaff) {
+        alert('Teacher not found in staff records');
+        setLoading(false);
+        return;
+      }
+
+      const submitData = {
+        day: formData.day,
+        period: parseInt(formData.period),
+        startTime: formData.startTime,
+        endTime: formData.endTime,
+        teacherId: selectedStaff.id,
+        room: formData.room || '',
+        schoolId: currentSchool?.id
+      };
+
+      if (isTVET) {
+        if (!formData.programId) {
+          alert('Please select a program');
+          setLoading(false);
+          return;
+        }
+        if (!formData.unitId) {
+          alert('Please select a module/unit');
+          setLoading(false);
+          return;
+        }
+        submitData.programId = formData.programId;
+        submitData.unitId = formData.unitId;
+        submitData.year = formData.year ? parseInt(formData.year) : null;
+        submitData.module = formData.module ? parseInt(formData.module) : null;
+      } else if (isUniversity) {
+        if (!formData.courseId) {
+          alert('Please select a course');
+          setLoading(false);
+          return;
+        }
+        if (!formData.unitId) {
+          alert('Please select a unit');
+          setLoading(false);
+          return;
+        }
+        submitData.courseId = formData.courseId;
+        submitData.unitId = formData.unitId;
+        submitData.year = formData.year ? parseInt(formData.year) : null;
+        submitData.semester = formData.semester ? parseInt(formData.semester) : null;
+      } else {
+        if (!formData.classId) {
+          alert('Please select a class');
+          setLoading(false);
+          return;
+        }
+        if (!formData.subjectId) {
+          alert('Please select a subject');
+          setLoading(false);
+          return;
+        }
+        submitData.classId = formData.classId;
+        submitData.subjectId = formData.subjectId;
+      }
+
+      const conflictsFound = await checkAllConflicts(submitData);
+      
+      if (conflictsFound.teacher.length > 0 || conflictsFound.room.length > 0 || conflictsFound.student.length > 0) {
+        let conflictMessage = '⚠️ Conflicts detected:\n\n';
+        if (conflictsFound.teacher.length > 0) {
+          conflictMessage += `👨‍🏫 Teacher Conflict: ${conflictsFound.teacher.length} existing class(es) at this time\n`;
+        }
+        if (conflictsFound.room.length > 0) {
+          conflictMessage += `🏠 Room Conflict: ${conflictsFound.room.length} existing booking(s) at this time\n`;
+        }
+        if (conflictsFound.student.length > 0) {
+          conflictMessage += `👨‍🎓 Student Conflicts: ${conflictsFound.student.length} student(s) have overlapping schedules\n`;
+        }
+        conflictMessage += '\nDo you want to save anyway?';
+        if (!window.confirm(conflictMessage)) {
+          setLoading(false);
+          return;
+        }
+      }
+
+      await handleCreate('/timetable', submitData, setTimetable, timetable);
+      setShowForm(false);
+      setFormData({
+        classId: '', courseId: '', programId: '', year: '', semester: '', module: '',
+        day: 'MONDAY', period: '', startTime: '08:00', endTime: '08:40',
+        subjectId: '', unitId: '', teacherId: '', room: ''
+      });
+      setConflicts([]);
+      await refreshTimetable();
+      alert('✅ Timetable entry added successfully!');
+    } catch (error) {
+      console.error('❌ Error creating timetable entry:', error);
+      alert(error.response?.data?.message || 'Failed to create timetable entry');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==================== HANDLE DELETE ====================
+  const handleDeleteEntry = async (id) => {
+    if (!canDelete) return;
+    if (window.confirm('Delete this timetable entry?')) {
+      await handleDelete(id);
+      setTimeout(refreshTimetable, 500);
+    }
+  };
+
+  // ==================== HANDLE CHECK CONFLICTS ====================
+  const handleCheckConflicts = async (entry) => {
+    setLoadingConflicts(true);
+    try {
+      const conflictsFound = await checkAllConflicts(entry, entry.id);
+      setShowConflicts(true);
+      if (conflictsFound.teacher.length === 0 && conflictsFound.room.length === 0 && conflictsFound.student.length === 0) {
+        alert('✅ No conflicts detected for this timetable entry.');
+      } else {
+        let conflictMessage = '⚠️ Conflicts detected:\n\n';
+        if (conflictsFound.teacher.length > 0) {
+          conflictMessage += `👨‍🏫 Teacher Conflicts:\n`;
+          conflictsFound.teacher.forEach(t => {
+            conflictMessage += `   - ${t.day} at ${t.startTime}-${t.endTime} (${t.unit?.name || t.subject?.name || 'Unknown'})\n`;
+          });
+          conflictMessage += '\n';
+        }
+        if (conflictsFound.room.length > 0) {
+          conflictMessage += `🏠 Room Conflicts:\n`;
+          conflictsFound.room.forEach(r => {
+            conflictMessage += `   - ${r.day} at ${r.startTime}-${r.endTime} (${r.unit?.name || r.subject?.name || 'Unknown'})\n`;
+          });
+          conflictMessage += '\n';
+        }
+        if (conflictsFound.student.length > 0) {
+          conflictMessage += `👨‍🎓 Student Conflicts (${conflictsFound.student.length} students):\n`;
+          conflictsFound.student.slice(0, 5).forEach(s => {
+            conflictMessage += `   - ${s.studentName} (${s.admissionNumber}) - ${s.conflictItem} at ${s.conflictTime} on ${s.conflictDay}\n`;
+          });
+          if (conflictsFound.student.length > 5) {
+            conflictMessage += `   ... and ${conflictsFound.student.length - 5} more students\n`;
+          }
+        }
+        alert(conflictMessage);
+      }
+    } catch (error) {
+      console.error('Error checking conflicts:', error);
+      alert('Failed to check conflicts');
+    } finally {
+      setLoadingConflicts(false);
+    }
+  };
+
+  // ==================== PRINT FUNCTION ====================
+  const handlePrint = () => {
+    // [Keep your existing print function - it's already good]
+  };
+
+  // ==================== FILTERED TIMETABLE ====================
+  const filteredTimetable = React.useMemo(() => {
+    if (!timetable || timetable.length === 0) return [];
+    let filtered = [...timetable];
+    if (isTVET) {
+      if (selectedProgram) filtered = filtered.filter(entry => entry.programId === selectedProgram);
+      if (selectedYear) filtered = filtered.filter(entry => entry.year === parseInt(selectedYear));
+      if (selectedModule) filtered = filtered.filter(entry => entry.module === parseInt(selectedModule));
+    } else if (isUniversity) {
+      if (selectedCourse) filtered = filtered.filter(entry => entry.courseId === selectedCourse);
+      if (selectedYear) filtered = filtered.filter(entry => entry.year === parseInt(selectedYear));
+      if (selectedSemester) filtered = filtered.filter(entry => entry.semester === parseInt(selectedSemester));
+    } else {
+      if (selectedClass) filtered = filtered.filter(entry => entry.classId === selectedClass);
+    }
+    return filtered;
+  }, [timetable, selectedProgram, selectedCourse, selectedYear, selectedModule, selectedSemester, selectedClass, isTVET, isUniversity]);
+
+  // ==================== RENDER ====================
+  return (
+    <div className="space-y-6">
+      {(loading || loadingConflicts) && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
+      
+      <div className="flex justify-between items-center no-print">
+        <h2 className="text-2xl font-bold">
+          {isTVET ? '🔧 Program Timetable' : isUniversity ? '📚 Course Timetable' : '📅 Class Timetable'}
+        </h2>
+        <div className="flex space-x-2">
+          {canAdd && (
+            <button onClick={() => setShowForm(true)} className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center">
+              <i className="fas fa-plus mr-2"></i>Add Entry
+            </button>
+          )}
+          <button onClick={handlePrint} className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center">
+            <i className="fas fa-print mr-2"></i>Print Timetable
+          </button>
+        </div>
+      </div>
+
+      {/* Conflict Warning Banner */}
+      {conflicts && (conflicts.teacher?.length > 0 || conflicts.room?.length > 0 || conflicts.student?.length > 0) && showForm && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <div className="flex items-start">
+            <i className="fas fa-exclamation-triangle text-yellow-500 mr-3 mt-0.5"></i>
+            <div className="flex-1">
+              <h4 className="font-medium text-yellow-800">Potential Conflicts Detected</h4>
+              <div className="text-sm text-yellow-700 mt-1">
+                {conflicts.teacher?.length > 0 && <p>• Teacher has {conflicts.teacher.length} existing class(es) at this time</p>}
+                {conflicts.room?.length > 0 && <p>• Room has {conflicts.room.length} existing booking(s) at this time</p>}
+                {conflicts.student?.length > 0 && <p>• {conflicts.student.length} student(s) may have schedule conflicts</p>}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Filter Section with Searchable Selects */}
+      <div className="bg-white p-4 rounded-xl shadow-sm no-print">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {isTVET && (
+            <>
+              <SearchableSelect
+                label="Program"
+                value={selectedProgram}
+                onChange={(e) => setSelectedProgram(e.target.value)}
+                options={programOptions}
+                placeholder=""
+              />
+              <SearchableSelect
+                label="Year"
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(e.target.value)}
+                options={yearOptions.filter(opt => opt.value !== '')}
+                placeholder=""
+              />
+              <SearchableSelect
+                label="Module"
+                value={selectedModule}
+                onChange={(e) => setSelectedModule(e.target.value)}
+                options={moduleOptions.filter(opt => opt.value !== '')}
+                placeholder=""
+              />
+            </>
+          )}
+          
+          {isUniversity && (
+            <>
+              <SearchableSelect
+                label="Course"
+                value={selectedCourse}
+                onChange={(e) => setSelectedCourse(e.target.value)}
+                options={courseOptions}
+                placeholder=""
+              />
+              <SearchableSelect
+                label="Year"
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(e.target.value)}
+                options={yearOptions.filter(opt => opt.value !== '')}
+                placeholder=""
+              />
+              <SearchableSelect
+                label="Semester"
+                value={selectedSemester}
+                onChange={(e) => setSelectedSemester(e.target.value)}
+                options={semesterOptions.filter(opt => opt.value !== '')}
+                placeholder=""
+              />
+            </>
+          )}
+          
+          {!isUniversity && !isTVET && (
+            <SearchableSelect
+              label="Class"
+              value={selectedClass}
+              onChange={(e) => setSelectedClass(e.target.value)}
+              options={classOptions}
+              placeholder=""
+            />
+          )}
+        </div>
+        
+        <div className="mt-2 text-sm text-gray-500">
+          Showing {filteredTimetable.length} entries
+          {selectedProgram && programs?.find(p => p.id === selectedProgram) && 
+            ` for ${programs.find(p => p.id === selectedProgram).name}`}
+          {selectedYear && ` • Year ${selectedYear}`}
+          {selectedModule && ` • Module ${selectedModule}`}
+        </div>
+      </div>
+
+      {/* Add Entry Form with Searchable Selects */}
+      {showForm && canAdd && (
+        <div className="bg-white p-6 rounded-xl shadow-sm border-2 border-indigo-100 no-print">
+          <h3 className="text-lg font-semibold mb-4">Add Timetable Entry</h3>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              
+              {/* TVET Fields */}
+              {isTVET && (
+                <>
+                  <SearchableSelect
+                    label="Program *"
+                    value={formData.programId}
+                    onChange={(e) => setFormData({...formData, programId: e.target.value, unitId: ''})}
+                    options={programOptions}
+                    required
+                    placeholder=""
+                  />
+                  <SearchableSelect
+                    label="Year"
+                    value={formData.year}
+                    onChange={(e) => setFormData({...formData, year: e.target.value})}
+                    options={yearOptions}
+                    placeholder=""
+                  />
+                  <SearchableSelect
+                    label="Module"
+                    value={formData.module}
+                    onChange={(e) => setFormData({...formData, module: e.target.value})}
+                    options={moduleOptions}
+                    placeholder=""
+                  />
+                </>
+              )}
+              
+              {/* University Fields */}
+              {isUniversity && (
+                <>
+                  <SearchableSelect
+                    label="Course *"
+                    value={formData.courseId}
+                    onChange={(e) => setFormData({...formData, courseId: e.target.value, unitId: ''})}
+                    options={courseOptions}
+                    required
+                    placeholder=""
+                  />
+                  <SearchableSelect
+                    label="Year"
+                    value={formData.year}
+                    onChange={(e) => setFormData({...formData, year: e.target.value})}
+                    options={yearOptions}
+                    placeholder=""
+                  />
+                  <SearchableSelect
+                    label="Semester"
+                    value={formData.semester}
+                    onChange={(e) => setFormData({...formData, semester: e.target.value})}
+                    options={semesterOptions}
+                    placeholder=""
+                  />
+                </>
+              )}
+              
+              {/* Regular School Fields */}
+              {!isUniversity && !isTVET && (
+                <SearchableSelect
+                  label="Class *"
+                  value={formData.classId}
+                  onChange={(e) => setFormData({...formData, classId: e.target.value})}
+                  options={classOptions}
+                  required
+                  placeholder=""
+                />
+              )}
+
+              {/* Unit/Subject Selection */}
+              {(isTVET || isUniversity) && (
+                <SearchableSelect
+                  label={isTVET ? "Module *" : "Unit *"}
+                  value={formData.unitId}
+                  onChange={(e) => setFormData({...formData, unitId: e.target.value})}
+                  options={unitOptions}
+                  required
+                  disabled={(!formData.programId && !formData.courseId)}
+                  placeholder=""
+                />
+              )}
+              
+              {!isUniversity && !isTVET && (
+                <SearchableSelect
+                  label="Subject *"
+                  value={formData.subjectId}
+                  onChange={(e) => setFormData({...formData, subjectId: e.target.value})}
+                  options={subjectOptions}
+                  required
+                  disabled={!formData.classId}
+                  placeholder=""
+                />
+              )}
+
+              <SearchableSelect
+                label="Teacher *"
+                value={formData.teacherId}
+                onChange={(e) => setFormData({...formData, teacherId: e.target.value})}
+                options={teacherOptions}
+                required
+                placeholder=""
+              />
+
+              <SearchableSelect
+                label="Day *"
+                value={formData.day}
+                onChange={(e) => setFormData({...formData, day: e.target.value})}
+                options={dayOptions}
+                required
+                placeholder=""
+              />
+
+              <SearchableSelect
+                label="Period *"
+                value={formData.period}
+                onChange={(e) => setFormData({...formData, period: e.target.value})}
+                options={periodOptions}
+                required
+                placeholder=""
+              />
+
+              <input
+                type="text"
+                placeholder="Room (e.g., Hall A, Lab 1)"
+                value={formData.room}
+                onChange={(e) => setFormData({...formData, room: e.target.value})}
+                className="px-3 py-2 border rounded-lg"
+              />
+              
+              <input
+                type="time"
+                value={formData.startTime}
+                onChange={(e) => setFormData({...formData, startTime: e.target.value})}
+                className="px-3 py-2 border rounded-lg"
+                required
+              />
+              
+              <input
+                type="time"
+                value={formData.endTime}
+                onChange={(e) => setFormData({...formData, endTime: e.target.value})}
+                className="px-3 py-2 border rounded-lg"
+                required
+              />
+            </div>
+
+            <button type="submit" className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50" disabled={loading}>
+              {loading ? 'Adding...' : 'Add Entry'}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {/* Timetable Display - Keep your existing table display */}
+      <div className="bg-white rounded-xl shadow-sm overflow-x-auto">
+        {filteredTimetable.length === 0 ? (
+          <div className="text-center py-12 text-gray-500">
+            <i className="fas fa-calendar-alt text-5xl text-gray-300 mb-4"></i>
+            <p className="text-lg">No timetable entries found</p>
+            <p className="text-sm mt-2">Try adjusting your filters or add new entries</p>
+          </div>
+        ) : (
+          <table className="w-full border-collapse">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 border text-left text-xs font-medium text-gray-500 uppercase">Period</th>
+                {days.map(day => (
+                  <th key={day} className="px-4 py-3 border text-left text-xs font-medium text-gray-500 uppercase">{day}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {periods.map(period => (
+                <tr key={period}>
+                  <td className="px-4 py-3 border font-medium bg-gray-50">Period {period}</td>
+                  {days.map(day => {
+                    const entry = filteredTimetable.find(t => t.day === day && t.period === period);
+                    return (
+                      <td key={`${period}-${day}`} className="px-4 py-3 border align-top">
+                        {entry ? (
+                          <div className="bg-indigo-50 p-3 rounded-lg relative group">
+                            <div className="font-bold text-indigo-700 text-base">{getUnitName(entry)}</div>
+                            {isTVET && entry.module && (
+                              <div className="text-xs font-medium text-indigo-600 mt-1 bg-indigo-100 px-2 py-1 rounded inline-block">Module {entry.module}</div>
+                            )}
+                            {isUniversity && entry.semester && (
+                              <div className="text-xs font-medium text-indigo-600 mt-1 bg-indigo-100 px-2 py-1 rounded inline-block">Sem {entry.semester}</div>
+                            )}
+                            {entry.year && <div className="text-xs text-gray-500 mt-1">Year {entry.year}</div>}
+                            <div className="text-sm text-gray-700 mt-2 font-medium">
+                              <i className="fas fa-user mr-1 text-gray-400"></i>{getTeacherName(entry)}
+                            </div>
+                            {entry.room && (
+                              <div className="text-xs text-gray-500 mt-1">
+                                <i className="fas fa-door-open mr-1 text-gray-400"></i>Room: {entry.room}
+                              </div>
+                            )}
+                            <div className="text-xs text-gray-400 mt-2 border-t pt-1 border-indigo-200">
+                              <i className="far fa-clock mr-1"></i>{entry.startTime?.substring(0,5)} - {entry.endTime?.substring(0,5)}
+                            </div>
+                            <div className="mt-2 flex space-x-1 no-print">
+                              <button onClick={() => handleCheckConflicts(entry)} className="text-yellow-600 hover:text-yellow-800 text-xs p-1 hover:bg-yellow-50 rounded" title="Check Conflicts">
+                                <i className="fas fa-exclamation-triangle"></i>
+                              </button>
+                              {canDelete && (
+                                <button onClick={() => handleDeleteEntry(entry.id)} className="text-red-500 hover:text-red-700 text-xs p-1 hover:bg-red-50 rounded" title="Delete entry">
+                                  <i className="fas fa-trash"></i>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-gray-300 text-center py-4">—</div>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+};
 // ==================== COMPLETE REPORTS MODULE ====================
 import { 
   BarChart, Bar, PieChart, Pie, LineChart, Line, 
