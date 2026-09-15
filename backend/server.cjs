@@ -7117,144 +7117,120 @@ app.get('/api/timetable/by-admission/:admissionNumber', authenticate, async (req
     res.status(500).json({ message: error.message });
   }
 });
-
 // ==================== PARENT-SPECIFIC ENDPOINTS ====================
 
-// GET parent's children
+// ------------------------------------------------------------------
+// GET parent's own children (used by Parent Portal landing page)
+// ------------------------------------------------------------------
 app.get('/api/parents/me/children', authenticate, async (req, res) => {
   try {
     if (req.user.role !== 'PARENT') {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'This endpoint is only for parents' 
-      });
+      return res.status(403).json({ success: false, message: 'This endpoint is only for parents' });
     }
 
-    const parents = await Parent.findAll({
-      where: { userId: req.user.id },
+    const rows = await Parent.findAll({
+      where: { userId: req.user.id, schoolId: req.user.schoolId },
       include: [{
         model: Student,
+        as: 'student',
         include: [
-          { model: Class, required: false },
-          { model: Course, required: false }
-        ]
-      }]
+          { model: Class,   required: false },
+          { model: Course,  required: false },
+          { model: Program, required: false },
+        ],
+      }],
     });
 
-    const children = parents.map(p => p.Student).filter(s => s);
+    const children = rows.map(r => r.student).filter(Boolean);
 
-    res.json({ 
-      success: true, 
-      children,
-      count: children.length
-    });
+    res.json({ success: true, children, count: children.length });
   } catch (error) {
     console.error('Get parent children error:', error);
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
+// ------------------------------------------------------------------
+// Helper — verify the logged-in parent can access this student
+// Returns the Student row on success, or null on failure.
+// ------------------------------------------------------------------
+const getParentAccessibleStudent = async (parentUserId, schoolId, admissionNumber) => {
+  const student = await Student.findOne({
+    where: { schoolId, admissionNumber },
+  });
+  if (!student) return null;
+
+  const link = await Parent.findOne({
+    where: { userId: parentUserId, studentId: student.id },
+  });
+  if (!link) return null;
+
+  return student;
+};
+
+// ------------------------------------------------------------------
 // GET child's results by admission number
+// ------------------------------------------------------------------
 app.get('/api/parents/me/children/:admissionNumber/results', authenticate, async (req, res) => {
   try {
     if (req.user.role !== 'PARENT') {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'This endpoint is only for parents' 
-      });
+      return res.status(403).json({ success: false, message: 'This endpoint is only for parents' });
     }
 
     const { admissionNumber } = req.params;
 
-    // Find the student
-    const student = await Student.findOne({
-      where: { 
-        schoolId: req.user.schoolId,
-        admissionNumber 
-      }
-    });
+    const student = await getParentAccessibleStudent(
+      req.user.id, req.user.schoolId, admissionNumber
+    );
 
     if (!student) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Student not found' 
-      });
-    }
-
-    // Verify this parent has access to this student
-    const parent = await Parent.findOne({
-      where: { userId: req.user.id, studentId: student.id }
-    });
-
-    if (!parent) {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'You do not have access to this student' 
-      });
+      return res.status(404).json({ success: false, message: 'Student not found or you do not have access' });
     }
 
     const results = await Result.findAll({
       where: { studentId: student.id },
       include: [
-        { model: Exam, attributes: ['id', 'name', 'date', 'type'] },
-        { model: Subject, attributes: ['id', 'name'] },
-        { model: CourseUnit, as: 'CourseUnit', attributes: ['id', 'name'] }
+        { model: Exam,       attributes: ['id', 'name', 'date', 'type'], required: false },
+        { model: Subject,    attributes: ['id', 'name'],                 required: false },
+        { model: CourseUnit, as: 'CourseUnit', attributes: ['id', 'name'], required: false },
       ],
-      order: [['createdAt', 'DESC']]
+      order: [['createdAt', 'DESC']],
     });
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       results,
       student: {
         id: student.id,
         firstName: student.firstName,
         lastName: student.lastName,
-        admissionNumber: student.admissionNumber
-      }
+        admissionNumber: student.admissionNumber,
+      },
     });
   } catch (error) {
     console.error('Get child results error:', error);
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
+// ------------------------------------------------------------------
 // GET child's attendance by admission number
+// ------------------------------------------------------------------
 app.get('/api/parents/me/children/:admissionNumber/attendance', authenticate, async (req, res) => {
   try {
     if (req.user.role !== 'PARENT') {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'This endpoint is only for parents' 
-      });
+      return res.status(403).json({ success: false, message: 'This endpoint is only for parents' });
     }
 
     const { admissionNumber } = req.params;
     const { startDate, endDate } = req.query;
 
-    const student = await Student.findOne({
-      where: { 
-        schoolId: req.user.schoolId,
-        admissionNumber 
-      }
-    });
+    const student = await getParentAccessibleStudent(
+      req.user.id, req.user.schoolId, admissionNumber
+    );
 
     if (!student) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Student not found' 
-      });
-    }
-
-    const parent = await Parent.findOne({
-      where: { userId: req.user.id, studentId: student.id }
-    });
-
-    if (!parent) {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'You do not have access to this student' 
-      });
+      return res.status(404).json({ success: false, message: 'Student not found or you do not have access' });
     }
 
     const where = { studentId: student.id };
@@ -7265,67 +7241,49 @@ app.get('/api/parents/me/children/:admissionNumber/attendance', authenticate, as
     const attendance = await Attendance.findAll({
       where,
       include: [
-        { model: Course, attributes: ['id', 'name'] },
-        { model: Class, attributes: ['id', 'name'] }
+        { model: Course, attributes: ['id', 'name'], required: false },
+        { model: Class,  attributes: ['id', 'name'], required: false },
       ],
-      order: [['date', 'DESC']]
+      order: [['date', 'DESC']],
     });
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       attendance,
       student: {
         id: student.id,
         firstName: student.firstName,
         lastName: student.lastName,
-        admissionNumber: student.admissionNumber
-      }
+        admissionNumber: student.admissionNumber,
+      },
     });
   } catch (error) {
     console.error('Get child attendance error:', error);
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
+// ------------------------------------------------------------------
 // GET child's fee statement by admission number
+// ------------------------------------------------------------------
 app.get('/api/parents/me/children/:admissionNumber/fees', authenticate, async (req, res) => {
   try {
     if (req.user.role !== 'PARENT') {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'This endpoint is only for parents' 
-      });
+      return res.status(403).json({ success: false, message: 'This endpoint is only for parents' });
     }
 
     const { admissionNumber } = req.params;
 
-    const student = await Student.findOne({
-      where: { 
-        schoolId: req.user.schoolId,
-        admissionNumber 
-      }
-    });
+    const student = await getParentAccessibleStudent(
+      req.user.id, req.user.schoolId, admissionNumber
+    );
 
     if (!student) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Student not found' 
-      });
-    }
-
-    const parent = await Parent.findOne({
-      where: { userId: req.user.id, studentId: student.id }
-    });
-
-    if (!parent) {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'You do not have access to this student' 
-      });
+      return res.status(404).json({ success: false, message: 'Student not found or you do not have access' });
     }
 
     const school = await School.findByPk(req.user.schoolId);
-    
+
     let feeWhere = { schoolId: req.user.schoolId };
     if (school.category === 'UNIVERSITY') {
       feeWhere.courseId = student.courseId;
@@ -7336,13 +7294,15 @@ app.get('/api/parents/me/children/:admissionNumber/fees', authenticate, async (r
     }
 
     const fees = await Fee.findAll({ where: feeWhere });
-    const payments = await Payment.findAll({ 
-      where: { studentId: student.id },
-      order: [['date', 'DESC']]
+    const payments = await Payment.findAll({
+      where: { studentId: student.id, isOtherIncome: false },
+      order: [['date', 'DESC']],
     });
 
-    const totalFees = fees.reduce((sum, fee) => sum + parseFloat(fee.amount), 0);
-    const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
+    const totalFees = fees.reduce((s, f) => s + parseFloat(f.amount || 0), 0);
+    const totalPaid = payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+    const totalDiscounts = payments.reduce((s, p) => s + parseFloat(p.discountAmount || 0), 0);
+    const balance = totalFees - totalDiscounts - totalPaid;
 
     res.json({
       success: true,
@@ -7351,64 +7311,41 @@ app.get('/api/parents/me/children/:admissionNumber/fees', authenticate, async (r
           id: student.id,
           firstName: student.firstName,
           lastName: student.lastName,
-          admissionNumber: student.admissionNumber
+          admissionNumber: student.admissionNumber,
         },
         fees,
         payments,
-        summary: {
-          totalFees,
-          totalPaid,
-          balance: totalFees - totalPaid
-        }
-      }
+        summary: { totalFees, totalPaid, totalDiscounts, balance },
+      },
     });
   } catch (error) {
     console.error('Get child fees error:', error);
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
+// ------------------------------------------------------------------
 // GET child's exam card by admission number
+// ------------------------------------------------------------------
 app.get('/api/parents/me/children/:admissionNumber/exam-card', authenticate, async (req, res) => {
   try {
     if (req.user.role !== 'PARENT') {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'This endpoint is only for parents' 
-      });
+      return res.status(403).json({ success: false, message: 'This endpoint is only for parents' });
     }
 
     const { admissionNumber } = req.params;
     const { semester } = req.query;
 
-    const student = await Student.findOne({
-      where: { 
-        schoolId: req.user.schoolId,
-        admissionNumber 
-      }
-    });
+    const student = await getParentAccessibleStudent(
+      req.user.id, req.user.schoolId, admissionNumber
+    );
 
     if (!student) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Student not found' 
-      });
-    }
-
-    const parent = await Parent.findOne({
-      where: { userId: req.user.id, studentId: student.id }
-    });
-
-    if (!parent) {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'You do not have access to this student' 
-      });
+      return res.status(404).json({ success: false, message: 'Student not found or you do not have access' });
     }
 
     const school = await School.findByPk(req.user.schoolId);
 
-    // Get applicable fees
     let feeWhere = { schoolId: req.user.schoolId };
     if (school.category === 'UNIVERSITY') {
       feeWhere.courseId = student.courseId;
@@ -7420,27 +7357,19 @@ app.get('/api/parents/me/children/:admissionNumber/exam-card', authenticate, asy
     }
 
     const fees = await Fee.findAll({ where: feeWhere });
-    const totalFees = fees.reduce((sum, f) => sum + parseFloat(f.amount), 0);
-    const totalPaid = await Payment.sum('amount', { where: { studentId: student.id } }) || 0;
+    const totalFees = fees.reduce((s, f) => s + parseFloat(f.amount || 0), 0);
+    const totalPaid = (await Payment.sum('amount', { where: { studentId: student.id } })) || 0;
     const balance = totalFees - totalPaid;
     const isEligible = balance <= 0;
 
-    // Get units/subjects
     let units = [];
     if (school.category === 'UNIVERSITY') {
-      const unitWhere = { 
-        schoolId: req.user.schoolId, 
-        courseId: student.courseId 
-      };
+      const unitWhere = { schoolId: req.user.schoolId, courseId: student.courseId };
       if (semester) unitWhere.semester = parseInt(semester);
       if (student.currentYear) unitWhere.year = student.currentYear;
-      
       units = await CourseUnit.findAll({ where: unitWhere });
     } else {
-      const unitWhere = { 
-        schoolId: req.user.schoolId, 
-        classId: student.classId 
-      };
+      const unitWhere = { schoolId: req.user.schoolId, classId: student.classId };
       units = await Subject.findAll({ where: unitWhere });
     }
 
@@ -7452,72 +7381,52 @@ app.get('/api/parents/me/children/:admissionNumber/exam-card', authenticate, asy
           firstName: student.firstName,
           lastName: student.lastName,
           admissionNumber: student.admissionNumber,
-          course: student.course,
-          class: student.class,
           currentYear: student.currentYear,
-          currentSemester: student.currentSemester
+          currentSemester: student.currentSemester,
         },
-        fees: {
-          total: totalFees,
-          paid: totalPaid,
-          balance,
-          isEligible
-        },
+        fees: { total: totalFees, paid: totalPaid, balance, isEligible },
         units,
-        generatedAt: new Date()
-      }
+        generatedAt: new Date(),
+      },
     });
   } catch (error) {
     console.error('Get child exam card error:', error);
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
+// ------------------------------------------------------------------
 // GET child's timetable by admission number
+// ------------------------------------------------------------------
 app.get('/api/parents/me/children/:admissionNumber/timetable', authenticate, async (req, res) => {
   try {
     if (req.user.role !== 'PARENT') {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'This endpoint is only for parents' 
-      });
+      return res.status(403).json({ success: false, message: 'This endpoint is only for parents' });
     }
 
     const { admissionNumber } = req.params;
 
-    const student = await Student.findOne({
-      where: { 
-        schoolId: req.user.schoolId,
-        admissionNumber 
-      }
-    });
+    const student = await getParentAccessibleStudent(
+      req.user.id, req.user.schoolId, admissionNumber
+    );
 
     if (!student) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Student not found' 
-      });
-    }
-
-    const parent = await Parent.findOne({
-      where: { userId: req.user.id, studentId: student.id }
-    });
-
-    if (!parent) {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'You do not have access to this student' 
-      });
+      return res.status(404).json({ success: false, message: 'Student not found or you do not have access' });
     }
 
     const school = await School.findByPk(req.user.schoolId);
-    
+
     let where = { schoolId: req.user.schoolId };
-    
     if (school.category === 'UNIVERSITY') {
       where.courseId = student.courseId;
       if (student.currentYear) where.year = student.currentYear;
       if (student.currentSemester) where.semester = student.currentSemester;
+    } else if (school.category === 'COLLEGE_TVET') {
+      where.programId = student.programId;
+      if (student.currentModule) {
+        const moduleNum = parseInt(String(student.currentModule).replace(/\D/g, ''));
+        if (!isNaN(moduleNum)) where.module = moduleNum;
+      }
     } else {
       where.classId = student.classId;
     }
@@ -7525,30 +7434,28 @@ app.get('/api/parents/me/children/:admissionNumber/timetable', authenticate, asy
     const timetable = await Timetable.findAll({
       where,
       include: [
-        { model: Subject, required: false },
+        { model: Subject,    required: false },
         { model: CourseUnit, as: 'unit', required: false },
-        { 
-          model: Staff, 
-          as: 'teacher',
+        { model: Staff, as: 'teacher',
           include: [{ model: User, attributes: ['firstName', 'lastName'] }],
-          required: false 
-        }
+          required: false,
+        },
       ],
-      order: [['day', 'ASC'], ['period', 'ASC']]
+      order: [['day', 'ASC'], ['period', 'ASC']],
     });
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       timetable,
       student: {
         id: student.id,
         name: `${student.firstName} ${student.lastName}`,
-        admissionNumber: student.admissionNumber
-      }
+        admissionNumber: student.admissionNumber,
+      },
     });
   } catch (error) {
     console.error('Get child timetable error:', error);
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
@@ -7945,53 +7852,30 @@ app.post('/api/students/promote', authenticate, requireSchoolAdmin, async (req, 
     });
   }
 });
-
-// ==================== PARENT ROUTES ====================
-
 app.get('/api/parents', authenticate, async (req, res) => {
   try {
     const where = { schoolId: req.user.schoolId };
-    
-    // If user is a parent, only show their own records
+
     if (req.user.role === 'PARENT') {
       where.userId = req.user.id;
     }
-    
-    // If studentId is provided in query, filter by that student
+
     const { studentId } = req.query;
-    if (studentId) {
-      where.studentId = studentId;
-    }
+    if (studentId) where.studentId = studentId;
 
     const parents = await Parent.findAll({
       where,
       include: [
-        { 
-          model: User, 
-          attributes: ['id', 'firstName', 'lastName', 'email', 'phone'],
-          required: false 
-        },
-        { 
-          model: Student, 
-          attributes: ['id', 'firstName', 'lastName', 'admissionNumber'],
-          required: false 
-        }
+        { model: User,    as: 'User',    attributes: ['id','firstName','lastName','email','phone'], required: false },
+        { model: Student, as: 'student', attributes: ['id','firstName','lastName','admissionNumber'], required: false },
       ],
-      order: [['createdAt', 'DESC']]
+      order: [['createdAt', 'DESC']],
     });
-    
-    res.json({ 
-      success: true, 
-      parents,
-      count: parents.length
-    });
+
+    res.json({ success: true, parents, count: parents.length });
   } catch (error) {
     console.error('Get parents error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error', 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
@@ -8025,100 +7909,115 @@ app.get('/api/parents/:id', authenticate, async (req, res) => {
     });
   }
 });
-
 app.post('/api/parents', authenticate, async (req, res) => {
+  const transaction = await sequelize.transaction();
   try {
-    const { 
-      userId, 
-      studentId, 
-      relationship, 
-      isPrimary, 
-      emergencyContact,
-      occupation,
-      employer,
-      monthlyIncome 
+    const {
+      userId, studentId,
+      relationship = 'Guardian',
+      isPrimary = false,
+      emergencyContact = false,
+      occupation = null,
+      employer = null,
+      monthlyIncome = null,
+      firstName, lastName, email, phone,
+      grantPortalAccess = false,
+      password = null,
     } = req.body;
 
-    // Check if user exists
-    const user = await User.findOne({
-      where: { id: userId, schoolId: req.user.schoolId }
-    });
-    
-    if (!user) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'User not found in this school' 
-      });
+    if (!studentId) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'studentId is required' });
     }
 
-    // Check if student exists
+    // Verify student exists in this school
     const student = await Student.findOne({
-      where: { id: studentId, schoolId: req.user.schoolId }
+      where: { id: studentId, schoolId: req.user.schoolId },
+      transaction,
     });
-    
     if (!student) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Student not found in this school' 
-      });
+      await transaction.rollback();
+      return res.status(404).json({ success: false, message: 'Student not found in this school' });
     }
 
-    // Check if relationship already exists
-    const existing = await Parent.findOne({
-      where: { userId, studentId }
-    });
+    // Resolve or create the parent login user
+    let linkedUserId = userId || null;
 
-    if (existing) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'This parent-student relationship already exists' 
+    if (!linkedUserId && grantPortalAccess && email && password) {
+      const existing = await User.findOne({
+        where: { email: email.trim(), schoolId: req.user.schoolId },
+        transaction,
       });
+
+      if (existing) {
+        linkedUserId = existing.id;
+      } else {
+        const newUser = await User.create({
+          email: email.trim(),
+          password,
+          firstName: firstName?.trim() || null,
+          lastName: lastName?.trim() || null,
+          phone: phone?.trim() || null,
+          role: 'PARENT',
+          schoolId: req.user.schoolId,
+        }, { transaction });
+        linkedUserId = newUser.id;
+      }
     }
 
-    // If this is marked as primary, unmark any other primary for this student
+    // Verify explicit userId, if passed
+    if (linkedUserId) {
+      const u = await User.findOne({
+        where: { id: linkedUserId, schoolId: req.user.schoolId },
+        transaction,
+      });
+      if (!u) {
+        await transaction.rollback();
+        return res.status(404).json({ success: false, message: 'User not found in this school' });
+      }
+    }
+
+    // Only one primary per student
     if (isPrimary) {
       await Parent.update(
         { isPrimary: false },
-        { where: { studentId, isPrimary: true } }
+        { where: { studentId, isPrimary: true }, transaction }
       );
     }
 
     const parent = await Parent.create({
-      userId,
+      userId: linkedUserId,                 // may be null when portal is off
       studentId,
-      relationship: relationship || 'Parent',
-      isPrimary: isPrimary || false,
-      emergencyContact: emergencyContact || false,
+      relationship,
+      isPrimary,
+      emergencyContact,
       occupation,
       employer,
       monthlyIncome,
-      schoolId: req.user.schoolId
-    });
+      firstName: firstName?.trim() || null,
+      lastName: lastName?.trim() || null,
+      email: email?.trim() || null,
+      phone: phone?.trim() || null,
+      hasPortalAccount: !!linkedUserId,
+      schoolId: req.user.schoolId,
+    }, { transaction });
 
-    await createAuditLog(req, 'CREATE', 'PARENT', parent.id, null, parent);
+    await transaction.commit();
 
-    const createdParent = await Parent.findByPk(parent.id, {
+    const full = await Parent.findByPk(parent.id, {
       include: [
-        { model: User, attributes: ['id', 'firstName', 'lastName', 'email', 'phone'] },
-        { model: Student, attributes: ['id', 'firstName', 'lastName', 'admissionNumber'] }
-      ]
+        { model: User,    as: 'User',    attributes: ['id','firstName','lastName','email','phone'], required: false },
+        { model: Student, as: 'student', attributes: ['id','firstName','lastName','admissionNumber'], required: false },
+      ],
     });
 
-    res.status(201).json({ 
-      success: true, 
-      parent: createdParent,
-      message: 'Parent record created successfully'
-    });
+    res.status(201).json({ success: true, parent: full, message: 'Parent linked successfully' });
   } catch (error) {
+    await transaction.rollback();
     console.error('Create parent error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error', 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
-
 app.put('/api/parents/:id', authenticate, async (req, res) => {
   try {
     const parent = await Parent.findOne({
