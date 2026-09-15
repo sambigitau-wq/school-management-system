@@ -13582,11 +13582,309 @@ const TimetableModule = ({
     }
   };
 
-  // ==================== PRINT FUNCTION ====================
+  // ==================== PRINT FUNCTION (WITH SCHOOL LOGO) ====================
   const handlePrint = () => {
-    // [Keep your existing print function - it's already good]
-  };
+    // Guard: nothing to print
+    if (!filteredTimetable || filteredTimetable.length === 0) {
+      alert('No timetable entries to print. Adjust the filters or add entries first.');
+      return;
+    }
 
+    const schoolName = currentSchool?.name || 'School Timetable';
+    const schoolLogo =
+      currentSchool?.contact?.logo ||
+      currentSchool?.branding?.logo ||
+      currentSchool?.logo ||
+      '';
+
+    // Build the header of the printed page
+    const headerHtml = `
+      <div class="print-header">
+        ${schoolLogo ? `<img src="${schoolLogo}" alt="School Logo" class="print-logo" />` : ''}
+        <div class="print-title-block">
+          <h1 class="print-school-name">${schoolName}</h1>
+          <h2 class="print-doc-title">
+            ${isTVET ? 'Program Timetable' : isUniversity ? 'Course Timetable' : 'Class Timetable'}
+          </h2>
+          <p class="print-generated">Generated on ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+        </div>
+      </div>
+    `;
+
+    // Build the filter summary line
+    const filterBits = [];
+    if (isTVET && selectedProgram) {
+      const p = programs?.find(x => x.id === selectedProgram);
+      if (p) filterBits.push(`Program: ${p.name}`);
+    }
+    if (isUniversity && selectedCourse) {
+      const c = courses?.find(x => x.id === selectedCourse);
+      if (c) filterBits.push(`Course: ${c.name}`);
+    }
+    if (!isUniversity && !isTVET && selectedClass) {
+      const c = classes?.find(x => x.id === selectedClass);
+      if (c) filterBits.push(`Class: ${c.name}`);
+    }
+    if (selectedYear) filterBits.push(`Year ${selectedYear}`);
+    if (selectedModule) filterBits.push(`Module ${selectedModule}`);
+    if (selectedSemester) filterBits.push(`Semester ${selectedSemester}`);
+
+    const filterHtml = filterBits.length > 0
+      ? `<p class="print-filters">${filterBits.join(' &nbsp;•&nbsp; ')}</p>`
+      : '';
+
+    // Build the table rows
+    let rowsHtml = '';
+    periods.forEach(period => {
+      rowsHtml += `<tr><th class="period-cell">Period ${period}</th>`;
+      days.forEach(day => {
+        const entry = filteredTimetable.find(t => t.day === day && t.period === period);
+        if (entry) {
+          const unitName = getUnitName(entry);
+          const teacherName = getTeacherName(entry);
+          const times = entry.startTime && entry.endTime
+            ? `${entry.startTime.substring(0, 5)}–${entry.endTime.substring(0, 5)}`
+            : '';
+
+          rowsHtml += `
+            <td class="entry-cell">
+              <div class="entry-unit">${unitName || '—'}</div>
+              ${teacherName && teacherName !== 'Unknown' ? `<div class="entry-teacher">${teacherName}</div>` : ''}
+              ${entry.room ? `<div class="entry-room">Room: ${entry.room}</div>` : ''}
+              ${times ? `<div class="entry-time">${times}</div>` : ''}
+              ${isTVET && entry.module ? `<div class="entry-badge">Module ${entry.module}</div>` : ''}
+              ${isUniversity && entry.semester ? `<div class="entry-badge">Sem ${entry.semester}</div>` : ''}
+              ${entry.year ? `<div class="entry-year">Year ${entry.year}</div>` : ''}
+            </td>`;
+        } else {
+          rowsHtml += `<td class="empty-cell">—</td>`;
+        }
+      });
+      rowsHtml += '</tr>';
+    });
+
+    const tableHtml = `
+      <table class="print-table">
+        <thead>
+          <tr>
+            <th class="period-header">Period</th>
+            ${days.map(d => `<th>${d}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    `;
+
+    const footerHtml = `
+      <div class="print-footer">
+        <div class="signature-line">
+          <span>Prepared by: __________________________</span>
+        </div>
+        <div class="signature-line">
+          <span>Approved by (Principal/Dean): __________________________</span>
+        </div>
+      </div>
+    `;
+
+    // Compose the whole document
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>${schoolName} — Timetable</title>
+          <meta charset="UTF-8" />
+          <style>
+            @page { size: A4 landscape; margin: 12mm; }
+            * { box-sizing: border-box; }
+            body {
+              font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+              color: #1f2937;
+              margin: 0;
+              padding: 12px;
+              background: #fff;
+            }
+            .print-header {
+              display: flex;
+              align-items: center;
+              gap: 16px;
+              border-bottom: 3px double #4f46e5;
+              padding-bottom: 12px;
+              margin-bottom: 16px;
+            }
+            .print-logo {
+              width: 72px;
+              height: 72px;
+              object-fit: contain;
+              border-radius: 8px;
+              border: 1px solid #e5e7eb;
+              padding: 4px;
+              background: #fff;
+            }
+            .print-title-block {
+              flex: 1;
+              text-align: center;
+            }
+            .print-school-name {
+              font-size: 22px;
+              font-weight: 800;
+              color: #4f46e5;
+              text-transform: uppercase;
+              letter-spacing: 1.2px;
+              margin: 0 0 4px 0;
+            }
+            .print-doc-title {
+              font-size: 15px;
+              font-weight: 600;
+              color: #374151;
+              margin: 0 0 4px 0;
+              text-transform: uppercase;
+              letter-spacing: 0.8px;
+            }
+            .print-generated {
+              font-size: 11px;
+              color: #6b7280;
+              margin: 0;
+            }
+            .print-filters {
+              text-align: center;
+              font-size: 12px;
+              color: #4b5563;
+              background: #eef2ff;
+              padding: 6px 10px;
+              border-radius: 6px;
+              margin: 0 0 14px 0;
+            }
+            .print-table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 11px;
+            }
+            .print-table th {
+              background: #eef2ff;
+              color: #4338ca;
+              border: 1px solid #c7d2fe;
+              padding: 8px 6px;
+              text-align: center;
+              font-weight: 700;
+              text-transform: uppercase;
+              font-size: 10px;
+              letter-spacing: 0.5px;
+            }
+            .print-table td {
+              border: 1px solid #e5e7eb;
+              padding: 6px;
+              vertical-align: top;
+            }
+            .period-cell,
+            .period-header {
+              background: #f3f4f6;
+              font-weight: 700;
+              color: #374151;
+              white-space: nowrap;
+              width: 70px;
+              text-align: center;
+            }
+            .entry-cell {
+              background: #fafaff;
+            }
+            .entry-unit {
+              font-weight: 700;
+              color: #4338ca;
+              font-size: 11.5px;
+              margin-bottom: 2px;
+            }
+            .entry-teacher {
+              color: #374151;
+              font-size: 10.5px;
+              margin-bottom: 1px;
+            }
+            .entry-room {
+              color: #6b7280;
+              font-size: 10px;
+              margin-bottom: 1px;
+            }
+            .entry-time {
+              color: #9ca3af;
+              font-size: 10px;
+              border-top: 1px dashed #e5e7eb;
+              margin-top: 3px;
+              padding-top: 3px;
+            }
+            .entry-badge {
+              display: inline-block;
+              background: #e0e7ff;
+              color: #4338ca;
+              font-size: 9px;
+              padding: 1px 5px;
+              border-radius: 4px;
+              margin-top: 3px;
+            }
+            .entry-year {
+              font-size: 9.5px;
+              color: #6b7280;
+              margin-top: 2px;
+            }
+            .empty-cell {
+              text-align: center;
+              color: #d1d5db;
+              background: #fbfbfd;
+            }
+            .print-footer {
+              margin-top: 28px;
+              padding-top: 16px;
+              border-top: 1px solid #e5e7eb;
+              display: flex;
+              justify-content: space-between;
+              gap: 32px;
+              font-size: 11px;
+              color: #4b5563;
+            }
+            .signature-line {
+              flex: 1;
+              padding-top: 24px;
+            }
+            @media print {
+              body { padding: 0; }
+              .no-print { display: none !important; }
+            }
+          </style>
+        </head>
+        <body>
+          ${headerHtml}
+          ${filterHtml}
+          ${tableHtml}
+          ${footerHtml}
+        </body>
+      </html>
+    `;
+
+    // Open print window
+    const printWindow = window.open('', '_blank', 'width=1200,height=800');
+    if (!printWindow) {
+      alert('Please allow pop-ups to print the timetable.');
+      return;
+    }
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+
+    // Give images a moment to load, then trigger print
+    printWindow.onload = () => {
+      setTimeout(() => {
+        printWindow.focus();
+        printWindow.print();
+      }, 300);
+    };
+    // Fallback in case onload already fired
+    setTimeout(() => {
+      try {
+        printWindow.focus();
+        printWindow.print();
+      } catch (e) { /* ignore */ }
+    }, 800);
+  };
   // ==================== FILTERED TIMETABLE ====================
   const filteredTimetable = React.useMemo(() => {
     if (!timetable || timetable.length === 0) return [];
