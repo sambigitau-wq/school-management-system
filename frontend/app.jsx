@@ -36530,7 +36530,7 @@ const SettingsModule = ({
     </div>
   );
 };
-// ==================== COMPLETE STAFF ATTENDANCE MODULE (FULL REWRITE) ====================
+// ==================== COMPLETE STAFF ATTENDANCE MODULE (SCHOOL-AWARE) ====================
 const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user }) => {
   console.log('👤 StaffAttendanceModule initialized');
   console.log('👤 Current user:', user);
@@ -36539,6 +36539,11 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
   // ==================== FIND CURRENT STAFF MEMBER ====================
   const currentStaffMember = staff?.find(s => s.userId === user?.id);
   const isUserInStaff = !!currentStaffMember;
+
+  // ==================== SCHOOL TYPE DETECTION ====================
+  const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
+  const isUniversityOrTVET = schoolCategory === 'UNIVERSITY' || schoolCategory === 'COLLEGE_TVET';
+  const isPrimaryOrSecondary = schoolCategory === 'ECDE_PRIMARY_JSS' || schoolCategory === 'SENIOR_SECONDARY';
 
   // ==================== SCHOOL SETTINGS FOR LATE TIME ====================
   const schoolStartTime = currentSchool?.startTime || '08:00';
@@ -36565,7 +36570,6 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
   const isDepartmentHead = currentStaffMember?.jobTitle?.includes('Head') || currentStaffMember?.jobTitle?.includes('HOD');
   const isDean = currentStaffMember?.jobTitle === 'Dean' || user?.role === 'DEAN';
 
-  const canMarkOwnAttendance = isUserInStaff;
   const canApproveAttendance = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || isHR;
   const canViewAllAttendance = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || isHR || isAccountant || isDepartmentHead || isDean;
 
@@ -36737,6 +36741,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDepartment, setSelectedDepartment] = useState('');
+  const [selectedSubject, setSelectedSubject] = useState('');
   const [viewMode, setViewMode] = useState('self');
   const [myAttendance, setMyAttendance] = useState([]);
   const [myPendingRequests, setMyPendingRequests] = useState([]);
@@ -36769,25 +36774,82 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
     { value: 'OTHER', label: 'Other', subLabel: 'Other types of leave' }
   ], []);
 
-  const departmentOptions = useMemo(() => {
-    const opts = [{ value: '', label: 'All Departments' }];
-    const depts = [...new Set((staff || []).map(s => s.department).filter(Boolean))];
-    depts.forEach(dept => {
-      opts.push({
-        value: dept,
-        label: dept,
-        subLabel: `${staff.filter(s => s.department === dept).length} staff`
+  // ==================== DYNAMIC FILTER OPTIONS ====================
+  // University/TVET → Department
+  // Primary/Secondary → Subject
+  // Fallback → Staff Type
+  const filterOptions = useMemo(() => {
+    const opts = [];
+
+    if (isUniversityOrTVET) {
+      const depts = [...new Set((staff || []).map(s => s.department).filter(Boolean))];
+      if (depts.length === 0) {
+        opts.push({ value: '', label: 'No departments defined' });
+      } else {
+        opts.push({ value: '', label: 'All Departments' });
+        depts.forEach(dept => {
+          opts.push({
+            value: dept,
+            label: dept,
+            subLabel: `${staff.filter(s => s.department === dept).length} staff`
+          });
+        });
+      }
+      return opts;
+    }
+
+    if (isPrimaryOrSecondary) {
+      // Flatten all subjects across all staff
+      const subjectCounts = {};
+      (staff || []).forEach(s => {
+        const subs = Array.isArray(s.subjects) ? s.subjects : [];
+        subs.forEach(sub => {
+          if (!sub) return;
+          const key = typeof sub === 'string' ? sub : (sub.name || sub.code || '');
+          if (!key) return;
+          subjectCounts[key] = (subjectCounts[key] || 0) + 1;
+        });
       });
+
+      const subjectKeys = Object.keys(subjectCounts).sort();
+      if (subjectKeys.length === 0) {
+        opts.push({ value: '', label: 'No subjects assigned to staff yet' });
+      } else {
+        opts.push({ value: '', label: 'All Subjects' });
+        subjectKeys.forEach(sub => {
+          opts.push({
+            value: sub,
+            label: sub,
+            subLabel: `${subjectCounts[sub]} teacher${subjectCounts[sub] !== 1 ? 's' : ''}`
+          });
+        });
+      }
+      return opts;
+    }
+
+    // Fallback: staff type
+    opts.push({ value: '', label: 'All Staff' });
+    ['TEACHING', 'NON_TEACHING', 'ACADEMIC', 'ADMINISTRATIVE', 'TECHNICAL', 'RESEARCH'].forEach(t => {
+      const count = (staff || []).filter(s => s.staffType === t).length;
+      if (count > 0) {
+        opts.push({
+          value: t,
+          label: t.replace(/_/g, ' '),
+          subLabel: `${count} staff`
+        });
+      }
     });
     return opts;
-  }, [staff]);
+  }, [staff, isUniversityOrTVET, isPrimaryOrSecondary]);
+
+  // ✅ Label to display next to the filter
+  const filterLabel = isUniversityOrTVET
+    ? 'Department'
+    : isPrimaryOrSecondary
+      ? 'Subject'
+      : 'Staff Type';
 
   // ==================== TIME HELPERS ====================
-  const getCurrentTime = () => {
-    const now = new Date();
-    return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-  };
-
   const isTimeLate = (timeIn) => {
     const [inHours, inMinutes] = timeIn.split(':').map(Number);
     const [lateHours, lateMinutes] = lateTime.split(':').map(Number);
@@ -36805,6 +36867,15 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
       'OFF': 'bg-gray-100 text-gray-800'
     };
     return colors[status] || 'bg-gray-100 text-gray-800';
+  };
+
+  // ==================== HELPER: Get staff subjects as string array ====================
+  const getStaffSubjectKeys = (s) => {
+    const subs = Array.isArray(s.subjects) ? s.subjects : [];
+    return subs.map(sub => {
+      if (!sub) return '';
+      return typeof sub === 'string' ? sub : (sub.name || sub.code || '');
+    }).filter(Boolean);
   };
 
   // ==================== DATA LOADERS ====================
@@ -36870,9 +36941,24 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
     setLoading(true);
     try {
       const params = {};
-      if (selectedDepartment) params.department = selectedDepartment;
+      if (isUniversityOrTVET && selectedDepartment) params.department = selectedDepartment;
       const res = await api.get('/staff-attendance/pending', { params });
-      setPendingApprovals(res.data.pending || []);
+
+      let pending = res.data.pending || [];
+
+      // Client-side subject filter for primary/secondary
+      if (isPrimaryOrSecondary && selectedSubject) {
+        const staffById = {};
+        (staff || []).forEach(s => { staffById[s.id] = s; });
+
+        pending = pending.filter(rec => {
+          const s = staffById[rec.staffId];
+          if (!s) return false;
+          return getStaffSubjectKeys(s).includes(selectedSubject);
+        });
+      }
+
+      setPendingApprovals(pending);
     } catch (error) {
       console.error('Error loading pending approvals:', error);
     } finally {
@@ -36885,13 +36971,29 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
     setLoading(true);
     try {
       let params = { startDate: dateRange.start, endDate: dateRange.end };
-      if (isDepartmentHead && currentStaffMember?.department) {
+
+      if (isDepartmentHead && currentStaffMember?.department && isUniversityOrTVET) {
         params.department = currentStaffMember.department;
-      } else if (selectedDepartment) {
+      } else if (isUniversityOrTVET && selectedDepartment) {
         params.department = selectedDepartment;
       }
+
       const res = await api.get('/staff-attendance', { params });
-      setAttendanceList(res.data.attendance || []);
+      let records = res.data.attendance || [];
+
+      // Client-side subject filter for primary/secondary
+      if (isPrimaryOrSecondary && selectedSubject) {
+        const staffById = {};
+        (staff || []).forEach(s => { staffById[s.id] = s; });
+
+        records = records.filter(rec => {
+          const s = staffById[rec.staffId];
+          if (!s) return false;
+          return getStaffSubjectKeys(s).includes(selectedSubject);
+        });
+      }
+
+      setAttendanceList(records);
     } catch (error) {
       console.error('Error loading team attendance:', error);
     } finally {
@@ -36904,12 +37006,48 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
     setLoading(true);
     try {
       const params = { startDate: dateRange.start, endDate: dateRange.end };
-      if (selectedDepartment) params.department = selectedDepartment;
+
+      // Only University/TVET sends department to backend
+      if (isUniversityOrTVET && selectedDepartment) {
+        params.department = selectedDepartment;
+      }
+
       const res = await api.get('/staff-attendance/report', { params });
-      setAttendanceReport(res.data);
+      let report = res.data;
+
+      // Client-side subject filter for primary/secondary
+      if (isPrimaryOrSecondary && selectedSubject && Array.isArray(report.perStaff)) {
+        const staffById = {};
+        (staff || []).forEach(s => { staffById[s.id] = s; });
+
+        const filteredPerStaff = report.perStaff.filter(s => {
+          const fullStaff = staffById[s.staffId];
+          if (!fullStaff) return false;
+          return getStaffSubjectKeys(fullStaff).includes(selectedSubject);
+        });
+
+        // Recompute summary
+        const newSummary = {
+          totalStaff: filteredPerStaff.length,
+          totalPresent: filteredPerStaff.reduce((sum, s) => sum + s.totals.present, 0),
+          totalAbsent: filteredPerStaff.reduce((sum, s) => sum + s.totals.absent, 0),
+          totalLate: filteredPerStaff.reduce((sum, s) => sum + s.totals.late, 0),
+          totalLeave: filteredPerStaff.reduce((sum, s) => sum + s.totals.leave, 0),
+          pendingApprovals: filteredPerStaff.reduce((sum, s) => sum + s.totals.pending, 0),
+          rejectedApprovals: filteredPerStaff.reduce((sum, s) => sum + s.totals.rejected, 0)
+        };
+        const denom = newSummary.totalPresent + newSummary.totalAbsent + newSummary.totalLate + newSummary.totalLeave;
+        newSummary.overallAttendanceRate = denom > 0
+          ? Math.round((newSummary.totalPresent / denom) * 100)
+          : 0;
+
+        report = { ...report, perStaff: filteredPerStaff, summary: newSummary };
+      }
+
+      setAttendanceReport(report);
     } catch (error) {
       console.error('Error loading report:', error);
-      alert('Failed to load attendance report');
+      alert(error.response?.data?.message || 'Failed to load attendance report');
     } finally {
       setLoading(false);
     }
@@ -36957,7 +37095,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
           : ''
       });
 
-      alert(`✅ Time In recorded at ${timeIn}${isLate ? ` (LATE)` : ''}`);
+      alert(`✅ Time In recorded at ${timeIn}${isLate ? ' (LATE)' : ''}`);
       await loadTodayAttendance();
       await loadMyAttendance();
       await loadMyPendingRequests();
@@ -37089,7 +37227,10 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                 ? currentStaffMember.jobTitle
                 : (currentStaffMember.staffType || 'Staff')}
               {' • '}
-              {currentStaffMember.department || 'No Department'}
+              {currentStaffMember.department
+                || (isPrimaryOrSecondary && getStaffSubjectKeys(currentStaffMember).length > 0
+                  ? getStaffSubjectKeys(currentStaffMember).slice(0, 2).join(', ')
+                  : 'No Department')}
             </span>
           </div>
         )}
@@ -37521,7 +37662,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
       {viewMode === 'team' && canViewAllAttendance && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">
-            {isDepartmentHead
+            {isDepartmentHead && isUniversityOrTVET
               ? `${currentStaffMember?.department} Department Attendance`
               : 'Team Attendance'}
           </h3>
@@ -37545,13 +37686,20 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                 className="w-full px-3 py-2 border rounded-lg"
               />
             </div>
-            {!isDepartmentHead && (
+            {!(isDepartmentHead && isUniversityOrTVET) && (
               <SearchableSelect
-                label="Department"
-                value={selectedDepartment}
-                onChange={(e) => setSelectedDepartment(e.target.value)}
-                options={departmentOptions}
-                placeholder="All Departments"
+                label={filterLabel}
+                value={isUniversityOrTVET ? selectedDepartment : selectedSubject}
+                onChange={(e) => {
+                  if (isUniversityOrTVET) setSelectedDepartment(e.target.value);
+                  else setSelectedSubject(e.target.value);
+                }}
+                options={filterOptions}
+                placeholder={
+                  isUniversityOrTVET ? 'All Departments'
+                    : isPrimaryOrSecondary ? 'All Subjects'
+                      : 'All Staff'
+                }
               />
             )}
           </div>
@@ -37569,7 +37717,9 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Department</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                      {isUniversityOrTVET ? 'Department' : 'Subjects'}
+                    </th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time In</th>
@@ -37584,12 +37734,33 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                     const hours = record.timeIn && record.timeOut
                       ? ((new Date(`1970-01-01T${record.timeOut}`) - new Date(`1970-01-01T${record.timeIn}`)) / (1000 * 60 * 60)).toFixed(1)
                       : '—';
+
+                    const recordStaff = (staff || []).find(s => s.id === record.staffId) || record.Staff;
+                    const subjectKeys = recordStaff ? getStaffSubjectKeys(recordStaff) : [];
+
                     return (
                       <tr key={record.id} className="hover:bg-gray-50">
                         <td className="px-4 py-2 font-medium">
                           {record.Staff?.User?.firstName} {record.Staff?.User?.lastName}
                         </td>
-                        <td className="px-4 py-2">{record.Staff?.department || '—'}</td>
+                        <td className="px-4 py-2 text-sm">
+                          {isUniversityOrTVET ? (
+                            record.Staff?.department || '—'
+                          ) : subjectKeys.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {subjectKeys.slice(0, 3).map((sub, i) => (
+                                <span key={i} className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded text-xs">
+                                  {sub}
+                                </span>
+                              ))}
+                              {subjectKeys.length > 3 && (
+                                <span className="text-xs text-gray-400">+{subjectKeys.length - 3}</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </td>
                         <td className="px-4 py-2">{new Date(record.date).toLocaleDateString()}</td>
                         <td className="px-4 py-2">
                           <span className={`px-2 py-1 rounded-full text-xs ${getStatusColor(record.status)}`}>
@@ -37628,11 +37799,18 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
 
           <div className="mb-4 max-w-sm">
             <SearchableSelect
-              label="Filter by Department"
-              value={selectedDepartment}
-              onChange={(e) => { setSelectedDepartment(e.target.value); }}
-              options={departmentOptions}
-              placeholder="All Departments"
+              label={`Filter by ${filterLabel}`}
+              value={isUniversityOrTVET ? selectedDepartment : selectedSubject}
+              onChange={(e) => {
+                if (isUniversityOrTVET) setSelectedDepartment(e.target.value);
+                else setSelectedSubject(e.target.value);
+              }}
+              options={filterOptions}
+              placeholder={
+                isUniversityOrTVET ? 'All Departments'
+                  : isPrimaryOrSecondary ? 'All Subjects'
+                    : 'All Staff'
+              }
             />
           </div>
 
@@ -37642,7 +37820,9 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Department</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                      {isUniversityOrTVET ? 'Department' : 'Subjects'}
+                    </th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time In</th>
@@ -37652,39 +37832,61 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {pendingApprovals.map(record => (
-                    <tr key={record.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-2 font-medium">
-                        {record.Staff?.User?.firstName} {record.Staff?.User?.lastName}
-                      </td>
-                      <td className="px-4 py-2">{record.Staff?.department || '—'}</td>
-                      <td className="px-4 py-2">{new Date(record.date).toLocaleDateString()}</td>
-                      <td className="px-4 py-2">
-                        <span className={`px-2 py-1 rounded-full text-xs ${getStatusColor(record.status)}`}>
-                          {record.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2 font-mono">{record.timeIn?.substring(0, 5) || '—'}</td>
-                      <td className="px-4 py-2 font-mono">{record.timeOut?.substring(0, 5) || '—'}</td>
-                      <td className="px-4 py-2 text-sm text-gray-500 max-w-xs">{record.remarks || '—'}</td>
-                      <td className="px-4 py-2">
-                        <div className="flex space-x-2">
-                          <button
-                            onClick={() => handleApprove(record.id, 'APPROVE')}
-                            className="bg-green-600 text-white px-3 py-1 rounded-lg text-sm hover:bg-green-700"
-                          >
-                            Approve
-                          </button>
-                          <button
-                            onClick={() => handleApprove(record.id, 'REJECT')}
-                            className="bg-red-600 text-white px-3 py-1 rounded-lg text-sm hover:bg-red-700"
-                          >
-                            Reject
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {pendingApprovals.map(record => {
+                    const recordStaff = (staff || []).find(s => s.id === record.staffId) || record.Staff;
+                    const subjectKeys = recordStaff ? getStaffSubjectKeys(recordStaff) : [];
+
+                    return (
+                      <tr key={record.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-2 font-medium">
+                          {record.Staff?.User?.firstName} {record.Staff?.User?.lastName}
+                        </td>
+                        <td className="px-4 py-2 text-sm">
+                          {isUniversityOrTVET ? (
+                            record.Staff?.department || '—'
+                          ) : subjectKeys.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {subjectKeys.slice(0, 2).map((sub, i) => (
+                                <span key={i} className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded text-xs">
+                                  {sub}
+                                </span>
+                              ))}
+                              {subjectKeys.length > 2 && (
+                                <span className="text-xs text-gray-400">+{subjectKeys.length - 2}</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2">{new Date(record.date).toLocaleDateString()}</td>
+                        <td className="px-4 py-2">
+                          <span className={`px-2 py-1 rounded-full text-xs ${getStatusColor(record.status)}`}>
+                            {record.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 font-mono">{record.timeIn?.substring(0, 5) || '—'}</td>
+                        <td className="px-4 py-2 font-mono">{record.timeOut?.substring(0, 5) || '—'}</td>
+                        <td className="px-4 py-2 text-sm text-gray-500 max-w-xs">{record.remarks || '—'}</td>
+                        <td className="px-4 py-2">
+                          <div className="flex space-x-2">
+                            <button
+                              onClick={() => handleApprove(record.id, 'APPROVE')}
+                              className="bg-green-600 text-white px-3 py-1 rounded-lg text-sm hover:bg-green-700"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              onClick={() => handleApprove(record.id, 'REJECT')}
+                              className="bg-red-600 text-white px-3 py-1 rounded-lg text-sm hover:bg-red-700"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -37723,11 +37925,18 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                 />
               </div>
               <SearchableSelect
-                label="Department"
-                value={selectedDepartment}
-                onChange={(e) => setSelectedDepartment(e.target.value)}
-                options={departmentOptions}
-                placeholder="All Departments"
+                label={filterLabel}
+                value={isUniversityOrTVET ? selectedDepartment : selectedSubject}
+                onChange={(e) => {
+                  if (isUniversityOrTVET) setSelectedDepartment(e.target.value);
+                  else setSelectedSubject(e.target.value);
+                }}
+                options={filterOptions}
+                placeholder={
+                  isUniversityOrTVET ? 'All Departments'
+                    : isPrimaryOrSecondary ? 'All Subjects'
+                      : 'All Staff'
+                }
               />
               <div className="flex items-end">
                 <button
@@ -37797,7 +38006,9 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                         <tr>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee ID</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Department</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                            {isUniversityOrTVET ? 'Department' : 'Subjects'}
+                          </th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Job Title</th>
                           <th className="px-4 py-3 text-center text-xs font-medium text-green-600 uppercase">Present</th>
                           <th className="px-4 py-3 text-center text-xs font-medium text-red-600 uppercase">Absent</th>
@@ -37808,65 +38019,87 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                         </tr>
                       </thead>
                       <tbody className="divide-y">
-                        {attendanceReport.perStaff.map(s => (
-                          <tr key={s.staffId} className="hover:bg-gray-50">
-                            <td className="px-4 py-3">
-                              <div className="font-medium text-gray-800">{s.name}</div>
-                              {s.email && <div className="text-xs text-gray-500">{s.email}</div>}
-                            </td>
-                            <td className="px-4 py-3 font-mono text-sm">{s.employeeId || '—'}</td>
-                            <td className="px-4 py-3 text-sm">{s.department}</td>
-                            <td className="px-4 py-3 text-sm">{s.jobTitle}</td>
-                            <td className="px-4 py-3 text-center">
-                              <span className="px-2 py-1 rounded-full text-xs bg-green-100 text-green-800 font-medium">
-                                {s.totals.present}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <span className="px-2 py-1 rounded-full text-xs bg-red-100 text-red-800 font-medium">
-                                {s.totals.absent}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <span className="px-2 py-1 rounded-full text-xs bg-yellow-100 text-yellow-800 font-medium">
-                                {s.totals.late}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800 font-medium">
-                                {s.totals.leave}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                s.totals.pending > 0 ? 'bg-orange-100 text-orange-800' : 'bg-gray-100 text-gray-500'
-                              }`}>
-                                {s.totals.pending}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-2">
-                                <div className="flex-1 bg-gray-200 rounded-full h-2 min-w-[60px]">
-                                  <div
-                                    className="bg-green-500 h-2 rounded-full transition-all"
-                                    style={{ width: `${s.attendanceRate}%` }}
-                                  />
-                                </div>
-                                <span className="text-xs font-medium text-gray-700 w-10">
-                                  {s.attendanceRate}%
+                        {attendanceReport.perStaff.map(s => {
+                          const fullStaff = (staff || []).find(x => x.id === s.staffId);
+                          const subjectKeys = fullStaff ? getStaffSubjectKeys(fullStaff) : (Array.isArray(s.subjects) ? s.subjects : []);
+
+                          return (
+                            <tr key={s.staffId} className="hover:bg-gray-50">
+                              <td className="px-4 py-3">
+                                <div className="font-medium text-gray-800">{s.name}</div>
+                                {s.email && <div className="text-xs text-gray-500">{s.email}</div>}
+                              </td>
+                              <td className="px-4 py-3 font-mono text-sm">{s.employeeId || '—'}</td>
+                              <td className="px-4 py-3 text-sm">
+                                {isUniversityOrTVET ? (
+                                  s.department
+                                ) : subjectKeys.length > 0 ? (
+                                  <div className="flex flex-wrap gap-1">
+                                    {subjectKeys.map((sub, i) => {
+                                      const label = typeof sub === 'string' ? sub : (sub.name || sub.code || '');
+                                      return (
+                                        <span key={i} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded text-xs">
+                                          {label}
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                ) : (
+                                  <span className="text-gray-400">No subjects</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-sm">{s.jobTitle}</td>
+                              <td className="px-4 py-3 text-center">
+                                <span className="px-2 py-1 rounded-full text-xs bg-green-100 text-green-800 font-medium">
+                                  {s.totals.present}
                                 </span>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <span className="px-2 py-1 rounded-full text-xs bg-red-100 text-red-800 font-medium">
+                                  {s.totals.absent}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <span className="px-2 py-1 rounded-full text-xs bg-yellow-100 text-yellow-800 font-medium">
+                                  {s.totals.late}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800 font-medium">
+                                  {s.totals.leave}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                  s.totals.pending > 0 ? 'bg-orange-100 text-orange-800' : 'bg-gray-100 text-gray-500'
+                                }`}>
+                                  {s.totals.pending}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-2">
+                                  <div className="flex-1 bg-gray-200 rounded-full h-2 min-w-[60px]">
+                                    <div
+                                      className="bg-green-500 h-2 rounded-full transition-all"
+                                      style={{ width: `${s.attendanceRate}%` }}
+                                    />
+                                  </div>
+                                  <span className="text-xs font-medium text-gray-700 w-10">
+                                    {s.attendanceRate}%
+                                  </span>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
                 </div>
               )}
 
-              {/* ============ DEPARTMENT BREAKDOWN ============ */}
-              {attendanceReport.byDepartment && attendanceReport.byDepartment.length > 0 && (
+              {/* ============ DEPARTMENT BREAKDOWN (Uni/TVET only) ============ */}
+              {isUniversityOrTVET && attendanceReport.byDepartment && attendanceReport.byDepartment.length > 0 && (
                 <div className="bg-white p-6 rounded-xl shadow-sm">
                   <h3 className="text-lg font-semibold mb-4">🏢 Department Breakdown</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -37906,7 +38139,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                 </div>
               )}
 
-              {/* Empty state if report has no per-staff data */}
+              {/* Empty state if no per-staff data */}
               {(!attendanceReport.perStaff || attendanceReport.perStaff.length === 0) && (
                 <div className="bg-white p-12 rounded-xl shadow-sm text-center">
                   <i className="fas fa-users text-5xl text-gray-300 mb-3"></i>
