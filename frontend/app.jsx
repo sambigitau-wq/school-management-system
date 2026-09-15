@@ -38098,16 +38098,211 @@ const AttendanceModule = ({
       </div>
     );
   }
+// ==================== RENDER PARENT VIEW ====================
+if (isParent) {
+  return (
+    <div className="space-y-6">
+      {loadingChildren && (
+        <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>
+      )}
 
-  // ==================== RENDER PARENT VIEW ====================
-  if (isParent) {
-    // ... keep existing parent view render
-    return (
-      <div>
-        {/* Parent view - no changes needed */}
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold flex items-center gap-2">
+          📋 My Children's Attendance
+          {myChildren.length > 0 && (
+            <span className="text-sm font-normal text-gray-500">
+              ({myChildren.length} child{myChildren.length !== 1 ? 'ren' : ''})
+            </span>
+          )}
+        </h2>
+        <button
+          onClick={loadMyChildren}
+          disabled={loadingChildren}
+          className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2 disabled:opacity-50"
+        >
+          <i className={`fas fa-sync-alt ${loadingChildren ? 'fa-spin' : ''}`}></i>
+          Refresh
+        </button>
       </div>
-    );
-  }
+
+      {myChildren.length === 0 ? (
+        <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+          <i className="fas fa-child text-6xl text-gray-300 mb-4 block"></i>
+          <h3 className="text-lg font-semibold text-gray-700 mb-2">
+            No children linked to your account
+          </h3>
+          <p className="text-gray-500 text-sm">
+            Please contact the school administrator to link your children
+            so you can view their attendance records.
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* Child Selector */}
+          <div className="bg-white p-6 rounded-xl shadow-sm">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Select Child
+            </label>
+            <select
+              value={selectedChild?.id || ''}
+              onChange={(e) => {
+                const child = myChildren.find(c => c.id === e.target.value);
+                setSelectedChild(child || null);
+                if (child) {
+                  loadChildAttendance(child.admissionNumber);
+                } else {
+                  setChildAttendance([]);
+                  setMyAttendanceSummary(null);
+                }
+              }}
+              className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="">-- Select a child --</option>
+              {myChildren.map(child => (
+                <option key={child.id} value={child.id}>
+                  {child.firstName} {child.lastName} ({child.admissionNumber})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Attendance Display for Selected Child */}
+          {selectedChild && (
+            <>
+              {/* Child Info Header */}
+              <div className="bg-gradient-to-r from-purple-500 to-pink-600 rounded-xl p-6 text-white">
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center">
+                    <span className="text-2xl font-bold text-purple-600">
+                      {selectedChild.firstName?.[0]}{selectedChild.lastName?.[0]}
+                    </span>
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-bold">
+                      {selectedChild.firstName} {selectedChild.lastName}
+                    </h3>
+                    <p className="text-purple-100">
+                      Admission: {selectedChild.admissionNumber}
+                    </p>
+                    {selectedChild.class?.name && (
+                      <p className="text-purple-200 text-sm mt-1">
+                        Class: {selectedChild.class.name}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Summary Cards */}
+              {myAttendanceSummary && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-white p-4 rounded-xl shadow-sm text-center">
+                    <p className="text-sm text-gray-500">Total Days</p>
+                    <p className="text-2xl font-bold text-gray-800">
+                      {myAttendanceSummary.total || 0}
+                    </p>
+                  </div>
+                  <div className="bg-green-50 p-4 rounded-xl shadow-sm text-center">
+                    <p className="text-sm text-green-600">Present</p>
+                    <p className="text-2xl font-bold text-green-700">
+                      {myAttendanceSummary.present || 0}
+                    </p>
+                  </div>
+                  <div className="bg-red-50 p-4 rounded-xl shadow-sm text-center">
+                    <p className="text-sm text-red-600">Absent</p>
+                    <p className="text-2xl font-bold text-red-700">
+                      {myAttendanceSummary.absent || 0}
+                    </p>
+                  </div>
+                  <div className="bg-yellow-50 p-4 rounded-xl shadow-sm text-center">
+                    <p className="text-sm text-yellow-600">Attendance Rate</p>
+                    <p className="text-2xl font-bold text-yellow-700">
+                      {myAttendanceSummary.presentPercentage || 0}%
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Attendance Records Table */}
+              {childAttendance.length > 0 ? (
+                <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+                  <div className="px-6 py-4 bg-gray-50 border-b">
+                    <h3 className="font-semibold text-lg">
+                      Attendance Records ({childAttendance.length})
+                    </h3>
+                  </div>
+                  <div className="overflow-x-auto max-h-96">
+                    <table className="w-full">
+                      <thead className="bg-gray-50 sticky top-0">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                            Date
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                            Status
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                            {isUniversity || isTVET ? 'Unit/Module' : 'Subject'}
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                            Time In
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                            Remarks
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {childAttendance.map((record, idx) => (
+                          <tr key={record.id || idx} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm">
+                              {new Date(record.date).toLocaleDateString()}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(record.status)}`}>
+                                {record.status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm">
+                              {getItemName(record)}
+                            </td>
+                            <td className="px-4 py-3 text-sm">
+                              {record.timeIn?.substring(0, 5) || '—'}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-500">
+                              {record.remarks || '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+                  <i className="fas fa-calendar-times text-5xl text-gray-300 mb-3 block"></i>
+                  <p className="text-gray-500">
+                    No attendance records found for {selectedChild.firstName}.
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Empty State — child selected but nothing loaded yet */}
+          {!selectedChild && (
+            <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+              <i className="fas fa-arrow-up text-4xl text-gray-300 mb-3 block"></i>
+              <p className="text-gray-500">
+                Select a child above to view their attendance history.
+              </p>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
   // ==================== RENDER TEACHER/ADMIN VIEW ====================
   return (
