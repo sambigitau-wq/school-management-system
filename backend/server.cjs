@@ -17708,22 +17708,23 @@ app.get('/api/staff-attendance', authenticate, async (req, res) => {
     if (approved === 'true') where.approved = true;
     if (approved === 'false') where.approved = false;
     if (approved === 'pending') where.approvalStatus = 'PENDING';
-    
-    const attendance = await StaffAttendance.findAll({
-      where,
+ const attendance = await StaffAttendance.findAll({
+  where,
+  include: [
+    {
+      model: Staff,
+      as: 'Staff',                                      // ← ADD THIS
       include: [
         {
-          model: Staff,
-          include: [
-            {
-              model: User,
-              attributes: ['id', 'firstName', 'lastName', 'email', 'phone']
-            }
-          ]
+          model: User,
+          as: 'User',                                   // ← and this (see note below)
+          attributes: ['id', 'firstName', 'lastName', 'email', 'phone']
         }
-      ],
-      order: [['date', 'DESC']]
-    });
+      ]
+    }
+  ],
+  order: [['date', 'DESC']]
+});
     
     res.json({
       success: true,
@@ -17779,18 +17780,22 @@ app.post('/api/staff-attendance/leave-request', authenticate, async (req, res) =
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
-
-// ==================== GET MY PENDING REQUESTS ====================
+// ==================== GET MY PENDING REQUESTS (FIXED) ====================
 app.get('/api/staff-attendance/my-pending', authenticate, async (req, res) => {
   try {
     const userId = req.user.id;
-    
+
+    // ---- Find the staff record for the logged-in user ----
     const staff = await Staff.findOne({ where: { userId } });
-    
+
     if (!staff) {
-      return res.status(404).json({ success: false, message: 'Staff record not found' });
+      return res.status(404).json({
+        success: false,
+        message: 'Staff record not found for your account'
+      });
     }
-    
+
+    // ---- Fetch this staff member's pending attendance requests ----
     const pending = await StaffAttendance.findAll({
       where: {
         staffId: staff.id,
@@ -17799,14 +17804,18 @@ app.get('/api/staff-attendance/my-pending', authenticate, async (req, res) => {
       },
       order: [['date', 'ASC']]
     });
-    
+
     res.json({
       success: true,
       pending
     });
   } catch (error) {
     console.error('Error fetching pending requests:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
