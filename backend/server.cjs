@@ -3031,7 +3031,7 @@ Class.belongsTo(School, { foreignKey: 'schoolId' });
 School.hasMany(Student, { foreignKey: 'schoolId' });
 Student.belongsTo(School, { foreignKey: 'schoolId' });
 Student.belongsTo(User, { foreignKey: 'userId' });
-User.hasMany(Student, { foreignKey: 'userId' });
+
 School.hasMany(Subject, { foreignKey: 'schoolId' });
 Subject.belongsTo(School, { foreignKey: 'schoolId' });
 School.hasMany(Exam, { foreignKey: 'schoolId' });
@@ -3141,9 +3141,6 @@ Staff.belongsTo(Faculty, { foreignKey: 'facultyId' });
 Department.belongsTo(Staff, { as: 'headOfDepartment', foreignKey: 'headOfDepartmentId' });
 Faculty.belongsTo(Staff, { as: 'facultyDean', foreignKey: 'deanId' });
 
-User.hasMany(Parent, { foreignKey: 'userId' });
-Parent.belongsTo(User, { foreignKey: 'userId' });
-
 Exam.belongsTo(Class, { foreignKey: 'classId' });
 Exam.belongsTo(Subject, { foreignKey: 'subjectId' });
 Exam.belongsTo(Course, { foreignKey: 'courseId' });
@@ -3216,7 +3213,7 @@ Student.hasMany(Parent, { foreignKey: 'studentId', as: 'parents' });
 Parent.belongsTo(Student, { foreignKey: 'studentId', as: 'student' });
 
 User.hasMany(Parent,   { foreignKey: 'userId', as: 'parentLinks' });
-
+Parent.belongsTo(User, { foreignKey: 'userId', as: 'User' });
 // ---- Parent ↔ School ----
 Parent.belongsTo(School, { foreignKey: 'schoolId' });
 School.hasMany(Parent,   { foreignKey: 'schoolId' });
@@ -24139,26 +24136,24 @@ app.use((err, req, res, next) => {
     error: process.env.NODE_ENV === 'development' ? err.message : undefined
   });
 });
-// ==================== START SERVER ====================
 const PORT = process.env.PORT || 5000;
 
 (async () => {
   try {
-    // 1. Verify DB connection
     await sequelize.authenticate();
     console.log('✅ Database connection established');
 
-    // 2. Sync models
-    //    - Dev:  alter: true → auto-adds new columns/enums (use with care!)
-    //    - Prod: no alter      → run migrations manually instead
-    const syncOptions = process.env.NODE_ENV === 'production'
-      ? {}
-      : { alter: true };
+    // Only enable alter:true when BOTH are true. Safe by default in prod.
+    const allowAlter =
+      process.env.NODE_ENV === 'development' &&
+      process.env.ALLOW_DB_ALTER === 'true';
 
+    const syncOptions = allowAlter ? { alter: true } : {};
+
+    console.log('🔄 Syncing database with options:', syncOptions);
     await sequelize.sync(syncOptions);
     console.log('✅ Database synced successfully');
 
-    // 3. Model / feature banner
     console.log('📊 Grading Systems Loaded:');
     console.log('   - CBC (ECDE & Primary)');
     console.log('   - 8-4-4 (Secondary)');
@@ -24168,16 +24163,9 @@ const PORT = process.env.PORT || 5000;
     console.log('   - Cambridge IGCSE');
     console.log('   - American System');
 
-    // 4. Start listening
     app.listen(PORT, () => {
       console.log(`🚀 Server running on http://localhost:${PORT}`);
       console.log(`📚 API Documentation: http://localhost:${PORT}/api`);
-      console.log(`✅ All routes are now fixed!`);
-      console.log(`   - Students:   http://localhost:${PORT}/api/students`);
-      console.log(`   - Exams:      http://localhost:${PORT}/api/exams`);
-      console.log(`   - Fees:       http://localhost:${PORT}/api/fees`);
-      console.log(`   - Timetable:  http://localhost:${PORT}/api/timetable`);
-      console.log(`   - Transfers:  http://localhost:${PORT}/api/fee-transfers`);
     });
   } catch (err) {
     console.error('❌ Startup error:', err);
