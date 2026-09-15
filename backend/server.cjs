@@ -3215,8 +3215,6 @@ User.hasOne(Student,    { foreignKey: 'userId', as: 'studentProfile' });
 Student.hasMany(Parent, { foreignKey: 'studentId', as: 'parents' });
 Parent.belongsTo(Student, { foreignKey: 'studentId', as: 'student' });
 
-// ---- Parent ↔ User (guardian login, optional) ----
-Parent.belongsTo(User, { foreignKey: 'userId', as: 'User' });   // alias 'User' matches existing frontend code
 User.hasMany(Parent,   { foreignKey: 'userId', as: 'parentLinks' });
 
 // ---- Parent ↔ School ----
