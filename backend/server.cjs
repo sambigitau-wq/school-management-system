@@ -3194,7 +3194,11 @@ Program.hasMany(Attendance, { foreignKey: 'programId' });
 
 AuditLog.belongsTo(User, { foreignKey: 'userId' });
 StaffAttendance.belongsTo(Staff, { foreignKey: 'staffId' });
-Staff.hasMany(StaffAttendance, { foreignKey: 'staffId', as: 'attendances' });
+StaffAttendance.belongsTo(User, { 
+  as: 'approvedByUser', 
+  foreignKey: 'approvedBy', 
+  constraints: false 
+});
 
 Sponsor.belongsTo(School, { foreignKey: 'schoolId' });
 Sponsor.belongsToMany(Student, { through: StudentSponsor, foreignKey: 'sponsorId' });
@@ -18052,9 +18056,10 @@ app.get('/api/staff-attendance/report', authenticate, async (req, res) => {
           : `Staff ${s.id}`,
         email: s.User?.email || null,
         phone: s.User?.phone || null,
-        department: s.department || '—',
+              department: s.department || '—',
         jobTitle: s.jobTitle || '—',
         staffType: s.staffType || '—',
+        subjects: Array.isArray(s.subjects) ? s.subjects : [],
         totals: {
           present,
           absent,
