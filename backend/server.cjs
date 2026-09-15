@@ -987,68 +987,100 @@ const Class = sequelize.define('Class', {
   isActive: { type: DataTypes.BOOLEAN, defaultValue: true }
 });
 
-// In your backend server.cjs, update the Student model
+// ==================== STUDENT MODEL ====================
 const Student = sequelize.define('Student', {
-  id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-  admissionNumber: { type: DataTypes.STRING, allowNull: false, unique: true },
-  idType: { 
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true,
+  },
+
+  admissionNumber: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    unique: true,
+  },
+
+  // ---- Identification ----
+  idType: {
     type: DataTypes.ENUM('NATIONAL_ID', 'BIRTH_CERTIFICATE', 'PASSPORT', 'SCHOOL_ID', 'OTHER'),
-    allowNull: true 
+    allowNull: true,
   },
   idNumber: { type: DataTypes.STRING, allowNull: true },
+
+  // ---- Names ----
   firstName: { type: DataTypes.STRING, allowNull: false },
-  lastName: { type: DataTypes.STRING, allowNull: false },
-  middleName: DataTypes.STRING,
-  
-  // CONTACT FIELDS - ALL OPTIONAL (allowNull: true)
-  email: { 
-    type: DataTypes.STRING, 
-    allowNull: true,  // ← NOT required
+  lastName:  { type: DataTypes.STRING, allowNull: false },
+  middleName: { type: DataTypes.STRING, allowNull: true },
+
+  // ---- Contact (ALL OPTIONAL) ----
+  email: {
+    type: DataTypes.STRING,
+    allowNull: true,
     validate: {
-      isEmail: {
-        msg: 'Must be a valid email address',
-        args: true,
-        // This validation only runs if email is provided
-      }
-    }
+      // Custom validator — only runs when a value is present
+      isValidEmail(value) {
+        if (value === null || value === undefined || value === '') return;
+        const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!re.test(value)) {
+          throw new Error('Must be a valid email address');
+        }
+      },
+    },
   },
-  phone: { 
-    type: DataTypes.STRING, 
-    allowNull: true,  // ← NOT required
+  phone: {
+    type: DataTypes.STRING,
+    allowNull: true,
     validate: {
-      is: {
-        args: /^[0-9+\-\s()]{0,20}$/i,  // Optional phone validation
-        msg: 'Please enter a valid phone number'
-      }
-    }
+      isValidPhone(value) {
+        if (value === null || value === undefined || value === '') return;
+        if (!/^[0-9+\-\s()]{0,20}$/.test(value)) {
+          throw new Error('Please enter a valid phone number');
+        }
+      },
+    },
   },
-  address: { 
-    type: DataTypes.TEXT, 
-    allowNull: true   // ← NOT required
+  address: { type: DataTypes.TEXT, allowNull: true },
+
+  // ---- Demographics ----
+  dateOfBirth: { type: DataTypes.DATEONLY, allowNull: true },
+  gender: {
+    type: DataTypes.ENUM('MALE', 'FEMALE', 'OTHER'),
+    allowNull: true,
   },
-  
-  dateOfBirth: DataTypes.DATEONLY,
-  gender: DataTypes.ENUM('MALE', 'FEMALE', 'OTHER'),
-  nationality: DataTypes.STRING,
-  religion: DataTypes.STRING,
-  birthCertificate: DataTypes.STRING,
-  passportPhoto: DataTypes.STRING,
-  classId: DataTypes.UUID,
-  schoolId: { type: DataTypes.UUID, allowNull: false },
-  enrollmentDate: DataTypes.DATEONLY,
-  boardingStatus: DataTypes.ENUM('DAY', 'BOARDING', 'WEEKLY'),
+  nationality: { type: DataTypes.STRING, allowNull: true },
+  religion: { type: DataTypes.STRING, allowNull: true },
+
+  // ---- Attachments ----
+  birthCertificate: { type: DataTypes.STRING, allowNull: true },
+  passportPhoto: { type: DataTypes.STRING, allowNull: true },
+
+  // ---- Academic placement ----
+  classId:        { type: DataTypes.UUID, allowNull: true },
+  courseId:       { type: DataTypes.UUID, allowNull: true },
+  programId:      { type: DataTypes.UUID, allowNull: true },
+  currentYear:    { type: DataTypes.INTEGER, allowNull: true },
+  currentSemester:{ type: DataTypes.INTEGER, allowNull: true },
+  currentModule:  { type: DataTypes.STRING, allowNull: true },
+  admissionDate:  { type: DataTypes.DATEONLY, allowNull: true },
+  enrollmentDate: { type: DataTypes.DATEONLY, allowNull: true },
+  expectedGraduation: { type: DataTypes.DATEONLY, allowNull: true },
+
+  // ---- Research (university) ----
+  supervisor:  { type: DataTypes.STRING, allowNull: true },
+  thesisTitle: { type: DataTypes.TEXT, allowNull: true },
+
+  // ---- Logistics ----
+  boardingStatus: {
+    type: DataTypes.ENUM('DAY', 'BOARDING', 'WEEKLY'),
+    allowNull: true,
+  },
   transportRouteId: { type: DataTypes.UUID, allowNull: true },
-  courseId: { type: DataTypes.UUID, allowNull: true },
-  programId: { type: DataTypes.UUID, allowNull: true },
-  currentYear: { type: DataTypes.INTEGER, allowNull: true },
-  currentSemester: { type: DataTypes.INTEGER, allowNull: true },
-  currentModule: { type: DataTypes.STRING, allowNull: true },
-  admissionDate: DataTypes.DATEONLY,
-  expectedGraduation: DataTypes.DATEONLY,
-  supervisor: DataTypes.STRING,
-  thesisTitle: DataTypes.TEXT,
+
+  // ---- Medical ----
   medicalInfo: {
     type: DataTypes.JSONB,
+    allowNull: true,
     defaultValue: {
       bloodGroup: '',
       allergies: '',
@@ -1056,32 +1088,97 @@ const Student = sequelize.define('Student', {
       disabilities: '',
       doctorName: '',
       doctorPhone: '',
-      emergencyNotes: ''
-    }
+      emergencyNotes: '',
+    },
   },
-  parentId: DataTypes.UUID,
-  isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
-  userId: { 
-    type: DataTypes.UUID, 
-    allowNull: true,
-    references: {
-      model: 'Users',
-      key: 'id'
-    }
-  }
-});
 
+  // ---- Linkage ----
+  schoolId: {
+    type: DataTypes.UUID,
+    allowNull: false,
+  },
+  // Legacy single-parent pointer (kept for backwards compatibility).
+  // The canonical relationship is via the Parent join table.
+  parentId: { type: DataTypes.UUID, allowNull: true },
+  // Optional student login account
+  userId: {
+    type: DataTypes.UUID,
+    allowNull: true,
+    references: { model: 'Users', key: 'id' },
+  },
+
+  isActive: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  },
+}, {
+  timestamps: true,
+  tableName: 'Students',
+});
+// ==================== PARENT MODEL ====================
 const Parent = sequelize.define('Parent', {
-  id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-  userId: DataTypes.UUID,
-  studentId: DataTypes.UUID,
-  relationship: DataTypes.STRING,
-  isPrimary: { type: DataTypes.BOOLEAN, defaultValue: false },
-  emergencyContact: { type: DataTypes.BOOLEAN, defaultValue: false },
-  occupation: DataTypes.STRING,
-  employer: DataTypes.STRING,
-  monthlyIncome: DataTypes.DECIMAL(10, 2),
-  schoolId: { type: DataTypes.UUID, allowNull: false }
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true,
+  },
+
+  // Link to a login account (OPTIONAL — null when no portal access)
+  userId: {
+    type: DataTypes.UUID,
+    allowNull: true,                 // ← important
+    references: { model: 'Users', key: 'id' },
+  },
+
+  // Link to the student (REQUIRED)
+  studentId: {
+    type: DataTypes.UUID,
+    allowNull: false,
+    references: { model: 'Students', key: 'id' },
+  },
+
+  schoolId: {
+    type: DataTypes.UUID,
+    allowNull: false,
+  },
+
+  // ---- Relationship ----
+  relationship: {
+    type: DataTypes.ENUM(
+      'Mother', 'Father', 'Guardian',
+      'Grandparent', 'Sibling', 'Uncle', 'Aunt', 'Sponsor', 'Other'
+    ),
+    allowNull: false,
+    defaultValue: 'Guardian',
+  },
+
+  // ---- Flags ----
+  isPrimary:        { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  emergencyContact: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+
+  // ---- Optional extras ----
+  occupation:    { type: DataTypes.STRING, allowNull: true },
+  employer:      { type: DataTypes.STRING, allowNull: true },
+  monthlyIncome: { type: DataTypes.DECIMAL(12, 2), allowNull: true },
+
+  // ---- Fallback contact info (used when there is NO login account) ----
+  // When userId is set, these are still populated for convenience and
+  // so the UI can render a guardian card without joining Users.
+  firstName: { type: DataTypes.STRING, allowNull: true },
+  lastName:  { type: DataTypes.STRING, allowNull: true },
+  email:     { type: DataTypes.STRING, allowNull: true },
+  phone:     { type: DataTypes.STRING, allowNull: true },
+
+  // Whether this guardian has an actual login account
+  hasPortalAccount: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
+}, {
+  timestamps: true,
+  tableName: 'Parents',
 });
 
 const Subject = sequelize.define('Subject', {
@@ -3108,6 +3205,27 @@ Student.belongsToMany(Sponsor, { through: StudentSponsor, foreignKey: 'studentId
 CourseUnit.belongsTo(Course, { foreignKey: 'courseId' });
 CourseUnit.belongsTo(Program, { foreignKey: 'programId' });
 
+// ==================== ASSOCIATIONS ====================
+
+// ---- Student ↔ User (student's own login) ----
+Student.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+User.hasOne(Student,    { foreignKey: 'userId', as: 'studentProfile' });
+
+// ---- Student ↔ Parent (many-to-many via Parent join) ----
+Student.hasMany(Parent, { foreignKey: 'studentId', as: 'parents' });
+Parent.belongsTo(Student, { foreignKey: 'studentId', as: 'student' });
+
+// ---- Parent ↔ User (guardian login, optional) ----
+Parent.belongsTo(User, { foreignKey: 'userId', as: 'User' });   // alias 'User' matches existing frontend code
+User.hasMany(Parent,   { foreignKey: 'userId', as: 'parentLinks' });
+
+// ---- Parent ↔ School ----
+Parent.belongsTo(School, { foreignKey: 'schoolId' });
+School.hasMany(Parent,   { foreignKey: 'schoolId' });
+
+// ---- Student ↔ School ----
+Student.belongsTo(School, { foreignKey: 'schoolId' });
+School.hasMany(Student,   { foreignKey: 'schoolId' });
 // ==================== PERMISSION DEFINITIONS ====================
 const PERMISSIONS = {
   SUPER_ADMIN: '*',
@@ -5638,53 +5756,198 @@ app.get('/api/students/:id', authenticate, async (req, res) => {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
-
-// CREATE student
+// ==================== CREATE STUDENT ====================
 app.post('/api/students', authenticate, async (req, res) => {
+  const transaction = await sequelize.transaction();
   try {
-    const studentData = req.body;
-    
-    // Only admins can create students
+    const studentData = { ...req.body };
+
+    // ---- Permissions ----
     if (!['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(req.user.role)) {
+      await transaction.rollback();
       return res.status(403).json({ message: 'Access denied' });
     }
-    
-    // Generate admission number if not provided
-    if (!studentData.admissionNumber) {
+
+    // ---- Extract nested payloads so they don't leak into Student.create ----
+    const { studentLogin, parent, ...studentFields } = studentData;
+
+    // ---- Generate admission number if not provided ----
+    if (!studentFields.admissionNumber) {
       const year = new Date().getFullYear();
-      const count = await Student.count({ where: { schoolId: req.user.schoolId } }) + 1;
-      studentData.admissionNumber = `${year}-${count.toString().padStart(4, '0')}`;
+      const count = await Student.count({
+        where: { schoolId: req.user.schoolId },
+        transaction,
+      }) + 1;
+      studentFields.admissionNumber = `${year}-${count.toString().padStart(4, '0')}`;
     }
-    
-    // Ensure schoolId is set
-    studentData.schoolId = req.user.schoolId;
-    
-    const student = await Student.create(studentData);
-    
-    // If a user account should be created
-    if (studentData.studentLogin?.createAccount && studentData.studentLogin.email) {
-      const user = await User.create({
-        email: studentData.studentLogin.email,
-        password: studentData.studentLogin.password,
-        firstName: studentData.firstName,
-        lastName: studentData.lastName,
+
+    // ---- Ensure schoolId ----
+    studentFields.schoolId = req.user.schoolId;
+
+    // ---- Normalize empty UUIDs to null ----
+    ['classId', 'courseId', 'programId', 'facultyId', 'departmentId', 'transportRouteId']
+      .forEach(f => { if (studentFields[f] === '') studentFields[f] = null; });
+
+    // ==================== 1. Create the student ====================
+    const student = await Student.create(studentFields, { transaction });
+
+    // ==================== 2. Optional student login ====================
+    if (studentLogin?.createAccount && studentLogin.email && studentLogin.password) {
+      const studentUser = await User.create({
+        email: studentLogin.email,
+        password: studentLogin.password, // hashed via User model hook if you have one
+        firstName: studentFields.firstName,
+        lastName: studentFields.lastName,
         role: 'STUDENT',
         schoolId: req.user.schoolId,
-        phone: studentData.phone
-      });
-      
-      // Link the student to the user
-      await student.update({ userId: user.id });
+        phone: studentFields.phone || null,
+      }, { transaction });
+
+      await student.update({ userId: studentUser.id }, { transaction });
     }
-    
-    res.json({ success: true, student });
-    
+
+    // ==================== 3. Parent / Guardian (REQUIRED DETAILS, OPTIONAL PORTAL) ====================
+    if (parent) {
+      // ---------- Case A: Link to an existing parent user ----------
+      if (parent.useExisting && parent.existingUserId) {
+        const existingUser = await User.findOne({
+          where: { id: parent.existingUserId, schoolId: req.user.schoolId },
+          transaction,
+        });
+
+        if (!existingUser) {
+          await transaction.rollback();
+          return res.status(400).json({ message: 'Selected existing parent not found' });
+        }
+
+        await Parent.create({
+          userId: existingUser.id,
+          studentId: student.id,
+          relationship: parent.relationship || 'Guardian',
+          isPrimary: parent.isPrimary ?? false,
+          emergencyContact: parent.emergencyContact ?? false,
+          occupation: parent.occupation || null,
+          employer: parent.employer || null,
+          monthlyIncome: parent.monthlyIncome || null,
+          schoolId: req.user.schoolId,
+        }, { transaction });
+      }
+
+      // ---------- Case B: New guardian (details required) ----------
+      else {
+        const {
+          firstName, lastName, email, phone,
+          relationship = 'Guardian',
+          isPrimary = false,
+          emergencyContact = false,
+          occupation = null,
+          employer = null,
+          monthlyIncome = null,
+          grantPortalAccess = false,
+          password = null,
+        } = parent;
+
+        // ---- Required: first & last name ----
+        if (!firstName?.trim() || !lastName?.trim()) {
+          await transaction.rollback();
+          return res.status(400).json({
+            message: 'Guardian first name and last name are required',
+          });
+        }
+
+        // ---- Required: at least one contact channel ----
+        if (!phone?.trim() && !email?.trim()) {
+          await transaction.rollback();
+          return res.status(400).json({
+            message: 'Provide at least a phone number or email for the guardian',
+          });
+        }
+
+        // ---- If portal requested, email + password are required ----
+        if (grantPortalAccess) {
+          if (!email?.trim()) {
+            await transaction.rollback();
+            return res.status(400).json({ message: 'Email is required to grant portal access' });
+          }
+          if (!password || password.length < 6) {
+            await transaction.rollback();
+            return res.status(400).json({
+              message: 'Password (min 6 chars) is required to grant portal access',
+            });
+          }
+        }
+
+        let linkedUserId = null;
+
+        // ---- Create a User account ONLY if portal access is requested ----
+        if (grantPortalAccess) {
+          // Prevent duplicate user accounts by email within the school
+          const existingUser = await User.findOne({
+            where: { email: email.trim(), schoolId: req.user.schoolId },
+            transaction,
+          });
+
+          if (existingUser) {
+            // Reuse the existing user (already has a login)
+            linkedUserId = existingUser.id;
+          } else {
+            const newUser = await User.create({
+              email: email.trim(),
+              password, // hash in User model hook
+              firstName: firstName.trim(),
+              lastName: lastName.trim(),
+              phone: phone?.trim() || null,
+              role: 'PARENT',
+              schoolId: req.user.schoolId,
+            }, { transaction });
+
+            linkedUserId = newUser.id;
+          }
+        }
+
+        // ---- Always create the Parent link record ----
+        // userId may be null when no portal account was created.
+        // Contact details are stored regardless, using the fallback columns.
+        await Parent.create({
+          userId: linkedUserId,                    // nullable
+          studentId: student.id,
+          relationship,
+          isPrimary,
+          emergencyContact,
+          occupation,
+          employer,
+          monthlyIncome,
+          schoolId: req.user.schoolId,
+
+          // Fallback contact info — safe even if no User exists
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          email: email?.trim() || null,
+          phone: phone?.trim() || null,
+          hasPortalAccount: !!linkedUserId,
+        }, { transaction });
+      }
+    }
+
+    // ==================== Commit ====================
+    await transaction.commit();
+
+    // Reload with associations for the response
+    const fullStudent = await Student.findByPk(student.id, {
+      include: [
+        { model: User,   as: 'user',    required: false },
+        { model: Parent, as: 'parents', required: false },
+      ],
+    });
+
+    res.json({ success: true, student: fullStudent });
+
   } catch (error) {
+    await transaction.rollback();
     console.error('Create student error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
-
 // UPDATE student
 app.put('/api/students/:id', authenticate, async (req, res) => {
   try {
@@ -23878,14 +24141,26 @@ app.use((err, req, res, next) => {
     error: process.env.NODE_ENV === 'development' ? err.message : undefined
   });
 });
-
 // ==================== START SERVER ====================
-
 const PORT = process.env.PORT || 5000;
 
-sequelize.sync({ force: false })
-  .then(() => {
+(async () => {
+  try {
+    // 1. Verify DB connection
+    await sequelize.authenticate();
+    console.log('✅ Database connection established');
+
+    // 2. Sync models
+    //    - Dev:  alter: true → auto-adds new columns/enums (use with care!)
+    //    - Prod: no alter      → run migrations manually instead
+    const syncOptions = process.env.NODE_ENV === 'production'
+      ? {}
+      : { alter: true };
+
+    await sequelize.sync(syncOptions);
     console.log('✅ Database synced successfully');
+
+    // 3. Model / feature banner
     console.log('📊 Grading Systems Loaded:');
     console.log('   - CBC (ECDE & Primary)');
     console.log('   - 8-4-4 (Secondary)');
@@ -23894,16 +24169,20 @@ sequelize.sync({ force: false })
     console.log('   - IB (International Baccalaureate)');
     console.log('   - Cambridge IGCSE');
     console.log('   - American System');
+
+    // 4. Start listening
     app.listen(PORT, () => {
       console.log(`🚀 Server running on http://localhost:${PORT}`);
       console.log(`📚 API Documentation: http://localhost:${PORT}/api`);
       console.log(`✅ All routes are now fixed!`);
-      console.log(`   - Students: http://localhost:${PORT}/api/students`);
-      console.log(`   - Exams: http://localhost:${PORT}/api/exams`);
-      console.log(`   - Fees: http://localhost:${PORT}/api/fees`);
-      console.log(`   - Timetable: http://localhost:${PORT}/api/timetable`);
+      console.log(`   - Students:   http://localhost:${PORT}/api/students`);
+      console.log(`   - Exams:      http://localhost:${PORT}/api/exams`);
+      console.log(`   - Fees:       http://localhost:${PORT}/api/fees`);
+      console.log(`   - Timetable:  http://localhost:${PORT}/api/timetable`);
+      console.log(`   - Transfers:  http://localhost:${PORT}/api/fee-transfers`);
     });
-  })
-  .catch(err => {
-    console.error('❌ Database sync error:', err);
-  });
+  } catch (err) {
+    console.error('❌ Startup error:', err);
+    process.exit(1);
+  }
+})();
