@@ -9007,15 +9007,25 @@ const calculateGradeFromMarksWithSystem = (marks, maxMarks, gradingSystem) => {
   const percentage = maxMarks > 0 ? (marks / maxMarks) * 100 : 0;
   return gradingSystem.getGrade(percentage);
 };
-// ===== CREATE RESULT =====
+// ===== CREATE RESULT — COMPLETE VERSION =====
 app.post('/api/results', authenticate, checkPermission('manage_results'), async (req, res) => {
   try {
     const { studentId, examId, subjectId, unitId, marks, isAbsent, remarks, description } = req.body;
 
-    // ✅ Verify the student exists in the Students table
+    console.log('📝 Create result request:', { studentId, examId, marks, isAbsent });
+
+    // 1. Validate required fields
+    if (!studentId || !examId) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Student ID and Exam ID are required' 
+      });
+    }
+
+    // 2. Verify the student exists in this school
     const student = await Student.findOne({ 
       where: { 
-        id: studentId,  // This is the student's ID from Students table
+        id: studentId,
         schoolId: req.user.schoolId 
       } 
     });
@@ -9023,10 +9033,11 @@ app.post('/api/results', authenticate, checkPermission('manage_results'), async 
     if (!student) {
       return res.status(400).json({ 
         success: false,
-        message: `Student ${studentId} not found in your school` 
+        message: `Student not found in your school` 
       });
     }
 
+    // 3. Verify the exam exists in this school
     const exam = await Exam.findOne({ 
       where: { id: examId, schoolId: req.user.schoolId } 
     });
@@ -9034,14 +9045,72 @@ app.post('/api/results', authenticate, checkPermission('manage_results'), async 
     if (!exam) {
       return res.status(400).json({ 
         success: false,
-        message: `Exam ${examId} not found in your school` 
+        message: `Exam not found in your school` 
       });
     }
 
-    // ... rest of the result creation logic
+    // 4. Calculate grade using the school's grading system
+    const school = await School.findByPk(req.user.schoolId);
+    const gradingSystemObj = GRADING_SYSTEMS[school.gradingSystem] || GRADING_SYSTEMS.CBC;
+    const maxMarks = exam.maxMarks || 100;
+    const numericMarks = isAbsent ? 0 : (parseFloat(marks) || 0);
+
+    let gradeInfo;
+    if (isAbsent) {
+      gradeInfo = { grade: 'ABS', code: 'ABS', points: 0, color: 'gray' };
+    } else {
+      gradeInfo = calculateGradeFromMarksWithSystem(numericMarks, maxMarks, gradingSystemObj);
+    }
+
+    // 5. Check if a result already exists for this student+exam
+    const existing = await Result.findOne({
+      where: { studentId, examId }
+    });
+
+    // 6. Build the result data
+    const resultData = {
+      studentId,
+      examId,
+      subjectId: subjectId || null,
+      unitId: unitId || null,
+      marks: numericMarks,
+      grade: gradeInfo.grade,
+      gradeCode: gradeInfo.code,
+      points: gradeInfo.points,
+      isAbsent: isAbsent || false,
+      remarks: remarks || (isAbsent ? 'Absent' : ''),
+      description: description || null,
+      gradingSystem: school.gradingSystem
+    };
+
+    let result;
+    if (existing) {
+      // Update existing
+      const oldResult = { ...existing.toJSON() };
+      await existing.update(resultData);
+      result = existing;
+      await createAuditLog(req, 'UPDATE', 'RESULT', result.id, oldResult, result);
+      console.log(`✅ Result updated: ${result.id}`);
+    } else {
+      // Create new
+      result = await Result.create(resultData);
+      await createAuditLog(req, 'CREATE', 'RESULT', result.id, null, result);
+      console.log(`✅ Result created: ${result.id}`);
+    }
+
+    // 7. Send response
+    return res.status(existing ? 200 : 201).json({
+      success: true,
+      result,
+      message: existing ? 'Result updated successfully' : 'Result created successfully'
+    });
+
   } catch (error) {
-    console.error('Create result error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    console.error('❌ Create result error:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: error.message || 'Failed to save result' 
+    });
   }
 });
 app.get('/api/results', authenticate, async (req, res) => {
