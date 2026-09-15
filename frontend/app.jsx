@@ -3122,8 +3122,8 @@ const DashboardModule = ({
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard title="Students" value={totalStudents} icon="users" color="blue" />
           <StatCard title="Staff" value={totalStaff} icon="chalkboard-teacher" color="green" />
-          <StatCard title="Total Fees" value={formatCurrency(totalFeesAmount)} icon="money-bill" color="purple" />
-          <StatCard title="Collected" value={formatCurrency(totalPaymentsAmount)} icon="check-circle" color="green" />
+      <StatCard title="Total Fees Allocated" value={formatCurrency(totalFeesAmount)} icon="money-bill" color="purple" />
+          <StatCard title=" Fees Collected" value={formatCurrency(totalPaymentsAmount)} icon="check-circle" color="green" />
         </div>
 
         <div className="bg-white rounded-xl shadow-sm p-6">
