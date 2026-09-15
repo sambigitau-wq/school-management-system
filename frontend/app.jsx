@@ -10043,7 +10043,7 @@ const ExamModule = ({
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex space-x-2">
+                        <div className="flex flex-wrap gap-2">
                           {canEditExams && (
                             <button
                               onClick={() => {
@@ -10070,22 +10070,22 @@ const ExamModule = ({
                                 setSelectedExam(exam);
                                 setShowExamForm(true);
                               }}
-                              className="text-indigo-600 hover:text-indigo-900 p-2 hover:bg-indigo-50 rounded-lg transition-colors"
+                              className="text-xs px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-md hover:bg-indigo-100 transition-colors font-medium whitespace-nowrap"
                               title="Edit Exam">
-                              <i className="fas fa-edit"></i>
+                              Edit
                             </button>
                           )}
                           {canAddResults && (<>
                             <button
                               onClick={() => { setResultForm({...resultForm, examId: exam.id}); setShowResultForm(true); }}
-                              className="text-green-600 hover:text-green-900 p-2 hover:bg-green-50 rounded-lg transition-colors"
+                              className="text-xs px-3 py-1.5 bg-green-50 text-green-700 rounded-md hover:bg-green-100 transition-colors font-medium whitespace-nowrap"
                               title="Add Single Result">
-                              <i className="fas fa-plus-circle"></i>
+                              Add Result
                             </button>
                             <button onClick={() => loadStudentsForBulkResults(exam.id)}
-                              className="text-purple-600 hover:text-purple-900 p-2 hover:bg-purple-50 rounded-lg transition-colors"
+                              className="text-xs px-3 py-1.5 bg-purple-50 text-purple-700 rounded-md hover:bg-purple-100 transition-colors font-medium whitespace-nowrap"
                               title="Bulk Results Entry">
-                              <i className="fas fa-table"></i>
+                              Bulk Entry
                             </button>
                           </>)}
                           {canPublishResults && (
@@ -10095,18 +10095,20 @@ const ExamModule = ({
                                   handleUpdate('/exams', exam.id, { ...exam, isPublished: true }, setExams, exams);
                                 }
                               }}
-                              className={`p-2 rounded-lg transition-colors ${
-                                exam.isPublished ? 'text-green-600 hover:bg-green-50' : 'text-yellow-600 hover:bg-yellow-50'
+                              className={`text-xs px-3 py-1.5 rounded-md font-medium transition-colors whitespace-nowrap ${
+                                exam.isPublished
+                                  ? 'bg-green-50 text-green-700 hover:bg-green-100'
+                                  : 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100'
                               }`}
                               title={exam.isPublished ? 'Published' : 'Publish'}>
-                              <i className={`fas fa-${exam.isPublished ? 'check-circle' : 'globe'}`}></i>
+                              {exam.isPublished ? 'Published' : 'Publish'}
                             </button>
                           )}
                           {canDeleteExams && (
                             <button onClick={() => handleDeleteExam(exam.id)}
-                              className="text-red-600 hover:text-red-900 p-2 hover:bg-red-50 rounded-lg transition-colors"
+                              className="text-xs px-3 py-1.5 bg-red-50 text-red-700 rounded-md hover:bg-red-100 transition-colors font-medium whitespace-nowrap"
                               title="Delete Exam">
-                              <i className="fas fa-trash"></i>
+                              Delete
                             </button>
                           )}
                         </div>
@@ -10122,6 +10124,7 @@ const ExamModule = ({
     </div>
   );
 };
+
 // ==================== COMPLETE FIXED RESULTS MODULE ====================
 const ResultsModule = ({ 
   exams, setExams, results, students, subjects, classes, courses, programs,
