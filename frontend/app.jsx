@@ -11551,108 +11551,135 @@ const ResultsModule = ({
       setLoading(false);
     }
   };
+// ==================== FIXED: SAVE RESULTS ====================
+const saveAllResults = async () => {
+  if (!canAddResults) { alert('You do not have permission to save results'); return; }
+  
+  // Filter only entries that have something to save
+  const entriesToSave = resultEntries.filter(
+    e => e.marks !== '' || e.isAbsent
+  );
+  
+  if (entriesToSave.length === 0) {
+    alert('No marks entered. Please enter marks or mark students as absent.');
+    return;
+  }
 
-  // ==================== FIXED: SAVE RESULTS ====================
-  const saveAllResults = async () => {
-    if (!canAddResults) { alert('You do not have permission to save results'); return; }
-    setLoading(true);
-    let saved = 0;
-    let errors = 0;
-    const errorDetails = [];
+  setLoading(true);
+  let saved = 0;
+  let errors = 0;
+  const errorDetails = [];
 
-    try {
-      const exam = exams.find(e => e.id === selectedExam);
-      
-      for (const entry of resultEntries) {
-        if (entry.marks === '' && !entry.isAbsent) {
-          continue;
-        }
-
-        const marks = entry.isAbsent ? 0 : parseFloat(entry.marks) || 0;
-        
-        const student = students.find(s => s.id === entry.studentId);
-        
-        if (!student) {
-          errors++;
-          errorDetails.push(`${entry.studentName}: Student not found in system`);
-          continue;
-        }
-        
-        if (student.schoolId && student.schoolId !== currentSchool?.id) {
-          errors++;
-          errorDetails.push(`${entry.studentName}: Student does not belong to this school`);
-          continue;
-        }
-
-        const { grade, points } = calculateGrade(marks, exam?.maxMarks || 100, exam?.schoolCategory);
-        
-        const data = {
-          studentId: student.id,
-          examId: selectedExam,
-          marks,
-          grade,
-          points,
-          isAbsent: entry.isAbsent,
-          remarks: entry.isAbsent ? 'Absent' : ''
-        };
-        
-        if (isUniversity || isTVET) {
-          data.unitId = exam.unitId;
-        } else {
-          data.subjectId = exam.subjectId;
-        }
-
-        console.log(`📤 Saving result for ${entry.studentName} (ID: ${student.id})`);
-
-        try {
-          let existingResult = null;
-          try {
-            const existingRes = await api.get(`/results/exam/${selectedExam}`);
-            const found = existingRes.data.results?.find(r => r.studentId === student.id);
-            if (found) {
-              existingResult = found;
-            }
-          } catch (err) {
-            console.log('No existing results');
-          }
-
-          if (entry.resultId) {
-            await api.put(`/results/${entry.resultId}`, data);
-            console.log(`✅ Updated result for ${entry.studentName}`);
-          } else if (existingResult) {
-            await api.put(`/results/${existingResult.id}`, data);
-            console.log(`✅ Updated existing result for ${entry.studentName}`);
-          } else {
-            await api.post('/results', data);
-            console.log(`✅ Created result for ${entry.studentName}`);
-          }
-          
-          saved++;
-        } catch (err) {
-          console.error(`❌ Error saving for ${entry.studentName}:`, err);
-          errors++;
-          const errorMsg = err.response?.data?.message || err.message || 'Unknown error';
-          errorDetails.push(`${entry.studentName}: ${errorMsg}`);
-        }
-      }
-
-      if (saved > 0) {
-        alert(`✅ ${saved} results saved successfully${errors > 0 ? `\n❌ ${errors} failed` : ''}`);
-      } else {
-        alert(`❌ Failed to save results. ${errors} error(s):\n${errorDetails.join('\n')}`);
-      }
-      
-      if (saved > 0) {
-        await loadExamResults();
-      }
-    } catch (error) {
-      console.error('Error saving results:', error);
-      alert('Failed to save: ' + (error.response?.data?.message || error.message));
-    } finally {
-      setLoading(false);
+  try {
+    const exam = exams.find(e => e.id === selectedExam);
+    if (!exam) {
+      alert('Exam not found. Please refresh.');
+      return;
     }
-  };
 
+    // ✅ STEP 1: Fetch existing results ONCE (not per student)
+    let existingByStudentId = {};
+    try {
+      console.log('🔎 Fetching existing results for exam:', selectedExam);
+      const existingRes = await api.get(`/results/exam/${selectedExam}`);
+      const existingList = existingRes.data?.results || [];
+      existingList.forEach(r => {
+        existingByStudentId[r.studentId] = r;
+      });
+      console.log(`📋 Found ${existingList.length} existing results`);
+    } catch (err) {
+      console.warn('⚠️ Could not fetch existing results, will create new:', err?.message);
+    }
+
+    // ✅ STEP 2: Save each student (one write per student, no redundant reads)
+    for (const entry of entriesToSave) {
+      const marks = entry.isAbsent ? 0 : parseFloat(entry.marks) || 0;
+
+      const student = students.find(s => s.id === entry.studentId);
+      if (!student) {
+        errors++;
+        errorDetails.push(`${entry.studentName}: Student not found in system`);
+        continue;
+      }
+
+      if (student.schoolId && student.schoolId !== currentSchool?.id) {
+        errors++;
+        errorDetails.push(`${entry.studentName}: Student does not belong to this school`);
+        continue;
+      }
+
+      const { grade, points } = calculateGrade(
+        marks,
+        exam?.maxMarks || 100,
+        exam?.schoolCategory
+      );
+
+      const data = {
+        studentId: student.id,
+        examId: selectedExam,
+        marks,
+        grade,
+        points,
+        isAbsent: entry.isAbsent,
+        remarks: entry.isAbsent ? 'Absent' : ''
+      };
+
+      // Attach subject/unit based on school type
+      if (isUniversity || isTVET) {
+        data.unitId = exam.unitId;
+      } else {
+        data.subjectId = exam.subjectId;
+      }
+
+      // Decide: update or create
+      const existing = entry.resultId
+        ? { id: entry.resultId }
+        : existingByStudentId[student.id];
+
+      try {
+        if (existing?.id) {
+          console.log(`📝 Updating ${entry.studentName} (result ${existing.id})`);
+          await api.put(`/results/${existing.id}`, data);
+        } else {
+          console.log(`📝 Creating result for ${entry.studentName}`);
+          await api.post('/results', data);
+        }
+        saved++;
+      } catch (err) {
+        console.error(`❌ Failed to save ${entry.studentName}:`, err);
+        errors++;
+        const errorMsg =
+          err.response?.data?.message ||
+          err.response?.data?.error ||
+          err.message ||
+          'Unknown error';
+        errorDetails.push(`${entry.studentName}: ${errorMsg}`);
+      }
+    }
+
+    // Report
+    if (saved > 0 && errors === 0) {
+      alert(`✅ ${saved} result(s) saved successfully!`);
+    } else if (saved > 0 && errors > 0) {
+      alert(
+        `⚠️ ${saved} saved, ${errors} failed:\n\n${errorDetails.slice(0, 10).join('\n')}` +
+        (errorDetails.length > 10 ? `\n... and ${errorDetails.length - 10} more` : '')
+      );
+    } else {
+      alert(`❌ All saves failed:\n\n${errorDetails.slice(0, 10).join('\n')}`);
+    }
+
+    if (saved > 0) {
+      await loadExamResults();
+    }
+  } catch (error) {
+    console.error('❌ Fatal error in saveAllResults:', error);
+    alert('Failed to save: ' + (error.response?.data?.message || error.message));
+  } finally {
+    // ✅ ALWAYS runs — this is what resets the "Saving..." state
+    setLoading(false);
+  }
+};
   // ==================== PUBLISH RESULTS ====================
   const publishResults = async () => {
     if (!canPublishResults) { alert('You do not have permission to publish results'); return; }
