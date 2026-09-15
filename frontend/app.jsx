@@ -61271,10 +61271,6 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
       { icon: "cog", label: "Settings", id: 'settings' }
     ];
 
-    if (isSecondaryOrPrimary) {
-      parentItems.splice(5, 0, { icon: "book", label: "Subjects", id: 'subjects' });
-    }
-
     return [
       dashboardSection,
       { title: "MY CHILDREN", items: parentItems }
