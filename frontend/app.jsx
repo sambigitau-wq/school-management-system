@@ -3863,26 +3863,22 @@ const ClassModule = ({
         schoolId
       };
 
-      // Call the API directly so we can react to the actual server response
       const res = editingId
         ? await api.put(`/classes/${editingId}`, payload)
         : await api.post('/classes', payload);
 
-      // Pull the returned class out of either shape
       const savedClass = res.data?.class || res.data;
 
       if (!savedClass || !savedClass.id) {
         throw new Error('Server did not return the saved class');
       }
 
-      // Update local state immediately (no need to wait for a refetch)
       if (editingId) {
         setClasses(prev => prev.map(c => (c.id === editingId ? savedClass : c)));
       } else {
         setClasses(prev => [...prev, savedClass]);
       }
 
-      // Reset and close form
       setShowForm(false);
       setEditingId(null);
       setClassForm({
@@ -3892,15 +3888,8 @@ const ClassModule = ({
         academicYear: new Date().getFullYear().toString()
       });
 
-      // Clear any filter so the new/updated row is visible right away
       setSearchTerm('');
       setSelectedClass(null);
-
-      // Also notify parent (in case it does its own bookkeeping)
-      if (editingId && typeof onUpdate === 'function') {
-        // onUpdate was already called inside the flow? No — we bypassed it,
-        // so call it now with the saved response (parent can no-op).
-      }
     } catch (err) {
       console.error('❌ Save class failed:', err);
       setLocalError(err.response?.data?.message || err.message || 'Failed to save class');
@@ -3920,7 +3909,7 @@ const ClassModule = ({
     setShowForm(true);
   };
 
-  // ==================== HANDLE DELETE (with confirmation) ====================
+  // ==================== HANDLE DELETE ====================
   const handleDelete = async (cls) => {
     if (!window.confirm(`Delete class "${cls.name}"?`)) return;
 
@@ -3945,7 +3934,7 @@ const ClassModule = ({
     );
   }, [classes, searchTerm]);
 
-  // Get class options for Searchable Select
+  // Get class options for the top Searchable Select (only used for filtering)
   const classOptions = useMemo(() => {
     return classes.map(cls => ({
       value: cls.id,
@@ -3954,25 +3943,15 @@ const ClassModule = ({
     }));
   }, [classes]);
 
-  // ==================== INPUT FIELD ====================
-  const InputField = ({ label, type, value, onChange, placeholder, required, disabled, min, step }) => (
-    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">
-        {label}
-        {required && <span className="text-red-500 ml-1">*</span>}
-      </label>
-      <input
-        type={type || 'text'}
-        value={value !== undefined && value !== null ? value : ''}
-        onChange={onChange}
-        placeholder={placeholder}
-        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-        disabled={disabled}
-        min={min}
-        step={step}
-      />
-    </div>
-  );
+  // Academic year options for the form's Searchable Select
+  const academicYearOptions = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    return [
+      { value: currentYear.toString(), label: currentYear.toString() },
+      { value: (currentYear - 1).toString(), label: (currentYear - 1).toString() },
+      { value: (currentYear + 1).toString(), label: (currentYear + 1).toString() },
+    ];
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -4108,46 +4087,71 @@ const ClassModule = ({
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-              <InputField
-                label="Class Name"
-                value={classForm.name}
-                onChange={(e) => setClassForm({...classForm, name: e.target.value})}
-                placeholder="e.g., Grade 7"
-                required
-                disabled={saving}
-              />
+
+              {/* ✅ RAW input for Class Name — no wrapper component */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Class Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={classForm.name}
+                  onChange={(e) => setClassForm({ ...classForm, name: e.target.value })}
+                  placeholder="e.g., Grade 7"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                  required
+                  disabled={saving}
+                  autoFocus
+                />
+              </div>
+
+              {/* Searchable Select only for Academic Year (real dropdown) */}
               <SearchableSelect
                 label="Academic Year"
                 value={classForm.academicYear}
-                onChange={(e) => setClassForm({...classForm, academicYear: e.target.value})}
-                options={[
-                  { value: new Date().getFullYear().toString(), label: new Date().getFullYear().toString() },
-                  { value: (new Date().getFullYear() - 1).toString(), label: (new Date().getFullYear() - 1).toString() },
-                  { value: (new Date().getFullYear() + 1).toString(), label: (new Date().getFullYear() + 1).toString() },
-                ]}
+                onChange={(e) => setClassForm({ ...classForm, academicYear: e.target.value })}
+                options={academicYearOptions}
                 placeholder="Search or select year..."
                 required
                 disabled={saving}
               />
-              <InputField
-                label="Capacity"
-                type="number"
-                value={classForm.capacity}
-                onChange={(e) => setClassForm({...classForm, capacity: parseInt(e.target.value)})}
-                required
-                disabled={saving}
-              />
-              <InputField
-                label="Streams (comma separated)"
-                value={classForm.streams?.join(', ')}
-                onChange={(e) => setClassForm({
-                  ...classForm,
-                  streams: e.target.value.split(',').map(s => s.trim()).filter(s => s)
-                })}
-                placeholder="East, West, Central"
-                disabled={saving}
-              />
+
+              {/* ✅ RAW input for Capacity */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Capacity <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  value={classForm.capacity}
+                  onChange={(e) => setClassForm({ ...classForm, capacity: parseInt(e.target.value) || 0 })}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                  required
+                  disabled={saving}
+                />
+              </div>
+
+              {/* ✅ RAW input for Streams — no wrapper */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Streams (comma separated)
+                </label>
+                <input
+                  type="text"
+                  value={classForm.streams?.join(', ') || ''}
+                  onChange={(e) =>
+                    setClassForm({
+                      ...classForm,
+                      streams: e.target.value.split(',').map(s => s.trim()).filter(s => s)
+                    })
+                  }
+                  placeholder="East, West, Central"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                  disabled={saving}
+                />
+              </div>
             </div>
+            
             <div className="flex space-x-2">
               <button 
                 type="submit" 
