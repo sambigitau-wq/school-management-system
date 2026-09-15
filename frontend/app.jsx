@@ -10508,7 +10508,7 @@ const ExamModule = ({
     </div>
   );
 };
-// ==================== COMPLETE FIXED RESULTS MODULE - EMPTY SEARCHABLE SELECTS ====================
+// ==================== COMPLETE FIXED RESULTS MODULE ====================
 const ResultsModule = ({ 
   exams, setExams, results, students, subjects, classes, courses, programs,
   currentSchool, parents, units, user,
@@ -10519,8 +10519,6 @@ const ResultsModule = ({
   console.log('🏫 School category:', currentSchool?.category);
   console.log('👤 User role:', user?.role);
   console.log('📝 propAdmissionNumber:', propAdmissionNumber);
-  
-
 
   // ==================== SCHOOL TYPE DETECTION ====================
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
@@ -10558,7 +10556,7 @@ const ResultsModule = ({
   const canPrintAllResults = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || 
                              isSeniorTeacher || isClassTeacher || isDean || isHOD;
 
-  // ==================== FIXED SEARCHABLE SELECT COMPONENT - EMPTY BY DEFAULT ====================
+  // ==================== FIXED SEARCHABLE SELECT COMPONENT ====================
   const SearchableSelect = ({ 
     label, 
     value, 
@@ -10601,7 +10599,6 @@ const ResultsModule = ({
       return options.find(opt => opt.value === value) || null;
     }, [options, value]);
     
-    // Click outside handler
     useEffect(() => {
       const handleClickOutside = (event) => {
         if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -10613,7 +10610,6 @@ const ResultsModule = ({
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    // Clear search when dropdown closes
     useEffect(() => {
       if (!isOpen) {
         setSearch('');
@@ -10633,7 +10629,6 @@ const ResultsModule = ({
       setIsOpen(true);
       setIsFocused(true);
       
-      // If input is cleared, also clear the selection
       if (newValue === '') {
         onChange({ target: { value: '' } });
       }
@@ -11356,7 +11351,7 @@ const ResultsModule = ({
     }
   };
 
-  // ==================== GET OPTIONS (Admin View) - EMPTY BY DEFAULT ====================
+  // ==================== GET OPTIONS (Admin View) ====================
   const getProgramOptions = () => {
     if (!programs || programs.length === 0) return [];
     return programs.map(p => ({ value: p.id, label: p.name, subLabel: p.code || '' }));
@@ -11551,135 +11546,136 @@ const ResultsModule = ({
       setLoading(false);
     }
   };
-// ==================== FIXED: SAVE RESULTS ====================
-const saveAllResults = async () => {
-  if (!canAddResults) { alert('You do not have permission to save results'); return; }
-  
-  // Filter only entries that have something to save
-  const entriesToSave = resultEntries.filter(
-    e => e.marks !== '' || e.isAbsent
-  );
-  
-  if (entriesToSave.length === 0) {
-    alert('No marks entered. Please enter marks or mark students as absent.');
-    return;
-  }
 
-  setLoading(true);
-  let saved = 0;
-  let errors = 0;
-  const errorDetails = [];
-
-  try {
-    const exam = exams.find(e => e.id === selectedExam);
-    if (!exam) {
-      alert('Exam not found. Please refresh.');
+  // ==================== ✅ FIXED: SAVE RESULTS ====================
+  // Bug fixed: the previous version called `GET /results/exam/{examId}` inside the
+  // per-student for-loop, producing N redundant HTTP reads and making the save
+  // appear to hang on the "Saving..." state. We now fetch existing results ONCE
+  // before the loop and use a studentId → result map to decide PUT vs POST.
+  const saveAllResults = async () => {
+    if (!canAddResults) { alert('You do not have permission to save results'); return; }
+    
+    const entriesToSave = resultEntries.filter(e => e.marks !== '' || e.isAbsent);
+    
+    if (entriesToSave.length === 0) {
+      alert('No marks entered. Please enter marks or mark students as absent.');
       return;
     }
 
-    // ✅ STEP 1: Fetch existing results ONCE (not per student)
-    let existingByStudentId = {};
+    setLoading(true);
+    let saved = 0;
+    let errors = 0;
+    const errorDetails = [];
+
     try {
-      console.log('🔎 Fetching existing results for exam:', selectedExam);
-      const existingRes = await api.get(`/results/exam/${selectedExam}`);
-      const existingList = existingRes.data?.results || [];
-      existingList.forEach(r => {
-        existingByStudentId[r.studentId] = r;
-      });
-      console.log(`📋 Found ${existingList.length} existing results`);
-    } catch (err) {
-      console.warn('⚠️ Could not fetch existing results, will create new:', err?.message);
-    }
-
-    // ✅ STEP 2: Save each student (one write per student, no redundant reads)
-    for (const entry of entriesToSave) {
-      const marks = entry.isAbsent ? 0 : parseFloat(entry.marks) || 0;
-
-      const student = students.find(s => s.id === entry.studentId);
-      if (!student) {
-        errors++;
-        errorDetails.push(`${entry.studentName}: Student not found in system`);
-        continue;
+      const exam = exams.find(e => e.id === selectedExam);
+      if (!exam) {
+        alert('Exam not found. Please refresh.');
+        return;
       }
 
-      if (student.schoolId && student.schoolId !== currentSchool?.id) {
-        errors++;
-        errorDetails.push(`${entry.studentName}: Student does not belong to this school`);
-        continue;
-      }
-
-      const { grade, points } = calculateGrade(
-        marks,
-        exam?.maxMarks || 100,
-        exam?.schoolCategory
-      );
-
-      const data = {
-        studentId: student.id,
-        examId: selectedExam,
-        marks,
-        grade,
-        points,
-        isAbsent: entry.isAbsent,
-        remarks: entry.isAbsent ? 'Absent' : ''
-      };
-
-      // Attach subject/unit based on school type
-      if (isUniversity || isTVET) {
-        data.unitId = exam.unitId;
-      } else {
-        data.subjectId = exam.subjectId;
-      }
-
-      // Decide: update or create
-      const existing = entry.resultId
-        ? { id: entry.resultId }
-        : existingByStudentId[student.id];
-
+      // ✅ STEP 1: Fetch existing results ONCE (not per student)
+      let existingByStudentId = {};
       try {
-        if (existing?.id) {
-          console.log(`📝 Updating ${entry.studentName} (result ${existing.id})`);
-          await api.put(`/results/${existing.id}`, data);
-        } else {
-          console.log(`📝 Creating result for ${entry.studentName}`);
-          await api.post('/results', data);
-        }
-        saved++;
+        console.log('🔎 Fetching existing results for exam:', selectedExam);
+        const existingRes = await api.get(`/results/exam/${selectedExam}`);
+        const existingList = existingRes.data?.results || [];
+        existingList.forEach(r => {
+          existingByStudentId[r.studentId] = r;
+        });
+        console.log(`📋 Found ${existingList.length} existing results`);
       } catch (err) {
-        console.error(`❌ Failed to save ${entry.studentName}:`, err);
-        errors++;
-        const errorMsg =
-          err.response?.data?.message ||
-          err.response?.data?.error ||
-          err.message ||
-          'Unknown error';
-        errorDetails.push(`${entry.studentName}: ${errorMsg}`);
+        console.warn('⚠️ Could not fetch existing results, will create new:', err?.message);
       }
-    }
 
-    // Report
-    if (saved > 0 && errors === 0) {
-      alert(`✅ ${saved} result(s) saved successfully!`);
-    } else if (saved > 0 && errors > 0) {
-      alert(
-        `⚠️ ${saved} saved, ${errors} failed:\n\n${errorDetails.slice(0, 10).join('\n')}` +
-        (errorDetails.length > 10 ? `\n... and ${errorDetails.length - 10} more` : '')
-      );
-    } else {
-      alert(`❌ All saves failed:\n\n${errorDetails.slice(0, 10).join('\n')}`);
-    }
+      // ✅ STEP 2: Save each student — one write, no redundant reads
+      for (const entry of entriesToSave) {
+        const marks = entry.isAbsent ? 0 : parseFloat(entry.marks) || 0;
 
-    if (saved > 0) {
-      await loadExamResults();
+        const student = students.find(s => s.id === entry.studentId);
+        if (!student) {
+          errors++;
+          errorDetails.push(`${entry.studentName}: Student not found in system`);
+          continue;
+        }
+
+        if (student.schoolId && student.schoolId !== currentSchool?.id) {
+          errors++;
+          errorDetails.push(`${entry.studentName}: Student does not belong to this school`);
+          continue;
+        }
+
+        const { grade, points } = calculateGrade(
+          marks,
+          exam?.maxMarks || 100,
+          exam?.schoolCategory
+        );
+
+        const data = {
+          studentId: student.id,
+          examId: selectedExam,
+          marks,
+          grade,
+          points,
+          isAbsent: entry.isAbsent,
+          remarks: entry.isAbsent ? 'Absent' : ''
+        };
+
+        if (isUniversity || isTVET) {
+          data.unitId = exam.unitId;
+        } else {
+          data.subjectId = exam.subjectId;
+        }
+
+        const existing = entry.resultId
+          ? { id: entry.resultId }
+          : existingByStudentId[student.id];
+
+        try {
+          if (existing?.id) {
+            console.log(`📝 Updating ${entry.studentName} (result ${existing.id})`);
+            await api.put(`/results/${existing.id}`, data);
+          } else {
+            console.log(`📝 Creating result for ${entry.studentName}`);
+            await api.post('/results', data);
+          }
+          saved++;
+        } catch (err) {
+          console.error(`❌ Failed to save ${entry.studentName}:`, err);
+          errors++;
+          const errorMsg =
+            err.response?.data?.message ||
+            err.response?.data?.error ||
+            err.message ||
+            'Unknown error';
+          errorDetails.push(`${entry.studentName}: ${errorMsg}`);
+        }
+      }
+
+      // Report
+      if (saved > 0 && errors === 0) {
+        alert(`✅ ${saved} result(s) saved successfully!`);
+      } else if (saved > 0 && errors > 0) {
+        alert(
+          `⚠️ ${saved} saved, ${errors} failed:\n\n${errorDetails.slice(0, 10).join('\n')}` +
+          (errorDetails.length > 10 ? `\n... and ${errorDetails.length - 10} more` : '')
+        );
+      } else {
+        alert(`❌ All saves failed:\n\n${errorDetails.slice(0, 10).join('\n')}`);
+      }
+
+      if (saved > 0) {
+        await loadExamResults();
+      }
+    } catch (error) {
+      console.error('❌ Fatal error in saveAllResults:', error);
+      alert('Failed to save: ' + (error.response?.data?.message || error.message));
+    } finally {
+      // ✅ ALWAYS runs — this is what resets the "Saving..." state
+      setLoading(false);
     }
-  } catch (error) {
-    console.error('❌ Fatal error in saveAllResults:', error);
-    alert('Failed to save: ' + (error.response?.data?.message || error.message));
-  } finally {
-    // ✅ ALWAYS runs — this is what resets the "Saving..." state
-    setLoading(false);
-  }
-};
+  };
+
   // ==================== PUBLISH RESULTS ====================
   const publishResults = async () => {
     if (!canPublishResults) { alert('You do not have permission to publish results'); return; }
