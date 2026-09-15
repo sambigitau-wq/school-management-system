@@ -27932,187 +27932,128 @@ const ResearchModule = ({ research, setResearch, faculties, form, setForm, handl
     </div>
   );
 };
-// ==================== COMPLETE TIMETABLE MODULE WITH SEARCHABLE SELECT ====================
-const TimetableModule = ({ 
-  timetable, setTimetable, 
-  classes, subjects, staff, courses, programs, units,
-  handleCreate, handleDelete, currentSchool, user,
-  students, enrollments
+
+// ==================== COMPLETE ATTENDANCE MODULE (TIMETABLE-AWARE) ====================
+const AttendanceModule = ({ 
+  attendance, setAttendance, 
+  classes, students, courses, programs, units,
+  subjects,
+  timetable,
+  handleCreate, handleUpdate, handleDelete,
+  currentSchool, user,
+  admissionNumber: propAdmissionNumber 
 }) => {
-  console.log('📅 TimetableModule initialized');
-  
-  const [selectedProgram, setSelectedProgram] = useState('');
-  const [selectedCourse, setSelectedCourse] = useState('');
-  const [selectedClass, setSelectedClass] = useState('');
-  const [selectedYear, setSelectedYear] = useState('');
-  const [selectedModule, setSelectedModule] = useState('');
-  const [selectedSemester, setSelectedSemester] = useState('');
-  const [showForm, setShowForm] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [filteredUnits, setFilteredUnits] = useState([]);
-  const [filteredSubjects, setFilteredSubjects] = useState([]);
-  const [conflicts, setConflicts] = useState([]);
-  const [showConflicts, setShowConflicts] = useState(false);
-  const [studentConflicts, setStudentConflicts] = useState([]);
-  const [loadingConflicts, setLoadingConflicts] = useState(false);
-  const [formData, setFormData] = useState({
-    classId: '',
-    courseId: '',
-    programId: '',
-    year: '',
-    semester: '',
-    module: '',
-    day: 'MONDAY',
-    period: '',
-    startTime: '08:00',
-    endTime: '08:40',
-    subjectId: '',
-    unitId: '',
-    teacherId: '',
-    room: ''
-  });
+  console.log('📅 AttendanceModule initialized');
 
-  // Permissions
-  const canAdd = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'DEAN', 'HOD'].includes(user?.role);
-  const canDelete = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'DEAN', 'HOD'].includes(user?.role);
+  // ==================== HELPERS ====================
+  const getKenyanDate = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
 
-  const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
-  const isUniversity = schoolCategory === 'UNIVERSITY';
-  const isTVET = schoolCategory === 'COLLEGE_TVET';
-  
-  const days = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
-  const periods = [1, 2, 3, 4, 5, 6, 7, 8];
+  // Get the day-of-week name (MONDAY..SUNDAY) from a YYYY-MM-DD string
+  const getDayNameFromDate = (dateStr) => {
+    const days = ['SUNDAY','MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY'];
+    const d = new Date(`${dateStr}T12:00:00`); // noon avoids TZ issues
+    return days[d.getDay()];
+  };
 
-  // ==================== SEARCHABLE SELECT COMPONENT ====================
-  const SearchableSelect = ({ label, value, onChange, options, placeholder, disabled, required, className }) => {
+  // ==================== GUARDS ====================
+  const hasLoadedStudentAttendance = useRef(false);
+  const hasLoadedChildrenAttendance = useRef(false);
+
+  // ==================== SEARCHABLE SELECT ====================
+  const SearchableSelect = ({ 
+    label, value, onChange, options = [], placeholder, disabled, required, className,
+    showClear = true 
+  }) => {
     const [search, setSearch] = useState('');
     const [isOpen, setIsOpen] = useState(false);
     const [isFocused, setIsFocused] = useState(false);
     const dropdownRef = useRef(null);
     const inputRef = useRef(null);
 
-    const filteredOptions = useMemo(() => {
-      if (!search.trim()) return options;
-      const searchLower = search.toLowerCase();
-      return options.filter(opt => 
-        opt.label?.toLowerCase().includes(searchLower) ||
-        opt.subLabel?.toLowerCase().includes(searchLower) ||
-        opt.value?.toString().toLowerCase().includes(searchLower)
-      );
-    }, [options, search]);
+    const optionsWithEmpty = useMemo(() => {
+      const hasEmpty = options.some(opt => opt.value === '' || opt.value === null || opt.value === undefined);
+      if (hasEmpty) return options;
+      return [{ value: '', label: '' }, ...options];
+    }, [options]);
 
-    const selectedOption = options.find(opt => opt.value === value);
+    const filteredOptions = useMemo(() => {
+      if (!search.trim()) return optionsWithEmpty;
+      const s = search.toLowerCase();
+      return optionsWithEmpty.filter(opt => 
+        opt.label?.toLowerCase().includes(s) ||
+        opt.subLabel?.toLowerCase().includes(s) ||
+        opt.value?.toString().toLowerCase().includes(s)
+      );
+    }, [optionsWithEmpty, search]);
+
+    const selectedOption = optionsWithEmpty.find(opt => opt.value === value);
 
     useEffect(() => {
-      const handleClickOutside = (event) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-          setIsOpen(false);
-          setIsFocused(false);
+      const handler = (e) => {
+        if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+          setIsOpen(false); setIsFocused(false);
         }
       };
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
+      document.addEventListener('mousedown', handler);
+      return () => document.removeEventListener('mousedown', handler);
     }, []);
 
-    const handleSelect = (selectedValue) => {
-      onChange({ target: { value: selectedValue } });
-      const selected = options.find(opt => opt.value === selectedValue);
-      setSearch(selected ? selected.label : '');
-      setIsOpen(false);
-      setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
-    };
+    useEffect(() => {
+      if (selectedOption && !isFocused) setSearch(selectedOption.label);
+      else if (!selectedOption && !isFocused) setSearch('');
+    }, [value, selectedOption, isFocused]);
 
-    const handleInputChange = (e) => {
-      const newValue = e.target.value;
-      setSearch(newValue);
-      setIsOpen(true);
-      setIsFocused(true);
-      if (newValue === '') {
-        onChange({ target: { value: '' } });
-      }
-    };
-
-    const handleFocus = () => {
-      setIsFocused(true);
-      setIsOpen(true);
-      if (selectedOption && !search) {
-        setSearch(selectedOption.label);
-      }
-    };
-
-    const handleBlur = (e) => {
-      const relatedTarget = e.relatedTarget;
-      if (dropdownRef.current && dropdownRef.current.contains(relatedTarget)) {
-        return;
-      }
-      setTimeout(() => {
-        if (document.activeElement !== inputRef.current) {
-          setIsOpen(false);
-          setIsFocused(false);
-          if (selectedOption) {
-            setSearch(selectedOption.label);
-          } else {
-            setSearch('');
-          }
-        }
-      }, 150);
-    };
-
-    const handleClear = (e) => {
-      e.stopPropagation();
-      onChange({ target: { value: '' } });
-      setSearch('');
-      setIsOpen(false);
-      setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
+    const handleSelect = (v) => {
+      onChange({ target: { value: v } });
+      const sel = optionsWithEmpty.find(o => o.value === v);
+      setSearch(sel ? sel.label : '');
+      setIsOpen(false); setIsFocused(false);
+      inputRef.current?.focus();
     };
 
     const getDisplayValue = () => {
       if (isFocused) return search;
       if (selectedOption) return selectedOption.label;
-      return search || '';
+      return placeholder || '';
     };
 
     return (
       <div className="relative" ref={dropdownRef}>
         {label && (
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
+            {label}{required && <span className="text-red-500 ml-1">*</span>}
           </label>
         )}
         <div className="relative">
           <input
             ref={inputRef}
             type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
+            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
             } ${className || ''}`}
             value={getDisplayValue()}
-            onChange={handleInputChange}
-            onFocus={handleFocus}
-            onBlur={handleBlur}
-            placeholder={placeholder || "Search and select..."}
+            onChange={(e) => { setSearch(e.target.value); setIsOpen(true); setIsFocused(true); if (e.target.value === '') onChange({ target: { value: '' } }); }}
+            onFocus={() => { setIsFocused(true); setIsOpen(true); }}
+            onBlur={() => setTimeout(() => { if (!dropdownRef.current?.contains(document.activeElement)) { setIsOpen(false); setIsFocused(false); } }, 150)}
+            placeholder={placeholder || 'Search...'}
             disabled={disabled}
             autoComplete="off"
           />
-          {value && !disabled && (
-            <button
-              type="button"
-              onClick={handleClear}
-              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
-            >
+          {value && showClear && !disabled && (
+            <button type="button" onClick={(e) => { e.stopPropagation(); onChange({ target: { value: '' } }); setSearch(''); }}
+              className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           )}
-          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
             <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
@@ -28122,14 +28063,12 @@ const TimetableModule = ({
           <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
             {filteredOptions.length > 0 ? (
               filteredOptions.map((opt) => (
-                <div
-                  key={opt.value || Math.random().toString()}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
+                <div key={opt.value || Math.random().toString()}
+                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 ${
                     opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
                   }`}
                   onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => handleSelect(opt.value)}
-                >
+                  onClick={() => handleSelect(opt.value)}>
                   <div className="font-medium">{opt.label}</div>
                   {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
                 </div>
@@ -28145,873 +28084,1193 @@ const TimetableModule = ({
     );
   };
 
-  // ==================== OPTIONS GENERATORS ====================
-  const programOptions = useMemo(() => {
-    const options = [];
-    (programs || []).forEach(p => {
-      options.push({
-        value: p.id,
-        label: p.name,
-        subLabel: p.code || 'Program'
-      });
-    });
-    return options;
-  }, [programs]);
+  // ==================== INPUT FIELD ====================
+  const InputField = ({ label, type = 'text', value, onChange, required, disabled }) => (
+    <div>
+      {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
+      <input type={type} value={value} onChange={onChange} required={required} disabled={disabled}
+        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" />
+    </div>
+  );
 
+  // ==================== SCHOOL / ROLE DETECTION ====================
+  const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
+  const isUniversity = schoolCategory === 'UNIVERSITY';
+  const isTVET = schoolCategory === 'COLLEGE_TVET';
+  const isSecondary = schoolCategory === 'SENIOR_SECONDARY';
+  const isPrimary = schoolCategory === 'ECDE_PRIMARY_JSS';
+  const isRegularSchool = !isUniversity && !isTVET;   // ← register mode
+  const usesTimetable = isUniversity || isTVET;        // ← timetable-driven
+
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+  const isSchoolAdmin = user?.role === 'SCHOOL_ADMIN';
+  const isPrincipal = user?.role === 'PRINCIPAL';
+  const isDeputyPrincipal = user?.role === 'DEPUTY_PRINCIPAL';
+  const isSeniorTeacher = user?.role === 'SENIOR_TEACHER';
+  const isClassTeacher = user?.role === 'CLASS_TEACHER';
+  const isSubjectTeacher = user?.role === 'SUBJECT_TEACHER';
+  const isLecturer = ['LECTURER', 'SENIOR_LECTURER', 'PROFESSOR'].includes(user?.role);
+  const isInstructor = ['INSTRUCTOR', 'TRAINER'].includes(user?.role);
+  const isDean = user?.role === 'DEAN';
+  const isHOD = user?.role === 'HOD';
+  const isStudent = user?.role === 'STUDENT';
+  const isParent = user?.role === 'PARENT';
+
+  const canMarkAttendance = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || 
+    isSeniorTeacher || isClassTeacher || isSubjectTeacher || isLecturer || isInstructor || isDean || isHOD;
+  const canViewReports = canMarkAttendance || isParent || isStudent;
+
+  // ==================== STATE ====================
+  const [selectedStudent, setSelectedStudent] = useState('');
+  const [attendanceDate, setAttendanceDate] = useState(getKenyanDate());
+  const [attendanceList, setAttendanceList] = useState([]);
+  const [attendanceHistory, setAttendanceHistory] = useState([]);
+  const [studentSearch, setStudentSearch] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [viewMode, setViewMode] = useState('mark');
+  const [dateRange, setDateRange] = useState({
+    start: new Date(new Date().setDate(1)).toISOString().split('T')[0],
+    end: new Date().toISOString().split('T')[0]
+  });
+  const [attendanceReport, setAttendanceReport] = useState(null);
+  const [apiError, setApiError] = useState('');
+  const [editingAttendance, setEditingAttendance] = useState(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+
+  // Timetable-driven selections (University/TVET)
+  const [todaysTimetable, setTodaysTimetable] = useState([]);       // Entries filtered to `attendanceDate`
+  const [selectedTimetableEntry, setSelectedTimetableEntry] = useState(null);
+
+  // University filters
+  const [uniCourse, setUniCourse] = useState('');
+  const [uniYear, setUniYear] = useState('');
+  const [uniSemester, setUniSemester] = useState('');
+
+  // TVET filters
+  const [tvetProgram, setTvetProgram] = useState('');
+  const [tvetModule, setTvetModule] = useState('');
+  const [tvetYear, setTvetYear] = useState('');
+
+  // Regular school (register) filters
+  const [regClass, setRegClass] = useState('');
+  const [regSubject, setRegSubject] = useState('');
+
+  const [filteredUnits, setFilteredUnits] = useState([]);
+  const [filteredSubjects, setFilteredSubjects] = useState([]);
+
+  // Parent state
+  const [myChildren, setMyChildren] = useState([]);
+  const [selectedChild, setSelectedChild] = useState(null);
+  const [childAttendance, setChildAttendance] = useState([]);
+  const [childSummary, setChildSummary] = useState(null);
+  const [loadingChildren, setLoadingChildren] = useState(false);
+
+  // Student state
+  const [myAttendance, setMyAttendance] = useState([]);
+  const [myAttendanceSummary, setMyAttendanceSummary] = useState(null);
+  const [myStudentRecord, setMyStudentRecord] = useState(null);
+  const [showAdmissionModal, setShowAdmissionModal] = useState(false);
+  const [admissionNumber, setAdmissionNumber] = useState(propAdmissionNumber || '');
+  const [tempAdmissionNumber, setTempAdmissionNumber] = useState(propAdmissionNumber || '');
+  const [loadingMyAttendance, setLoadingMyAttendance] = useState(false);
+
+  // ==================== OPTIONS ====================
   const courseOptions = useMemo(() => {
-    const options = [];
-    (courses || []).forEach(c => {
-      options.push({
-        value: c.id,
-        label: c.name,
-        subLabel: c.code || 'Course'
-      });
-    });
-    return options;
+    const opts = [];
+    (courses || []).forEach(c => opts.push({ value: c.id, label: c.name, subLabel: c.code || 'Course' }));
+    return opts;
   }, [courses]);
 
+  const programOptions = useMemo(() => {
+    const opts = [];
+    (programs || []).forEach(p => opts.push({ value: p.id, label: p.name, subLabel: p.code || p.level || 'Program' }));
+    return opts;
+  }, [programs]);
+
   const classOptions = useMemo(() => {
-    const options = [];
-    (classes || []).forEach(c => {
-      options.push({
-        value: c.id,
-        label: c.name,
-        subLabel: c.capacity ? `Capacity: ${c.capacity}` : ''
-      });
-    });
-    return options;
+    const opts = [];
+    (classes || []).forEach(c => opts.push({ value: c.id, label: c.name, subLabel: c.capacity ? `Capacity: ${c.capacity}` : 'Class' }));
+    return opts;
   }, [classes]);
 
-  const unitOptions = useMemo(() => {
-    const options = [];
-    filteredUnits.forEach(u => {
-      const subLabels = [];
-      if (u.module) subLabels.push(`Module ${u.module}`);
-      if (u.semester) subLabels.push(`Sem ${u.semester}`);
-      if (u.year) subLabels.push(`Yr ${u.year}`);
-      if (u.credits) subLabels.push(`${u.credits} credits`);
-      
-      options.push({
-        value: u.id,
-        label: u.name,
-        subLabel: subLabels.join(' • ') || 'Unit'
-      });
-    });
-    return options;
-  }, [filteredUnits]);
-
   const subjectOptions = useMemo(() => {
-    const options = [];
-    filteredSubjects.forEach(s => {
-      options.push({
-        value: s.id,
-        label: s.name,
-        subLabel: s.code || 'Subject'
-      });
-    });
-    return options;
+    const opts = [];
+    (filteredSubjects || []).forEach(s => opts.push({ value: s.id, label: s.name, subLabel: s.code || 'Subject' }));
+    return opts;
   }, [filteredSubjects]);
 
-  const teacherOptions = useMemo(() => {
-    const options = [];
-    (staff || []).filter(s => s.staffType === 'TEACHING' || s.staffType === 'ACADEMIC').forEach(s => {
-      if (s.User) {
-        const name = `${s.User.firstName || ''} ${s.User.lastName || ''}`.trim() || 'Unknown';
-        const subLabels = [];
-        if (s.jobTitle) subLabels.push(s.jobTitle);
-        if (s.academicTitle) subLabels.push(s.academicTitle);
-        if (s.specialization) subLabels.push(s.specialization);
-        
-        options.push({
-          value: s.userId,
-          label: name,
-          subLabel: subLabels.join(' • ') || 'Teacher'
-        });
-      }
-    });
-    return options;
-  }, [staff]);
+  const studentOptions = useMemo(() => {
+    const opts = [];
+    (students || []).forEach(s => opts.push({
+      value: s.id, label: `${s.firstName} ${s.lastName}`, subLabel: s.admissionNumber
+    }));
+    return opts;
+  }, [students]);
 
-  const yearOptions = [
-    { value: '', label: 'Select Year' },
-    { value: '1', label: 'Year 1' },
-    { value: '2', label: 'Year 2' },
-    { value: '3', label: 'Year 3' },
-    { value: '4', label: 'Year 4' }
-  ];
-
-  const moduleOptions = [
-    { value: '', label: 'Select Module' },
-    { value: '1', label: 'Module 1' },
-    { value: '2', label: 'Module 2' },
-    { value: '3', label: 'Module 3' },
-    { value: '4', label: 'Module 4' }
-  ];
+  const yearOptions = useMemo(() => {
+    const opts = [];
+    for (let i = 1; i <= 6; i++) opts.push({ value: i.toString(), label: `Year ${i}` });
+    return opts;
+  }, []);
 
   const semesterOptions = [
-    { value: '', label: 'Select Semester' },
     { value: '1', label: 'Semester 1' },
     { value: '2', label: 'Semester 2' }
   ];
 
-  const dayOptions = days.map(d => ({ value: d, label: d }));
-  const periodOptions = periods.map(p => ({ value: p, label: `Period ${p}` }));
+  const moduleOptions = useMemo(() => {
+    const opts = [];
+    for (let i = 1; i <= 6; i++) opts.push({ value: i.toString(), label: `Module ${i}` });
+    return opts;
+  }, []);
 
-  // ==================== CONFLICT DETECTION FUNCTIONS ====================
-  const checkTeacherConflicts = (teacherId, day, startTime, endTime, excludeId = null) => {
-    return timetable.filter(entry => {
-      if (excludeId && entry.id === excludeId) return false;
-      if (entry.teacherId !== teacherId) return false;
-      if (entry.day !== day) return false;
-      const entryStart = entry.startTime;
-      const entryEnd = entry.endTime;
-      const overlap = (startTime < entryEnd && endTime > entryStart);
-      return overlap;
-    });
-  };
-
-  const checkRoomConflicts = (room, day, startTime, endTime, excludeId = null) => {
-    if (!room) return [];
-    return timetable.filter(entry => {
-      if (excludeId && entry.id === excludeId) return false;
-      if (entry.room !== room) return false;
-      if (entry.day !== day) return false;
-      const entryStart = entry.startTime;
-      const entryEnd = entry.endTime;
-      const overlap = (startTime < entryEnd && endTime > entryStart);
-      return overlap;
-    });
-  };
-
-  const checkStudentConflicts = async (courseId, programId, classId, year, module, semester, day, startTime, endTime, excludeId = null) => {
-    setLoadingConflicts(true);
-    try {
-      let studentIds = [];
-      if (isTVET && programId) {
-        const studentsInProgram = students?.filter(s => s.programId === programId) || [];
-        if (year) {
-          studentIds = studentsInProgram.filter(s => s.currentYear === parseInt(year)).map(s => s.id);
-        } else {
-          studentIds = studentsInProgram.map(s => s.id);
-        }
-      } else if (isUniversity && courseId) {
-        const studentsInCourse = students?.filter(s => s.courseId === courseId) || [];
-        if (year) {
-          studentIds = studentsInCourse.filter(s => s.currentYear === parseInt(year)).map(s => s.id);
-        } else {
-          studentIds = studentsInCourse.map(s => s.id);
-        }
-      } else if (classId) {
-        studentIds = students?.filter(s => s.classId === classId).map(s => s.id) || [];
-      }
-      
-      if (studentIds.length === 0) return [];
-      
-      const conflictingStudents = [];
-      const checkedEntries = new Set();
-      
-      for (const studentId of studentIds) {
-        const studentEnrollments = enrollments?.filter(e => e.studentId === studentId && e.status === 'APPROVED') || [];
-        for (const enrollment of studentEnrollments) {
-          let studentTimetable = [];
-          if (isTVET && enrollment.programId) {
-            studentTimetable = timetable.filter(t => 
-              t.programId === enrollment.programId && 
-              (!enrollment.year || t.year === enrollment.year) &&
-              (!enrollment.module || t.module === enrollment.module)
-            );
-          } else if (isUniversity && enrollment.courseId) {
-            studentTimetable = timetable.filter(t => 
-              t.courseId === enrollment.courseId && 
-              (!enrollment.year || t.year === enrollment.year) &&
-              (!enrollment.semester || t.semester === enrollment.semester)
-            );
-          } else if (enrollment.classId) {
-            studentTimetable = timetable.filter(t => t.classId === enrollment.classId);
-          }
-          
-          for (const entry of studentTimetable) {
-            if (excludeId && entry.id === excludeId) continue;
-            if (entry.day !== day) continue;
-            const entryStart = entry.startTime;
-            const entryEnd = entry.endTime;
-            const overlap = (startTime < entryEnd && endTime > entryStart);
-            if (overlap && !checkedEntries.has(`${studentId}-${entry.id}`)) {
-              checkedEntries.add(`${studentId}-${entry.id}`);
-              conflictingStudents.push({
-                studentId,
-                studentName: students?.find(s => s.id === studentId)?.firstName + ' ' + students?.find(s => s.id === studentId)?.lastName,
-                admissionNumber: students?.find(s => s.id === studentId)?.admissionNumber,
-                conflictingEntry: entry,
-                conflictTime: `${entry.startTime} - ${entry.endTime}`,
-                conflictDay: entry.day,
-                conflictItem: entry.unit?.name || entry.subject?.name || 'Unknown'
-              });
-            }
-          }
-        }
-      }
-      return conflictingStudents;
-    } catch (error) {
-      console.error('Error checking student conflicts:', error);
-      return [];
-    } finally {
-      setLoadingConflicts(false);
+  // ==================== GET ITEM NAME ====================
+  const getItemName = (item) => {
+    if (!item) return 'Unknown';
+    if (item.unit?.name) return item.unit.name;
+    if (item.Unit?.name) return item.Unit.name;
+    if (item.subject?.name) return item.subject.name;
+    if (item.Subject?.name) return item.Subject.name;
+    if (item.unitName) return item.unitName;
+    if (item.subjectName) return item.subjectName;
+    if (item.unitId) {
+      const unit = units?.find(u => u.id === item.unitId);
+      if (unit?.name) return unit.name;
     }
+    if (item.subjectId) {
+      const subject = subjects?.find(s => s.id === item.subjectId);
+      if (subject?.name) return subject.name;
+    }
+    return 'Unknown';
   };
 
-  const checkAllConflicts = async (formDataToCheck, excludeId = null) => {
-    const conflictsFound = { teacher: [], room: [], student: [] };
-    if (formDataToCheck.teacherId) {
-      conflictsFound.teacher = checkTeacherConflicts(
-        formDataToCheck.teacherId,
-        formDataToCheck.day,
-        formDataToCheck.startTime,
-        formDataToCheck.endTime,
-        excludeId
-      );
-    }
-    if (formDataToCheck.room) {
-      conflictsFound.room = checkRoomConflicts(
-        formDataToCheck.room,
-        formDataToCheck.day,
-        formDataToCheck.startTime,
-        formDataToCheck.endTime,
-        excludeId
-      );
-    }
-    conflictsFound.student = await checkStudentConflicts(
-      formDataToCheck.courseId,
-      formDataToCheck.programId,
-      formDataToCheck.classId,
-      formDataToCheck.year,
-      formDataToCheck.module,
-      formDataToCheck.semester,
-      formDataToCheck.day,
-      formDataToCheck.startTime,
-      formDataToCheck.endTime,
-      excludeId
-    );
-    setConflicts(conflictsFound);
-    return conflictsFound;
+  // ==================== STATUS BADGE ====================
+  const getStatusBadge = (status) => {
+    const colors = { 
+      'PRESENT': 'bg-green-100 text-green-800', 
+      'ABSENT': 'bg-red-100 text-red-800', 
+      'LATE': 'bg-yellow-100 text-yellow-800', 
+      'PERMISSION': 'bg-blue-100 text-blue-800', 
+      'SICK': 'bg-purple-100 text-purple-800', 
+      'FIELD_TRIP': 'bg-indigo-100 text-indigo-800' 
+    };
+    return colors[status] || 'bg-gray-100 text-gray-800';
   };
 
-  // ==================== AUTO-REFRESH FUNCTION ====================
-  const refreshTimetable = async () => {
-    try {
-      setLoading(true);
-      const params = {};
-      if (isTVET && selectedProgram) params.programId = selectedProgram;
-      if (isTVET && selectedYear) params.year = selectedYear;
-      if (isTVET && selectedModule) params.module = selectedModule;
-      if (isUniversity && selectedCourse) params.courseId = selectedCourse;
-      if (isUniversity && selectedYear) params.year = selectedYear;
-      if (isUniversity && selectedSemester) params.semester = selectedSemester;
-      if (!isUniversity && !isTVET && selectedClass) params.classId = selectedClass;
-      
-      const res = await api.get('/timetable', { params });
-      if (res.data.timetable) {
-        setTimetable(res.data.timetable);
-      }
-    } catch (error) {
-      console.error('Error refreshing timetable:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // ==================== FILTER UNITS / SUBJECTS ====================
   useEffect(() => {
-    refreshTimetable();
-  }, [selectedProgram, selectedCourse, selectedClass, selectedYear, selectedModule, selectedSemester]);
-
-  // ==================== FILTER UNITS/SUBJECTS ====================
-  useEffect(() => {
-    if (isTVET && formData.programId) {
-      const unitsForProgram = units?.filter(u => u.programId === formData.programId) || [];
-      setFilteredUnits(unitsForProgram);
-    } else if (isUniversity && formData.courseId) {
-      const unitsForCourse = units?.filter(u => u.courseId === formData.courseId) || [];
-      setFilteredUnits(unitsForCourse);
+    if (isUniversity && uniCourse && units) {
+      setFilteredUnits(units.filter(u => u.courseId === uniCourse));
+    } else if (isTVET && tvetProgram && units) {
+      const list = units.filter(u => u.programId === tvetProgram);
+      setFilteredUnits(tvetModule ? list.filter(u => String(u.module) === String(tvetModule)) : list);
     } else {
       setFilteredUnits([]);
     }
-  }, [formData.programId, formData.courseId, units, isTVET, isUniversity]);
+  }, [uniCourse, tvetProgram, tvetModule, units, isUniversity, isTVET]);
 
   useEffect(() => {
-    if (!isUniversity && !isTVET && formData.classId) {
-      const subjectsForClass = subjects?.filter(s => s.classId === formData.classId) || [];
-      setFilteredSubjects(subjectsForClass);
+    if (isRegularSchool && regClass && subjects) {
+      setFilteredSubjects(subjects.filter(s => s.classId === regClass));
     } else {
       setFilteredSubjects([]);
     }
-  }, [formData.classId, subjects, isUniversity, isTVET]);
+  }, [regClass, subjects, isRegularSchool]);
 
-  // ==================== HELPER FUNCTIONS ====================
-  const getUnitName = (entry) => {
-    if (entry.unit?.name) return entry.unit.name;
-    if (entry.Unit?.name) return entry.Unit.name;
-    if (entry.unitId) {
-      const foundUnit = units?.find(u => u.id === entry.unitId);
-      if (foundUnit?.name) return foundUnit.name;
-    }
-    if (entry.subject?.name) return entry.subject.name;
-    if (entry.Subject?.name) return entry.Subject.name;
-    if (entry.subjectId) {
-      const foundSubject = subjects?.find(s => s.id === entry.subjectId);
-      if (foundSubject?.name) return foundSubject.name;
-    }
-    return 'Unknown';
-  };
-
-  const getTeacherName = (entry) => {
-    if (entry.teacher?.User) {
-      return `${entry.teacher.User.firstName || ''} ${entry.teacher.User.lastName || ''}`.trim();
-    }
-    if (entry.Teacher?.User) {
-      return `${entry.Teacher.User.firstName || ''} ${entry.Teacher.User.lastName || ''}`.trim();
-    }
-    if (entry.teacherId) {
-      const foundStaff = staff?.find(s => s.id === entry.teacherId);
-      if (foundStaff?.User) {
-        return `${foundStaff.User.firstName || ''} ${foundStaff.User.lastName || ''}`.trim();
-      }
-    }
-    return 'Unknown';
-  };
-
-  // ==================== HANDLE SUBMIT ====================
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!canAdd) {
-      alert('You do not have permission to add timetable entries');
+  // ============================================================
+  // ⭐ NEW: TIMETABLE FILTERING FOR UNIVERSITY / TVET
+  // ============================================================
+  // Whenever the date, filters, or timetable change, recompute the list
+  // of timetable entries for that DAY.
+  useEffect(() => {
+    if (!usesTimetable) {
+      setTodaysTimetable([]);
+      setSelectedTimetableEntry(null);
       return;
     }
-    setLoading(true);
-    
+
+    const dayName = getDayNameFromDate(attendanceDate);
+    let entries = (timetable || []).filter(t => {
+      // Must match the day
+      if ((t.day || '').toUpperCase() !== dayName) return false;
+
+      // Apply school-type filters
+      if (isUniversity) {
+        if (uniCourse && t.courseId !== uniCourse) return false;
+        if (uniYear && String(t.year || '') !== String(uniYear)) return false;
+        if (uniSemester && String(t.semester || '') !== String(uniSemester)) return false;
+      } else if (isTVET) {
+        if (tvetProgram && t.programId !== tvetProgram) return false;
+        if (tvetYear && String(t.year || '') !== String(tvetYear)) return false;
+        if (tvetModule && String(t.module || '') !== String(tvetModule)) return false;
+      }
+      return true;
+    });
+
+    // Sort by period
+    entries = entries.sort((a, b) => (a.period || 0) - (b.period || 0));
+
+    setTodaysTimetable(entries);
+
+    // Auto-select if there's exactly one entry and nothing selected
+    if (entries.length === 1 && !selectedTimetableEntry) {
+      setSelectedTimetableEntry(entries[0]);
+    } else if (selectedTimetableEntry) {
+      // If the previously-selected entry no longer exists in the new list, clear it
+      const stillThere = entries.find(e => e.id === selectedTimetableEntry.id);
+      if (!stillThere) setSelectedTimetableEntry(null);
+    }
+  }, [
+    attendanceDate, timetable,
+    uniCourse, uniYear, uniSemester,
+    tvetProgram, tvetYear, tvetModule,
+    isUniversity, isTVET, usesTimetable
+  ]);
+
+  // ==================== LOAD MY CHILDREN (PARENT) ====================
+  const loadMyChildren = useCallback(async () => {
+    setLoadingChildren(true);
+    setApiError('');
     try {
-      if (!formData.teacherId) {
-        alert('Please select a teacher');
-        setLoading(false);
-        return;
-      }
-
-      const selectedStaff = staff.find(s => s.userId === formData.teacherId);
-      if (!selectedStaff) {
-        alert('Teacher not found in staff records');
-        setLoading(false);
-        return;
-      }
-
-      const submitData = {
-        day: formData.day,
-        period: parseInt(formData.period),
-        startTime: formData.startTime,
-        endTime: formData.endTime,
-        teacherId: selectedStaff.id,
-        room: formData.room || '',
-        schoolId: currentSchool?.id
-      };
-
-      if (isTVET) {
-        if (!formData.programId) {
-          alert('Please select a program');
-          setLoading(false);
-          return;
-        }
-        if (!formData.unitId) {
-          alert('Please select a module/unit');
-          setLoading(false);
-          return;
-        }
-        submitData.programId = formData.programId;
-        submitData.unitId = formData.unitId;
-        submitData.year = formData.year ? parseInt(formData.year) : null;
-        submitData.module = formData.module ? parseInt(formData.module) : null;
-      } else if (isUniversity) {
-        if (!formData.courseId) {
-          alert('Please select a course');
-          setLoading(false);
-          return;
-        }
-        if (!formData.unitId) {
-          alert('Please select a unit');
-          setLoading(false);
-          return;
-        }
-        submitData.courseId = formData.courseId;
-        submitData.unitId = formData.unitId;
-        submitData.year = formData.year ? parseInt(formData.year) : null;
-        submitData.semester = formData.semester ? parseInt(formData.semester) : null;
+      const res = await api.get('/parents/me/children');
+      const children = res.data.children || [];
+      setMyChildren(children);
+      if (children.length > 0) {
+        setSelectedChild(children[0]);
+        await loadChildAttendance(children[0].admissionNumber);
       } else {
-        if (!formData.classId) {
-          alert('Please select a class');
-          setLoading(false);
-          return;
-        }
-        if (!formData.subjectId) {
-          alert('Please select a subject');
-          setLoading(false);
-          return;
-        }
-        submitData.classId = formData.classId;
-        submitData.subjectId = formData.subjectId;
+        setSelectedChild(null);
+        setChildAttendance([]);
+        setChildSummary(null);
       }
-
-      const conflictsFound = await checkAllConflicts(submitData);
-      
-      if (conflictsFound.teacher.length > 0 || conflictsFound.room.length > 0 || conflictsFound.student.length > 0) {
-        let conflictMessage = '⚠️ Conflicts detected:\n\n';
-        if (conflictsFound.teacher.length > 0) {
-          conflictMessage += `👨‍🏫 Teacher Conflict: ${conflictsFound.teacher.length} existing class(es) at this time\n`;
-        }
-        if (conflictsFound.room.length > 0) {
-          conflictMessage += `🏠 Room Conflict: ${conflictsFound.room.length} existing booking(s) at this time\n`;
-        }
-        if (conflictsFound.student.length > 0) {
-          conflictMessage += `👨‍🎓 Student Conflicts: ${conflictsFound.student.length} student(s) have overlapping schedules\n`;
-        }
-        conflictMessage += '\nDo you want to save anyway?';
-        if (!window.confirm(conflictMessage)) {
-          setLoading(false);
-          return;
-        }
-      }
-
-      await handleCreate('/timetable', submitData, setTimetable, timetable);
-      setShowForm(false);
-      setFormData({
-        classId: '', courseId: '', programId: '', year: '', semester: '', module: '',
-        day: 'MONDAY', period: '', startTime: '08:00', endTime: '08:40',
-        subjectId: '', unitId: '', teacherId: '', room: ''
-      });
-      setConflicts([]);
-      await refreshTimetable();
-      alert('✅ Timetable entry added successfully!');
     } catch (error) {
-      console.error('❌ Error creating timetable entry:', error);
-      alert(error.response?.data?.message || 'Failed to create timetable entry');
+      console.error('❌ Error loading children:', error);
+      setApiError(error.response?.data?.message || 'Failed to load your children');
+      setMyChildren([]);
+    } finally {
+      setLoadingChildren(false);
+    }
+  }, []);
+
+  const loadChildAttendance = useCallback(async (childAdmission) => {
+    if (!childAdmission) return;
+    setLoading(true);
+    setApiError('');
+    try {
+      const res = await api.get(
+        `/parents/me/children/${encodeURIComponent(childAdmission)}/attendance`
+      );
+      const records = res.data.attendance || [];
+      setChildAttendance(records);
+
+      const total = records.length;
+      const present = records.filter(r => r.status === 'PRESENT').length;
+      const absent = records.filter(r => r.status === 'ABSENT').length;
+      const late = records.filter(r => r.status === 'LATE').length;
+
+      setChildSummary({
+        total, present, absent, late,
+        presentPercentage: total > 0 ? ((present / total) * 100).toFixed(1) : 0
+      });
+    } catch (error) {
+      console.error('❌ Error loading child attendance:', error);
+      setApiError(error.response?.data?.message || 'Failed to load attendance');
+      setChildAttendance([]);
+      setChildSummary(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // ==================== LOAD MY ATTENDANCE (STUDENT) ====================
+  const loadMyAttendance = useCallback(async (adm) => {
+    if (!adm) return;
+    setLoadingMyAttendance(true);
+    setApiError('');
+    try {
+      const res = await api.get(`/attendance/by-admission/${encodeURIComponent(adm)}`);
+      const records = res.data.attendance || [];
+      const studentInfo = res.data.student;
+      const summary = res.data.summary;
+
+      setMyAttendance(records);
+      setMyStudentRecord(studentInfo);
+      setMyAttendanceSummary(summary);
+    } catch (error) {
+      console.error('❌ Error loading my attendance:', error);
+      setApiError(error.response?.data?.message || 'Failed to load your attendance');
+      setMyAttendance([]);
+    } finally {
+      setLoadingMyAttendance(false);
+    }
+  }, []);
+
+  // ==================== EFFECTS: PARENT ====================
+  useEffect(() => {
+    if (isParent && !hasLoadedChildrenAttendance.current) {
+      loadMyChildren();
+      hasLoadedChildrenAttendance.current = true;
+    }
+    if (!isParent) hasLoadedChildrenAttendance.current = false;
+  }, [isParent, loadMyChildren]);
+
+  // ==================== EFFECTS: STUDENT ====================
+  useEffect(() => {
+    if (!isStudent) return;
+    if (hasLoadedStudentAttendance.current) return;
+
+    const savedAdmission = localStorage.getItem('studentAdmissionNumber');
+    const initial = propAdmissionNumber || savedAdmission;
+
+    if (initial) {
+      setAdmissionNumber(initial);
+      setTempAdmissionNumber(initial);
+      loadMyAttendance(initial);
+      hasLoadedStudentAttendance.current = true;
+    } else {
+      setShowAdmissionModal(true);
+    }
+  }, [isStudent, propAdmissionNumber, loadMyAttendance]);
+
+  const handleAdmissionSubmit = async () => {
+    if (!tempAdmissionNumber) return;
+    const adm = tempAdmissionNumber.toUpperCase().trim();
+    setAdmissionNumber(adm);
+    localStorage.setItem('studentAdmissionNumber', adm);
+    await loadMyAttendance(adm);
+    setShowAdmissionModal(false);
+  };
+
+  // ============================================================
+  // ⭐ LOAD STUDENTS FOR MARKING (TIMETABLE-DRIVEN OR REGISTER)
+  // ============================================================
+  const loadStudents = async () => {
+    setLoading(true);
+    setApiError('');
+    try {
+      let params = {};
+      let entries = [];
+
+      if (usesTimetable) {
+        // ---- University / TVET: timetable-driven ----
+        if (!selectedTimetableEntry) {
+          alert('Please select a class from today\'s timetable first.');
+          setLoading(false);
+          return;
+        }
+
+        const entry = selectedTimetableEntry;
+
+        if (isUniversity && entry.courseId) params.courseId = entry.courseId;
+        else if (isTVET && entry.programId) params.programId = entry.programId;
+
+        const res = await api.get('/students', { params });
+        let list = res.data.students || [];
+
+        // Apply year/module filters from the timetable entry
+        if (isUniversity && entry.year) {
+          list = list.filter(s => s.currentYear === entry.year);
+        }
+        if (isUniversity && entry.semester) {
+          list = list.filter(s => !s.currentSemester || s.currentSemester === entry.semester);
+        }
+        if (isTVET && entry.year) {
+          list = list.filter(s => s.currentYear === entry.year);
+        }
+        if (isTVET && entry.module) {
+          list = list.filter(s =>
+            s.currentModule === entry.module ||
+            s.currentModule === `Module ${entry.module}`
+          );
+        }
+
+        entries = list.map(s => ({
+          studentId: s.id,
+          studentName: `${s.firstName} ${s.lastName}`,
+          admissionNumber: s.admissionNumber,
+          status: 'PRESENT',
+          remarks: ''
+        }));
+
+      } else {
+        // ---- Primary / Secondary: register-style ----
+        if (!regClass) {
+          alert('Please select a class first.');
+          setLoading(false);
+          return;
+        }
+        params.classId = regClass;
+
+        const res = await api.get('/students', { params });
+        const list = res.data.students || [];
+
+        entries = list.map(s => ({
+          studentId: s.id,
+          studentName: `${s.firstName} ${s.lastName}`,
+          admissionNumber: s.admissionNumber,
+          status: 'PRESENT',
+          remarks: ''
+        }));
+      }
+
+      setAttendanceList(entries);
+    } catch (error) {
+      console.error('❌ Error loading students:', error);
+      setApiError(error.response?.data?.message || 'Failed to load students');
     } finally {
       setLoading(false);
     }
   };
 
-  // ==================== HANDLE DELETE ====================
-  const handleDeleteEntry = async (id) => {
-    if (!canDelete) return;
-    if (window.confirm('Delete this timetable entry?')) {
-      await handleDelete(id);
-      setTimeout(refreshTimetable, 500);
+  // ============================================================
+  // ⭐ SUBMIT ATTENDANCE
+  // ============================================================
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (attendanceList.length === 0) {
+      alert('No students to mark. Please load students first.');
+      return;
     }
-  };
 
-  // ==================== HANDLE CHECK CONFLICTS ====================
-  const handleCheckConflicts = async (entry) => {
-    setLoadingConflicts(true);
+    setLoading(true);
+    setApiError('');
     try {
-      const conflictsFound = await checkAllConflicts(entry, entry.id);
-      setShowConflicts(true);
-      if (conflictsFound.teacher.length === 0 && conflictsFound.room.length === 0 && conflictsFound.student.length === 0) {
-        alert('✅ No conflicts detected for this timetable entry.');
-      } else {
-        let conflictMessage = '⚠️ Conflicts detected:\n\n';
-        if (conflictsFound.teacher.length > 0) {
-          conflictMessage += `👨‍🏫 Teacher Conflicts:\n`;
-          conflictsFound.teacher.forEach(t => {
-            conflictMessage += `   - ${t.day} at ${t.startTime}-${t.endTime} (${t.unit?.name || t.subject?.name || 'Unknown'})\n`;
-          });
-          conflictMessage += '\n';
-        }
-        if (conflictsFound.room.length > 0) {
-          conflictMessage += `🏠 Room Conflicts:\n`;
-          conflictsFound.room.forEach(r => {
-            conflictMessage += `   - ${r.day} at ${r.startTime}-${r.endTime} (${r.unit?.name || r.subject?.name || 'Unknown'})\n`;
-          });
-          conflictMessage += '\n';
-        }
-        if (conflictsFound.student.length > 0) {
-          conflictMessage += `👨‍🎓 Student Conflicts (${conflictsFound.student.length} students):\n`;
-          conflictsFound.student.slice(0, 5).forEach(s => {
-            conflictMessage += `   - ${s.studentName} (${s.admissionNumber}) - ${s.conflictItem} at ${s.conflictTime} on ${s.conflictDay}\n`;
-          });
-          if (conflictsFound.student.length > 5) {
-            conflictMessage += `   ... and ${conflictsFound.student.length - 5} more students\n`;
+      const records = attendanceList.map(entry => {
+        const record = {
+          studentId: entry.studentId,
+          date: attendanceDate,
+          status: entry.status,
+          remarks: entry.remarks || ''
+        };
+
+        if (usesTimetable && selectedTimetableEntry) {
+          const t = selectedTimetableEntry;
+          if (isUniversity) {
+            if (t.courseId) record.courseId = t.courseId;
+            if (t.unitId) record.unitId = t.unitId;
+            if (t.year) record.year = t.year;
+            if (t.semester) record.semester = t.semester;
+          } else if (isTVET) {
+            if (t.programId) record.programId = t.programId;
+            if (t.unitId) record.unitId = t.unitId;
+            if (t.module) record.module = String(t.module);
+            if (t.year) record.year = t.year;
           }
+          // Attach timetable metadata
+          if (t.id) record.timetableId = t.id;
+          if (t.period) record.period = t.period;
+          if (t.startTime) record.startTime = t.startTime;
+          if (t.endTime) record.endTime = t.endTime;
+        } else {
+          // Register mode
+          record.classId = regClass;
+          if (regSubject) record.subjectId = regSubject;
         }
-        alert(conflictMessage);
+        return record;
+      });
+
+      await api.post('/attendance', records);
+      alert(`✅ Attendance marked for ${records.length} students`);
+
+      if (setAttendance) {
+        try {
+          const res = await api.get('/attendance');
+          setAttendance(res.data.attendance || []);
+        } catch (e) { /* ignore */ }
       }
     } catch (error) {
-      console.error('Error checking conflicts:', error);
-      alert('Failed to check conflicts');
+      console.error('❌ Error submitting attendance:', error);
+      setApiError(error.response?.data?.message || 'Failed to submit attendance');
     } finally {
-      setLoadingConflicts(false);
+      setLoading(false);
     }
   };
 
-  // ==================== PRINT FUNCTION ====================
-  const handlePrint = () => {
-    // [Keep your existing print function - it's already good]
+  // ==================== UPDATE ATTENDANCE ====================
+  const handleUpdateAttendance = async () => {
+    if (!editingAttendance) return;
+    setLoading(true);
+    try {
+      await api.put(`/attendance/${editingAttendance.id}`, {
+        status: editingAttendance.status,
+        remarks: editingAttendance.remarks
+      });
+      alert('✅ Attendance updated');
+      setShowEditModal(false);
+      setEditingAttendance(null);
+      if (setAttendance) {
+        try {
+          const res = await api.get('/attendance');
+          setAttendance(res.data.attendance || []);
+        } catch (e) { /* ignore */ }
+      }
+    } catch (error) {
+      console.error('❌ Update attendance error:', error);
+      alert(error.response?.data?.message || 'Failed to update attendance');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // ==================== FILTERED TIMETABLE ====================
-  const filteredTimetable = React.useMemo(() => {
-    if (!timetable || timetable.length === 0) return [];
-    let filtered = [...timetable];
-    if (isTVET) {
-      if (selectedProgram) filtered = filtered.filter(entry => entry.programId === selectedProgram);
-      if (selectedYear) filtered = filtered.filter(entry => entry.year === parseInt(selectedYear));
-      if (selectedModule) filtered = filtered.filter(entry => entry.module === parseInt(selectedModule));
-    } else if (isUniversity) {
-      if (selectedCourse) filtered = filtered.filter(entry => entry.courseId === selectedCourse);
-      if (selectedYear) filtered = filtered.filter(entry => entry.year === parseInt(selectedYear));
-      if (selectedSemester) filtered = filtered.filter(entry => entry.semester === parseInt(selectedSemester));
-    } else {
-      if (selectedClass) filtered = filtered.filter(entry => entry.classId === selectedClass);
-    }
-    return filtered;
-  }, [timetable, selectedProgram, selectedCourse, selectedYear, selectedModule, selectedSemester, selectedClass, isTVET, isUniversity]);
+  // ==================== FILTERED LIST ====================
+  const filteredAttendanceList = attendanceList.filter(item => 
+    item.studentName?.toLowerCase().includes(studentSearch.toLowerCase()) ||
+    item.admissionNumber?.toLowerCase().includes(studentSearch.toLowerCase())
+  );
 
-  // ==================== RENDER ====================
-  return (
-    <div className="space-y-6">
-      {(loading || loadingConflicts) && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
-      
-      <div className="flex justify-between items-center no-print">
-        <h2 className="text-2xl font-bold">
-          {isTVET ? '🔧 Program Timetable' : isUniversity ? '📚 Course Timetable' : '📅 Class Timetable'}
-        </h2>
-        <div className="flex space-x-2">
-          {canAdd && (
-            <button onClick={() => setShowForm(true)} className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center">
-              <i className="fas fa-plus mr-2"></i>Add Entry
+  // ==================== STUDENT VIEW ====================
+  if (isStudent) {
+    return (
+      <div className="space-y-6">
+        {showAdmissionModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+              <h2 className="text-2xl font-bold mb-4">View My Attendance</h2>
+              <p className="text-gray-600 mb-4">Enter your admission number to view your attendance records.</p>
+              {apiError && (
+                <div className="bg-red-50 p-3 rounded-lg text-red-600 text-sm mb-4">
+                  <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
+                </div>
+              )}
+              <input
+                type="text"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 mb-4"
+                value={tempAdmissionNumber}
+                onChange={(e) => setTempAdmissionNumber(e.target.value.toUpperCase())}
+                placeholder="e.g., 2024-0001"
+                autoFocus
+              />
+              <button onClick={handleAdmissionSubmit} disabled={loadingMyAttendance || !tempAdmissionNumber}
+                className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                {loadingMyAttendance ? 'Loading...' : 'View Attendance'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {loadingMyAttendance && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse"></div>}
+
+        <div className="flex justify-between items-center">
+          <h2 className="text-2xl font-bold">📋 My Attendance</h2>
+          {myStudentRecord && (
+            <button onClick={() => { localStorage.removeItem('studentAdmissionNumber'); setMyStudentRecord(null); setMyAttendance([]); setShowAdmissionModal(true); }}
+              className="text-indigo-600 hover:text-indigo-800 text-sm">
+              <i className="fas fa-exchange-alt mr-1"></i>Switch Account
             </button>
           )}
-          <button onClick={handlePrint} className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center">
-            <i className="fas fa-print mr-2"></i>Print Timetable
+        </div>
+
+        {myStudentRecord ? (
+          <>
+            <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl p-6 text-white">
+              <div className="flex items-center space-x-4">
+                <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center">
+                  <span className="text-2xl font-bold text-indigo-600">
+                    {myStudentRecord.firstName?.[0]}{myStudentRecord.lastName?.[0]}
+                  </span>
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold">{myStudentRecord.firstName} {myStudentRecord.lastName}</h3>
+                  <p className="text-indigo-100">Admission: {myStudentRecord.admissionNumber}</p>
+                </div>
+              </div>
+            </div>
+
+            {myAttendanceSummary && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-white p-4 rounded-xl shadow-sm text-center">
+                  <p className="text-sm text-gray-500">Total Days</p>
+                  <p className="text-2xl font-bold">{myAttendanceSummary.total || 0}</p>
+                </div>
+                <div className="bg-green-50 p-4 rounded-xl shadow-sm text-center">
+                  <p className="text-sm text-green-600">Present</p>
+                  <p className="text-2xl font-bold text-green-700">{myAttendanceSummary.present || 0}</p>
+                </div>
+                <div className="bg-red-50 p-4 rounded-xl shadow-sm text-center">
+                  <p className="text-sm text-red-600">Absent</p>
+                  <p className="text-2xl font-bold text-red-700">{myAttendanceSummary.absent || 0}</p>
+                </div>
+                <div className="bg-yellow-50 p-4 rounded-xl shadow-sm text-center">
+                  <p className="text-sm text-yellow-600">Rate</p>
+                  <p className="text-2xl font-bold text-yellow-700">{myAttendanceSummary.presentPercentage || 0}%</p>
+                </div>
+              </div>
+            )}
+
+            {myAttendance.length > 0 ? (
+              <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+                <div className="overflow-x-auto max-h-96">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 sticky top-0">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                          {isUniversity || isTVET ? 'Unit/Module' : 'Subject'}
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time In</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Remarks</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {myAttendance.map((r, i) => (
+                        <tr key={r.id || i} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm">{new Date(r.date).toLocaleDateString()}</td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(r.status)}`}>{r.status}</span>
+                          </td>
+                          <td className="px-4 py-3 text-sm">{getItemName(r)}</td>
+                          <td className="px-4 py-3 text-sm">{r.timeIn?.substring(0,5) || '—'}</td>
+                          <td className="px-4 py-3 text-sm text-gray-500">{r.remarks || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+                <i className="fas fa-calendar-times text-5xl text-gray-300 mb-3"></i>
+                <p className="text-gray-500">No attendance records yet.</p>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+            <i className="fas fa-calendar-check text-6xl text-gray-300 mb-4"></i>
+            <p className="text-gray-500 text-lg">Enter your admission number to view attendance.</p>
+            <button onClick={() => setShowAdmissionModal(true)}
+              className="mt-4 bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700">
+              Enter Admission Number
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ==================== PARENT VIEW ====================
+  if (isParent) {
+    return (
+      <div className="space-y-6">
+        {(loadingChildren || loading) && (
+          <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>
+        )}
+
+        <div className="flex justify-between items-center">
+          <h2 className="text-2xl font-bold flex items-center gap-2">
+            📋 My Children's Attendance
+            {myChildren.length > 0 && (
+              <span className="text-sm font-normal text-gray-500">
+                ({myChildren.length} child{myChildren.length !== 1 ? 'ren' : ''})
+              </span>
+            )}
+          </h2>
+          <button onClick={loadMyChildren} disabled={loadingChildren}
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2 disabled:opacity-50">
+            <i className={`fas fa-sync-alt ${loadingChildren ? 'fa-spin' : ''}`}></i>
+            Refresh
           </button>
+        </div>
+
+        {apiError && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+            <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
+          </div>
+        )}
+
+        {myChildren.length === 0 ? (
+          <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+            <i className="fas fa-child text-6xl text-gray-300 mb-4 block"></i>
+            <h3 className="text-lg font-semibold text-gray-700 mb-2">No children linked to your account</h3>
+            <p className="text-gray-500 text-sm">
+              Please contact the school administrator to link your children so you can view their attendance records.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="bg-white p-6 rounded-xl shadow-sm">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Select Child</label>
+              <select value={selectedChild?.id || ''}
+                onChange={(e) => {
+                  const child = myChildren.find(c => c.id === e.target.value);
+                  setSelectedChild(child || null);
+                  if (child) loadChildAttendance(child.admissionNumber);
+                  else { setChildAttendance([]); setChildSummary(null); }
+                }}
+                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
+                <option value="">-- Select a child --</option>
+                {myChildren.map(child => (
+                  <option key={child.id} value={child.id}>
+                    {child.firstName} {child.lastName} ({child.admissionNumber})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selectedChild && (
+              <>
+                <div className="bg-gradient-to-r from-purple-500 to-pink-600 rounded-xl p-6 text-white">
+                  <div className="flex items-center gap-4">
+                    <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center">
+                      <span className="text-2xl font-bold text-purple-600">
+                        {selectedChild.firstName?.[0]}{selectedChild.lastName?.[0]}
+                      </span>
+                    </div>
+                    <div>
+                      <h3 className="text-2xl font-bold">{selectedChild.firstName} {selectedChild.lastName}</h3>
+                      <p className="text-purple-100">Admission: {selectedChild.admissionNumber}</p>
+                      {selectedChild.class?.name && (
+                        <p className="text-purple-200 text-sm mt-1">Class: {selectedChild.class.name}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {childSummary && (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-white p-4 rounded-xl shadow-sm text-center">
+                      <p className="text-sm text-gray-500">Total Days</p>
+                      <p className="text-2xl font-bold text-gray-800">{childSummary.total || 0}</p>
+                    </div>
+                    <div className="bg-green-50 p-4 rounded-xl shadow-sm text-center">
+                      <p className="text-sm text-green-600">Present</p>
+                      <p className="text-2xl font-bold text-green-700">{childSummary.present || 0}</p>
+                    </div>
+                    <div className="bg-red-50 p-4 rounded-xl shadow-sm text-center">
+                      <p className="text-sm text-red-600">Absent</p>
+                      <p className="text-2xl font-bold text-red-700">{childSummary.absent || 0}</p>
+                    </div>
+                    <div className="bg-yellow-50 p-4 rounded-xl shadow-sm text-center">
+                      <p className="text-sm text-yellow-600">Attendance Rate</p>
+                      <p className="text-2xl font-bold text-yellow-700">{childSummary.presentPercentage || 0}%</p>
+                    </div>
+                  </div>
+                )}
+
+                {childAttendance.length > 0 ? (
+                  <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+                    <div className="px-6 py-4 bg-gray-50 border-b">
+                      <h3 className="font-semibold text-lg">
+                        Attendance Records ({childAttendance.length})
+                      </h3>
+                    </div>
+                    <div className="overflow-x-auto max-h-96">
+                      <table className="w-full">
+                        <thead className="bg-gray-50 sticky top-0">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                              {isUniversity || isTVET ? 'Unit/Module' : 'Subject'}
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time In</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Remarks</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {childAttendance.map((r, i) => (
+                            <tr key={r.id || i} className="hover:bg-gray-50">
+                              <td className="px-4 py-3 text-sm">{new Date(r.date).toLocaleDateString()}</td>
+                              <td className="px-4 py-3">
+                                <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(r.status)}`}>{r.status}</span>
+                              </td>
+                              <td className="px-4 py-3 text-sm">{getItemName(r)}</td>
+                              <td className="px-4 py-3 text-sm">{r.timeIn?.substring(0,5) || '—'}</td>
+                              <td className="px-4 py-3 text-sm text-gray-500">{r.remarks || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+                    <i className="fas fa-calendar-times text-5xl text-gray-300 mb-3 block"></i>
+                    <p className="text-gray-500">No attendance records found for {selectedChild.firstName}.</p>
+                  </div>
+                )}
+              </>
+            )}
+
+            {!selectedChild && (
+              <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+                <i className="fas fa-arrow-up text-4xl text-gray-300 mb-3 block"></i>
+                <p className="text-gray-500">Select a child above to view their attendance.</p>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // ==================== TEACHER / ADMIN VIEW ====================
+  const dayName = getDayNameFromDate(attendanceDate);
+
+  return (
+    <div className="space-y-6">
+      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
+
+      {apiError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+          <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
+        </div>
+      )}
+
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold text-gray-800">
+          {isUniversity ? '📚 Course Attendance (Timetable)' : 
+           isTVET ? '🔧 Program Attendance (Timetable)' : 
+           isSecondary ? '📖 Secondary Attendance Register' : 
+           '🎯 Primary Attendance Register'}
+        </h2>
+        <div className="flex space-x-2">
+          {canMarkAttendance && (
+            <button onClick={() => setViewMode('mark')}
+              className={`px-4 py-2 rounded-lg transition-colors ${
+                viewMode === 'mark' ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}>
+              <i className="fas fa-check-circle mr-2"></i>Mark Attendance
+            </button>
+          )}
+          {canViewReports && (
+            <button onClick={() => setViewMode('history')}
+              className={`px-4 py-2 rounded-lg transition-colors ${
+                viewMode === 'history' ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}>
+              <i className="fas fa-history mr-2"></i>View History
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Conflict Warning Banner */}
-      {conflicts && (conflicts.teacher?.length > 0 || conflicts.room?.length > 0 || conflicts.student?.length > 0) && showForm && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <div className="flex items-start">
-            <i className="fas fa-exclamation-triangle text-yellow-500 mr-3 mt-0.5"></i>
-            <div className="flex-1">
-              <h4 className="font-medium text-yellow-800">Potential Conflicts Detected</h4>
-              <div className="text-sm text-yellow-700 mt-1">
-                {conflicts.teacher?.length > 0 && <p>• Teacher has {conflicts.teacher.length} existing class(es) at this time</p>}
-                {conflicts.room?.length > 0 && <p>• Room has {conflicts.room.length} existing booking(s) at this time</p>}
-                {conflicts.student?.length > 0 && <p>• {conflicts.student.length} student(s) may have schedule conflicts</p>}
+      {/* MARK ATTENDANCE VIEW */}
+      {viewMode === 'mark' && canMarkAttendance && (
+        <div className="bg-white p-6 rounded-xl shadow-sm">
+          <h3 className="text-lg font-semibold mb-4">
+            Mark Attendance for {attendanceDate}
+            <span className="ml-2 text-sm font-normal text-indigo-600">({dayName})</span>
+          </h3>
+
+          {/* Date is always present */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+            <InputField label="Date" type="date" value={attendanceDate}
+              onChange={(e) => setAttendanceDate(e.target.value)} required />
+          </div>
+
+          {/* ============ UNIVERSITY / TVET: TIMETABLE-DRIVEN ============ */}
+          {usesTimetable && (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+                {isUniversity && (
+                  <>
+                    <SearchableSelect label="Course" value={uniCourse}
+                      onChange={(e) => { setUniCourse(e.target.value); setSelectedTimetableEntry(null); }}
+                      options={courseOptions} placeholder="All courses..." />
+                    <SearchableSelect label="Year" value={uniYear}
+                      onChange={(e) => { setUniYear(e.target.value); setSelectedTimetableEntry(null); }}
+                      options={yearOptions} placeholder="All Years" />
+                    <SearchableSelect label="Semester" value={uniSemester}
+                      onChange={(e) => { setUniSemester(e.target.value); setSelectedTimetableEntry(null); }}
+                      options={semesterOptions} placeholder="All Semesters" />
+                  </>
+                )}
+                {isTVET && (
+                  <>
+                    <SearchableSelect label="Program" value={tvetProgram}
+                      onChange={(e) => { setTvetProgram(e.target.value); setSelectedTimetableEntry(null); }}
+                      options={programOptions} placeholder="All programs..." />
+                    <SearchableSelect label="Year" value={tvetYear}
+                      onChange={(e) => { setTvetYear(e.target.value); setSelectedTimetableEntry(null); }}
+                      options={yearOptions} placeholder="All Years" />
+                    <SearchableSelect label="Module" value={tvetModule}
+                      onChange={(e) => { setTvetModule(e.target.value); setSelectedTimetableEntry(null); }}
+                      options={moduleOptions} placeholder="All Modules" />
+                  </>
+                )}
+              </div>
+
+              {/* Today's timetable */}
+              <div className="mb-4">
+                <h4 className="font-semibold text-gray-700 mb-2">
+                  📅 Classes scheduled for {dayName}, {attendanceDate}
+                </h4>
+
+                {todaysTimetable.length === 0 ? (
+                  <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-lg p-4">
+                    <i className="fas fa-exclamation-triangle mr-2"></i>
+                    No classes are scheduled for <strong>{dayName}</strong>
+                    {uniCourse || tvetProgram ? ' with the selected filters' : ''}.
+                    You cannot mark attendance for a class that is not on the timetable.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {todaysTimetable.map(entry => {
+                      const isSelected = selectedTimetableEntry?.id === entry.id;
+                      const unitName = entry.unit?.name || entry.subject?.name || getItemName(entry);
+                      const teacherName = entry.teacher?.User
+                        ? `${entry.teacher.User.firstName || ''} ${entry.teacher.User.lastName || ''}`.trim()
+                        : '';
+                      return (
+                        <button
+                          key={entry.id}
+                          type="button"
+                          onClick={() => setSelectedTimetableEntry(entry)}
+                          className={`text-left p-4 rounded-lg border-2 transition-all ${
+                            isSelected
+                              ? 'border-indigo-600 bg-indigo-50 shadow-md'
+                              : 'border-gray-200 bg-white hover:border-indigo-300'
+                          }`}
+                        >
+                          <div className="flex justify-between items-start mb-1">
+                            <span className="text-xs font-medium text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded">
+                              Period {entry.period}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                              {entry.startTime?.substring(0,5)}–{entry.endTime?.substring(0,5)}
+                            </span>
+                          </div>
+                          <div className="font-semibold text-gray-800">{unitName}</div>
+                          {teacherName && (
+                            <div className="text-xs text-gray-500 mt-1">
+                              <i className="fas fa-user mr-1"></i>{teacherName}
+                            </div>
+                          )}
+                          {entry.room && (
+                            <div className="text-xs text-gray-500">
+                              <i className="fas fa-door-open mr-1"></i>{entry.room}
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* ============ PRIMARY / SECONDARY: REGISTER-STYLE ============ */}
+          {isRegularSchool && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+              <SearchableSelect label="Class *" value={regClass}
+                onChange={(e) => { setRegClass(e.target.value); setRegSubject(''); }}
+                options={classOptions} placeholder="Search class..." />
+              <SearchableSelect label="Subject (Optional)" value={regSubject}
+                onChange={(e) => setRegSubject(e.target.value)} options={subjectOptions}
+                placeholder="Search subject..." disabled={!regClass} />
+            </div>
+          )}
+
+          <div className="flex justify-end mb-4">
+            <button type="button" onClick={loadStudents}
+              disabled={
+                loading ||
+                (usesTimetable && !selectedTimetableEntry) ||
+                (isRegularSchool && !regClass)
+              }
+              className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center">
+              {loading ? <><i className="fas fa-spinner fa-spin mr-2"></i>Loading...</> : <><i className="fas fa-users mr-2"></i>Load Students</>}
+            </button>
+          </div>
+
+          {attendanceList.length > 0 && (
+            <>
+              <div className="flex gap-2 mb-4">
+                <button onClick={() => setAttendanceList(prev => prev.map(s => ({ ...s, status: 'PRESENT' })))}
+                  className="bg-green-100 text-green-700 px-3 py-1 rounded-lg text-sm hover:bg-green-200">
+                  Mark All Present
+                </button>
+                <button onClick={() => setAttendanceList(prev => prev.map(s => ({ ...s, status: 'ABSENT' })))}
+                  className="bg-red-100 text-red-700 px-3 py-1 rounded-lg text-sm hover:bg-red-200">
+                  Mark All Absent
+                </button>
+                <input type="text" placeholder="Search students..."
+                  value={studentSearch} onChange={(e) => setStudentSearch(e.target.value)}
+                  className="flex-1 px-3 py-1 border rounded-lg text-sm" />
+              </div>
+
+              <form onSubmit={handleSubmit}>
+                <div className="overflow-x-auto border rounded-lg">
+                  <table className="w-full">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-2 text-left text-xs text-gray-500 uppercase">Admission</th>
+                        <th className="px-4 py-2 text-left text-xs text-gray-500 uppercase">Name</th>
+                        <th className="px-4 py-2 text-left text-xs text-gray-500 uppercase">Status</th>
+                        <th className="px-4 py-2 text-left text-xs text-gray-500 uppercase">Remarks</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {filteredAttendanceList.map(entry => (
+                        <tr key={entry.studentId} className="hover:bg-gray-50">
+                          <td className="px-4 py-2 font-mono text-sm">{entry.admissionNumber}</td>
+                          <td className="px-4 py-2">{entry.studentName}</td>
+                          <td className="px-4 py-2">
+                            <select value={entry.status}
+                              onChange={(e) => setAttendanceList(prev => prev.map(s => s.studentId === entry.studentId ? { ...s, status: e.target.value } : s))}
+                              className="px-2 py-1 border rounded">
+                              <option value="PRESENT">Present</option>
+                              <option value="ABSENT">Absent</option>
+                              <option value="LATE">Late</option>
+                              <option value="PERMISSION">Permission</option>
+                              <option value="SICK">Sick</option>
+                              <option value="FIELD_TRIP">Field Trip</option>
+                            </select>
+                          </td>
+                          <td className="px-4 py-2">
+                            <input type="text" value={entry.remarks}
+                              onChange={(e) => setAttendanceList(prev => prev.map(s => s.studentId === entry.studentId ? { ...s, remarks: e.target.value } : s))}
+                              className="w-full px-2 py-1 border rounded text-sm" placeholder="Optional..." />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="mt-4 flex justify-end">
+                  <button type="submit" disabled={loading}
+                    className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center">
+                    {loading ? <><i className="fas fa-spinner fa-spin mr-2"></i>Saving...</> : <><i className="fas fa-save mr-2"></i>Save Attendance</>}
+                  </button>
+                </div>
+              </form>
+            </>
+          )}
+
+          {attendanceList.length === 0 && !loading && (
+            <div className="text-center py-12 text-gray-500">
+              <i className="fas fa-users text-4xl text-gray-300 mb-3 block"></i>
+              <p>
+                {usesTimetable
+                  ? `Select a class from ${dayName}'s timetable, then click "Load Students".`
+                  : `Select a class and click "Load Students" to begin.`}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* HISTORY VIEW */}
+      {viewMode === 'history' && canViewReports && (
+        <div className="bg-white p-6 rounded-xl shadow-sm">
+          <h3 className="text-lg font-semibold mb-4">Attendance History</h3>
+          <p className="text-gray-500 text-sm mb-4">
+            Use the Reports view to inspect detailed attendance statistics for a student.
+          </p>
+          <button onClick={() => setViewMode('report')}
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
+            <i className="fas fa-chart-bar mr-2"></i>Go to Reports
+          </button>
+        </div>
+      )}
+
+      {/* REPORT VIEW */}
+      {viewMode === 'report' && canViewReports && (
+        <div className="bg-white p-6 rounded-xl shadow-sm">
+          <h3 className="text-lg font-semibold mb-4">Attendance Report</h3>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+            <SearchableSelect label="Student *" value={selectedStudent}
+              onChange={(e) => setSelectedStudent(e.target.value)}
+              options={studentOptions} placeholder="Search student..." required />
+            <InputField label="Start Date" type="date" value={dateRange.start}
+              onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })} />
+            <InputField label="End Date" type="date" value={dateRange.end}
+              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })} />
+          </div>
+
+          <button onClick={async () => {
+            if (!selectedStudent) return;
+            setLoading(true);
+            try {
+              const res = await api.get(`/attendance/report`, {
+                params: { studentId: selectedStudent, startDate: dateRange.start, endDate: dateRange.end }
+              });
+              setAttendanceReport(res.data.report);
+            } catch (error) {
+              alert(error.response?.data?.message || 'Failed to generate report');
+            } finally { setLoading(false); }
+          }}
+            disabled={!selectedStudent || loading}
+            className="mb-6 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+            <i className="fas fa-chart-pie mr-2"></i>Generate Report
+          </button>
+
+          {attendanceReport && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-blue-50 p-4 rounded-lg text-center">
+                  <p className="text-sm text-blue-600">Total Days</p>
+                  <p className="text-2xl font-bold text-blue-700">{attendanceReport.overall?.total || 0}</p>
+                </div>
+                <div className="bg-green-50 p-4 rounded-lg text-center">
+                  <p className="text-sm text-green-600">Present</p>
+                  <p className="text-2xl font-bold text-green-700">{attendanceReport.overall?.present || 0}</p>
+                </div>
+                <div className="bg-red-50 p-4 rounded-lg text-center">
+                  <p className="text-sm text-red-600">Absent</p>
+                  <p className="text-2xl font-bold text-red-700">{attendanceReport.overall?.absent || 0}</p>
+                </div>
+                <div className="bg-yellow-50 p-4 rounded-lg text-center">
+                  <p className="text-sm text-yellow-600">Rate</p>
+                  <p className="text-2xl font-bold text-yellow-700">{attendanceReport.overall?.presentPercentage || 0}%</p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* EDIT ATTENDANCE MODAL */}
+      {showEditModal && editingAttendance && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+            <h3 className="text-xl font-bold mb-4">Edit Attendance</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Student</label>
+                <p className="px-3 py-2 bg-gray-100 rounded-lg">{editingAttendance.studentName} ({editingAttendance.admissionNumber})</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                <p className="px-3 py-2 bg-gray-100 rounded-lg">{new Date(editingAttendance.date).toLocaleDateString()}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <select value={editingAttendance.status}
+                  onChange={(e) => setEditingAttendance({ ...editingAttendance, status: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg">
+                  <option value="PRESENT">Present</option>
+                  <option value="ABSENT">Absent</option>
+                  <option value="LATE">Late</option>
+                  <option value="PERMISSION">Permission</option>
+                  <option value="SICK">Sick</option>
+                  <option value="FIELD_TRIP">Field Trip</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Remarks</label>
+                <textarea value={editingAttendance.remarks || ''}
+                  onChange={(e) => setEditingAttendance({ ...editingAttendance, remarks: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg" rows="3" />
+              </div>
+              <div className="flex space-x-2 pt-4">
+                <button onClick={handleUpdateAttendance} disabled={loading}
+                  className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                  {loading ? 'Updating...' : 'Update Attendance'}
+                </button>
+                <button onClick={() => { setShowEditModal(false); setEditingAttendance(null); }}
+                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
+                  Cancel
+                </button>
               </div>
             </div>
           </div>
         </div>
       )}
-
-      {/* Filter Section with Searchable Selects */}
-      <div className="bg-white p-4 rounded-xl shadow-sm no-print">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {isTVET && (
-            <>
-              <SearchableSelect
-                label="Program"
-                value={selectedProgram}
-                onChange={(e) => setSelectedProgram(e.target.value)}
-                options={programOptions}
-                placeholder=""
-              />
-              <SearchableSelect
-                label="Year"
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(e.target.value)}
-                options={yearOptions.filter(opt => opt.value !== '')}
-                placeholder=""
-              />
-              <SearchableSelect
-                label="Module"
-                value={selectedModule}
-                onChange={(e) => setSelectedModule(e.target.value)}
-                options={moduleOptions.filter(opt => opt.value !== '')}
-                placeholder=""
-              />
-            </>
-          )}
-          
-          {isUniversity && (
-            <>
-              <SearchableSelect
-                label="Course"
-                value={selectedCourse}
-                onChange={(e) => setSelectedCourse(e.target.value)}
-                options={courseOptions}
-                placeholder=""
-              />
-              <SearchableSelect
-                label="Year"
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(e.target.value)}
-                options={yearOptions.filter(opt => opt.value !== '')}
-                placeholder=""
-              />
-              <SearchableSelect
-                label="Semester"
-                value={selectedSemester}
-                onChange={(e) => setSelectedSemester(e.target.value)}
-                options={semesterOptions.filter(opt => opt.value !== '')}
-                placeholder=""
-              />
-            </>
-          )}
-          
-          {!isUniversity && !isTVET && (
-            <SearchableSelect
-              label="Class"
-              value={selectedClass}
-              onChange={(e) => setSelectedClass(e.target.value)}
-              options={classOptions}
-              placeholder=""
-            />
-          )}
-        </div>
-        
-        <div className="mt-2 text-sm text-gray-500">
-          Showing {filteredTimetable.length} entries
-          {selectedProgram && programs?.find(p => p.id === selectedProgram) && 
-            ` for ${programs.find(p => p.id === selectedProgram).name}`}
-          {selectedYear && ` • Year ${selectedYear}`}
-          {selectedModule && ` • Module ${selectedModule}`}
-        </div>
-      </div>
-
-      {/* Add Entry Form with Searchable Selects */}
-      {showForm && canAdd && (
-        <div className="bg-white p-6 rounded-xl shadow-sm border-2 border-indigo-100 no-print">
-          <h3 className="text-lg font-semibold mb-4">Add Timetable Entry</h3>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              
-              {/* TVET Fields */}
-              {isTVET && (
-                <>
-                  <SearchableSelect
-                    label="Program *"
-                    value={formData.programId}
-                    onChange={(e) => setFormData({...formData, programId: e.target.value, unitId: ''})}
-                    options={programOptions}
-                    required
-                    placeholder=""
-                  />
-                  <SearchableSelect
-                    label="Year"
-                    value={formData.year}
-                    onChange={(e) => setFormData({...formData, year: e.target.value})}
-                    options={yearOptions}
-                    placeholder=""
-                  />
-                  <SearchableSelect
-                    label="Module"
-                    value={formData.module}
-                    onChange={(e) => setFormData({...formData, module: e.target.value})}
-                    options={moduleOptions}
-                    placeholder=""
-                  />
-                </>
-              )}
-              
-              {/* University Fields */}
-              {isUniversity && (
-                <>
-                  <SearchableSelect
-                    label="Course *"
-                    value={formData.courseId}
-                    onChange={(e) => setFormData({...formData, courseId: e.target.value, unitId: ''})}
-                    options={courseOptions}
-                    required
-                    placeholder=""
-                  />
-                  <SearchableSelect
-                    label="Year"
-                    value={formData.year}
-                    onChange={(e) => setFormData({...formData, year: e.target.value})}
-                    options={yearOptions}
-                    placeholder=""
-                  />
-                  <SearchableSelect
-                    label="Semester"
-                    value={formData.semester}
-                    onChange={(e) => setFormData({...formData, semester: e.target.value})}
-                    options={semesterOptions}
-                    placeholder=""
-                  />
-                </>
-              )}
-              
-              {/* Regular School Fields */}
-              {!isUniversity && !isTVET && (
-                <SearchableSelect
-                  label="Class *"
-                  value={formData.classId}
-                  onChange={(e) => setFormData({...formData, classId: e.target.value})}
-                  options={classOptions}
-                  required
-                  placeholder=""
-                />
-              )}
-
-              {/* Unit/Subject Selection */}
-              {(isTVET || isUniversity) && (
-                <SearchableSelect
-                  label={isTVET ? "Module *" : "Unit *"}
-                  value={formData.unitId}
-                  onChange={(e) => setFormData({...formData, unitId: e.target.value})}
-                  options={unitOptions}
-                  required
-                  disabled={(!formData.programId && !formData.courseId)}
-                  placeholder=""
-                />
-              )}
-              
-              {!isUniversity && !isTVET && (
-                <SearchableSelect
-                  label="Subject *"
-                  value={formData.subjectId}
-                  onChange={(e) => setFormData({...formData, subjectId: e.target.value})}
-                  options={subjectOptions}
-                  required
-                  disabled={!formData.classId}
-                  placeholder=""
-                />
-              )}
-
-              <SearchableSelect
-                label="Teacher *"
-                value={formData.teacherId}
-                onChange={(e) => setFormData({...formData, teacherId: e.target.value})}
-                options={teacherOptions}
-                required
-                placeholder=""
-              />
-
-              <SearchableSelect
-                label="Day *"
-                value={formData.day}
-                onChange={(e) => setFormData({...formData, day: e.target.value})}
-                options={dayOptions}
-                required
-                placeholder=""
-              />
-
-              <SearchableSelect
-                label="Period *"
-                value={formData.period}
-                onChange={(e) => setFormData({...formData, period: e.target.value})}
-                options={periodOptions}
-                required
-                placeholder=""
-              />
-
-              <input
-                type="text"
-                placeholder="Room (e.g., Hall A, Lab 1)"
-                value={formData.room}
-                onChange={(e) => setFormData({...formData, room: e.target.value})}
-                className="px-3 py-2 border rounded-lg"
-              />
-              
-              <input
-                type="time"
-                value={formData.startTime}
-                onChange={(e) => setFormData({...formData, startTime: e.target.value})}
-                className="px-3 py-2 border rounded-lg"
-                required
-              />
-              
-              <input
-                type="time"
-                value={formData.endTime}
-                onChange={(e) => setFormData({...formData, endTime: e.target.value})}
-                className="px-3 py-2 border rounded-lg"
-                required
-              />
-            </div>
-
-            <button type="submit" className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50" disabled={loading}>
-              {loading ? 'Adding...' : 'Add Entry'}
-            </button>
-          </form>
-        </div>
-      )}
-
-      {/* Timetable Display - Keep your existing table display */}
-      <div className="bg-white rounded-xl shadow-sm overflow-x-auto">
-        {filteredTimetable.length === 0 ? (
-          <div className="text-center py-12 text-gray-500">
-            <i className="fas fa-calendar-alt text-5xl text-gray-300 mb-4"></i>
-            <p className="text-lg">No timetable entries found</p>
-            <p className="text-sm mt-2">Try adjusting your filters or add new entries</p>
-          </div>
-        ) : (
-          <table className="w-full border-collapse">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 border text-left text-xs font-medium text-gray-500 uppercase">Period</th>
-                {days.map(day => (
-                  <th key={day} className="px-4 py-3 border text-left text-xs font-medium text-gray-500 uppercase">{day}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {periods.map(period => (
-                <tr key={period}>
-                  <td className="px-4 py-3 border font-medium bg-gray-50">Period {period}</td>
-                  {days.map(day => {
-                    const entry = filteredTimetable.find(t => t.day === day && t.period === period);
-                    return (
-                      <td key={`${period}-${day}`} className="px-4 py-3 border align-top">
-                        {entry ? (
-                          <div className="bg-indigo-50 p-3 rounded-lg relative group">
-                            <div className="font-bold text-indigo-700 text-base">{getUnitName(entry)}</div>
-                            {isTVET && entry.module && (
-                              <div className="text-xs font-medium text-indigo-600 mt-1 bg-indigo-100 px-2 py-1 rounded inline-block">Module {entry.module}</div>
-                            )}
-                            {isUniversity && entry.semester && (
-                              <div className="text-xs font-medium text-indigo-600 mt-1 bg-indigo-100 px-2 py-1 rounded inline-block">Sem {entry.semester}</div>
-                            )}
-                            {entry.year && <div className="text-xs text-gray-500 mt-1">Year {entry.year}</div>}
-                            <div className="text-sm text-gray-700 mt-2 font-medium">
-                              <i className="fas fa-user mr-1 text-gray-400"></i>{getTeacherName(entry)}
-                            </div>
-                            {entry.room && (
-                              <div className="text-xs text-gray-500 mt-1">
-                                <i className="fas fa-door-open mr-1 text-gray-400"></i>Room: {entry.room}
-                              </div>
-                            )}
-                            <div className="text-xs text-gray-400 mt-2 border-t pt-1 border-indigo-200">
-                              <i className="far fa-clock mr-1"></i>{entry.startTime?.substring(0,5)} - {entry.endTime?.substring(0,5)}
-                            </div>
-                            <div className="mt-2 flex space-x-1 no-print">
-                              <button onClick={() => handleCheckConflicts(entry)} className="text-yellow-600 hover:text-yellow-800 text-xs p-1 hover:bg-yellow-50 rounded" title="Check Conflicts">
-                                <i className="fas fa-exclamation-triangle"></i>
-                              </button>
-                              {canDelete && (
-                                <button onClick={() => handleDeleteEntry(entry.id)} className="text-red-500 hover:text-red-700 text-xs p-1 hover:bg-red-50 rounded" title="Delete entry">
-                                  <i className="fas fa-trash"></i>
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="text-gray-300 text-center py-4">—</div>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
     </div>
   );
 };
