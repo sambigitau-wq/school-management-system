@@ -8926,8 +8926,6 @@ const ExamModule = ({
   // ✅ TEACHING STAFF FETCHING — STRICT, STAFF-ONLY
   // ============================================================
 
-  // Extract array of staff from any plausible response shape.
-  // NEVER falls back to a generic users list — staff only.
   const extractStaffArray = (payload) => {
     if (!payload) return [];
     if (Array.isArray(payload)) return payload;
@@ -8951,8 +8949,6 @@ const ExamModule = ({
     );
   };
 
-  // STRICT: a record must carry an explicit teaching-role marker.
-  // Anything else (admins, accountants, students, parents, unknown) is rejected.
   const isTeachingStaff = (s) => {
     if (!s) return false;
 
@@ -8966,11 +8962,10 @@ const ExamModule = ({
       .filter(Boolean)
       .map(v => String(v).toUpperCase().replace(/[\s-]+/g, '_'));
 
-    // No role info at all → reject (safer than accepting unknowns)
     if (candidates.length === 0) return false;
 
     const TEACHING_MARKERS = [
-      'TEACH',       // TEACHER, TEACHING, TEACHING_STAFF, HEAD_TEACHER
+      'TEACH',
       'TUTOR',
       'LECTURER',
       'INSTRUCTOR',
@@ -8981,25 +8976,21 @@ const ExamModule = ({
 
     const NON_TEACHING_MARKERS = [
       'NON_TEACHING', 'NONTEACHING', 'SUPPORT_STAFF',
-      'ADMIN',             // ADMIN, ADMINISTRATOR, ADMIN_STAFF
+      'ADMIN',
       'ACCOUNTANT', 'BURSAR', 'SECRETARY',
       'DRIVER', 'SECURITY', 'CLEANER', 'COOK', 'LIBRARIAN',
       'STUDENT', 'PARENT', 'GUARDIAN',
       'SUPER_ADMIN', 'SCHOOL_ADMIN',
-      // Remove the next two if you DO want principals as invigilators
       'PRINCIPAL', 'DEPUTY_PRINCIPAL',
     ];
 
-    // Reject if any non-teaching marker matches
     if (candidates.some(c => NON_TEACHING_MARKERS.some(m => c.includes(m)))) {
       return false;
     }
 
-    // Accept only if an explicit teaching marker matches
     return candidates.some(c => TEACHING_MARKERS.some(m => c.includes(m)));
   };
 
-  // Extract a display name from any plausible field
   const getStaffDisplayName = (s) => {
     if (!s) return 'Unknown';
     const u = s.User || s.user || s.account || {};
@@ -9018,7 +9009,6 @@ const ExamModule = ({
     );
   };
 
-  // Extract department / subject label
   const getStaffSubLabel = (s) => {
     if (!s) return '';
     return (
@@ -9034,15 +9024,12 @@ const ExamModule = ({
     );
   };
 
-  // MAIN: fetch teaching staff from the system, scoped to this school.
-  // Only hits /staff endpoints. Never falls back to /users.
   const fetchTeachingStaff = async () => {
     setLoadingStaff(true);
     setStaffLoadError('');
 
     const schoolId = currentSchool?.id;
 
-    // Only /staff endpoints — never /users
     const endpoints = [];
     if (schoolId) {
       endpoints.push(`/staff?schoolId=${schoolId}`);
@@ -9085,7 +9072,6 @@ const ExamModule = ({
       return;
     }
 
-    // Debug: log a sample record so field names can be verified in DevTools
     console.log('📋 Sample staff record:', rawStaff[0]);
 
     const teaching = rawStaff.filter(isTeachingStaff);
@@ -9105,7 +9091,6 @@ const ExamModule = ({
       return;
     }
 
-    // De-duplicate by id
     const seen = new Set();
     const deduped = teaching.filter(s => {
       const key = s?.id ?? s?.staffId ?? s?.userId;
@@ -9119,7 +9104,6 @@ const ExamModule = ({
     setLoadingStaff(false);
   };
 
-  // Refetch when school changes
   useEffect(() => {
     fetchTeachingStaff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -9206,7 +9190,6 @@ const ExamModule = ({
     return filteredSubjects.map(s => ({ value: s.id, label: s.name, subLabel: `Code: ${s.code || 'N/A'}` }));
   }, [filteredSubjects]);
 
-  // ✅ Invigilator options — built from the strict teaching-staff list
   const getInvigilatorOptions = useCallback(() => {
     if (!teachingStaff || teachingStaff.length === 0) return [];
     return teachingStaff.map(s => ({
@@ -9247,12 +9230,49 @@ const ExamModule = ({
     }
   }, [examForm.courseId, examForm.programId, units, isUniversity, isTVET]);
 
+  // ✅ FIXED: Tolerant subject filtering.
+  //    - Handles multiple possible field names (classId, class_id, ClassId, class.id, Class.id)
+  //    - Handles string/number type mismatch with String() comparison
+  //    - Adds console diagnostics so you can see exactly why it's empty
   useEffect(() => {
-    if (isRegularSchool && selectedClass && subjects) {
-      setFilteredSubjects(subjects.filter(s => s.classId === selectedClass));
-    } else {
+    if (!isRegularSchool || !subjects || subjects.length === 0) {
       setFilteredSubjects([]);
+      return;
     }
+
+    if (!selectedClass) {
+      setFilteredSubjects([]);
+      return;
+    }
+
+    const filtered = subjects.filter(s => {
+      if (!s) return false;
+      // Try every plausible field name the backend might use
+      const subjectClassId =
+        s.classId ??
+        s.class_id ??
+        s.ClassId ??
+        s.classID ??
+        s.class?.id ??
+        s.Class?.id;
+      if (subjectClassId === undefined || subjectClassId === null) return false;
+      return String(subjectClassId) === String(selectedClass);
+    });
+
+    // Diagnostics — remove once verified
+    console.log('🔍 Subject filter debug:', {
+      totalSubjects: subjects.length,
+      selectedClass,
+      matchedSubjects: filtered.length,
+      sampleSubject: subjects[0],
+      sampleClassIdOnSubject:
+        subjects[0]?.classId ??
+        subjects[0]?.class_id ??
+        subjects[0]?.ClassId ??
+        subjects[0]?.class?.id
+    });
+
+    setFilteredSubjects(filtered);
   }, [selectedClass, subjects, isRegularSchool]);
 
   // ============================================================
@@ -9754,7 +9774,6 @@ const ExamModule = ({
         </div>
       )}
 
-      {/* ✅ Staff load error surface */}
       {staffLoadError && !loadingStaff && (
         <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg flex justify-between items-center">
           <div>
@@ -10108,7 +10127,6 @@ const ExamModule = ({
                     placeholder={isTVET ? "e.g., Workshop A" : "e.g., Hall 1"} />
                 </div>
 
-                {/* ✅ Invigilator — teaching staff only */}
                 <div className="col-span-2">
                   <SearchableSelect
                     label="Invigilator"
@@ -29449,9 +29467,15 @@ const FeesModule = ({
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
+    // ✅ Sync input display with selected value ONLY when not focused.
+    //    Never put the placeholder string into the input's `value` attribute.
     useEffect(() => {
-      if (selectedOption && !isFocused) setSearch(selectedOption.label);
-      else if (!selectedOption && !isFocused) setSearch('');
+      if (isFocused) return;
+      if (selectedOption && selectedOption.label) {
+        setSearch(selectedOption.label);
+      } else {
+        setSearch('');
+      }
     }, [value, selectedOption, isFocused]);
 
     const handleSelect = (selectedValue) => {
@@ -29464,24 +29488,23 @@ const FeesModule = ({
     };
 
     const handleInputChange = (e) => {
-      const newValue = e.target.value;
-      setSearch(newValue);
+      // ✅ Never call parent onChange here — keep typing purely local
+      setSearch(e.target.value);
       setIsOpen(true);
       setIsFocused(true);
-      if (newValue === '') onChange({ target: { value: '' } });
     };
 
-    const handleFocus = () => { setIsFocused(true); setIsOpen(true); };
+    const handleFocus = () => { 
+      setIsFocused(true); 
+      setIsOpen(true); 
+    };
 
-    const handleBlur = (e) => {
-      const relatedTarget = e.relatedTarget;
-      if (dropdownRef.current && dropdownRef.current.contains(relatedTarget)) return;
+    const handleBlur = () => {
       setTimeout(() => {
-        if (document.activeElement !== inputRef.current) {
+        if (!dropdownRef.current?.contains(document.activeElement)) {
           setIsOpen(false);
           setIsFocused(false);
-          if (selectedOption) setSearch(selectedOption.label);
-          else setSearch('');
+          // Restore handled by the sync effect above
         }
       }, 150);
     };
@@ -29489,15 +29512,16 @@ const FeesModule = ({
     const handleClear = (e) => {
       e.stopPropagation();
       onChange({ target: { value: '' } });
-      setSearch(''); setIsOpen(false); setIsFocused(false);
+      setSearch(''); 
+      setIsOpen(false); 
+      setIsFocused(false);
       if (inputRef.current) inputRef.current.focus();
     };
 
-    const getDisplayValue = () => {
-      if (isFocused) return search;
-      if (selectedOption) return selectedOption.label;
-      return placeholder || '';
-    };
+    // ✅ FIXED: never return the placeholder as the input's value
+    const displayValue = isFocused
+      ? search
+      : (selectedOption?.label || '');
 
     return (
       <div className="relative" ref={dropdownRef}>
@@ -29513,7 +29537,7 @@ const FeesModule = ({
             className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
               disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
             } ${className || ''}`}
-            value={getDisplayValue()}
+            value={displayValue}
             onChange={handleInputChange}
             onFocus={handleFocus}
             onBlur={handleBlur}
@@ -29539,14 +29563,14 @@ const FeesModule = ({
         {isOpen && !disabled && (
           <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
             {filteredOptions.length > 0 ? (
-              filteredOptions.map((opt) => (
-                <div key={opt.value || Math.random().toString()}
+              filteredOptions.map((opt, idx) => (
+                <div key={opt.value || `empty-${idx}`}
                   className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
                     opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
                   }`}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => handleSelect(opt.value)}>
-                  <div className="font-medium">{opt.label}</div>
+                  <div className="font-medium">{opt.label || '\u00A0'}</div>
                   {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
                 </div>
               ))
