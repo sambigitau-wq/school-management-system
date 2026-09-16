@@ -12930,7 +12930,7 @@ const AllResultsPrintModal = ({ printData, onClose, currentSchool, isUniversity,
   );
 };
 
-// ==================== TIMETABLE MODULE — MULTI-TYPE (Class / Tuition / Exam / Extra / Remedial) ====================
+// ==================== TIMETABLE MODULE — MULTI-TYPE (Class / Tuition / Extra / Remedial) ====================
 const TimetableModule = ({
   timetable, setTimetable,
   classes, subjects, staff, courses, programs, units,
@@ -12943,7 +12943,6 @@ const TimetableModule = ({
   const TIMETABLE_TYPES = [
     { value: 'CLASS',    label: 'Class Timetable',    short: 'Class',     icon: 'fa-chalkboard-teacher', accent: 'indigo'  },
     { value: 'TUITION',  label: 'Tuition Timetable',  short: 'Tuition',   icon: 'fa-book-reader',        accent: 'emerald' },
-    { value: 'EXAM',     label: 'Exam Timetable',     short: 'Exam',      icon: 'fa-file-alt',           accent: 'amber'   },
     { value: 'EXTRA',    label: 'Extra Activities',   short: 'Extra',     icon: 'fa-futbol',             accent: 'rose'    },
     { value: 'REMEDIAL', label: 'Remedial Timetable', short: 'Remedial',  icon: 'fa-hands-helping',      accent: 'violet'  }
   ];
@@ -14173,7 +14172,6 @@ const TimetableModule = ({
     </div>
   );
 };
-
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   ComposedChart, AreaChart, Area, RadarChart, Radar,
@@ -17714,10 +17712,10 @@ const StaffAttendanceReportsModule = ({ staff, currentSchool, user }) => {
     </div>
   );
 };
-// ==================== SEARCHABLE SELECT (OUTSIDE StaffModule) ====================
-// Defined once at module scope so React keeps the same component identity
-// across renders of StaffModule. This is the key to stop the input-blocking
-// behaviour caused by re-creating the component every render.
+
+// ============================================================
+//  STAFF SEARCHABLE SELECT — module scope, stable identity
+// ============================================================
 const StaffSearchableSelect = ({
   label,
   value,
@@ -17960,7 +17958,87 @@ const StaffSearchableSelect = ({
   );
 };
 
-// ==================== STAFF MODULE ====================
+// ============================================================
+//  STAFF TEXT INPUT — module scope
+// ============================================================
+const StaffTextInput = ({
+  label,
+  value,
+  onChange,
+  placeholder,
+  required,
+  disabled,
+  type = 'text'
+}) => (
+  <div className="w-full">
+    {label && (
+      <label className="block text-sm font-medium text-gray-700 mb-1">
+        {label}
+        {required && <span className="text-red-500 ml-1">*</span>}
+      </label>
+    )}
+    <input
+      type={type}
+      value={value ?? ''}
+      onChange={onChange}
+      placeholder={placeholder}
+      disabled={disabled}
+      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:bg-gray-100"
+      autoComplete="off"
+    />
+  </div>
+);
+
+// ============================================================
+//  STAFF MONEY INPUT — module scope
+//  Treats 0 and '0' as empty so the placeholder shows until typed.
+// ============================================================
+const StaffMoneyInput = ({
+  label,
+  value,
+  onChange,
+  placeholder,
+  disabled
+}) => {
+  const isEmpty =
+    value === '' ||
+    value === null ||
+    value === undefined ||
+    value === 0 ||
+    value === '0';
+
+  const display = isEmpty ? '' : String(value);
+
+  const handleChange = (e) => {
+    const raw = e.target.value;
+    // Allow empty, digits, one optional dot, at most 2 decimals
+    if (raw === '' || /^\d*\.?\d{0,2}$/.test(raw)) {
+      onChange(raw);
+    }
+  };
+
+  return (
+    <div className="w-full">
+      {label && (
+        <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      )}
+      <input
+        type="text"
+        inputMode="decimal"
+        value={display}
+        onChange={handleChange}
+        placeholder={placeholder || '0'}
+        disabled={disabled}
+        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:bg-gray-100"
+        autoComplete="off"
+      />
+    </div>
+  );
+};
+
+// ============================================================
+//  STAFF MODULE
+// ============================================================
 const StaffModule = ({
   staff = [],
   setStaff,
@@ -17976,6 +18054,11 @@ const StaffModule = ({
   user,
   departments = []
 }) => {
+  // ---- Aliases for the module-scope sub-components ----
+  const SearchableSelect = StaffSearchableSelect;
+  const TextInput = StaffTextInput;
+  const MoneyInput = StaffMoneyInput;
+
   // ==================== STATE ====================
   const [editingId, setEditingId] = useState(null);
   const [showPayrollForm, setShowPayrollForm] = useState(false);
@@ -18006,9 +18089,6 @@ const StaffModule = ({
 
   const showDepartment = isUniversity || isTVET;
   const showSubjects = isRegularSchool && !isPrimary;
-
-  // Alias so call sites below don't need to change
-  const SearchableSelect = StaffSearchableSelect;
 
   // ==================== HELPERS ====================
   const getUserDisplayName = (member) => {
@@ -18192,59 +18272,6 @@ const StaffModule = ({
     return uniqueDepartments.map(dept => ({ value: dept.id, label: dept.name }));
   }, [uniqueDepartments]);
 
-  // ==================== PLAIN TEXT INPUT ====================
-  const TextInput = ({ label, value, onChange, placeholder, required, disabled, type = 'text' }) => (
-    <div className="w-full">
-      {label && (
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
-        </label>
-      )}
-      <input
-        type={type}
-        value={value ?? ''}
-        onChange={onChange}
-        placeholder={placeholder}
-        disabled={disabled}
-        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:bg-gray-100"
-        autoComplete="off"
-      />
-    </div>
-  );
-
-  // ==================== MONEY INPUT ====================
-  const MoneyInput = ({ label, value, onChange, placeholder, disabled }) => {
-    const display = (value === '' || value === null || value === undefined)
-      ? ''
-      : String(value);
-
-    const handleChange = (e) => {
-      const raw = e.target.value;
-      if (raw === '' || /^\d*\.?\d{0,2}$/.test(raw)) {
-        onChange(raw);
-      }
-    };
-
-    return (
-      <div className="w-full">
-        {label && (
-          <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
-        )}
-        <input
-          type="text"
-          inputMode="decimal"
-          value={display}
-          onChange={handleChange}
-          placeholder={placeholder || '0'}
-          disabled={disabled}
-          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:bg-gray-100"
-          autoComplete="off"
-        />
-      </div>
-    );
-  };
-
   // ==================== FILTERED STAFF ====================
   const filteredStaff = useMemo(() => {
     let filtered = [...staff];
@@ -18373,6 +18400,7 @@ const StaffModule = ({
       staffType: 'TEACHING',
       staffRole: '',
       bankDetails: { bank: '', branch: '', account: '' },
+      // Empty strings so MoneyInput shows placeholders
       salary: { basic: '', house: '', transport: '' }
     });
   };
@@ -18445,6 +18473,7 @@ const StaffModule = ({
       employmentDate: member.employmentDate
         ? new Date(member.employmentDate).toISOString().split('T')[0]
         : new Date().toISOString().split('T')[0],
+      // Preserve raw values as strings so MoneyInput shows them nicely
       salary: {
         basic:     salary.basic     !== undefined && salary.basic     !== null ? String(salary.basic)     : '',
         house:     salary.house     !== undefined && salary.house     !== null ? String(salary.house)     : '',
@@ -18998,6 +19027,8 @@ const StaffModule = ({
     </div>
   );
 };
+
+
 // ==================== FIXED LIBRARY MODULE WITH SCHOOLID ====================
 const LibraryModule = ({ 
   books, setBooks, borrows, setBorrows, students, 
