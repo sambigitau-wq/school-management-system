@@ -3210,7 +3210,7 @@ StaffAttendance.belongsTo(User, {
   constraints: false 
 });
 
-Staff.hasMany(StaffAttendance, { foreignKey: 'staffId', as: 'attendances' });
+
 
 Sponsor.belongsTo(School, { foreignKey: 'schoolId' });
 
