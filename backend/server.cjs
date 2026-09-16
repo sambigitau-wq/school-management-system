@@ -13191,19 +13191,17 @@ app.get('/api/library/by-admission/:admissionNumber/history', authenticate, asyn
 });
 
 // ==================== TIMETABLE ROUTES ====================
-// ==================== FIXED GET TIMETABLE ====================
+// ==================== GET TIMETABLE ====================
 app.get('/api/timetable', authenticate, async (req, res) => {
   try {
     const { classId, courseId, programId, year, semester, module } = req.query;
     const where = { schoolId: req.user.schoolId };
-    
+
     const school = await School.findByPk(req.user.schoolId);
-    
     if (!school) {
       return res.status(404).json({ message: 'School not found' });
     }
-    
-    // Build where clause based on school type
+
     if (school.category === 'UNIVERSITY') {
       if (courseId) where.courseId = courseId;
       if (year && !isNaN(parseInt(year))) where.year = parseInt(year);
@@ -13224,11 +13222,11 @@ app.get('/api/timetable', authenticate, async (req, res) => {
           include: [
             { model: Course, required: false },
             { model: CourseUnit, as: 'unit', required: false },
-            { 
-              model: Staff, 
+            {
+              model: Staff,
               as: 'teacher',
               include: [{ model: User, attributes: ['firstName', 'lastName'] }],
-              required: false 
+              required: false
             }
           ],
           order: [['day', 'ASC'], ['period', 'ASC']]
@@ -13239,11 +13237,11 @@ app.get('/api/timetable', authenticate, async (req, res) => {
           include: [
             { model: Program, required: false },
             { model: CourseUnit, as: 'unit', required: false },
-            { 
-              model: Staff, 
+            {
+              model: Staff,
               as: 'teacher',
               include: [{ model: User, attributes: ['firstName', 'lastName'] }],
-              required: false 
+              required: false
             }
           ],
           order: [['day', 'ASC'], ['period', 'ASC']]
@@ -13254,11 +13252,11 @@ app.get('/api/timetable', authenticate, async (req, res) => {
           include: [
             { model: Subject, required: false },
             { model: Class, required: false },
-            { 
-              model: Staff, 
+            {
+              model: Staff,
               as: 'teacher',
               include: [{ model: User, attributes: ['firstName', 'lastName'] }],
-              required: false 
+              required: false
             }
           ],
           order: [['day', 'ASC'], ['period', 'ASC']]
@@ -13266,40 +13264,42 @@ app.get('/api/timetable', authenticate, async (req, res) => {
       }
     } catch (includeError) {
       console.error('Error with includes, falling back to simple query:', includeError.message);
-      timetable = await Timetable.findAll({ 
-        where, 
-        order: [['day', 'ASC'], ['period', 'ASC']] 
+      timetable = await Timetable.findAll({
+        where,
+        order: [['day', 'ASC'], ['period', 'ASC']]
       });
     }
-    
+
     res.json({ success: true, timetable });
   } catch (error) {
     console.error('Get timetable error:', error);
-    res.status(500).json({ 
-      message: 'Server error', 
-      error: error.message 
-    });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
+// ==================== POST /api/timetable ====================
+// Creates a class entry OR a break entry.
+// Breaks only need day + period + times + a scope id (class/course/program).
+// They do NOT need teacher, subject, unit, or room.
 app.post('/api/timetable', authenticate, requireSchoolAdmin, async (req, res) => {
   try {
     const {
-      classId, courseId, programId, year, semester, module, day, period, startTime, endTime,
+      classId, courseId, programId, year, semester, module,
+      day, period, startTime, endTime,
       subjectId, unitId, teacherId, room,
       isBreak: isBreakRaw, breakName
     } = req.body;
 
-    // ⬅️ CHANGED: normalise isBreak to a real boolean
+    // Normalize isBreak to a real boolean
     const isBreak = isBreakRaw === true || isBreakRaw === 'true';
 
-    // ⬅️ CHANGED: these two are always required, break or not
+    // These are always required
     if (!day)       return res.status(400).json({ message: 'Day is required' });
     if (!period)    return res.status(400).json({ message: 'Period is required' });
     if (!startTime) return res.status(400).json({ message: 'Start time is required' });
     if (!endTime)   return res.status(400).json({ message: 'End time is required' });
 
-    // ⬅️ CHANGED: teacher is only required for real classes, not for breaks
+    // Teacher is only required for real classes, not for breaks
     if (!isBreak && !teacherId) {
       return res.status(400).json({ message: 'Teacher is required' });
     }
@@ -13307,45 +13307,48 @@ app.post('/api/timetable', authenticate, requireSchoolAdmin, async (req, res) =>
     const school = await School.findByPk(req.user.schoolId);
     if (!school) return res.status(404).json({ message: 'School not found' });
 
-    // ⬅️ CHANGED: build the payload with a shared shape.
+    // Build the payload with a shared shape.
     // Teacher, room, subject/unit are force-nulled when this is a break.
-    let timetableData = {
+    const timetableData = {
       day,
-      period: parseInt(period),
+      period: parseInt(period, 10),
       startTime,
       endTime,
       teacherId: isBreak ? null : teacherId,
       room:      isBreak ? null : (room || null),
-      schoolId: req.user.schoolId,
+      schoolId:  req.user.schoolId,
       isBreak,
       breakName: isBreak ? (breakName || 'Break') : null,
 
-      // scope fields default to null, set below by school type
-      classId: null,
-      courseId: null,
+      // scope fields default to null; set below by school type
+      classId:   null,
+      courseId:  null,
       programId: null,
-      unitId: null,
+      unitId:    null,
       subjectId: null,
-      year: null,
-      semester: null,
-      module: null
+      year:      null,
+      semester:  null,
+      module:    null
     };
 
     // ==================== SCHOOL-TYPE-SPECIFIC VALIDATION ====================
-    // ⬅️ CHANGED: breaks skip the subject/unit requirement entirely; they only
-    // need the scope identifiers (class/course/program) so filtering works.
+    // KEY RULE: breaks still need a SCOPE identifier so the break shows up
+    // under the right filter, but never need subject/unit/teacher.
     if (school.category === 'UNIVERSITY') {
+      // Break or class: a course is always required for scoping
       if (!courseId) {
         return res.status(400).json({ message: 'Course ID is required for university' });
       }
+      // Unit is required only for real classes
       if (!isBreak && !unitId) {
         return res.status(400).json({ message: 'Unit ID is required for university' });
       }
       timetableData.courseId = courseId;
-      timetableData.unitId = isBreak ? null : unitId;
-      timetableData.year = year ? parseInt(year) : null;
-      timetableData.semester = semester ? parseInt(semester) : null;
-    } else if (school.category === 'COLLEGE_TVET') {
+      timetableData.unitId   = isBreak ? null : (unitId || null);
+      timetableData.year     = year     ? parseInt(year, 10)     : null;
+      timetableData.semester = semester ? parseInt(semester, 10) : null;
+    }
+    else if (school.category === 'COLLEGE_TVET') {
       if (!programId) {
         return res.status(400).json({ message: 'Program ID is required for TVET' });
       }
@@ -13353,28 +13356,34 @@ app.post('/api/timetable', authenticate, requireSchoolAdmin, async (req, res) =>
         return res.status(400).json({ message: 'Unit/Module ID is required for TVET' });
       }
       timetableData.programId = programId;
-      timetableData.unitId = isBreak ? null : unitId;
-      timetableData.year = year ? parseInt(year) : null;
-      timetableData.module = module ? parseInt(module) : null;
-    } else {
-      if (!classId) {
+      timetableData.unitId    = isBreak ? null : (unitId || null);
+      timetableData.year      = year   ? parseInt(year, 10)   : null;
+      timetableData.module    = module ? parseInt(module, 10) : null;
+    }
+    else {
+      // Regular school (Primary / Secondary)
+      // ⬅️ THE FIX: classId is required ONLY for real classes.
+      // For breaks, we still record classId so the break shows up
+      // under the right class filter — but we don't reject the request
+      // if classId is missing. It just becomes null.
+      if (!isBreak && !classId) {
         return res.status(400).json({ message: 'Class ID is required for regular schools' });
       }
       if (!isBreak && !subjectId) {
         return res.status(400).json({ message: 'Subject ID is required for regular schools' });
       }
-      timetableData.classId = classId;
-      timetableData.subjectId = isBreak ? null : subjectId;
+      timetableData.classId   = classId   || null;
+      timetableData.subjectId = isBreak ? null : (subjectId || null);
     }
 
     // ==================== CONFLICT CHECK ====================
-    // ⬅️ CHANGED: breaks skip all conflict detection (no teacher/room/unit)
+    // Breaks skip all conflict detection (no teacher/room/unit)
     if (!isBreak) {
       const conflictWhere = {
         schoolId: req.user.schoolId,
         day,
-        period: parseInt(period),
-        isBreak: false          // ⬅️ CHANGED: never match break rows
+        period: parseInt(period, 10),
+        isBreak: false
       };
 
       if (school.category === 'UNIVERSITY') {
@@ -13398,18 +13407,9 @@ app.post('/api/timetable', authenticate, requireSchoolAdmin, async (req, res) =>
 
     const timetable = await Timetable.create(timetableData);
 
-    await createAuditLog(
-      req,
-      'CREATE',
-      'TIMETABLE',
-      timetable.id,
-      null,
-      timetable
-    );
+    await createAuditLog(req, 'CREATE', 'TIMETABLE', timetable.id, null, timetable);
 
     // ==================== RESPONSE WITH INCLUDES ====================
-    // ⬅️ CHANGED: breaks have no teacher/unit/subject, so those includes
-    // return null and the frontend just renders the break name.
     let createdTimetable;
 
     if (school.category === 'UNIVERSITY') {
@@ -13483,7 +13483,7 @@ app.delete('/api/timetable/:id', authenticate, requireSchoolAdmin, async (req, r
     const timetable = await Timetable.findOne({
       where: { id: req.params.id, schoolId: req.user.schoolId }
     });
-    
+
     if (!timetable) {
       return res.status(404).json({ message: 'Timetable entry not found' });
     }
@@ -13497,7 +13497,6 @@ app.delete('/api/timetable/:id', authenticate, requireSchoolAdmin, async (req, r
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
-
 // ==================== VEHICLE ROUTES ====================
 
 app.post('/api/vehicles', authenticate, requireSchoolAdmin, async (req, res) => {
