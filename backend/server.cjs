@@ -1708,9 +1708,18 @@ const InventoryUsage = sequelize.define('InventoryUsage', {
 const Timetable = sequelize.define('Timetable', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
 
-  schoolId: { type: DataTypes.UUID, allowNull: false },     // required
+  schoolId: { type: DataTypes.UUID, allowNull: false },
 
-  // ---- Scope (all optional — breaks don't have any of these) ----
+  // ==================== NEW: distinguishes the kind of timetable ====================
+  timetableType: {
+    type: DataTypes.ENUM('CLASS', 'TUITION', 'EXAM', 'EXTRA', 'REMEDIAL'),
+    allowNull: false,
+    defaultValue: 'CLASS'
+  },
+  // Optional friendly name — e.g. "Class Timetable — Form 3 East"
+  label: { type: DataTypes.STRING(120), allowNull: true },
+
+  // ---- Scope ----
   classId:   { type: DataTypes.UUID, allowNull: true },
   courseId:  { type: DataTypes.UUID, allowNull: true },
   programId: { type: DataTypes.UUID, allowNull: true },
@@ -1724,28 +1733,55 @@ const Timetable = sequelize.define('Timetable', {
 
   // ---- Schedule ----
   day: {
-    type: DataTypes.ENUM('MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'),
+    // ⬅️ Added SUNDAY for weekend tuitions & remedials
+    type: DataTypes.ENUM('MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'),
     allowNull: false
   },
   period:    { type: DataTypes.INTEGER, allowNull: false },
-  startTime: { type: DataTypes.TIME,    allowNull: false },
-  endTime:   { type: DataTypes.TIME,    allowNull: false },
+  startTime: { type: DataTypes.TIME, allowNull: false },
+  endTime:   { type: DataTypes.TIME, allowNull: false },
 
   // ---- Teaching ----
-  teacherId: { type: DataTypes.UUID,    allowNull: true },
-  room:      { type: DataTypes.STRING,  allowNull: true },
+  teacherId: { type: DataTypes.UUID, allowNull: true },
+  room:      { type: DataTypes.STRING, allowNull: true },
 
-  // ---- Break support ----
-  isBreak:   { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
-  breakName: { type: DataTypes.STRING,  allowNull: true }
+  // ==================== BREAK SUPPORT (unchanged) ====================
+  isBreak: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false
+  },
+  breakName: {
+    type: DataTypes.STRING,
+    allowNull: true
+  }
 }, {
   timestamps: true,
-  tableName: 'Timetables'
-  // (remove the indexes block if you're not managing them)
+  tableName: 'Timetables',
+  indexes: [
+    { fields: ['schoolId'] },
+    { fields: ['schoolId', 'timetableType'] },       // ⬅️ NEW
+    { fields: ['schoolId', 'classId'] },
+    { fields: ['schoolId', 'courseId'] },
+    { fields: ['schoolId', 'programId'] },
+    { fields: ['schoolId', 'day', 'period'] }
+  ],
+  hooks: {
+    beforeValidate: (row) => {
+      if (row.isBreak) {
+        row.teacherId = null;
+        row.subjectId = null;
+        row.unitId = null;
+        row.room = null;
+        if (!row.breakName || String(row.breakName).trim() === '') {
+          row.breakName = 'Break';
+        }
+      } else {
+        row.breakName = null;
+      }
+    }
+  }
 });
-
-
-
 const Message = sequelize.define('Message', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
   schoolId: { type: DataTypes.UUID, allowNull: false },
@@ -13161,8 +13197,13 @@ app.get('/api/library/by-admission/:admissionNumber/history', authenticate, asyn
 // ==================== GET TIMETABLE ====================
 app.get('/api/timetable', authenticate, async (req, res) => {
   try {
-    const { classId, courseId, programId, year, semester, module } = req.query;
+    const { classId, courseId, programId, year, semester, module, timetableType } = req.query;
+
     const where = { schoolId: req.user.schoolId };
+
+    // ⬅️ Filter by timetable type. Defaults to CLASS so old clients keep working.
+    const validTypes = ['CLASS', 'TUITION', 'EXAM', 'EXTRA', 'REMEDIAL'];
+    where.timetableType = validTypes.includes(timetableType) ? timetableType : 'CLASS';
 
     const school = await School.findByPk(req.user.schoolId);
     if (!school) {
@@ -13245,7 +13286,7 @@ app.get('/api/timetable', authenticate, async (req, res) => {
 });
 
 // ==================== POST /api/timetable ====================
-// Creates a class entry OR a break entry.
+// Creates a class entry OR a break entry, for any timetable type.
 // Breaks only need day + period + times + a scope id (class/course/program).
 // They do NOT need teacher, subject, unit, or room.
 app.post('/api/timetable', authenticate, requireSchoolAdmin, async (req, res) => {
@@ -13254,11 +13295,17 @@ app.post('/api/timetable', authenticate, requireSchoolAdmin, async (req, res) =>
       classId, courseId, programId, year, semester, module,
       day, period, startTime, endTime,
       subjectId, unitId, teacherId, room,
-      isBreak: isBreakRaw, breakName
+      isBreak: isBreakRaw, breakName,
+      timetableType: rawType,      // ⬅️ NEW
+      label                        // ⬅️ NEW
     } = req.body;
 
     // Normalize isBreak to a real boolean
     const isBreak = isBreakRaw === true || isBreakRaw === 'true';
+
+    // ⬅️ NEW: validate + default the timetable type
+    const validTypes = ['CLASS', 'TUITION', 'EXAM', 'EXTRA', 'REMEDIAL'];
+    const timetableType = validTypes.includes(rawType) ? rawType : 'CLASS';
 
     // These are always required
     if (!day)       return res.status(400).json({ message: 'Day is required' });
@@ -13287,6 +13334,10 @@ app.post('/api/timetable', authenticate, requireSchoolAdmin, async (req, res) =>
       isBreak,
       breakName: isBreak ? (breakName || 'Break') : null,
 
+      // ⬅️ NEW: which kind of timetable this row belongs to
+      timetableType,
+      label: label ? String(label).trim() : null,
+
       // scope fields default to null; set below by school type
       classId:   null,
       courseId:  null,
@@ -13302,11 +13353,9 @@ app.post('/api/timetable', authenticate, requireSchoolAdmin, async (req, res) =>
     // KEY RULE: breaks still need a SCOPE identifier so the break shows up
     // under the right filter, but never need subject/unit/teacher.
     if (school.category === 'UNIVERSITY') {
-      // Break or class: a course is always required for scoping
       if (!courseId) {
         return res.status(400).json({ message: 'Course ID is required for university' });
       }
-      // Unit is required only for real classes
       if (!isBreak && !unitId) {
         return res.status(400).json({ message: 'Unit ID is required for university' });
       }
@@ -13329,10 +13378,9 @@ app.post('/api/timetable', authenticate, requireSchoolAdmin, async (req, res) =>
     }
     else {
       // Regular school (Primary / Secondary)
-      // ⬅️ THE FIX: classId is required ONLY for real classes.
-      // For breaks, we still record classId so the break shows up
-      // under the right class filter — but we don't reject the request
-      // if classId is missing. It just becomes null.
+      // classId is required ONLY for real classes. For breaks we still
+      // record it (so the break shows up under the right filter) but
+      // we don't reject the request if it's missing — it just becomes null.
       if (!isBreak && !classId) {
         return res.status(400).json({ message: 'Class ID is required for regular schools' });
       }
@@ -13344,13 +13392,17 @@ app.post('/api/timetable', authenticate, requireSchoolAdmin, async (req, res) =>
     }
 
     // ==================== CONFLICT CHECK ====================
-    // Breaks skip all conflict detection (no teacher/room/unit)
+    // Breaks skip all conflict detection.
+    // ⬅️ NEW: conflicts are scoped to the SAME timetableType only,
+    // so a teacher can have Class at 10:00 and Remedial at 10:00
+    // without triggering a false conflict.
     if (!isBreak) {
       const conflictWhere = {
         schoolId: req.user.schoolId,
         day,
         period: parseInt(period, 10),
-        isBreak: false
+        isBreak: false,
+        timetableType
       };
 
       if (school.category === 'UNIVERSITY') {
@@ -13367,7 +13419,7 @@ app.post('/api/timetable', authenticate, requireSchoolAdmin, async (req, res) =>
 
       if (teacherConflict) {
         return res.status(400).json({
-          message: 'Teacher is already assigned to another class at this time'
+          message: `Teacher is already assigned to another ${timetableType.toLowerCase()} entry at this time`
         });
       }
     }
@@ -13442,6 +13494,27 @@ app.post('/api/timetable', authenticate, requireSchoolAdmin, async (req, res) =>
       message: 'Server error creating timetable',
       error: error.message
     });
+  }
+});
+
+// ==================== DELETE ====================
+app.delete('/api/timetable/:id', authenticate, requireSchoolAdmin, async (req, res) => {
+  try {
+    const entry = await Timetable.findOne({
+      where: { id: req.params.id, schoolId: req.user.schoolId }
+    });
+
+    if (!entry) {
+      return res.status(404).json({ message: 'Timetable entry not found' });
+    }
+
+    await entry.destroy();
+    await createAuditLog(req, 'DELETE', 'TIMETABLE', req.params.id);
+
+    res.json({ success: true, message: 'Timetable entry deleted successfully' });
+  } catch (error) {
+    console.error('Delete timetable error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
