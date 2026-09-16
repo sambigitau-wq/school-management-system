@@ -582,11 +582,18 @@ const GlobalLoadingIndicator = ({ loading }) => {
 
 
 // ==================== COMPLETE ROLES MANAGEMENT MODULE ====================
-
-const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
+const RolesManagementModule = ({
+  user,
+  users,
+  setUsers,
+  currentSchool,
+  roles = [],
+  setRoles
+}) => {
   // ==================== STATE ====================
-  const [roles, setRoles] = useState([]);
-  const [filteredRoles, setFilteredRoles] = useState([]);
+  // NOTE: `roles` and `setRoles` come from props (lifted state).
+  // Do NOT declare a local useState for roles here.
+
   const [allPermissions, setAllPermissions] = useState([]);
   const [permissionsGrouped, setPermissionsGrouped] = useState({});
   const [selectedRole, setSelectedRole] = useState(null);
@@ -603,11 +610,10 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [expandedCategories, setExpandedCategories] = useState({});
-
+  const [success, setSuccess] = useState('');
+  const [error, setError] = useState('');
 
   const canManageRoles = user?.role === 'SUPER_ADMIN' || user?.role === 'SCHOOL_ADMIN';
-
-
 
   // ==================== PERMISSION CATEGORIES WITH EMOJIS ====================
   const permissionCategories = {
@@ -667,16 +673,42 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
     'fee_statement'
   ];
 
+  // ==================== DERIVED: FILTERED ROLES (via useMemo only) ====================
+  // Single source of truth for the filtered list.
+  // Do NOT also push to it via setFilteredRoles inside a useEffect.
+  const filteredRoles = useMemo(() => {
+    let list = Array.isArray(roles) ? roles : [];
+
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      list = list.filter(r =>
+        (r.name || '').toLowerCase().includes(term) ||
+        (r.description || '').toLowerCase().includes(term)
+      );
+    }
+
+    if (filterStatus === 'system') {
+      list = list.filter(r => r.isSystemRole === true);
+    } else if (filterStatus === 'custom') {
+      list = list.filter(r => r.isSystemRole !== true);
+    }
+
+    return list;
+  }, [roles, searchTerm, filterStatus]);
+
   // ==================== LOAD FUNCTIONS ====================
   const loadRoles = async () => {
     setLoading(true);
     try {
       const res = await api.get('/roles');
-      setRoles(res.data.roles || []);
-      setFilteredRoles(res.data.roles || []);
+      const fetched = res.data.roles || [];
+      if (typeof setRoles === 'function') {
+        setRoles(fetched);
+      }
     } catch (error) {
       console.error('Error loading roles:', error);
-      alert('Failed to load roles');
+      setError('Failed to load roles');
+      setTimeout(() => setError(''), 4000);
     } finally {
       setLoading(false);
     }
@@ -686,14 +718,14 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
     try {
       const res = await api.get('/permissions');
       setAllPermissions(res.data.permissions || []);
-      
+
       const grouped = {};
       (res.data.permissions || []).forEach(perm => {
         if (!grouped[perm.category]) grouped[perm.category] = [];
         grouped[perm.category].push(perm);
       });
       setPermissionsGrouped(grouped);
-      
+
       // Expand new feature categories by default
       const expanded = {};
       Object.keys(grouped).forEach(category => {
@@ -710,55 +742,61 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
       loadRoles();
       loadPermissions();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canManageRoles]);
-
-  // ==================== FILTER ROLES ====================
-  useEffect(() => {
-    let filtered = roles;
-    
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(role => 
-        role.name.toLowerCase().includes(term) ||
-        (role.description && role.description.toLowerCase().includes(term))
-      );
-    }
-    
-    if (filterStatus === 'system') {
-      filtered = filtered.filter(role => role.isSystemRole === true);
-    } else if (filterStatus === 'custom') {
-      filtered = filtered.filter(role => role.isSystemRole !== true);
-    }
-    
-    setFilteredRoles(filtered);
-  }, [roles, searchTerm, filterStatus]);
 
   // ==================== ROLE CRUD ====================
   const handleCreateRole = async (e) => {
     e.preventDefault();
-    
-    // Check for duplicate name
-    const duplicate = roles.find(r => r.name.toLowerCase() === roleForm.name.toLowerCase());
-    if (duplicate) {
-      alert(`❌ A role named "${roleForm.name}" already exists. Please use a different name.`);
+
+    const trimmedName = (roleForm.name || '').trim();
+    const trimmedDesc = (roleForm.description || '').trim();
+
+    if (!trimmedName) {
+      alert('❌ Role name is required');
       return;
     }
-    
+
+    const duplicate = (roles || []).find(
+      r => (r.name || '').trim().toLowerCase() === trimmedName.toLowerCase()
+    );
+    if (duplicate) {
+      alert(`❌ A role named "${trimmedName}" already exists. Please use a different name.`);
+      return;
+    }
+
     setLoading(true);
+    setError('');
+    setSuccess('');
+
     try {
       const res = await api.post('/roles', {
-        name: roleForm.name,
-        description: roleForm.description,
-        permissions: roleForm.permissions
+        name: trimmedName,
+        description: trimmedDesc,
+        permissions: Array.isArray(roleForm.permissions) ? roleForm.permissions : []
       });
-      setRoles([...roles, res.data.role]);
-      setFilteredRoles([...roles, res.data.role]);
+
+      const newRole = res.data?.role || res.data?.data?.role || res.data;
+      if (!newRole || !newRole.id) {
+        console.error('Unexpected response from POST /roles:', res.data);
+        throw new Error('Server did not return a valid role object');
+      }
+
+      // Update the lifted state via setRoles from props
+      if (typeof setRoles === 'function') {
+        setRoles(prev => [...prev, newRole]);
+      }
+
       setShowCreateModal(false);
       setRoleForm({ name: '', description: '', permissions: [] });
-      alert('✅ Role created successfully!');
+
+      setSuccess(`✅ Role "${trimmedName}" created successfully!`);
+      setTimeout(() => setSuccess(''), 4000);
     } catch (error) {
       console.error('Error creating role:', error);
-      alert(error.response?.data?.message || 'Failed to create role');
+      const msg = error.response?.data?.message || error.message || 'Failed to create role';
+      setError(msg);
+      setTimeout(() => setError(''), 5000);
     } finally {
       setLoading(false);
     }
@@ -766,87 +804,190 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
 
   const handleUpdateRole = async (e) => {
     e.preventDefault();
+    if (!selectedRole) return;
+
+    const trimmedName = (roleForm.name || '').trim();
+    if (!trimmedName) {
+      alert('❌ Role name is required');
+      return;
+    }
+
+    const duplicate = (roles || []).find(
+      r => r.id !== selectedRole.id &&
+           (r.name || '').trim().toLowerCase() === trimmedName.toLowerCase()
+    );
+    if (duplicate) {
+      alert(`❌ A role named "${trimmedName}" already exists.`);
+      return;
+    }
+
     setLoading(true);
+    setError('');
+    setSuccess('');
+
     try {
-      const res = await api.put(`/roles/${editingRole.id}`, {
-        name: roleForm.name,
-        description: roleForm.description
+      const res = await api.put(`/roles/${selectedRole.id}`, {
+        name: trimmedName,
+        description: (roleForm.description || '').trim(),
+        permissions: Array.isArray(roleForm.permissions)
+          ? roleForm.permissions
+          : (selectedRole.permissions || [])
       });
-      setRoles(roles.map(r => r.id === editingRole.id ? res.data.role : r));
-      setFilteredRoles(roles.map(r => r.id === editingRole.id ? res.data.role : r));
+
+      const updatedRole = res.data?.role || res.data?.data?.role || res.data;
+      if (!updatedRole || !updatedRole.id) {
+        throw new Error('Server did not return a valid role object');
+      }
+
+      if (typeof setRoles === 'function') {
+        setRoles(prev => prev.map(r => r.id === updatedRole.id ? updatedRole : r));
+      }
+
       setShowEditModal(false);
+      setSelectedRole(null);
       setEditingRole(null);
-      alert('✅ Role updated successfully!');
+      setRoleForm({ name: '', description: '', permissions: [] });
+
+      setSuccess(`✅ Role "${trimmedName}" updated successfully!`);
+      setTimeout(() => setSuccess(''), 4000);
     } catch (error) {
       console.error('Error updating role:', error);
-      alert(error.response?.data?.message || 'Failed to update role');
+      const msg = error.response?.data?.message || error.message || 'Failed to update role';
+      setError(msg);
+      setTimeout(() => setError(''), 5000);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDeleteRole = async (roleId) => {
-    if (!window.confirm('Are you sure you want to delete this role?')) return;
+  const handleDeleteRole = async (role) => {
+    if (!role) return;
+    if (role.isSystemRole) {
+      alert('❌ Cannot delete system roles');
+      return;
+    }
+    if (!window.confirm(`Delete role "${role.name}"? This cannot be undone.`)) return;
+
     setLoading(true);
+    setError('');
+    setSuccess('');
+
     try {
-      await api.delete(`/roles/${roleId}`);
-      setRoles(roles.filter(r => r.id !== roleId));
-      setFilteredRoles(roles.filter(r => r.id !== roleId));
-      alert('✅ Role deleted successfully!');
+      await api.delete(`/roles/${role.id}`);
+
+      if (typeof setRoles === 'function') {
+        setRoles(prev => prev.filter(r => r.id !== role.id));
+      }
+
+      setSuccess(`✅ Role "${role.name}" deleted successfully!`);
+      setTimeout(() => setSuccess(''), 4000);
     } catch (error) {
       console.error('Error deleting role:', error);
-      alert(error.response?.data?.message || 'Failed to delete role');
+      const msg = error.response?.data?.message || error.message || 'Failed to delete role';
+      setError(msg);
+      setTimeout(() => setError(''), 5000);
     } finally {
       setLoading(false);
     }
   };
 
   const handleUpdatePermissions = async () => {
+    if (!selectedRole) return;
+
     setLoading(true);
+    setError('');
+    setSuccess('');
+
     try {
-      await api.patch(`/roles/${selectedRole.id}/permissions`, { permissions: selectedPermissions });
-      setRoles(roles.map(r => 
-        r.id === selectedRole.id ? { ...r, permissions: selectedPermissions } : r
-      ));
-      setFilteredRoles(roles.map(r => 
-        r.id === selectedRole.id ? { ...r, permissions: selectedPermissions } : r
-      ));
+      await api.patch(`/roles/${selectedRole.id}/permissions`, {
+        permissions: selectedPermissions
+      });
+
+      if (typeof setRoles === 'function') {
+        setRoles(prev => prev.map(r =>
+          r.id === selectedRole.id ? { ...r, permissions: selectedPermissions } : r
+        ));
+      }
+
       setShowPermissionsModal(false);
       setSelectedRole(null);
-      alert('✅ Permissions updated successfully!');
+
+      setSuccess('✅ Permissions updated successfully!');
+      setTimeout(() => setSuccess(''), 4000);
     } catch (error) {
       console.error('Error updating permissions:', error);
-      alert(error.response?.data?.message || 'Failed to update permissions');
+      const msg = error.response?.data?.message || error.message || 'Failed to update permissions';
+      setError(msg);
+      setTimeout(() => setError(''), 5000);
     } finally {
       setLoading(false);
     }
   };
 
+  // ==================== ASSIGN ROLE TO A SINGLE USER ====================
   const handleAssignRole = async () => {
-    if (!selectedUser || !assignRoleId) {
-      alert('Please select a user and role');
+    if (!selectedUser) {
+      setError('Please select a user');
+      setTimeout(() => setError(''), 3000);
       return;
     }
+    if (!assignRoleId) {
+      setError('Please select a role');
+      setTimeout(() => setError(''), 3000);
+      return;
+    }
+
     setLoading(true);
+    setError('');
+    setSuccess('');
+
     try {
-      const res = await api.patch(`/users/${selectedUser.id}/role`, { roleId: assignRoleId });
-      setUsers(users.map(u => 
-        u.id === selectedUser.id ? { ...u, roleId: assignRoleId } : u
-      ));
+      const res = await api.patch(`/users/${selectedUser.id}/role`, {
+        roleId: assignRoleId
+      });
+
+      const updatedUser = res.data?.user || res.data?.data?.user;
+      const updatedRole = res.data?.role || res.data?.data?.role;
+
+      if (typeof setUsers === 'function') {
+        setUsers(prev => prev.map(u =>
+          u.id === selectedUser.id
+            ? {
+                ...u,
+                roleId: updatedUser?.roleId ?? assignRoleId,
+                role: updatedUser?.role ?? u.role,
+                Role: updatedRole ?? u.Role
+              }
+            : u
+        ));
+      }
+
+      // Refresh roles to update the userCount
+      const rolesRes = await api.get('/roles');
+      if (typeof setRoles === 'function') {
+        setRoles(rolesRes.data.roles || []);
+      }
+
       setShowAssignModal(false);
       setSelectedUser(null);
       setAssignRoleId('');
-      alert('✅ Role assigned successfully!');
-    } catch (error) {
-      console.error('Error assigning role:', error);
-      alert(error.response?.data?.message || 'Failed to assign role');
+
+      const roleName = updatedRole?.name || 'role';
+      setSuccess(`✅ Assigned ${roleName} to ${selectedUser.firstName} ${selectedUser.lastName}`);
+      setTimeout(() => setSuccess(''), 4000);
+    } catch (err) {
+      console.error('Assign role error:', err);
+      const msg = err.response?.data?.message || err.message || 'Failed to assign role';
+      setError(msg);
+      setTimeout(() => setError(''), 5000);
     } finally {
       setLoading(false);
     }
   };
 
+  // ==================== PERMISSION TOGGLES ====================
   const togglePermission = (permKey) => {
-    setSelectedPermissions(prev => 
+    setSelectedPermissions(prev =>
       prev.includes(permKey) ? prev.filter(p => p !== permKey) : [...prev, permKey]
     );
   };
@@ -854,7 +995,7 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
   const toggleAllCategory = (category, permissions) => {
     const categoryPerms = permissions.map(p => p.key);
     const allSelected = categoryPerms.every(p => selectedPermissions.includes(p));
-    
+
     if (allSelected) {
       setSelectedPermissions(prev => prev.filter(p => !categoryPerms.includes(p)));
     } else {
@@ -869,6 +1010,7 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
     }));
   };
 
+  // ==================== GUARD ====================
   if (!canManageRoles) {
     return (
       <div className="bg-white p-8 rounded-xl shadow-sm text-center">
@@ -878,23 +1020,42 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
     );
   }
 
-  // ==================== GET ROLE STATS ====================
+  // ==================== STATS ====================
   const getRoleStats = () => {
-    const total = roles.length;
-    const systemRoles = roles.filter(r => r.isSystemRole).length;
+    const total = (roles || []).length;
+    const systemRoles = (roles || []).filter(r => r.isSystemRole).length;
     const customRoles = total - systemRoles;
-    const totalPermissions = roles.reduce((sum, r) => sum + (r.permissions?.length || 0), 0);
-    const totalUsers = roles.reduce((sum, r) => sum + (r.userCount || 0), 0);
-    
+    const totalPermissions = (roles || []).reduce((sum, r) => sum + (r.permissions?.length || 0), 0);
+    const totalUsers = (roles || []).reduce((sum, r) => sum + (r.userCount || 0), 0);
+
     return { total, systemRoles, customRoles, totalPermissions, totalUsers };
   };
 
   const stats = getRoleStats();
 
+  // ==================== RENDER ====================
   return (
     <div className="space-y-6">
       {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
-      
+
+      {/* Success/Error banners */}
+      {success && (
+        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center justify-between">
+          <span><i className="fas fa-check-circle mr-2" />{success}</span>
+          <button onClick={() => setSuccess('')} className="text-green-500 hover:text-green-700">
+            <i className="fas fa-times" />
+          </button>
+        </div>
+      )}
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
+          <span><i className="fas fa-exclamation-circle mr-2" />{error}</span>
+          <button onClick={() => setError('')} className="text-red-500 hover:text-red-700">
+            <i className="fas fa-times" />
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex justify-between items-center flex-wrap gap-4">
         <div>
@@ -956,7 +1117,7 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
             <option value="custom">Custom Roles</option>
           </select>
           <span className="text-sm text-gray-500">
-            Showing {filteredRoles.length} of {roles.length} roles
+            Showing {filteredRoles.length} of {(roles || []).length} roles
           </span>
         </div>
       </div>
@@ -978,8 +1139,9 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
           </div>
         ) : (
           filteredRoles.map(role => {
-            const isNewRole = !role.isSystemRole && role.createdAt && new Date(role.createdAt) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-            
+            const isNewRole = !role.isSystemRole && role.createdAt &&
+              new Date(role.createdAt) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
             return (
               <div key={role.id} className="bg-white rounded-xl shadow-sm p-6 hover:shadow-md transition-shadow border border-gray-200">
                 <div className="flex justify-between items-start">
@@ -1029,7 +1191,12 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
                         <button
                           onClick={() => {
                             setEditingRole(role);
-                            setRoleForm({ name: role.name, description: role.description || '' });
+                            setSelectedRole(role);
+                            setRoleForm({
+                              name: role.name,
+                              description: role.description || '',
+                              permissions: role.permissions || []
+                            });
                             setShowEditModal(true);
                           }}
                           className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
@@ -1038,7 +1205,7 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
                           <i className="fas fa-edit"></i>
                         </button>
                         <button
-                          onClick={() => handleDeleteRole(role.id)}
+                          onClick={() => handleDeleteRole(role)}
                           className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                           title="Delete Role"
                         >
@@ -1048,7 +1215,7 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
                     )}
                   </div>
                 </div>
-                
+
                 <div className="mt-4 grid grid-cols-2 gap-2">
                   <div className="bg-gray-50 p-2 rounded-lg text-center">
                     <p className="text-xs text-gray-500">Users</p>
@@ -1059,7 +1226,7 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
                     <p className="text-lg font-bold text-gray-700">{role.permissions?.length || 0}</p>
                   </div>
                 </div>
-                
+
                 <button
                   onClick={() => {
                     setSelectedUser(null);
@@ -1093,7 +1260,7 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
                   type="text"
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                   value={roleForm.name}
-                  onChange={(e) => setRoleForm({...roleForm, name: e.target.value})}
+                  onChange={(e) => setRoleForm({ ...roleForm, name: e.target.value })}
                   required
                   disabled={loading}
                   placeholder="e.g., Department Head"
@@ -1104,17 +1271,25 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
                 <textarea
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                   value={roleForm.description}
-                  onChange={(e) => setRoleForm({...roleForm, description: e.target.value})}
+                  onChange={(e) => setRoleForm({ ...roleForm, description: e.target.value })}
                   rows="3"
                   disabled={loading}
                   placeholder="What permissions does this role have?"
                 />
               </div>
               <div className="flex space-x-2 pt-2">
-                <button type="submit" className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700" disabled={loading}>
+                <button
+                  type="submit"
+                  className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                  disabled={loading}
+                >
                   {loading ? 'Creating...' : 'Create Role'}
                 </button>
-                <button type="button" onClick={() => setShowCreateModal(false)} className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
+                >
                   Cancel
                 </button>
               </div>
@@ -1140,7 +1315,7 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
                   type="text"
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                   value={roleForm.name}
-                  onChange={(e) => setRoleForm({...roleForm, name: e.target.value})}
+                  onChange={(e) => setRoleForm({ ...roleForm, name: e.target.value })}
                   required
                   disabled={loading}
                 />
@@ -1150,16 +1325,24 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
                 <textarea
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                   value={roleForm.description}
-                  onChange={(e) => setRoleForm({...roleForm, description: e.target.value})}
+                  onChange={(e) => setRoleForm({ ...roleForm, description: e.target.value })}
                   rows="3"
                   disabled={loading}
                 />
               </div>
               <div className="flex space-x-2 pt-2">
-                <button type="submit" className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700" disabled={loading}>
+                <button
+                  type="submit"
+                  className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                  disabled={loading}
+                >
                   {loading ? 'Updating...' : 'Update Role'}
                 </button>
-                <button type="button" onClick={() => setShowEditModal(false)} className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
+                <button
+                  type="button"
+                  onClick={() => setShowEditModal(false)}
+                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
+                >
                   Cancel
                 </button>
               </div>
@@ -1186,7 +1369,8 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
                   )}
                 </div>
                 <p className="text-sm text-gray-600 mt-1">
-                  <span className="font-medium text-indigo-600">{selectedPermissions.length}</span> of <span className="font-medium">{allPermissions.length}</span> permissions selected
+                  <span className="font-medium text-indigo-600">{selectedPermissions.length}</span> of{' '}
+                  <span className="font-medium">{allPermissions.length}</span> permissions selected
                 </p>
               </div>
               <button onClick={() => setShowPermissionsModal(false)} className="text-gray-500 hover:text-gray-700">
@@ -1211,24 +1395,24 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
             <div className="space-y-4">
               {Object.keys(permissionsGrouped).map(category => {
                 const categoryPerms = permissionsGrouped[category] || [];
-                const filteredCategoryPerms = searchTerm 
-                  ? categoryPerms.filter(p => 
+                const filteredCategoryPerms = searchTerm
+                  ? categoryPerms.filter(p =>
                       p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                       p.key.toLowerCase().includes(searchTerm.toLowerCase()) ||
                       p.description?.toLowerCase().includes(searchTerm.toLowerCase())
                     )
                   : categoryPerms;
-                
+
                 if (filteredCategoryPerms.length === 0) return null;
-                
+
                 const allSelected = filteredCategoryPerms.every(p => selectedPermissions.includes(p.key));
                 const isNewFeature = newFeatureModules.includes(category);
                 const isExpanded = expandedCategories[category] !== false;
-                
+
                 return (
                   <div key={category} className={`border rounded-lg overflow-hidden ${isNewFeature ? 'border-purple-200' : 'border-gray-200'}`}>
-                    <div 
-                      className={`px-4 py-3 flex justify-between items-center cursor-pointer hover:bg-opacity-80 ${
+                    <div
+                      className={`px-4 py-3 flex justify-between items-center cursor-pointer ${
                         isNewFeature ? 'bg-purple-50 hover:bg-purple-100' : 'bg-gray-50 hover:bg-gray-100'
                       }`}
                       onClick={() => toggleCategoryExpand(category)}
@@ -1257,8 +1441,8 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
                             toggleAllCategory(category, filteredCategoryPerms);
                           }}
                           className={`text-xs px-2 py-1 rounded ${
-                            allSelected 
-                              ? 'bg-red-100 text-red-700 hover:bg-red-200' 
+                            allSelected
+                              ? 'bg-red-100 text-red-700 hover:bg-red-200'
                               : 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
                           }`}
                         >
@@ -1266,16 +1450,16 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
                         </button>
                       </div>
                     </div>
-                    
+
                     {isExpanded && (
                       <div className="p-3 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                         {filteredCategoryPerms.map(perm => {
                           const isNewFeaturePerm = newFeatureModules.includes(perm.module);
                           const isSelected = selectedPermissions.includes(perm.key);
-                          
+
                           return (
-                            <label 
-                              key={perm.key} 
+                            <label
+                              key={perm.key}
                               className={`flex items-start space-x-2 p-2 rounded cursor-pointer transition-colors ${
                                 isSelected ? 'bg-indigo-50 border border-indigo-200' : 'hover:bg-gray-50'
                               } ${isNewFeaturePerm ? 'border-l-4 border-l-purple-400' : ''}`}
@@ -1382,12 +1566,12 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                   value={selectedUser?.id || ''}
                   onChange={(e) => {
-                    const user = users.find(u => u.id === e.target.value);
-                    setSelectedUser(user);
+                    const u = users.find(x => x.id === e.target.value);
+                    setSelectedUser(u);
                   }}
                 >
                   <option value="">-- Select User --</option>
-                  {users.map(u => (
+                  {(users || []).map(u => (
                     <option key={u.id} value={u.id}>
                       {u.firstName} {u.lastName} ({u.email})
                       {u.role ? ` • ${u.role}` : ''}
@@ -1403,10 +1587,10 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
                   onChange={(e) => setAssignRoleId(e.target.value)}
                 >
                   <option value="">-- Select Role --</option>
-                  {roles.map(r => (
+                  {(roles || []).map(r => (
                     <option key={r.id} value={r.id}>
-                      {r.name} 
-                      {r.isSystemRole ? ' (System)' : ''} 
+                      {r.name}
+                      {r.isSystemRole ? ' (System)' : ''}
                       {r.isActive === false ? ' (Inactive)' : ''}
                       {r.userCount ? ` • ${r.userCount} users` : ''}
                     </option>
@@ -1417,7 +1601,7 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
                 <div className="bg-blue-50 p-3 rounded-lg">
                   <p className="text-sm text-blue-700">
                     <i className="fas fa-info-circle mr-1"></i>
-                    Assigning <strong>{roles.find(r => r.id === assignRoleId)?.name}</strong> to <strong>{selectedUser.firstName} {selectedUser.lastName}</strong>
+                    Assigning <strong>{(roles || []).find(r => r.id === assignRoleId)?.name}</strong> to <strong>{selectedUser.firstName} {selectedUser.lastName}</strong>
                   </p>
                 </div>
               )}
@@ -1444,7 +1628,6 @@ const RolesManagementModule = ({ user, users, setUsers, currentSchool }) => {
     </div>
   );
 };
-
 // ==================== UPDATED STUDENT ADMISSION MODAL ====================
 const StudentAdmissionModal = ({ onAdmissionSubmit, onClose, message }) => {
   const [admissionNumber, setAdmissionNumber] = useState('');
@@ -18212,7 +18395,8 @@ const StaffModule = ({
   onDelete,
   currentSchool,
   user,
-  departments = []
+  departments = [],
+  roles = []    
 }) => {
   // ---- Aliases for the module-scope sub-components ----
   const SearchableSelect = StaffSearchableSelect;
@@ -18293,69 +18477,36 @@ const StaffModule = ({
     const n = parseFloat(String(v).replace(/,/g, ''));
     return Number.isFinite(n) ? n : 0;
   };
+const staffRoleOptions = useMemo(() => {
+  // ---- 1. Built-in options (unchanged, based on school type) ----
+  let builtIn = [];
 
-  // ==================== STAFF ROLE OPTIONS ====================
-  const staffRoleOptions = useMemo(() => {
-    if (isUniversity) {
-      return [
-        { value: 'PROFESSOR',            label: 'Professor' },
-        { value: 'SENIOR_LECTURER',      label: 'Senior Lecturer' },
-        { value: 'LECTURER',             label: 'Lecturer' },
-        { value: 'ASSISTANT_LECTURER',   label: 'Assistant Lecturer' },
-        { value: 'TUTOR',                label: 'Tutor' },
-        { value: 'HOD_LECTURER',         label: 'Head of Department (Academic)' },
-        { value: 'DEAN',                 label: 'Dean' },
-        { value: 'REGISTRAR',            label: 'Registrar' },
-        { value: 'LIBRARIAN',            label: 'Librarian' },
-        { value: 'IT_OFFICER',           label: 'IT Officer' },
-        { value: 'ADMINISTRATOR',        label: 'Administrator' },
-        { value: 'FINANCE_OFFICER',      label: 'Finance Officer' },
-        { value: 'SUPPORT_STAFF',        label: 'Support Staff' },
-        { value: 'LAB_TECHNICIAN',       label: 'Lab Technician' },
-        { value: 'COUNSELOR',            label: 'Counselor' },
-        { value: 'NURSE',                label: 'Nurse' },
-      ];
-    }
-    if (isTVET) {
-      return [
-        { value: 'TECHNICAL_INSTRUCTOR', label: 'Technical Instructor' },
-        { value: 'WORKSHOP_SUPERVISOR',  label: 'Workshop Supervisor' },
-        { value: 'HOD',                  label: 'Head of Department' },
-        { value: 'PRINCIPAL',            label: 'Principal' },
-        { value: 'DEPUTY_PRINCIPAL',     label: 'Deputy Principal' },
-        { value: 'CLASS_TEACHER',        label: 'Class Teacher' },
-        { value: 'SUBJECT_TEACHER',      label: 'Subject Teacher' },
-        { value: 'SUPPORT_STAFF',        label: 'Support Staff' },
-        { value: 'LAB_TECHNICIAN',       label: 'Lab Technician' },
-        { value: 'LIBRARIAN',            label: 'Librarian' },
-        { value: 'ADMINISTRATOR',        label: 'Administrator' },
-        { value: 'FINANCE_OFFICER',      label: 'Finance Officer' },
-        { value: 'IT_OFFICER',           label: 'IT Officer' },
-        { value: 'COUNSELOR',            label: 'Counselor' },
-        { value: 'NURSE',                label: 'Nurse' },
-      ];
-    }
-    if (isSecondary) {
-      return [
-        { value: 'PRINCIPAL',            label: 'Principal' },
-        { value: 'DEPUTY_PRINCIPAL',     label: 'Deputy Principal' },
-        { value: 'HOD',                  label: 'Head of Department' },
-        { value: 'CLASS_TEACHER',        label: 'Class Teacher' },
-        { value: 'SUBJECT_TEACHER',      label: 'Subject Teacher' },
-        { value: 'SUPPORT_STAFF',        label: 'Support Staff' },
-        { value: 'LAB_TECHNICIAN',       label: 'Lab Technician' },
-        { value: 'LIBRARIAN',            label: 'Librarian' },
-        { value: 'ADMINISTRATOR',        label: 'Administrator' },
-        { value: 'FINANCE_OFFICER',      label: 'Finance Officer' },
-        { value: 'IT_OFFICER',           label: 'IT Officer' },
-        { value: 'COUNSELOR',            label: 'Counselor' },
-        { value: 'NURSE',                label: 'Nurse' },
-      ];
-    }
-    return [
-      { value: 'HEAD_TEACHER',         label: 'Head Teacher' },
-      { value: 'DEPUTY_HEAD_TEACHER',  label: 'Deputy Head Teacher' },
-      { value: 'SENIOR_TEACHER',       label: 'Senior Teacher' },
+  if (isUniversity) {
+    builtIn = [
+      { value: 'PROFESSOR',          label: 'Professor' },
+      { value: 'SENIOR_LECTURER',    label: 'Senior Lecturer' },
+      { value: 'LECTURER',           label: 'Lecturer' },
+      { value: 'ASSISTANT_LECTURER', label: 'Assistant Lecturer' },
+      { value: 'TUTOR',              label: 'Tutor' },
+      { value: 'HOD_LECTURER',       label: 'Head of Department (Academic)' },
+      { value: 'DEAN',               label: 'Dean' },
+      { value: 'REGISTRAR',          label: 'Registrar' },
+      { value: 'LIBRARIAN',          label: 'Librarian' },
+      { value: 'IT_OFFICER',         label: 'IT Officer' },
+      { value: 'ADMINISTRATOR',      label: 'Administrator' },
+      { value: 'FINANCE_OFFICER',    label: 'Finance Officer' },
+      { value: 'SUPPORT_STAFF',      label: 'Support Staff' },
+      { value: 'LAB_TECHNICIAN',     label: 'Lab Technician' },
+      { value: 'COUNSELOR',          label: 'Counselor' },
+      { value: 'NURSE',              label: 'Nurse' },
+    ];
+  } else if (isTVET) {
+    builtIn = [
+      { value: 'TECHNICAL_INSTRUCTOR', label: 'Technical Instructor' },
+      { value: 'WORKSHOP_SUPERVISOR',  label: 'Workshop Supervisor' },
+      { value: 'HOD',                  label: 'Head of Department' },
+      { value: 'PRINCIPAL',            label: 'Principal' },
+      { value: 'DEPUTY_PRINCIPAL',     label: 'Deputy Principal' },
       { value: 'CLASS_TEACHER',        label: 'Class Teacher' },
       { value: 'SUBJECT_TEACHER',      label: 'Subject Teacher' },
       { value: 'SUPPORT_STAFF',        label: 'Support Staff' },
@@ -18367,8 +18518,63 @@ const StaffModule = ({
       { value: 'COUNSELOR',            label: 'Counselor' },
       { value: 'NURSE',                label: 'Nurse' },
     ];
-  }, [isUniversity, isTVET, isSecondary]);
+  } else if (isSecondary) {
+    builtIn = [
+      { value: 'PRINCIPAL',        label: 'Principal' },
+      { value: 'DEPUTY_PRINCIPAL', label: 'Deputy Principal' },
+      { value: 'HOD',              label: 'Head of Department' },
+      { value: 'CLASS_TEACHER',    label: 'Class Teacher' },
+      { value: 'SUBJECT_TEACHER',  label: 'Subject Teacher' },
+      { value: 'SUPPORT_STAFF',    label: 'Support Staff' },
+      { value: 'LAB_TECHNICIAN',   label: 'Lab Technician' },
+      { value: 'LIBRARIAN',        label: 'Librarian' },
+      { value: 'ADMINISTRATOR',    label: 'Administrator' },
+      { value: 'FINANCE_OFFICER',  label: 'Finance Officer' },
+      { value: 'IT_OFFICER',       label: 'IT Officer' },
+      { value: 'COUNSELOR',        label: 'Counselor' },
+      { value: 'NURSE',            label: 'Nurse' },
+    ];
+  } else {
+    builtIn = [
+      { value: 'HEAD_TEACHER',        label: 'Head Teacher' },
+      { value: 'DEPUTY_HEAD_TEACHER', label: 'Deputy Head Teacher' },
+      { value: 'SENIOR_TEACHER',      label: 'Senior Teacher' },
+      { value: 'CLASS_TEACHER',       label: 'Class Teacher' },
+      { value: 'SUBJECT_TEACHER',     label: 'Subject Teacher' },
+      { value: 'SUPPORT_STAFF',       label: 'Support Staff' },
+      { value: 'LAB_TECHNICIAN',      label: 'Lab Technician' },
+      { value: 'LIBRARIAN',           label: 'Librarian' },
+      { value: 'ADMINISTRATOR',       label: 'Administrator' },
+      { value: 'FINANCE_OFFICER',     label: 'Finance Officer' },
+      { value: 'IT_OFFICER',          label: 'IT Officer' },
+      { value: 'COUNSELOR',           label: 'Counselor' },
+      { value: 'NURSE',               label: 'Nurse' },
+    ];
+  }
 
+  // ---- 2. Custom roles from the Roles Management module ----
+  // Convert each custom role into an option. The `value` uses the role's name
+  // (not its UUID) so it stays compatible with the existing backend which
+  // stores `staffRole` as a string.
+  const existingValues = new Set(builtIn.map(o => o.value));
+
+  const customRoleOptions = (Array.isArray(roles) ? roles : [])
+    .filter(r => r && r.name && r.isActive !== false)
+    .filter(r => !r.isSystemRole) 
+    // Skip any custom role whose name already collides with a built-in option
+    .filter(r => {
+      const normalized = String(r.name).trim().replace(/\s+/g, '_').toUpperCase();
+      return !existingValues.has(normalized);
+    })
+    .map(r => ({
+      value: String(r.name).trim().replace(/\s+/g, '_').toUpperCase(),
+      label: r.name,
+      subLabel: r.isSystemRole ? 'System role' : 'Custom role'
+    }));
+
+  // ---- 3. Merge: built-ins first, then custom roles ----
+  return [...builtIn, ...customRoleOptions];
+}, [isUniversity, isTVET, isSecondary, roles]);
   // ==================== OPTIONS ====================
   const departmentOptions = useMemo(() => {
     if (!departments || departments.length === 0) return [];
@@ -66879,6 +67085,7 @@ return (
             currentSchool={currentSchool}
             user={user}
             departments={departments}
+             roles={roles}  
           />
         )}
 
@@ -67498,6 +67705,8 @@ return (
             users={users}
             setUsers={setUsers}
             currentSchool={currentSchool}
+              roles={roles}
+  setRoles={setRoles}
           />
         )}
 
