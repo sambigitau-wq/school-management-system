@@ -4300,6 +4300,7 @@ const ClassModule = ({
 // ==================== COMPLETE STUDENT MODULE ====================
 // Parent/Guardian REQUIRED • Portal access OPTIONAL
 
+// ==================== STUDENT MODULE ====================
 const StudentModule = ({ 
   students, setStudents, 
   classes, routes, courses, faculties, departments, programs,
@@ -4447,7 +4448,6 @@ const StudentModule = ({
   const isSecondary = schoolCategory === 'SENIOR_SECONDARY';
   const isPrimary = schoolCategory === 'ECDE_PRIMARY_JSS';
 
-  // Whether the school has parent portal enabled at all (affects "existing parent" search)
   const enableParentPortal = currentSchool?.enableParentPortal === true ||
                              currentSchool?.settings?.enableParentPortal === true;
 
@@ -4463,7 +4463,7 @@ const StudentModule = ({
   const [loadingMyData, setLoadingMyData] = useState(false);
   const [showAdmissionModal, setShowAdmissionModal] = useState(false);
   const [admissionNumber, setAdmissionNumber] = useState(() => localStorage.getItem('studentAdmissionNumber'));
-  
+
   const [viewMode, setViewMode] = useState('grid');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedClass, setSelectedClass] = useState('');
@@ -4474,7 +4474,7 @@ const StudentModule = ({
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [showFilters, setShowFilters] = useState(false);
   const [loading, setLoading] = useState(false);
-  
+
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -4483,30 +4483,27 @@ const StudentModule = ({
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [selectedStudentForParent, setSelectedStudentForParent] = useState(null);
   const [activeDetailTab, setActiveDetailTab] = useState('overview');
-  
+
   const [studentDetails, setStudentDetails] = useState(null);
   const [studentFeeSummary, setStudentFeeSummary] = useState(null);
   const [studentPayments, setStudentPayments] = useState([]);
   const [studentParents, setStudentParents] = useState([]);
   const [studentResults, setStudentResults] = useState([]);
   const [studentAttendance, setStudentAttendance] = useState([]);
-  const [enrolledCourses, setEnrolledCourses] = useState([]);
-  const [showEnrollModal, setShowEnrollModal] = useState(false);
-  const [selectedCourseToEnroll, setSelectedCourseToEnroll] = useState('');
+
+  // Submission error banner (shown inside Add/Edit modal instead of a toast)
+  const [submitError, setSubmitError] = useState('');
 
   // ==================== PARENT FORM STATE ====================
-  // IMPORTANT: guardian details are ALWAYS required.
-  // Portal access (creating a User with password) is OPTIONAL.
   const [parentForm, setParentForm] = useState({
     userId: '',
     studentId: '',
-    relationship: 'Mother',           // Mother | Father | Guardian | ...
+    relationship: 'Mother',
     isPrimary: true,
     emergencyContact: false,
     occupation: '',
     employer: '',
     monthlyIncome: '',
-    // Guardian identity — always collected
     firstName: '',
     middleName: '',
     lastName: '',
@@ -4514,11 +4511,10 @@ const StudentModule = ({
     phone: '',
     idNumber: '',
     address: '',
-    // Portal access — optional
     grantPortalAccess: false,
     password: ''
   });
-  
+
   const [searchParent, setSearchParent] = useState('');
   const [createNewParent, setCreateNewParent] = useState(true);
   const [selectedExistingParent, setSelectedExistingParent] = useState(null);
@@ -4526,7 +4522,6 @@ const StudentModule = ({
     email: '', password: '', firstName: '', lastName: '', phone: ''
   });
 
-  // Relationship choices — mom / dad / guardian etc.
   const RELATIONSHIP_OPTIONS = [
     'Mother', 'Father', 'Guardian', 'Grandparent',
     'Sibling', 'Uncle', 'Aunt', 'Sponsor', 'Other'
@@ -4543,7 +4538,7 @@ const StudentModule = ({
   const loadMyStudentData = async () => {
     setLoadingMyData(true);
     try {
-    const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(admissionNumber)}`);
+      const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(admissionNumber)}`);
       if (studentRes.data.student) {
         const myStudent = studentRes.data.student;
         setMyStudentRecord(myStudent);
@@ -4647,23 +4642,19 @@ const StudentModule = ({
     return Array.from(map.values());
   }, [parents]);
 
-  const filteredParentUsers = useMemo(() => {
-    if (!parentUsers) return [];
-    if (!searchParent.trim()) return parentUsers;
-    const s = searchParent.toLowerCase();
-    return parentUsers.filter(p =>
-      (p.firstName?.toLowerCase() || '').includes(s) ||
-      (p.lastName?.toLowerCase() || '').includes(s) ||
-      (p.email?.toLowerCase() || '').includes(s) ||
-      `${p.firstName} ${p.lastName}`.toLowerCase().includes(s)
-    );
-  }, [parentUsers, searchParent]);
-
   // ==================== HELPERS ====================
   const prepareFormData = (data) => {
     const uuidFields = ['classId', 'courseId', 'programId', 'facultyId', 'departmentId', 'transportRouteId'];
     const prepared = { ...data };
     uuidFields.forEach(f => { if (prepared[f] === '') prepared[f] = null; });
+
+    // Auto-generated admission number: strip the field entirely
+    // so the backend can generate one. NEVER send the string "AUTO" or similar.
+    if (!prepared.admissionNumber || String(prepared.admissionNumber).trim() === '') {
+      delete prepared.admissionNumber;
+    } else {
+      prepared.admissionNumber = String(prepared.admissionNumber).trim().toUpperCase();
+    }
     return prepared;
   };
 
@@ -4728,6 +4719,7 @@ const StudentModule = ({
   // ==================== EDIT ====================
   const handleEditClick = (student) => {
     if (!canEdit) { alert('You do not have permission to edit students'); return; }
+    setSubmitError('');
     setSelectedStudent(student);
     setForm({
       ...student,
@@ -4750,10 +4742,12 @@ const StudentModule = ({
     e.preventDefault();
     if (!canEdit) { alert('You do not have permission to update students'); return; }
     setLoading(true);
+    setSubmitError('');
     try {
       const updateData = { ...form };
       if (isTVET && !updateData.programId) {
-        alert('Please select a program'); setLoading(false); return;
+        setSubmitError('Please select a program.');
+        setLoading(false); return;
       }
       if (isTVET) delete updateData.courseId;
       await handleUpdate('/students', selectedStudent.id, prepareFormData(updateData), setStudents, students);
@@ -4762,7 +4756,8 @@ const StudentModule = ({
       alert('✅ Student updated successfully!');
     } catch (error) {
       console.error('Error updating student:', error);
-      alert('❌ Failed to update student');
+      const msg = error.response?.data?.message || error.message || 'Failed to update student';
+      setSubmitError(msg);
     } finally { setLoading(false); }
   };
 
@@ -4787,7 +4782,7 @@ const StudentModule = ({
     } finally { setLoading(false); }
   };
 
-  // ==================== ADD PARENT (from details tab) ====================
+  // ==================== ADD PARENT ====================
   const handleAddParentClick = (student) => {
     if (!canEdit) { alert('You do not have permission to add parents'); return; }
     setSelectedStudentForParent(student);
@@ -4810,7 +4805,6 @@ const StudentModule = ({
   const handleAddParent = async () => {
     if (!canEdit) return;
 
-    // Validate required guardian fields
     if (!parentForm.firstName?.trim() || !parentForm.lastName?.trim()) {
       alert('Guardian first name and last name are required'); return;
     }
@@ -4832,7 +4826,6 @@ const StudentModule = ({
         userId = selectedExistingParent.userId;
       }
 
-      // Create a User account only if portal access is granted
       if (createNewParent && parentForm.grantPortalAccess) {
         const userRes = await api.post('/users', {
           email: parentForm.email.trim(),
@@ -4847,9 +4840,8 @@ const StudentModule = ({
         userId = userRes.data.user.id;
       }
 
-      // Create the Parent link record
       await api.post('/parents', {
-        userId: userId || null,               // may be null if portal not granted
+        userId: userId || null,
         studentId: selectedStudentForParent.id,
         relationship: parentForm.relationship,
         isPrimary: parentForm.isPrimary,
@@ -4857,7 +4849,6 @@ const StudentModule = ({
         occupation: parentForm.occupation || null,
         employer: parentForm.employer || null,
         monthlyIncome: parentForm.monthlyIncome ? parseFloat(parentForm.monthlyIncome) : null,
-        // Guardian raw details (saved even without portal)
         firstName: parentForm.firstName.trim(),
         middleName: parentForm.middleName?.trim() || null,
         lastName: parentForm.lastName.trim(),
@@ -4868,7 +4859,6 @@ const StudentModule = ({
         schoolId: currentSchool?.id
       });
 
-      // Refresh parents list
       try {
         const pr = await api.get('/parents');
         setParents(pr.data.parents || []);
@@ -4960,9 +4950,18 @@ const StudentModule = ({
               </div>
               <p className="text-gray-600 mb-6">Please enter your admission number to access your student dashboard.</p>
               <div className="space-y-4">
-                <InputField label="Admission Number" value={admissionNumber}
-                  onChange={(e) => setAdmissionNumber(e.target.value.toUpperCase())}
-                  placeholder="e.g., BCM-05" required />
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Admission Number <span className="text-red-500 ml-1">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={admissionNumber || ''}
+                    onChange={(e) => setAdmissionNumber(e.target.value.toUpperCase())}
+                    placeholder="e.g., BCM-05"
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
                 <button onClick={loadMyStudentData}
                   disabled={loadingMyData || !admissionNumber}
                   className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
@@ -5112,14 +5111,13 @@ const StudentModule = ({
             {viewMode === 'grid' ? 'Table View' : 'Grid View'}
           </button>
           {canAdd && (
-            <button onClick={() => setShowAddModal(true)} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center">
+            <button onClick={() => { setSubmitError(''); setShowAddModal(true); }} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center">
               <i className="fas fa-plus mr-2"></i>Add Student
             </button>
           )}
         </div>
       </div>
 
-      {/* Filters */}
       {showFilters && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">🔍 Filter Students</h3>
@@ -5143,12 +5141,15 @@ const StudentModule = ({
             {!isUniversity && !isTVET && (
               <SearchableSelect label="Class" value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)} options={classOptions} placeholder="Search classes..." emptyMessage="No classes available" />
             )}
-            <SelectField label="Status" value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)}
-              options={[
-                { value: 'all', label: 'All Students' },
-                { value: 'active', label: 'Active Only' },
-                { value: 'inactive', label: 'Inactive Only' }
-              ]} />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+              <select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg">
+                <option value="all">All Students</option>
+                <option value="active">Active Only</option>
+                <option value="inactive">Inactive Only</option>
+              </select>
+            </div>
           </div>
           <div className="mt-4 flex justify-end space-x-2">
             <button onClick={() => {
@@ -5170,29 +5171,51 @@ const StudentModule = ({
           <div className="bg-white p-6 rounded-xl shadow-sm max-w-4xl w-full max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold">Register New Student</h3>
-              <button onClick={() => setShowAddModal(false)} className="text-gray-500 hover:text-gray-700">
+              <button onClick={() => { setShowAddModal(false); setSubmitError(''); }} className="text-gray-500 hover:text-gray-700">
                 <i className="fas fa-times"></i>
               </button>
             </div>
 
-            <form onSubmit={(e) => {
+            {submitError && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
+                <i className="fas fa-exclamation-circle mr-2"></i>
+                {submitError}
+              </div>
+            )}
+
+            <form onSubmit={async (e) => {
               e.preventDefault();
-              // GUARDIAN VALIDATION — always required
+              setSubmitError('');
+
+              // Academic requirement check
+              if (isUniversity && !form.courseId) { setSubmitError('Please select a course.'); return; }
+              if (isTVET && !form.programId) { setSubmitError('Please select a program.'); return; }
+              if (!isUniversity && !isTVET && !form.classId) { setSubmitError('Please select a class.'); return; }
+
+              // Guardian validation — always required
               const p = form.parent || {};
               if (!p.firstName?.trim() || !p.lastName?.trim()) {
-                alert('Guardian first name and last name are required.');
-                return;
+                setSubmitError('Guardian first name and last name are required.'); return;
               }
               if (!p.phone?.trim() && !p.email?.trim()) {
-                alert('Provide at least a phone number or email for the guardian.');
-                return;
+                setSubmitError('Provide at least a phone number or email for the guardian.'); return;
               }
               if (p.grantPortalAccess) {
-                if (!p.email?.trim()) { alert('Email is required to grant portal access.'); return; }
-                if (!p.password?.trim()) { alert('Password is required to grant portal access.'); return; }
+                if (!p.email?.trim()) { setSubmitError('Email is required to grant portal access.'); return; }
+                if (!p.password?.trim()) { setSubmitError('Password is required to grant portal access.'); return; }
               }
-              onSubmit(e, prepareFormData(form));
-              setShowAddModal(false);
+
+              try {
+                // Note: onSubmit is provided by the parent; it's responsible for
+                // calling the API and updating state. prepareFormData strips
+                // admissionNumber if blank so the backend auto-generates it.
+                await onSubmit(e, prepareFormData(form));
+                setShowAddModal(false);
+              } catch (err) {
+                console.error('Create student failed:', err);
+                const msg = err.response?.data?.message || err.message || 'Failed to register student';
+                setSubmitError(msg);
+              }
             }} className="space-y-4">
 
               {/* PERSONAL */}
@@ -5229,6 +5252,10 @@ const StudentModule = ({
                   <SelectField label="ID Type" value={form.idType || 'NATIONAL_ID'} onChange={(e) => setForm({...form, idType: e.target.value})} options={['NATIONAL_ID', 'BIRTH_CERTIFICATE', 'PASSPORT', 'SCHOOL_ID', 'OTHER']} />
                   <InputField label="ID/Birth Certificate Number" value={form.idNumber || ''} onChange={(e) => setForm({...form, idNumber: e.target.value})} />
                 </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  <i className="fas fa-info-circle mr-1"></i>
+                  Leave admission number blank to let the system generate one automatically.
+                </p>
               </div>
 
               {/* ACADEMIC */}
@@ -5311,7 +5338,7 @@ const StudentModule = ({
                 )}
               </div>
 
-              {/* ==================== PARENT / GUARDIAN (REQUIRED DETAILS • OPTIONAL PORTAL) ==================== */}
+              {/* PARENT / GUARDIAN */}
               <div className="bg-gray-50 p-4 rounded-lg border border-indigo-100">
                 <div className="flex items-start justify-between mb-3">
                   <div>
@@ -5324,7 +5351,6 @@ const StudentModule = ({
                   </div>
                 </div>
 
-                {/* Mode toggle — only show "Use Existing" when school has parent portal enabled AND parents exist */}
                 {enableParentPortal && parentUsers.length > 0 && (
                   <div className="flex items-center space-x-4 mb-3">
                     <label className="flex items-center">
@@ -5356,7 +5382,6 @@ const StudentModule = ({
                   />
                 ) : (
                   <div className="space-y-4">
-                    {/* Identity */}
                     <div className="grid grid-cols-2 gap-4">
                       <InputField label="First Name *" value={form.parent?.firstName || ''}
                         onChange={(e) => setForm({...form, parent: { ...form.parent, firstName: e.target.value }})}
@@ -5375,7 +5400,6 @@ const StudentModule = ({
                       Provide at least a phone number or email.
                     </p>
 
-                    {/* Relationship + flags */}
                     <div className="grid grid-cols-2 gap-4">
                       <SelectField label="Relationship *"
                         value={form.parent?.relationship || 'Mother'}
@@ -5399,7 +5423,6 @@ const StudentModule = ({
                       </div>
                     </div>
 
-                    {/* Optional extras */}
                     <details className="text-sm">
                       <summary className="cursor-pointer text-indigo-600 hover:text-indigo-800 select-none">
                         Optional: occupation, employer, income
@@ -5414,7 +5437,6 @@ const StudentModule = ({
                       </div>
                     </details>
 
-                    {/* ============ OPTIONAL PORTAL ACCESS ============ */}
                     <div className="border-t pt-3 mt-1">
                       <label className="flex items-start cursor-pointer">
                         <input type="checkbox"
@@ -5466,10 +5488,18 @@ const StudentModule = ({
           <div className="bg-white p-6 rounded-xl shadow-sm max-w-4xl w-full max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold">Edit Student</h3>
-              <button onClick={() => { setShowEditModal(false); setSelectedStudent(null); }} className="text-gray-500 hover:text-gray-700">
+              <button onClick={() => { setShowEditModal(false); setSelectedStudent(null); setSubmitError(''); }} className="text-gray-500 hover:text-gray-700">
                 <i className="fas fa-times"></i>
               </button>
             </div>
+
+            {submitError && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
+                <i className="fas fa-exclamation-circle mr-2"></i>
+                {submitError}
+              </div>
+            )}
+
             <form onSubmit={handleUpdateSubmit} className="space-y-4">
               <div className="bg-gray-50 p-4 rounded-lg">
                 <h4 className="font-medium text-indigo-600 mb-3">Personal Details</h4>
@@ -6006,7 +6036,7 @@ const StudentModule = ({
         </div>
       )}
 
-      {/* ==================== ADD PARENT / GUARDIAN MODAL (from details) ==================== */}
+      {/* ==================== ADD PARENT MODAL ==================== */}
       {showAddParentModal && selectedStudentForParent && canEdit && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
@@ -6101,7 +6131,6 @@ const StudentModule = ({
                 </div>
               </div>
 
-              {/* Optional portal */}
               {createNewParent && (
                 <div className="border-t pt-4">
                   <label className="flex items-start cursor-pointer">
@@ -12867,15 +12896,17 @@ const AllResultsPrintModal = ({ printData, onClose, currentSchool, isUniversity,
     </div>
   );
 };
-// ==================== COMPLETE TIMETABLE MODULE WITH SEARCHABLE SELECT ====================
-const TimetableModule = ({ 
-  timetable, setTimetable, 
+
+
+// ==================== COMPLETE TIMETABLE MODULE WITH BREAKS ====================
+const TimetableModule = ({
+  timetable, setTimetable,
   classes, subjects, staff, courses, programs, units,
   handleCreate, handleDelete, currentSchool, user,
   students, enrollments
 }) => {
   console.log('📅 TimetableModule initialized');
-  
+
   const [selectedProgram, setSelectedProgram] = useState('');
   const [selectedCourse, setSelectedCourse] = useState('');
   const [selectedClass, setSelectedClass] = useState('');
@@ -12890,6 +12921,17 @@ const TimetableModule = ({
   const [showConflicts, setShowConflicts] = useState(false);
   const [studentConflicts, setStudentConflicts] = useState([]);
   const [loadingConflicts, setLoadingConflicts] = useState(false);
+
+  // NEW: Break-related state
+  const [showBreakForm, setShowBreakForm] = useState(false);
+  const [breakForm, setBreakForm] = useState({
+    name: 'Break',
+    day: 'MONDAY',
+    period: '',
+    startTime: '10:20',
+    endTime: '10:50'
+  });
+
   const [formData, setFormData] = useState({
     classId: '',
     courseId: '',
@@ -12914,11 +12956,14 @@ const TimetableModule = ({
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
   const isUniversity = schoolCategory === 'UNIVERSITY';
   const isTVET = schoolCategory === 'COLLEGE_TVET';
-  
+
+  // NEW: Breaks only apply to Primary / Secondary / TVET. University skips them.
+  const supportsBreaks = !isUniversity;
+
   const days = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
   const periods = [1, 2, 3, 4, 5, 6, 7, 8];
 
-  // ==================== SEARCHABLE SELECT COMPONENT ====================
+  // ==================== SEARCHABLE SELECT ====================
   const SearchableSelect = ({ label, value, onChange, options, placeholder, disabled, required, className }) => {
     const [search, setSearch] = useState('');
     const [isOpen, setIsOpen] = useState(false);
@@ -12926,72 +12971,61 @@ const TimetableModule = ({
     const dropdownRef = useRef(null);
     const inputRef = useRef(null);
 
-    const filteredOptions = useMemo(() => {
-      if (!search.trim()) return options;
-      const searchLower = search.toLowerCase();
-      return options.filter(opt => 
-        opt.label?.toLowerCase().includes(searchLower) ||
-        opt.subLabel?.toLowerCase().includes(searchLower) ||
-        opt.value?.toString().toLowerCase().includes(searchLower)
-      );
-    }, [options, search]);
+    const safeOptions = Array.isArray(options) ? options : [];
 
-    const selectedOption = options.find(opt => opt.value === value);
+    const filteredOptions = useMemo(() => {
+      if (!search.trim()) return safeOptions;
+      const s = search.toLowerCase();
+      return safeOptions.filter(opt =>
+        opt.label?.toLowerCase().includes(s) ||
+        opt.subLabel?.toLowerCase().includes(s) ||
+        opt.value?.toString().toLowerCase().includes(s)
+      );
+    }, [safeOptions, search]);
+
+    const selectedOption = safeOptions.find(opt => opt.value === value);
 
     useEffect(() => {
-      const handleClickOutside = (event) => {
+      const handler = (event) => {
         if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
           setIsOpen(false);
           setIsFocused(false);
         }
       };
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
+      document.addEventListener('mousedown', handler);
+      return () => document.removeEventListener('mousedown', handler);
     }, []);
 
     const handleSelect = (selectedValue) => {
       onChange({ target: { value: selectedValue } });
-      const selected = options.find(opt => opt.value === selectedValue);
+      const selected = safeOptions.find(opt => opt.value === selectedValue);
       setSearch(selected ? selected.label : '');
       setIsOpen(false);
       setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
+      if (inputRef.current) inputRef.current.focus();
     };
 
     const handleInputChange = (e) => {
-      const newValue = e.target.value;
-      setSearch(newValue);
+      const v = e.target.value;
+      setSearch(v);
       setIsOpen(true);
       setIsFocused(true);
-      if (newValue === '') {
-        onChange({ target: { value: '' } });
-      }
+      if (v === '') onChange({ target: { value: '' } });
     };
 
     const handleFocus = () => {
       setIsFocused(true);
       setIsOpen(true);
-      if (selectedOption && !search) {
-        setSearch(selectedOption.label);
-      }
+      if (selectedOption && !search) setSearch(selectedOption.label);
     };
 
-    const handleBlur = (e) => {
-      const relatedTarget = e.relatedTarget;
-      if (dropdownRef.current && dropdownRef.current.contains(relatedTarget)) {
-        return;
-      }
+    const handleBlur = () => {
       setTimeout(() => {
         if (document.activeElement !== inputRef.current) {
           setIsOpen(false);
           setIsFocused(false);
-          if (selectedOption) {
-            setSearch(selectedOption.label);
-          } else {
-            setSearch('');
-          }
+          if (selectedOption) setSearch(selectedOption.label);
+          else setSearch('');
         }
       }, 150);
     };
@@ -13002,9 +13036,7 @@ const TimetableModule = ({
       setSearch('');
       setIsOpen(false);
       setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
+      if (inputRef.current) inputRef.current.focus();
     };
 
     const getDisplayValue = () => {
@@ -13032,7 +13064,7 @@ const TimetableModule = ({
             onChange={handleInputChange}
             onFocus={handleFocus}
             onBlur={handleBlur}
-            placeholder={placeholder || "Search and select..."}
+            placeholder={placeholder || 'Search and select...'}
             disabled={disabled}
             autoComplete="off"
           />
@@ -13040,14 +13072,15 @@ const TimetableModule = ({
             <button
               type="button"
               onClick={handleClear}
-              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
+              className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
+              tabIndex={-1}
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           )}
-          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
             <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
@@ -13056,9 +13089,9 @@ const TimetableModule = ({
         {isOpen && !disabled && (
           <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
             {filteredOptions.length > 0 ? (
-              filteredOptions.map((opt) => (
+              filteredOptions.map((opt, idx) => (
                 <div
-                  key={opt.value || Math.random().toString()}
+                  key={opt.value || idx}
                   className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
                     opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
                   }`}
@@ -13080,72 +13113,31 @@ const TimetableModule = ({
     );
   };
 
-  // ==================== OPTIONS GENERATORS ====================
-  const programOptions = useMemo(() => {
-    const options = [];
-    (programs || []).forEach(p => {
-      options.push({
-        value: p.id,
-        label: p.name,
-        subLabel: p.code || 'Program'
-      });
-    });
-    return options;
-  }, [programs]);
+  // ==================== OPTIONS ====================
+  const programOptions = useMemo(() => (programs || []).map(p => ({
+    value: p.id, label: p.name, subLabel: p.code || 'Program'
+  })), [programs]);
 
-  const courseOptions = useMemo(() => {
-    const options = [];
-    (courses || []).forEach(c => {
-      options.push({
-        value: c.id,
-        label: c.name,
-        subLabel: c.code || 'Course'
-      });
-    });
-    return options;
-  }, [courses]);
+  const courseOptions = useMemo(() => (courses || []).map(c => ({
+    value: c.id, label: c.name, subLabel: c.code || 'Course'
+  })), [courses]);
 
-  const classOptions = useMemo(() => {
-    const options = [];
-    (classes || []).forEach(c => {
-      options.push({
-        value: c.id,
-        label: c.name,
-        subLabel: c.capacity ? `Capacity: ${c.capacity}` : ''
-      });
-    });
-    return options;
-  }, [classes]);
+  const classOptions = useMemo(() => (classes || []).map(c => ({
+    value: c.id, label: c.name, subLabel: c.capacity ? `Capacity: ${c.capacity}` : ''
+  })), [classes]);
 
-  const unitOptions = useMemo(() => {
-    const options = [];
-    filteredUnits.forEach(u => {
-      const subLabels = [];
-      if (u.module) subLabels.push(`Module ${u.module}`);
-      if (u.semester) subLabels.push(`Sem ${u.semester}`);
-      if (u.year) subLabels.push(`Yr ${u.year}`);
-      if (u.credits) subLabels.push(`${u.credits} credits`);
-      
-      options.push({
-        value: u.id,
-        label: u.name,
-        subLabel: subLabels.join(' • ') || 'Unit'
-      });
-    });
-    return options;
-  }, [filteredUnits]);
+  const unitOptions = useMemo(() => filteredUnits.map(u => {
+    const subLabels = [];
+    if (u.module) subLabels.push(`Module ${u.module}`);
+    if (u.semester) subLabels.push(`Sem ${u.semester}`);
+    if (u.year) subLabels.push(`Yr ${u.year}`);
+    if (u.credits) subLabels.push(`${u.credits} credits`);
+    return { value: u.id, label: u.name, subLabel: subLabels.join(' • ') || 'Unit' };
+  }), [filteredUnits]);
 
-  const subjectOptions = useMemo(() => {
-    const options = [];
-    filteredSubjects.forEach(s => {
-      options.push({
-        value: s.id,
-        label: s.name,
-        subLabel: s.code || 'Subject'
-      });
-    });
-    return options;
-  }, [filteredSubjects]);
+  const subjectOptions = useMemo(() => filteredSubjects.map(s => ({
+    value: s.id, label: s.name, subLabel: s.code || 'Subject'
+  })), [filteredSubjects]);
 
   const teacherOptions = useMemo(() => {
     const options = [];
@@ -13156,7 +13148,6 @@ const TimetableModule = ({
         if (s.jobTitle) subLabels.push(s.jobTitle);
         if (s.academicTitle) subLabels.push(s.academicTitle);
         if (s.specialization) subLabels.push(s.specialization);
-        
         options.push({
           value: s.userId,
           label: name,
@@ -13168,7 +13159,6 @@ const TimetableModule = ({
   }, [staff]);
 
   const yearOptions = [
-    { value: '', label: 'Select Year' },
     { value: '1', label: 'Year 1' },
     { value: '2', label: 'Year 2' },
     { value: '3', label: 'Year 3' },
@@ -13176,7 +13166,6 @@ const TimetableModule = ({
   ];
 
   const moduleOptions = [
-    { value: '', label: 'Select Module' },
     { value: '1', label: 'Module 1' },
     { value: '2', label: 'Module 2' },
     { value: '3', label: 'Module 3' },
@@ -13184,7 +13173,6 @@ const TimetableModule = ({
   ];
 
   const semesterOptions = [
-    { value: '', label: 'Select Semester' },
     { value: '1', label: 'Semester 1' },
     { value: '2', label: 'Semester 2' }
   ];
@@ -13192,29 +13180,37 @@ const TimetableModule = ({
   const dayOptions = days.map(d => ({ value: d, label: d }));
   const periodOptions = periods.map(p => ({ value: p, label: `Period ${p}` }));
 
-  // ==================== CONFLICT DETECTION FUNCTIONS ====================
+  // NEW: Break presets
+  const breakNameOptions = [
+    { value: 'Short Break',  label: 'Short Break'  },
+    { value: 'Long Break',   label: 'Long Break'   },
+    { value: 'Lunch Break',  label: 'Lunch Break'  },
+    { value: 'Tea Break',    label: 'Tea Break'    },
+    { value: 'Assembly',     label: 'Assembly'     },
+    { value: 'Games',        label: 'Games / PE'   },
+    { value: 'Prep',         label: 'Prep / Study' },
+    { value: 'Other',        label: 'Other…'       }
+  ];
+
+  // ==================== CONFLICT DETECTION ====================
   const checkTeacherConflicts = (teacherId, day, startTime, endTime, excludeId = null) => {
     return timetable.filter(entry => {
+      if (entry.isBreak) return false;              // breaks have no teacher
       if (excludeId && entry.id === excludeId) return false;
       if (entry.teacherId !== teacherId) return false;
       if (entry.day !== day) return false;
-      const entryStart = entry.startTime;
-      const entryEnd = entry.endTime;
-      const overlap = (startTime < entryEnd && endTime > entryStart);
-      return overlap;
+      return startTime < entry.endTime && endTime > entry.startTime;
     });
   };
 
   const checkRoomConflicts = (room, day, startTime, endTime, excludeId = null) => {
     if (!room) return [];
     return timetable.filter(entry => {
+      if (entry.isBreak) return false;
       if (excludeId && entry.id === excludeId) return false;
       if (entry.room !== room) return false;
       if (entry.day !== day) return false;
-      const entryStart = entry.startTime;
-      const entryEnd = entry.endTime;
-      const overlap = (startTime < entryEnd && endTime > entryStart);
-      return overlap;
+      return startTime < entry.endTime && endTime > entry.startTime;
     });
   };
 
@@ -13223,60 +13219,54 @@ const TimetableModule = ({
     try {
       let studentIds = [];
       if (isTVET && programId) {
-        const studentsInProgram = students?.filter(s => s.programId === programId) || [];
-        if (year) {
-          studentIds = studentsInProgram.filter(s => s.currentYear === parseInt(year)).map(s => s.id);
-        } else {
-          studentIds = studentsInProgram.map(s => s.id);
-        }
+        const s = students?.filter(x => x.programId === programId) || [];
+        studentIds = year ? s.filter(x => x.currentYear === parseInt(year)).map(x => x.id) : s.map(x => x.id);
       } else if (isUniversity && courseId) {
-        const studentsInCourse = students?.filter(s => s.courseId === courseId) || [];
-        if (year) {
-          studentIds = studentsInCourse.filter(s => s.currentYear === parseInt(year)).map(s => s.id);
-        } else {
-          studentIds = studentsInCourse.map(s => s.id);
-        }
+        const s = students?.filter(x => x.courseId === courseId) || [];
+        studentIds = year ? s.filter(x => x.currentYear === parseInt(year)).map(x => x.id) : s.map(x => x.id);
       } else if (classId) {
-        studentIds = students?.filter(s => s.classId === classId).map(s => s.id) || [];
+        studentIds = students?.filter(x => x.classId === classId).map(x => x.id) || [];
       }
-      
+
       if (studentIds.length === 0) return [];
-      
+
       const conflictingStudents = [];
       const checkedEntries = new Set();
-      
+
       for (const studentId of studentIds) {
         const studentEnrollments = enrollments?.filter(e => e.studentId === studentId && e.status === 'APPROVED') || [];
         for (const enrollment of studentEnrollments) {
           let studentTimetable = [];
           if (isTVET && enrollment.programId) {
-            studentTimetable = timetable.filter(t => 
-              t.programId === enrollment.programId && 
+            studentTimetable = timetable.filter(t =>
+              !t.isBreak &&
+              t.programId === enrollment.programId &&
               (!enrollment.year || t.year === enrollment.year) &&
               (!enrollment.module || t.module === enrollment.module)
             );
           } else if (isUniversity && enrollment.courseId) {
-            studentTimetable = timetable.filter(t => 
-              t.courseId === enrollment.courseId && 
+            studentTimetable = timetable.filter(t =>
+              !t.isBreak &&
+              t.courseId === enrollment.courseId &&
               (!enrollment.year || t.year === enrollment.year) &&
               (!enrollment.semester || t.semester === enrollment.semester)
             );
           } else if (enrollment.classId) {
-            studentTimetable = timetable.filter(t => t.classId === enrollment.classId);
+            studentTimetable = timetable.filter(t => !t.isBreak && t.classId === enrollment.classId);
           }
-          
+
           for (const entry of studentTimetable) {
             if (excludeId && entry.id === excludeId) continue;
             if (entry.day !== day) continue;
-            const entryStart = entry.startTime;
-            const entryEnd = entry.endTime;
-            const overlap = (startTime < entryEnd && endTime > entryStart);
-            if (overlap && !checkedEntries.has(`${studentId}-${entry.id}`)) {
-              checkedEntries.add(`${studentId}-${entry.id}`);
+            const overlap = (startTime < entry.endTime && endTime > entry.startTime);
+            const key = `${studentId}-${entry.id}`;
+            if (overlap && !checkedEntries.has(key)) {
+              checkedEntries.add(key);
+              const s = students?.find(x => x.id === studentId);
               conflictingStudents.push({
                 studentId,
-                studentName: students?.find(s => s.id === studentId)?.firstName + ' ' + students?.find(s => s.id === studentId)?.lastName,
-                admissionNumber: students?.find(s => s.id === studentId)?.admissionNumber,
+                studentName: s ? `${s.firstName} ${s.lastName}` : 'Unknown',
+                admissionNumber: s?.admissionNumber,
                 conflictingEntry: entry,
                 conflictTime: `${entry.startTime} - ${entry.endTime}`,
                 conflictDay: entry.day,
@@ -13287,51 +13277,32 @@ const TimetableModule = ({
         }
       }
       return conflictingStudents;
-    } catch (error) {
-      console.error('Error checking student conflicts:', error);
+    } catch (err) {
+      console.error('Error checking student conflicts:', err);
       return [];
     } finally {
       setLoadingConflicts(false);
     }
   };
 
-  const checkAllConflicts = async (formDataToCheck, excludeId = null) => {
-    const conflictsFound = { teacher: [], room: [], student: [] };
-    if (formDataToCheck.teacherId) {
-      conflictsFound.teacher = checkTeacherConflicts(
-        formDataToCheck.teacherId,
-        formDataToCheck.day,
-        formDataToCheck.startTime,
-        formDataToCheck.endTime,
-        excludeId
-      );
+  const checkAllConflicts = async (data, excludeId = null) => {
+    const found = { teacher: [], room: [], student: [] };
+    if (data.teacherId) {
+      found.teacher = checkTeacherConflicts(data.teacherId, data.day, data.startTime, data.endTime, excludeId);
     }
-    if (formDataToCheck.room) {
-      conflictsFound.room = checkRoomConflicts(
-        formDataToCheck.room,
-        formDataToCheck.day,
-        formDataToCheck.startTime,
-        formDataToCheck.endTime,
-        excludeId
-      );
+    if (data.room) {
+      found.room = checkRoomConflicts(data.room, data.day, data.startTime, data.endTime, excludeId);
     }
-    conflictsFound.student = await checkStudentConflicts(
-      formDataToCheck.courseId,
-      formDataToCheck.programId,
-      formDataToCheck.classId,
-      formDataToCheck.year,
-      formDataToCheck.module,
-      formDataToCheck.semester,
-      formDataToCheck.day,
-      formDataToCheck.startTime,
-      formDataToCheck.endTime,
-      excludeId
+    found.student = await checkStudentConflicts(
+      data.courseId, data.programId, data.classId,
+      data.year, data.module, data.semester,
+      data.day, data.startTime, data.endTime, excludeId
     );
-    setConflicts(conflictsFound);
-    return conflictsFound;
+    setConflicts(found);
+    return found;
   };
 
-  // ==================== AUTO-REFRESH FUNCTION ====================
+  // ==================== REFRESH ====================
   const refreshTimetable = async () => {
     try {
       setLoading(true);
@@ -13343,30 +13314,25 @@ const TimetableModule = ({
       if (isUniversity && selectedYear) params.year = selectedYear;
       if (isUniversity && selectedSemester) params.semester = selectedSemester;
       if (!isUniversity && !isTVET && selectedClass) params.classId = selectedClass;
-      
+
       const res = await api.get('/timetable', { params });
-      if (res.data.timetable) {
-        setTimetable(res.data.timetable);
-      }
-    } catch (error) {
-      console.error('Error refreshing timetable:', error);
+      if (res.data.timetable) setTimetable(res.data.timetable);
+    } catch (err) {
+      console.error('Error refreshing timetable:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    refreshTimetable();
-  }, [selectedProgram, selectedCourse, selectedClass, selectedYear, selectedModule, selectedSemester]);
+  useEffect(() => { refreshTimetable(); },
+    [selectedProgram, selectedCourse, selectedClass, selectedYear, selectedModule, selectedSemester]);
 
-  // ==================== FILTER UNITS/SUBJECTS ====================
+  // ==================== FILTER UNITS / SUBJECTS ====================
   useEffect(() => {
     if (isTVET && formData.programId) {
-      const unitsForProgram = units?.filter(u => u.programId === formData.programId) || [];
-      setFilteredUnits(unitsForProgram);
+      setFilteredUnits(units?.filter(u => u.programId === formData.programId) || []);
     } else if (isUniversity && formData.courseId) {
-      const unitsForCourse = units?.filter(u => u.courseId === formData.courseId) || [];
-      setFilteredUnits(unitsForCourse);
+      setFilteredUnits(units?.filter(u => u.courseId === formData.courseId) || []);
     } else {
       setFilteredUnits([]);
     }
@@ -13374,68 +13340,51 @@ const TimetableModule = ({
 
   useEffect(() => {
     if (!isUniversity && !isTVET && formData.classId) {
-      const subjectsForClass = subjects?.filter(s => s.classId === formData.classId) || [];
-      setFilteredSubjects(subjectsForClass);
+      setFilteredSubjects(subjects?.filter(s => s.classId === formData.classId) || []);
     } else {
       setFilteredSubjects([]);
     }
   }, [formData.classId, subjects, isUniversity, isTVET]);
 
-  // ==================== HELPER FUNCTIONS ====================
+  // ==================== HELPERS ====================
   const getUnitName = (entry) => {
+    if (entry.isBreak) return entry.breakName || 'Break';
     if (entry.unit?.name) return entry.unit.name;
     if (entry.Unit?.name) return entry.Unit.name;
     if (entry.unitId) {
-      const foundUnit = units?.find(u => u.id === entry.unitId);
-      if (foundUnit?.name) return foundUnit.name;
+      const u = units?.find(x => x.id === entry.unitId);
+      if (u?.name) return u.name;
     }
     if (entry.subject?.name) return entry.subject.name;
     if (entry.Subject?.name) return entry.Subject.name;
     if (entry.subjectId) {
-      const foundSubject = subjects?.find(s => s.id === entry.subjectId);
-      if (foundSubject?.name) return foundSubject.name;
+      const s = subjects?.find(x => x.id === entry.subjectId);
+      if (s?.name) return s.name;
     }
     return 'Unknown';
   };
 
   const getTeacherName = (entry) => {
-    if (entry.teacher?.User) {
-      return `${entry.teacher.User.firstName || ''} ${entry.teacher.User.lastName || ''}`.trim();
-    }
-    if (entry.Teacher?.User) {
-      return `${entry.Teacher.User.firstName || ''} ${entry.Teacher.User.lastName || ''}`.trim();
-    }
+    if (entry.isBreak) return '';
+    if (entry.teacher?.User) return `${entry.teacher.User.firstName || ''} ${entry.teacher.User.lastName || ''}`.trim();
+    if (entry.Teacher?.User) return `${entry.Teacher.User.firstName || ''} ${entry.Teacher.User.lastName || ''}`.trim();
     if (entry.teacherId) {
-      const foundStaff = staff?.find(s => s.id === entry.teacherId);
-      if (foundStaff?.User) {
-        return `${foundStaff.User.firstName || ''} ${foundStaff.User.lastName || ''}`.trim();
-      }
+      const s = staff?.find(x => x.id === entry.teacherId);
+      if (s?.User) return `${s.User.firstName || ''} ${s.User.lastName || ''}`.trim();
     }
     return 'Unknown';
   };
 
-  // ==================== HANDLE SUBMIT ====================
+  // ==================== SUBMIT — CLASS ====================
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!canAdd) {
-      alert('You do not have permission to add timetable entries');
-      return;
-    }
+    if (!canAdd) { alert('You do not have permission to add timetable entries'); return; }
     setLoading(true);
-    
     try {
-      if (!formData.teacherId) {
-        alert('Please select a teacher');
-        setLoading(false);
-        return;
-      }
+      if (!formData.teacherId) { alert('Please select a teacher'); setLoading(false); return; }
 
       const selectedStaff = staff.find(s => s.userId === formData.teacherId);
-      if (!selectedStaff) {
-        alert('Teacher not found in staff records');
-        setLoading(false);
-        return;
-      }
+      if (!selectedStaff) { alert('Teacher not found in staff records'); setLoading(false); return; }
 
       const submitData = {
         day: formData.day,
@@ -13444,72 +13393,39 @@ const TimetableModule = ({
         endTime: formData.endTime,
         teacherId: selectedStaff.id,
         room: formData.room || '',
-        schoolId: currentSchool?.id
+        schoolId: currentSchool?.id,
+        isBreak: false
       };
 
       if (isTVET) {
-        if (!formData.programId) {
-          alert('Please select a program');
-          setLoading(false);
-          return;
-        }
-        if (!formData.unitId) {
-          alert('Please select a module/unit');
-          setLoading(false);
-          return;
-        }
+        if (!formData.programId) { alert('Please select a program'); setLoading(false); return; }
+        if (!formData.unitId) { alert('Please select a module/unit'); setLoading(false); return; }
         submitData.programId = formData.programId;
         submitData.unitId = formData.unitId;
         submitData.year = formData.year ? parseInt(formData.year) : null;
         submitData.module = formData.module ? parseInt(formData.module) : null;
       } else if (isUniversity) {
-        if (!formData.courseId) {
-          alert('Please select a course');
-          setLoading(false);
-          return;
-        }
-        if (!formData.unitId) {
-          alert('Please select a unit');
-          setLoading(false);
-          return;
-        }
+        if (!formData.courseId) { alert('Please select a course'); setLoading(false); return; }
+        if (!formData.unitId) { alert('Please select a unit'); setLoading(false); return; }
         submitData.courseId = formData.courseId;
         submitData.unitId = formData.unitId;
         submitData.year = formData.year ? parseInt(formData.year) : null;
         submitData.semester = formData.semester ? parseInt(formData.semester) : null;
       } else {
-        if (!formData.classId) {
-          alert('Please select a class');
-          setLoading(false);
-          return;
-        }
-        if (!formData.subjectId) {
-          alert('Please select a subject');
-          setLoading(false);
-          return;
-        }
+        if (!formData.classId) { alert('Please select a class'); setLoading(false); return; }
+        if (!formData.subjectId) { alert('Please select a subject'); setLoading(false); return; }
         submitData.classId = formData.classId;
         submitData.subjectId = formData.subjectId;
       }
 
       const conflictsFound = await checkAllConflicts(submitData);
-      
-      if (conflictsFound.teacher.length > 0 || conflictsFound.room.length > 0 || conflictsFound.student.length > 0) {
-        let conflictMessage = '⚠️ Conflicts detected:\n\n';
-        if (conflictsFound.teacher.length > 0) {
-          conflictMessage += `👨‍🏫 Teacher Conflict: ${conflictsFound.teacher.length} existing class(es) at this time\n`;
-        }
-        if (conflictsFound.room.length > 0) {
-          conflictMessage += `🏠 Room Conflict: ${conflictsFound.room.length} existing booking(s) at this time\n`;
-        }
-        if (conflictsFound.student.length > 0) {
-          conflictMessage += `👨‍🎓 Student Conflicts: ${conflictsFound.student.length} student(s) have overlapping schedules\n`;
-        }
-        conflictMessage += '\nDo you want to save anyway?';
-        if (!window.confirm(conflictMessage)) {
-          setLoading(false);
-          return;
-        }
+      if (conflictsFound.teacher.length || conflictsFound.room.length || conflictsFound.student.length) {
+        let msg = '⚠️ Conflicts detected:\n\n';
+        if (conflictsFound.teacher.length) msg += `👨‍🏫 Teacher Conflict: ${conflictsFound.teacher.length} existing class(es)\n`;
+        if (conflictsFound.room.length)    msg += `🏠 Room Conflict: ${conflictsFound.room.length} booking(s)\n`;
+        if (conflictsFound.student.length) msg += `👨‍🎓 Student Conflicts: ${conflictsFound.student.length} student(s)\n`;
+        msg += '\nSave anyway?';
+        if (!window.confirm(msg)) { setLoading(false); return; }
       }
 
       await handleCreate('/timetable', submitData, setTimetable, timetable);
@@ -13522,15 +13438,70 @@ const TimetableModule = ({
       setConflicts([]);
       await refreshTimetable();
       alert('✅ Timetable entry added successfully!');
-    } catch (error) {
-      console.error('❌ Error creating timetable entry:', error);
-      alert(error.response?.data?.message || 'Failed to create timetable entry');
+    } catch (err) {
+      console.error('❌ Error creating timetable entry:', err);
+      alert(err.response?.data?.message || 'Failed to create timetable entry');
     } finally {
       setLoading(false);
     }
   };
 
-  // ==================== HANDLE DELETE ====================
+  // ==================== SUBMIT — BREAK ====================
+  // Breaks are stored as timetable rows but with isBreak=true, no teacher/unit/subject,
+  // and only day + period + times + a name. They still occupy the slot.
+  const handleBreakSubmit = async (e) => {
+    e.preventDefault();
+    if (!canAdd) { alert('You do not have permission'); return; }
+    setLoading(true);
+    try {
+      if (!breakForm.period) { alert('Please select a period'); setLoading(false); return; }
+      if (!breakForm.startTime || !breakForm.endTime) { alert('Please set start and end time'); setLoading(false); return; }
+      if (breakForm.startTime >= breakForm.endTime) { alert('End time must be after start time'); setLoading(false); return; }
+
+      // Check for slot occupancy (across all entries, including other breaks)
+      const existingSlot = timetable.find(t =>
+        t.day === breakForm.day && t.period === parseInt(breakForm.period)
+      );
+      if (existingSlot) {
+        if (!window.confirm(`Period ${breakForm.period} on ${breakForm.day} already has an entry (${existingSlot.isBreak ? existingSlot.breakName : getUnitName(existingSlot)}). Overwrite?`)) {
+          setLoading(false); return;
+        }
+      }
+
+      const submitData = {
+        day: breakForm.day,
+        period: parseInt(breakForm.period),
+        startTime: breakForm.startTime,
+        endTime: breakForm.endTime,
+        room: '',
+        teacherId: null,
+        isBreak: true,
+        breakName: breakForm.name || 'Break',
+        schoolId: currentSchool?.id,
+        // Attach scope identifiers so the break shows up under the right filter
+        ...(isTVET && selectedProgram ? { programId: selectedProgram } : {}),
+        ...(isTVET && selectedYear ? { year: parseInt(selectedYear) } : {}),
+        ...(isTVET && selectedModule ? { module: parseInt(selectedModule) } : {}),
+        ...(isUniversity && selectedCourse ? { courseId: selectedCourse } : {}),
+        ...(isUniversity && selectedYear ? { year: parseInt(selectedYear) } : {}),
+        ...(isUniversity && selectedSemester ? { semester: parseInt(selectedSemester) } : {}),
+        ...(!isUniversity && !isTVET && selectedClass ? { classId: selectedClass } : {})
+      };
+
+      await handleCreate('/timetable', submitData, setTimetable, timetable);
+      setShowBreakForm(false);
+      setBreakForm({ name: 'Break', day: 'MONDAY', period: '', startTime: '10:20', endTime: '10:50' });
+      await refreshTimetable();
+      alert('✅ Break added successfully!');
+    } catch (err) {
+      console.error('❌ Error adding break:', err);
+      alert(err.response?.data?.message || 'Failed to add break');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==================== DELETE ====================
   const handleDeleteEntry = async (id) => {
     if (!canDelete) return;
     if (window.confirm('Delete this timetable entry?')) {
@@ -13539,68 +13510,75 @@ const TimetableModule = ({
     }
   };
 
-  // ==================== HANDLE CHECK CONFLICTS ====================
+  // ==================== CHECK CONFLICTS FOR AN ENTRY ====================
   const handleCheckConflicts = async (entry) => {
+    if (entry.isBreak) { alert('Breaks do not participate in conflict checks.'); return; }
     setLoadingConflicts(true);
     try {
       const conflictsFound = await checkAllConflicts(entry, entry.id);
       setShowConflicts(true);
-      if (conflictsFound.teacher.length === 0 && conflictsFound.room.length === 0 && conflictsFound.student.length === 0) {
+      if (!conflictsFound.teacher.length && !conflictsFound.room.length && !conflictsFound.student.length) {
         alert('✅ No conflicts detected for this timetable entry.');
       } else {
-        let conflictMessage = '⚠️ Conflicts detected:\n\n';
-        if (conflictsFound.teacher.length > 0) {
-          conflictMessage += `👨‍🏫 Teacher Conflicts:\n`;
-          conflictsFound.teacher.forEach(t => {
-            conflictMessage += `   - ${t.day} at ${t.startTime}-${t.endTime} (${t.unit?.name || t.subject?.name || 'Unknown'})\n`;
-          });
-          conflictMessage += '\n';
+        let msg = '⚠️ Conflicts detected:\n\n';
+        if (conflictsFound.teacher.length) {
+          msg += '👨‍🏫 Teacher Conflicts:\n';
+          conflictsFound.teacher.forEach(t => { msg += `   - ${t.day} ${t.startTime}-${t.endTime} (${t.unit?.name || t.subject?.name || 'Unknown'})\n`; });
+          msg += '\n';
         }
-        if (conflictsFound.room.length > 0) {
-          conflictMessage += `🏠 Room Conflicts:\n`;
-          conflictsFound.room.forEach(r => {
-            conflictMessage += `   - ${r.day} at ${r.startTime}-${r.endTime} (${r.unit?.name || r.subject?.name || 'Unknown'})\n`;
-          });
-          conflictMessage += '\n';
+        if (conflictsFound.room.length) {
+          msg += '🏠 Room Conflicts:\n';
+          conflictsFound.room.forEach(r => { msg += `   - ${r.day} ${r.startTime}-${r.endTime} (${r.unit?.name || r.subject?.name || 'Unknown'})\n`; });
+          msg += '\n';
         }
-        if (conflictsFound.student.length > 0) {
-          conflictMessage += `👨‍🎓 Student Conflicts (${conflictsFound.student.length} students):\n`;
+        if (conflictsFound.student.length) {
+          msg += `👨‍🎓 Student Conflicts (${conflictsFound.student.length}):\n`;
           conflictsFound.student.slice(0, 5).forEach(s => {
-            conflictMessage += `   - ${s.studentName} (${s.admissionNumber}) - ${s.conflictItem} at ${s.conflictTime} on ${s.conflictDay}\n`;
+            msg += `   - ${s.studentName} (${s.admissionNumber}) - ${s.conflictItem} at ${s.conflictTime} on ${s.conflictDay}\n`;
           });
-          if (conflictsFound.student.length > 5) {
-            conflictMessage += `   ... and ${conflictsFound.student.length - 5} more students\n`;
-          }
+          if (conflictsFound.student.length > 5) msg += `   ... and ${conflictsFound.student.length - 5} more\n`;
         }
-        alert(conflictMessage);
+        alert(msg);
       }
-    } catch (error) {
-      console.error('Error checking conflicts:', error);
+    } catch (err) {
+      console.error('Error checking conflicts:', err);
       alert('Failed to check conflicts');
     } finally {
       setLoadingConflicts(false);
     }
   };
 
-  // ==================== PRINT FUNCTION (WITH SCHOOL LOGO) ====================
+  // ==================== FILTERED TIMETABLE ====================
+  const filteredTimetable = useMemo(() => {
+    if (!timetable || timetable.length === 0) return [];
+    let filtered = [...timetable];
+    if (isTVET) {
+      if (selectedProgram) filtered = filtered.filter(e => e.programId === selectedProgram);
+      if (selectedYear)    filtered = filtered.filter(e => e.year === parseInt(selectedYear));
+      if (selectedModule)  filtered = filtered.filter(e => e.module === parseInt(selectedModule));
+    } else if (isUniversity) {
+      if (selectedCourse)   filtered = filtered.filter(e => e.courseId === selectedCourse);
+      if (selectedYear)     filtered = filtered.filter(e => e.year === parseInt(selectedYear));
+      if (selectedSemester) filtered = filtered.filter(e => e.semester === parseInt(selectedSemester));
+    } else {
+      if (selectedClass) filtered = filtered.filter(e => e.classId === selectedClass);
+    }
+    return filtered;
+  }, [timetable, selectedProgram, selectedCourse, selectedYear, selectedModule, selectedSemester, selectedClass, isTVET, isUniversity]);
+
+  // ==================== PRINT ====================
   const handlePrint = () => {
-    // Guard: nothing to print
     if (!filteredTimetable || filteredTimetable.length === 0) {
-      alert('No timetable entries to print. Adjust the filters or add entries first.');
+      alert('No timetable entries to print.');
       return;
     }
 
     const schoolName = currentSchool?.name || 'School Timetable';
-    const schoolLogo =
-      currentSchool?.contact?.logo ||
-      currentSchool?.branding?.logo ||
-      currentSchool?.logo ||
-      '';
+    const schoolLogo = currentSchool?.contact?.logo || currentSchool?.branding?.logo || currentSchool?.logo || '';
 
-    // Build the header of the printed page
     const headerHtml = `
       <div class="print-header">
-        ${schoolLogo ? `<img src="${schoolLogo}" alt="School Logo" class="print-logo" />` : ''}
+        ${schoolLogo ? `<img src="${schoolLogo}" alt="Logo" class="print-logo" />` : ''}
         <div class="print-title-block">
           <h1 class="print-school-name">${schoolName}</h1>
           <h2 class="print-doc-title">
@@ -13611,7 +13589,6 @@ const TimetableModule = ({
       </div>
     `;
 
-    // Build the filter summary line
     const filterBits = [];
     if (isTVET && selectedProgram) {
       const p = programs?.find(x => x.id === selectedProgram);
@@ -13625,27 +13602,35 @@ const TimetableModule = ({
       const c = classes?.find(x => x.id === selectedClass);
       if (c) filterBits.push(`Class: ${c.name}`);
     }
-    if (selectedYear) filterBits.push(`Year ${selectedYear}`);
-    if (selectedModule) filterBits.push(`Module ${selectedModule}`);
+    if (selectedYear)     filterBits.push(`Year ${selectedYear}`);
+    if (selectedModule)   filterBits.push(`Module ${selectedModule}`);
     if (selectedSemester) filterBits.push(`Semester ${selectedSemester}`);
 
-    const filterHtml = filterBits.length > 0
+    const filterHtml = filterBits.length
       ? `<p class="print-filters">${filterBits.join(' &nbsp;•&nbsp; ')}</p>`
       : '';
 
-    // Build the table rows
     let rowsHtml = '';
     periods.forEach(period => {
       rowsHtml += `<tr><th class="period-cell">Period ${period}</th>`;
       days.forEach(day => {
         const entry = filteredTimetable.find(t => t.day === day && t.period === period);
-        if (entry) {
+        if (entry && entry.isBreak) {
+          // ============== BREAK CELL ==============
+          rowsHtml += `
+            <td class="break-cell">
+              <div class="break-name">${entry.breakName || 'Break'}</div>
+              ${entry.startTime && entry.endTime
+                ? `<div class="break-time">${entry.startTime.substring(0, 5)}–${entry.endTime.substring(0, 5)}</div>`
+                : ''}
+            </td>`;
+        } else if (entry) {
+          // ============== CLASS CELL ==============
           const unitName = getUnitName(entry);
           const teacherName = getTeacherName(entry);
           const times = entry.startTime && entry.endTime
             ? `${entry.startTime.substring(0, 5)}–${entry.endTime.substring(0, 5)}`
             : '';
-
           rowsHtml += `
             <td class="entry-cell">
               <div class="entry-unit">${unitName || '—'}</div>
@@ -13671,24 +13656,17 @@ const TimetableModule = ({
             ${days.map(d => `<th>${d}</th>`).join('')}
           </tr>
         </thead>
-        <tbody>
-          ${rowsHtml}
-        </tbody>
+        <tbody>${rowsHtml}</tbody>
       </table>
     `;
 
     const footerHtml = `
       <div class="print-footer">
-        <div class="signature-line">
-          <span>Prepared by: __________________________</span>
-        </div>
-        <div class="signature-line">
-          <span>Approved by (Principal/Dean): __________________________</span>
-        </div>
+        <div class="signature-line"><span>Prepared by: __________________________</span></div>
+        <div class="signature-line"><span>Approved by (Principal/Dean): __________________________</span></div>
       </div>
     `;
 
-    // Compose the whole document
     const html = `
       <!DOCTYPE html>
       <html>
@@ -13698,157 +13676,56 @@ const TimetableModule = ({
           <style>
             @page { size: A4 landscape; margin: 12mm; }
             * { box-sizing: border-box; }
-            body {
-              font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-              color: #1f2937;
-              margin: 0;
-              padding: 12px;
-              background: #fff;
-            }
-            .print-header {
-              display: flex;
-              align-items: center;
-              gap: 16px;
-              border-bottom: 3px double #4f46e5;
-              padding-bottom: 12px;
-              margin-bottom: 16px;
-            }
-            .print-logo {
-              width: 72px;
-              height: 72px;
-              object-fit: contain;
-              border-radius: 8px;
-              border: 1px solid #e5e7eb;
-              padding: 4px;
-              background: #fff;
-            }
-            .print-title-block {
-              flex: 1;
+            body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; color: #1f2937; margin: 0; padding: 12px; background: #fff; }
+            .print-header { display: flex; align-items: center; gap: 16px; border-bottom: 3px double #4f46e5; padding-bottom: 12px; margin-bottom: 16px; }
+            .print-logo { width: 72px; height: 72px; object-fit: contain; border-radius: 8px; border: 1px solid #e5e7eb; padding: 4px; background: #fff; }
+            .print-title-block { flex: 1; text-align: center; }
+            .print-school-name { font-size: 22px; font-weight: 800; color: #4f46e5; text-transform: uppercase; letter-spacing: 1.2px; margin: 0 0 4px 0; }
+            .print-doc-title { font-size: 15px; font-weight: 600; color: #374151; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.8px; }
+            .print-generated { font-size: 11px; color: #6b7280; margin: 0; }
+            .print-filters { text-align: center; font-size: 12px; color: #4b5563; background: #eef2ff; padding: 6px 10px; border-radius: 6px; margin: 0 0 14px 0; }
+            .print-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+            .print-table th { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; padding: 8px 6px; text-align: center; font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
+            .print-table td { border: 1px solid #e5e7eb; padding: 6px; vertical-align: top; }
+            .period-cell, .period-header { background: #f3f4f6; font-weight: 700; color: #374151; white-space: nowrap; width: 70px; text-align: center; }
+            .entry-cell { background: #fafaff; }
+            .entry-unit { font-weight: 700; color: #4338ca; font-size: 11.5px; margin-bottom: 2px; }
+            .entry-teacher { color: #374151; font-size: 10.5px; margin-bottom: 1px; }
+            .entry-room { color: #6b7280; font-size: 10px; margin-bottom: 1px; }
+            .entry-time { color: #9ca3af; font-size: 10px; border-top: 1px dashed #e5e7eb; margin-top: 3px; padding-top: 3px; }
+            .entry-badge { display: inline-block; background: #e0e7ff; color: #4338ca; font-size: 9px; padding: 1px 5px; border-radius: 4px; margin-top: 3px; }
+            .entry-year { font-size: 9.5px; color: #6b7280; margin-top: 2px; }
+            .empty-cell { text-align: center; color: #d1d5db; background: #fbfbfd; }
+
+            /* ============ BREAK STYLING ============ */
+            .break-cell {
+              background: repeating-linear-gradient(
+                45deg,
+                #fef3c7,
+                #fef3c7 6px,
+                #fde68a 6px,
+                #fde68a 12px
+              );
               text-align: center;
+              vertical-align: middle;
             }
-            .print-school-name {
-              font-size: 22px;
+            .break-name {
               font-weight: 800;
-              color: #4f46e5;
+              color: #92400e;
+              font-size: 11px;
               text-transform: uppercase;
-              letter-spacing: 1.2px;
-              margin: 0 0 4px 0;
+              letter-spacing: 0.6px;
             }
-            .print-doc-title {
-              font-size: 15px;
+            .break-time {
+              color: #78350f;
+              font-size: 10px;
+              margin-top: 3px;
               font-weight: 600;
-              color: #374151;
-              margin: 0 0 4px 0;
-              text-transform: uppercase;
-              letter-spacing: 0.8px;
             }
-            .print-generated {
-              font-size: 11px;
-              color: #6b7280;
-              margin: 0;
-            }
-            .print-filters {
-              text-align: center;
-              font-size: 12px;
-              color: #4b5563;
-              background: #eef2ff;
-              padding: 6px 10px;
-              border-radius: 6px;
-              margin: 0 0 14px 0;
-            }
-            .print-table {
-              width: 100%;
-              border-collapse: collapse;
-              font-size: 11px;
-            }
-            .print-table th {
-              background: #eef2ff;
-              color: #4338ca;
-              border: 1px solid #c7d2fe;
-              padding: 8px 6px;
-              text-align: center;
-              font-weight: 700;
-              text-transform: uppercase;
-              font-size: 10px;
-              letter-spacing: 0.5px;
-            }
-            .print-table td {
-              border: 1px solid #e5e7eb;
-              padding: 6px;
-              vertical-align: top;
-            }
-            .period-cell,
-            .period-header {
-              background: #f3f4f6;
-              font-weight: 700;
-              color: #374151;
-              white-space: nowrap;
-              width: 70px;
-              text-align: center;
-            }
-            .entry-cell {
-              background: #fafaff;
-            }
-            .entry-unit {
-              font-weight: 700;
-              color: #4338ca;
-              font-size: 11.5px;
-              margin-bottom: 2px;
-            }
-            .entry-teacher {
-              color: #374151;
-              font-size: 10.5px;
-              margin-bottom: 1px;
-            }
-            .entry-room {
-              color: #6b7280;
-              font-size: 10px;
-              margin-bottom: 1px;
-            }
-            .entry-time {
-              color: #9ca3af;
-              font-size: 10px;
-              border-top: 1px dashed #e5e7eb;
-              margin-top: 3px;
-              padding-top: 3px;
-            }
-            .entry-badge {
-              display: inline-block;
-              background: #e0e7ff;
-              color: #4338ca;
-              font-size: 9px;
-              padding: 1px 5px;
-              border-radius: 4px;
-              margin-top: 3px;
-            }
-            .entry-year {
-              font-size: 9.5px;
-              color: #6b7280;
-              margin-top: 2px;
-            }
-            .empty-cell {
-              text-align: center;
-              color: #d1d5db;
-              background: #fbfbfd;
-            }
-            .print-footer {
-              margin-top: 28px;
-              padding-top: 16px;
-              border-top: 1px solid #e5e7eb;
-              display: flex;
-              justify-content: space-between;
-              gap: 32px;
-              font-size: 11px;
-              color: #4b5563;
-            }
-            .signature-line {
-              flex: 1;
-              padding-top: 24px;
-            }
-            @media print {
-              body { padding: 0; }
-              .no-print { display: none !important; }
-            }
+
+            .print-footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; gap: 32px; font-size: 11px; color: #4b5563; }
+            .signature-line { flex: 1; padding-top: 24px; }
+            @media print { body { padding: 0; } .no-print { display: none !important; } }
           </style>
         </head>
         <body>
@@ -13860,62 +13737,36 @@ const TimetableModule = ({
       </html>
     `;
 
-    // Open print window
     const printWindow = window.open('', '_blank', 'width=1200,height=800');
-    if (!printWindow) {
-      alert('Please allow pop-ups to print the timetable.');
-      return;
-    }
+    if (!printWindow) { alert('Please allow pop-ups to print the timetable.'); return; }
     printWindow.document.open();
     printWindow.document.write(html);
     printWindow.document.close();
 
-    // Give images a moment to load, then trigger print
-    printWindow.onload = () => {
-      setTimeout(() => {
-        printWindow.focus();
-        printWindow.print();
-      }, 300);
-    };
-    // Fallback in case onload already fired
-    setTimeout(() => {
-      try {
-        printWindow.focus();
-        printWindow.print();
-      } catch (e) { /* ignore */ }
-    }, 800);
+    printWindow.onload = () => setTimeout(() => { printWindow.focus(); printWindow.print(); }, 300);
+    setTimeout(() => { try { printWindow.focus(); printWindow.print(); } catch (e) {} }, 800);
   };
-  // ==================== FILTERED TIMETABLE ====================
-  const filteredTimetable = React.useMemo(() => {
-    if (!timetable || timetable.length === 0) return [];
-    let filtered = [...timetable];
-    if (isTVET) {
-      if (selectedProgram) filtered = filtered.filter(entry => entry.programId === selectedProgram);
-      if (selectedYear) filtered = filtered.filter(entry => entry.year === parseInt(selectedYear));
-      if (selectedModule) filtered = filtered.filter(entry => entry.module === parseInt(selectedModule));
-    } else if (isUniversity) {
-      if (selectedCourse) filtered = filtered.filter(entry => entry.courseId === selectedCourse);
-      if (selectedYear) filtered = filtered.filter(entry => entry.year === parseInt(selectedYear));
-      if (selectedSemester) filtered = filtered.filter(entry => entry.semester === parseInt(selectedSemester));
-    } else {
-      if (selectedClass) filtered = filtered.filter(entry => entry.classId === selectedClass);
-    }
-    return filtered;
-  }, [timetable, selectedProgram, selectedCourse, selectedYear, selectedModule, selectedSemester, selectedClass, isTVET, isUniversity]);
 
   // ==================== RENDER ====================
   return (
     <div className="space-y-6">
       {(loading || loadingConflicts) && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
-      
-      <div className="flex justify-between items-center no-print">
+
+      {/* Header */}
+      <div className="flex justify-between items-center no-print flex-wrap gap-2">
         <h2 className="text-2xl font-bold">
           {isTVET ? '🔧 Program Timetable' : isUniversity ? '📚 Course Timetable' : '📅 Class Timetable'}
         </h2>
-        <div className="flex space-x-2">
+        <div className="flex flex-wrap gap-2">
           {canAdd && (
             <button onClick={() => setShowForm(true)} className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center">
               <i className="fas fa-plus mr-2"></i>Add Entry
+            </button>
+          )}
+          {/* NEW: Add Break button — hidden for University */}
+          {canAdd && supportsBreaks && (
+            <button onClick={() => setShowBreakForm(true)} className="bg-amber-500 text-white px-4 py-2 rounded-lg flex items-center hover:bg-amber-600">
+              <i className="fas fa-mug-hot mr-2"></i>Add Break
             </button>
           )}
           <button onClick={handlePrint} className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center">
@@ -13924,7 +13775,7 @@ const TimetableModule = ({
         </div>
       </div>
 
-      {/* Conflict Warning Banner */}
+      {/* Conflict Banner */}
       {conflicts && (conflicts.teacher?.length > 0 || conflicts.room?.length > 0 || conflicts.student?.length > 0) && showForm && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
           <div className="flex items-start">
@@ -13941,241 +13792,138 @@ const TimetableModule = ({
         </div>
       )}
 
-      {/* Filter Section with Searchable Selects */}
+      {/* Filters */}
       <div className="bg-white p-4 rounded-xl shadow-sm no-print">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {isTVET && (
-            <>
-              <SearchableSelect
-                label="Program"
-                value={selectedProgram}
-                onChange={(e) => setSelectedProgram(e.target.value)}
-                options={programOptions}
-                placeholder=""
-              />
-              <SearchableSelect
-                label="Year"
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(e.target.value)}
-                options={yearOptions.filter(opt => opt.value !== '')}
-                placeholder=""
-              />
-              <SearchableSelect
-                label="Module"
-                value={selectedModule}
-                onChange={(e) => setSelectedModule(e.target.value)}
-                options={moduleOptions.filter(opt => opt.value !== '')}
-                placeholder=""
-              />
-            </>
-          )}
-          
-          {isUniversity && (
-            <>
-              <SearchableSelect
-                label="Course"
-                value={selectedCourse}
-                onChange={(e) => setSelectedCourse(e.target.value)}
-                options={courseOptions}
-                placeholder=""
-              />
-              <SearchableSelect
-                label="Year"
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(e.target.value)}
-                options={yearOptions.filter(opt => opt.value !== '')}
-                placeholder=""
-              />
-              <SearchableSelect
-                label="Semester"
-                value={selectedSemester}
-                onChange={(e) => setSelectedSemester(e.target.value)}
-                options={semesterOptions.filter(opt => opt.value !== '')}
-                placeholder=""
-              />
-            </>
-          )}
-          
+          {isTVET && (<>
+            <SearchableSelect label="Program" value={selectedProgram} onChange={(e) => setSelectedProgram(e.target.value)} options={programOptions} placeholder="" />
+            <SearchableSelect label="Year" value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} options={yearOptions} placeholder="" />
+            <SearchableSelect label="Module" value={selectedModule} onChange={(e) => setSelectedModule(e.target.value)} options={moduleOptions} placeholder="" />
+          </>)}
+          {isUniversity && (<>
+            <SearchableSelect label="Course" value={selectedCourse} onChange={(e) => setSelectedCourse(e.target.value)} options={courseOptions} placeholder="" />
+            <SearchableSelect label="Year" value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} options={yearOptions} placeholder="" />
+            <SearchableSelect label="Semester" value={selectedSemester} onChange={(e) => setSelectedSemester(e.target.value)} options={semesterOptions} placeholder="" />
+          </>)}
           {!isUniversity && !isTVET && (
-            <SearchableSelect
-              label="Class"
-              value={selectedClass}
-              onChange={(e) => setSelectedClass(e.target.value)}
-              options={classOptions}
-              placeholder=""
-            />
+            <SearchableSelect label="Class" value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)} options={classOptions} placeholder="" />
           )}
         </div>
-        
         <div className="mt-2 text-sm text-gray-500">
           Showing {filteredTimetable.length} entries
-          {selectedProgram && programs?.find(p => p.id === selectedProgram) && 
-            ` for ${programs.find(p => p.id === selectedProgram).name}`}
+          {selectedProgram && programs?.find(p => p.id === selectedProgram) && ` for ${programs.find(p => p.id === selectedProgram).name}`}
           {selectedYear && ` • Year ${selectedYear}`}
           {selectedModule && ` • Module ${selectedModule}`}
         </div>
       </div>
 
-      {/* Add Entry Form with Searchable Selects */}
+      {/* Add Class Entry Form */}
       {showForm && canAdd && (
         <div className="bg-white p-6 rounded-xl shadow-sm border-2 border-indigo-100 no-print">
           <h3 className="text-lg font-semibold mb-4">Add Timetable Entry</h3>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              
-              {/* TVET Fields */}
-              {isTVET && (
-                <>
-                  <SearchableSelect
-                    label="Program *"
-                    value={formData.programId}
-                    onChange={(e) => setFormData({...formData, programId: e.target.value, unitId: ''})}
-                    options={programOptions}
-                    required
-                    placeholder=""
-                  />
-                  <SearchableSelect
-                    label="Year"
-                    value={formData.year}
-                    onChange={(e) => setFormData({...formData, year: e.target.value})}
-                    options={yearOptions}
-                    placeholder=""
-                  />
-                  <SearchableSelect
-                    label="Module"
-                    value={formData.module}
-                    onChange={(e) => setFormData({...formData, module: e.target.value})}
-                    options={moduleOptions}
-                    placeholder=""
-                  />
-                </>
-              )}
-              
-              {/* University Fields */}
-              {isUniversity && (
-                <>
-                  <SearchableSelect
-                    label="Course *"
-                    value={formData.courseId}
-                    onChange={(e) => setFormData({...formData, courseId: e.target.value, unitId: ''})}
-                    options={courseOptions}
-                    required
-                    placeholder=""
-                  />
-                  <SearchableSelect
-                    label="Year"
-                    value={formData.year}
-                    onChange={(e) => setFormData({...formData, year: e.target.value})}
-                    options={yearOptions}
-                    placeholder=""
-                  />
-                  <SearchableSelect
-                    label="Semester"
-                    value={formData.semester}
-                    onChange={(e) => setFormData({...formData, semester: e.target.value})}
-                    options={semesterOptions}
-                    placeholder=""
-                  />
-                </>
-              )}
-              
-              {/* Regular School Fields */}
+              {isTVET && (<>
+                <SearchableSelect label="Program *" value={formData.programId} onChange={(e) => setFormData({...formData, programId: e.target.value, unitId: ''})} options={programOptions} required placeholder="" />
+                <SearchableSelect label="Year" value={formData.year} onChange={(e) => setFormData({...formData, year: e.target.value})} options={yearOptions} placeholder="" />
+                <SearchableSelect label="Module" value={formData.module} onChange={(e) => setFormData({...formData, module: e.target.value})} options={moduleOptions} placeholder="" />
+              </>)}
+              {isUniversity && (<>
+                <SearchableSelect label="Course *" value={formData.courseId} onChange={(e) => setFormData({...formData, courseId: e.target.value, unitId: ''})} options={courseOptions} required placeholder="" />
+                <SearchableSelect label="Year" value={formData.year} onChange={(e) => setFormData({...formData, year: e.target.value})} options={yearOptions} placeholder="" />
+                <SearchableSelect label="Semester" value={formData.semester} onChange={(e) => setFormData({...formData, semester: e.target.value})} options={semesterOptions} placeholder="" />
+              </>)}
               {!isUniversity && !isTVET && (
-                <SearchableSelect
-                  label="Class *"
-                  value={formData.classId}
-                  onChange={(e) => setFormData({...formData, classId: e.target.value})}
-                  options={classOptions}
-                  required
-                  placeholder=""
-                />
+                <SearchableSelect label="Class *" value={formData.classId} onChange={(e) => setFormData({...formData, classId: e.target.value})} options={classOptions} required placeholder="" />
               )}
 
-              {/* Unit/Subject Selection */}
               {(isTVET || isUniversity) && (
-                <SearchableSelect
-                  label={isTVET ? "Module *" : "Unit *"}
-                  value={formData.unitId}
-                  onChange={(e) => setFormData({...formData, unitId: e.target.value})}
-                  options={unitOptions}
-                  required
-                  disabled={(!formData.programId && !formData.courseId)}
-                  placeholder=""
-                />
+                <SearchableSelect label={isTVET ? 'Module *' : 'Unit *'} value={formData.unitId} onChange={(e) => setFormData({...formData, unitId: e.target.value})} options={unitOptions} required disabled={!formData.programId && !formData.courseId} placeholder="" />
               )}
-              
               {!isUniversity && !isTVET && (
-                <SearchableSelect
-                  label="Subject *"
-                  value={formData.subjectId}
-                  onChange={(e) => setFormData({...formData, subjectId: e.target.value})}
-                  options={subjectOptions}
-                  required
-                  disabled={!formData.classId}
-                  placeholder=""
-                />
+                <SearchableSelect label="Subject *" value={formData.subjectId} onChange={(e) => setFormData({...formData, subjectId: e.target.value})} options={subjectOptions} required disabled={!formData.classId} placeholder="" />
               )}
 
-              <SearchableSelect
-                label="Teacher *"
-                value={formData.teacherId}
-                onChange={(e) => setFormData({...formData, teacherId: e.target.value})}
-                options={teacherOptions}
-                required
-                placeholder=""
-              />
+              <SearchableSelect label="Teacher *" value={formData.teacherId} onChange={(e) => setFormData({...formData, teacherId: e.target.value})} options={teacherOptions} required placeholder="" />
+              <SearchableSelect label="Day *" value={formData.day} onChange={(e) => setFormData({...formData, day: e.target.value})} options={dayOptions} required placeholder="" />
+              <SearchableSelect label="Period *" value={formData.period} onChange={(e) => setFormData({...formData, period: e.target.value})} options={periodOptions} required placeholder="" />
 
-              <SearchableSelect
-                label="Day *"
-                value={formData.day}
-                onChange={(e) => setFormData({...formData, day: e.target.value})}
-                options={dayOptions}
-                required
-                placeholder=""
-              />
-
-              <SearchableSelect
-                label="Period *"
-                value={formData.period}
-                onChange={(e) => setFormData({...formData, period: e.target.value})}
-                options={periodOptions}
-                required
-                placeholder=""
-              />
-
-              <input
-                type="text"
-                placeholder="Room (e.g., Hall A, Lab 1)"
-                value={formData.room}
-                onChange={(e) => setFormData({...formData, room: e.target.value})}
-                className="px-3 py-2 border rounded-lg"
-              />
-              
-              <input
-                type="time"
-                value={formData.startTime}
-                onChange={(e) => setFormData({...formData, startTime: e.target.value})}
-                className="px-3 py-2 border rounded-lg"
-                required
-              />
-              
-              <input
-                type="time"
-                value={formData.endTime}
-                onChange={(e) => setFormData({...formData, endTime: e.target.value})}
-                className="px-3 py-2 border rounded-lg"
-                required
-              />
+              <input type="text" placeholder="Room (e.g., Hall A, Lab 1)" value={formData.room} onChange={(e) => setFormData({...formData, room: e.target.value})} className="px-3 py-2 border rounded-lg" />
+              <input type="time" value={formData.startTime} onChange={(e) => setFormData({...formData, startTime: e.target.value})} className="px-3 py-2 border rounded-lg" required />
+              <input type="time" value={formData.endTime} onChange={(e) => setFormData({...formData, endTime: e.target.value})} className="px-3 py-2 border rounded-lg" required />
             </div>
-
-            <button type="submit" className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50" disabled={loading}>
-              {loading ? 'Adding...' : 'Add Entry'}
-            </button>
+            <div className="flex gap-2">
+              <button type="submit" className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50" disabled={loading}>
+                {loading ? 'Adding...' : 'Add Entry'}
+              </button>
+              <button type="button" onClick={() => setShowForm(false)} className="bg-gray-400 text-white px-6 py-2 rounded-lg hover:bg-gray-500">
+                Cancel
+              </button>
+            </div>
           </form>
         </div>
       )}
 
-      {/* Timetable Display - Keep your existing table display */}
+      {/* NEW: Add Break Form */}
+      {showBreakForm && canAdd && supportsBreaks && (
+        <div className="bg-white p-6 rounded-xl shadow-sm border-2 border-amber-200 no-print">
+          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <i className="fas fa-mug-hot text-amber-500"></i>
+            Add Break
+          </h3>
+          <p className="text-sm text-gray-500 mb-4">
+            Breaks occupy a slot but don't have a teacher, subject, or unit. They don't participate in conflict checks.
+          </p>
+          <form onSubmit={handleBreakSubmit} className="space-y-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <SearchableSelect
+                label="Break Type *"
+                value={breakForm.name}
+                onChange={(e) => setBreakForm({ ...breakForm, name: e.target.value })}
+                options={breakNameOptions}
+                required
+                placeholder=""
+              />
+              <SearchableSelect
+                label="Day *"
+                value={breakForm.day}
+                onChange={(e) => setBreakForm({ ...breakForm, day: e.target.value })}
+                options={dayOptions}
+                required
+                placeholder=""
+              />
+              <SearchableSelect
+                label="Period *"
+                value={breakForm.period}
+                onChange={(e) => setBreakForm({ ...breakForm, period: e.target.value })}
+                options={periodOptions}
+                required
+                placeholder=""
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Start</label>
+                  <input type="time" value={breakForm.startTime} onChange={(e) => setBreakForm({ ...breakForm, startTime: e.target.value })} className="w-full px-3 py-2 border rounded-lg" required />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">End</label>
+                  <input type="time" value={breakForm.endTime} onChange={(e) => setBreakForm({ ...breakForm, endTime: e.target.value })} className="w-full px-3 py-2 border rounded-lg" required />
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button type="submit" disabled={loading} className="bg-amber-500 text-white px-6 py-2 rounded-lg hover:bg-amber-600 disabled:opacity-50">
+                {loading ? 'Adding...' : 'Add Break'}
+              </button>
+              <button type="button" onClick={() => setShowBreakForm(false)} className="bg-gray-400 text-white px-6 py-2 rounded-lg hover:bg-gray-500">
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Timetable Grid */}
       <div className="bg-white rounded-xl shadow-sm overflow-x-auto">
         {filteredTimetable.length === 0 ? (
           <div className="text-center py-12 text-gray-500">
@@ -14201,7 +13949,29 @@ const TimetableModule = ({
                     const entry = filteredTimetable.find(t => t.day === day && t.period === period);
                     return (
                       <td key={`${period}-${day}`} className="px-4 py-3 border align-top">
-                        {entry ? (
+                        {entry && entry.isBreak ? (
+                          // ============== BREAK CELL ==============
+                          <div className="bg-gradient-to-br from-amber-100 to-amber-200 border border-amber-300 p-3 rounded-lg relative group">
+                            <div className="flex items-center gap-2">
+                              <i className="fas fa-mug-hot text-amber-700"></i>
+                              <div className="font-bold text-amber-800 text-base uppercase tracking-wide">
+                                {entry.breakName || 'Break'}
+                              </div>
+                            </div>
+                            <div className="text-xs text-amber-700 mt-2 font-medium">
+                              <i className="far fa-clock mr-1"></i>
+                              {entry.startTime?.substring(0, 5)} - {entry.endTime?.substring(0, 5)}
+                            </div>
+                            {canDelete && (
+                              <div className="mt-2 flex space-x-1 no-print">
+                                <button onClick={() => handleDeleteEntry(entry.id)} className="text-red-500 hover:text-red-700 text-xs p-1 hover:bg-red-50 rounded" title="Delete break">
+                                  <i className="fas fa-trash"></i>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ) : entry ? (
+                          // ============== CLASS CELL ==============
                           <div className="bg-indigo-50 p-3 rounded-lg relative group">
                             <div className="font-bold text-indigo-700 text-base">{getUnitName(entry)}</div>
                             {isTVET && entry.module && (
@@ -14220,7 +13990,8 @@ const TimetableModule = ({
                               </div>
                             )}
                             <div className="text-xs text-gray-400 mt-2 border-t pt-1 border-indigo-200">
-                              <i className="far fa-clock mr-1"></i>{entry.startTime?.substring(0,5)} - {entry.endTime?.substring(0,5)}
+                              <i className="far fa-clock mr-1"></i>
+                              {entry.startTime?.substring(0, 5)} - {entry.endTime?.substring(0, 5)}
                             </div>
                             <div className="mt-2 flex space-x-1 no-print">
                               <button onClick={() => handleCheckConflicts(entry)} className="text-yellow-600 hover:text-yellow-800 text-xs p-1 hover:bg-yellow-50 rounded" title="Check Conflicts">
@@ -14248,6 +14019,7 @@ const TimetableModule = ({
     </div>
   );
 };
+
 
 
 import {
@@ -14303,7 +14075,6 @@ const ReportsModule = ({
   const [showCharts, setShowCharts] = useState(true);
   const [reportData, setReportData] = useState(null);
 
-  // Cached fetches
   const [fees, setFees] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [staff, setStaff] = useState([]);
@@ -14321,7 +14092,6 @@ const ReportsModule = ({
   const [selectedStudent, setSelectedStudent] = useState('');
   const [selectedExam, setSelectedExam] = useState('');
   const [academicStudent, setAcademicStudent] = useState('');
-  const [academicTerm, setAcademicTerm] = useState('');
 
   // Class
   const [selectedClass, setSelectedClass] = useState('');
@@ -14372,13 +14142,15 @@ const ReportsModule = ({
 
   // Transport
   const [transportSearch, setTransportSearch] = useState('');
+  const [transportView, setTransportView] = useState('routes'); // 'routes' | 'students'
 
   // Hostel
   const [hostelGenderFilter, setHostelGenderFilter] = useState('');
+  const [hostelView, setHostelView] = useState('hostels'); // 'hostels' | 'students'
 
   // Library
   const [libraryCategory, setLibraryCategory] = useState('');
-  const [libraryStatusFilter, setLibraryStatusFilter] = useState('');
+  const [libraryView, setLibraryView] = useState('books'); // 'books' | 'borrows'
 
   // ==================== COLORS ====================
   const CHART_COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#14b8a6', '#6366f1', '#f97316'];
@@ -14415,7 +14187,9 @@ const ReportsModule = ({
         thead { display: table-header-group; }
         .rounded-xl, .shadow-sm { box-shadow: none !important; border: 1px solid #e5e7eb; }
         html, body { background: white !important; }
+        .print-title { display: block !important; margin-bottom: 12px; font-size: 16px; font-weight: bold; }
       }
+      .print-title { display: none; }
     `;
     document.head.appendChild(style);
     return () => document.head.removeChild(style);
@@ -14426,17 +14200,17 @@ const ReportsModule = ({
     if (fetchedOnce[key]) return;
     try {
       let res;
-      if (key === 'fees')            { res = await api.get('/fees');                                       setFees(res.data.fees || []); }
-      if (key === 'attendance')      { res = await api.get('/attendance', { params: { limit: 5000 } });    setAttendance(res.data.attendance || []); }
-      if (key === 'staff')           { res = await api.get('/staff');                                      setStaff(res.data.staff || []); }
-      if (key === 'discounts')       { res = await api.get('/discounts');                                  setDiscounts(res.data.discounts || []); }
-      if (key === 'allocations')     { res = await api.get('/fee-allocations');                            setAllocations(res.data.allocations || []); }
-      if (key === 'inventory')       { res = await api.get('/inventory');                                  setInventory(res.data.items || []); }
-      if (key === 'transportRoutes') { res = await api.get('/transport-routes');                           setTransportRoutes(res.data.routes || []); }
-      if (key === 'vehicles')        { res = await api.get('/vehicles');                                   setVehicles(res.data.vehicles || []); }
-      if (key === 'hostels')         { res = await api.get('/hostels');                                    setHostels(res.data.hostels || []); }
-      if (key === 'books')           { res = await api.get('/books');                                      setBooks(res.data.books || []); }
-      if (key === 'borrows')         { res = await api.get('/borrows');                                    setBorrows(res.data.borrows || []); }
+      if (key === 'fees')            { res = await api.get('/fees');                                     setFees(res.data.fees || []); }
+      if (key === 'attendance')      { res = await api.get('/attendance', { params: { limit: 5000 } });  setAttendance(res.data.attendance || []); }
+      if (key === 'staff')           { res = await api.get('/staff');                                    setStaff(res.data.staff || []); }
+      if (key === 'discounts')       { res = await api.get('/discounts');                                setDiscounts(res.data.discounts || []); }
+      if (key === 'allocations')     { res = await api.get('/fee-allocations');                          setAllocations(res.data.allocations || []); }
+      if (key === 'inventory')       { res = await api.get('/inventory');                                setInventory(res.data.items || []); }
+      if (key === 'transportRoutes') { res = await api.get('/transport-routes');                         setTransportRoutes(res.data.routes || []); }
+      if (key === 'vehicles')        { res = await api.get('/vehicles');                                 setVehicles(res.data.vehicles || []); }
+      if (key === 'hostels')         { res = await api.get('/hostels');                                  setHostels(res.data.hostels || []); }
+      if (key === 'books')           { res = await api.get('/books');                                    setBooks(res.data.books || []); }
+      if (key === 'borrows')         { res = await api.get('/borrows');                                  setBorrows(res.data.borrows || []); }
       setFetchedOnce(prev => ({ ...prev, [key]: true }));
     } catch (err) {
       console.warn(`Optional data fetch failed (${key}):`, err?.response?.data || err.message);
@@ -14683,9 +14457,8 @@ const ReportsModule = ({
       const gradeChart = Object.keys(gradeDist).map(g => ({ name: g, value: gradeDist[g] }));
 
       setReportData({ type: 'student', student, results: enriched, summary, charts: { trend, subjectPerf, gradeChart } });
-    } catch (err) {
-      console.error(err); alert('Failed to generate student report');
-    } finally { setLoading(false); }
+    } catch (err) { console.error(err); alert('Failed to generate student report'); }
+    finally { setLoading(false); }
   };
 
   // ==================== CLASS REPORT ====================
@@ -14737,22 +14510,18 @@ const ReportsModule = ({
         charts: { topStudents, rangeChart },
         summary: { totalStudents: studentList.length, studentsWithResults: withResults.length, totalExams: examList.length, classAverage }
       });
-    } catch (err) {
-      console.error(err); alert('Failed to generate class report');
-    } finally { setLoading(false); }
+    } catch (err) { console.error(err); alert('Failed to generate class report'); }
+    finally { setLoading(false); }
   };
 
-  // ==================== DETAILED ACADEMIC REPORT ====================
+  // ==================== DETAILED ACADEMIC ====================
   const generateAcademicReport = () => {
     if (!academicStudent) return alert('Select a student');
     setLoading(true);
     try {
       const student = students.find(s => s.id === academicStudent);
       if (!student) { alert('Student not found'); return; }
-
       const studentResults = results.filter(r => r.studentId === academicStudent);
-
-      // Subject → exam breakdown
       const bySubject = {};
       studentResults.forEach(r => {
         const exam = exams.find(e => e.id === r.examId);
@@ -14767,7 +14536,6 @@ const ReportsModule = ({
           if (subject) itemName = subject.name;
         }
         if (itemName === 'Unknown' && exam?.name) itemName = exam.name;
-
         if (!bySubject[itemName]) bySubject[itemName] = { name: itemName, exams: [], total: 0, count: 0 };
         bySubject[itemName].exams.push({
           exam: exam?.name || 'Unknown',
@@ -14779,7 +14547,6 @@ const ReportsModule = ({
         bySubject[itemName].total += r.marks || 0;
         bySubject[itemName].count += 1;
       });
-
       const subjectRows = Object.values(bySubject).map(s => ({
         subject: s.name,
         examCount: s.count,
@@ -14789,65 +14556,41 @@ const ReportsModule = ({
         worstExam: s.exams.reduce((worst, e) => e.marks < (worst?.marks || Infinity) ? e : worst, null)?.exam || '—',
         exams: s.exams
       })).sort((a, b) => parseFloat(b.average) - parseFloat(a.average));
-
-      // Class ranks
       const classMates = isRegularSchool
         ? students.filter(s => s.classId === student.classId)
         : isUniversity
           ? students.filter(s => s.courseId === student.courseId)
           : students.filter(s => s.programId === student.programId);
-
       const peerAverages = classMates.map(m => {
         const rs = results.filter(r => r.studentId === m.id);
         const total = rs.reduce((sum, r) => sum + (r.marks || 0), 0);
         return { studentId: m.id, avg: rs.length ? total / rs.length : 0 };
       }).sort((a, b) => b.avg - a.avg);
-
       const myRank = peerAverages.findIndex(p => p.studentId === academicStudent) + 1;
-      const overallAvg = studentResults.length
-        ? (studentResults.reduce((sum, r) => sum + (r.marks || 0), 0) / studentResults.length).toFixed(2)
-        : '0.00';
-
+      const overallAvg = studentResults.length ? (studentResults.reduce((sum, r) => sum + (r.marks || 0), 0) / studentResults.length).toFixed(2) : '0.00';
       const bestSubject = subjectRows[0]?.subject || '—';
       const weakestSubject = subjectRows[subjectRows.length - 1]?.subject || '—';
-
-      // Radar chart data (subjects with normalized 0-100)
       const radarData = subjectRows.map(s => ({
         subject: s.subject.length > 12 ? s.subject.substring(0, 10) + '…' : s.subject,
         average: parseFloat(s.average)
       }));
-
-      // Per-exam progression
       const progression = [...studentResults].map(r => {
         const exam = exams.find(e => e.id === r.examId);
-        return {
-          name: exam?.name?.substring(0, 12) || 'Exam',
-          marks: r.marks || 0,
-          date: exam?.date
-        };
+        return { name: exam?.name?.substring(0, 12) || 'Exam', marks: r.marks || 0, date: exam?.date };
       }).sort((a, b) => new Date(a.date) - new Date(b.date));
-
       setReportData({
-        type: 'academic',
-        student,
-        subjectRows,
+        type: 'academic', student, subjectRows,
         summary: {
-          overallAvg,
-          totalSubjects: subjectRows.length,
-          totalExams: studentResults.length,
-          rank: myRank,
-          totalPeers: peerAverages.length,
-          bestSubject,
-          weakestSubject
+          overallAvg, totalSubjects: subjectRows.length, totalExams: studentResults.length,
+          rank: myRank, totalPeers: peerAverages.length, bestSubject, weakestSubject
         },
         charts: { radarData, progression }
       });
-    } catch (err) {
-      console.error(err); alert('Failed to generate academic report');
-    } finally { setLoading(false); }
+    } catch (err) { console.error(err); alert('Failed to generate academic report'); }
+    finally { setLoading(false); }
   };
 
-  // ==================== FEE REPORT ====================
+  // ==================== FEE ====================
   const generateFeeReport = async () => {
     setLoading(true);
     try {
@@ -14906,12 +14649,9 @@ const ReportsModule = ({
         summary: {
           totalCollected, totalBilled, totalOutstanding,
           collectionRate: totalBilled > 0 ? ((totalCollected / totalBilled) * 100).toFixed(2) : '0.00',
-          paymentCount: paymentsForStudents.length,
-          studentCount: targetStudents.length
+          paymentCount: paymentsForStudents.length, studentCount: targetStudents.length
         },
-        charts: { monthlyChart, methodChart, feeChart },
-        rows: perStudent,
-        period: { start, end }
+        charts: { monthlyChart, methodChart, feeChart }, rows: perStudent, period: { start, end }
       });
     } catch (err) { console.error(err); alert('Failed to generate fee report'); }
     finally { setLoading(false); }
@@ -15061,9 +14801,7 @@ const ReportsModule = ({
         type: 'financial',
         period: { ...feeDateRange },
         summary: { totalIncome, totalExpenses, netIncome },
-        charts: { monthlyChart, methodChart, categoryChart },
-        recentPayments: filteredPayments.slice(0, 20),
-        recentExpenses: filteredExpenses.slice(0, 20)
+        charts: { monthlyChart, methodChart, categoryChart }
       });
     } catch (err) { console.error(err); alert('Failed to generate financial report'); }
     finally { setLoading(false); }
@@ -15167,6 +14905,7 @@ const ReportsModule = ({
     setLoading(true);
     try {
       await fetchOnce('discounts');
+      await fetchOnce('fees');
       let target = discounts;
       if (discountSearch) {
         const q = discountSearch.toLowerCase();
@@ -15258,13 +14997,11 @@ const ReportsModule = ({
       let target = inventory;
       if (inventoryCategory) target = target.filter(i => i.category === inventoryCategory);
       if (inventoryLowStockOnly) target = target.filter(i => (i.quantity || 0) <= (i.reorderLevel || 0));
-
       const totalItems = target.length;
       const totalQuantity = target.reduce((s, i) => s + (i.quantity || 0), 0);
       const totalValue = target.reduce((s, i) => s + (parseFloat(i.quantity || 0) * parseFloat(i.unitPrice || 0)), 0);
       const lowStock = target.filter(i => (i.quantity || 0) <= (i.reorderLevel || 0)).length;
       const outOfStock = target.filter(i => (i.quantity || 0) === 0).length;
-
       const byCategory = {};
       target.forEach(i => {
         const k = i.category || 'Uncategorized';
@@ -15276,7 +15013,6 @@ const ReportsModule = ({
       const lowStockList = target.filter(i => (i.quantity || 0) <= (i.reorderLevel || 0))
         .map(i => ({ name: i.name, quantity: i.quantity, reorderLevel: i.reorderLevel }))
         .sort((a, b) => (a.quantity - a.reorderLevel) - (b.quantity - b.reorderLevel));
-
       const rows = target.map(i => ({
         name: i.name,
         category: i.category || '—',
@@ -15289,12 +15025,10 @@ const ReportsModule = ({
               : (i.quantity || 0) <= (i.reorderLevel || 0) ? 'Low Stock'
               : 'In Stock'
       })).sort((a, b) => b.totalValue - a.totalValue);
-
       setReportData({
         type: 'inventory',
         summary: { totalItems, totalQuantity, totalValue, lowStock, outOfStock },
-        charts: { categoryChart, lowStockList },
-        rows
+        charts: { categoryChart, lowStockList }, rows
       });
     } catch (err) { console.error(err); alert('Failed to generate inventory report'); }
     finally { setLoading(false); }
@@ -15306,59 +15040,75 @@ const ReportsModule = ({
     try {
       await fetchOnce('transportRoutes');
       await fetchOnce('vehicles');
-
       let routes = transportRoutes;
       if (transportSearch) {
         const q = transportSearch.toLowerCase();
         routes = routes.filter(r => (r.name || '').toLowerCase().includes(q));
       }
-
       const totalRoutes = routes.length;
       const totalVehicles = vehicles.length;
       const totalStudents = routes.reduce((s, r) => s + (Array.isArray(r.students) ? r.students.length : 0), 0);
       const monthlyRevenue = routes.reduce((s, r) => {
-        const students = Array.isArray(r.students) ? r.students.length : 0;
-        return s + (students * parseFloat(r.fee || 0));
+        const cnt = Array.isArray(r.students) ? r.students.length : 0;
+        return s + (cnt * parseFloat(r.fee || 0));
       }, 0);
-
       const routeChart = routes.map(r => ({
         name: (r.name || '').substring(0, 15),
         students: Array.isArray(r.students) ? r.students.length : 0
       }));
-
       const capacityChart = routes.map(r => {
         const v = vehicles.find(x => x.id === r.vehicleId);
         const cap = v?.capacity || 0;
         const used = Array.isArray(r.students) ? r.students.length : 0;
         return {
           name: (r.name || '').substring(0, 15),
-          capacity: cap,
-          used,
+          capacity: cap, used,
           utilization: cap > 0 ? Math.round((used / cap) * 100) : 0
         };
       });
-
-      const rows = routes.map(r => {
+      const routeRows = routes.map(r => {
         const v = vehicles.find(x => x.id === r.vehicleId);
-        const students = Array.isArray(r.students) ? r.students.length : 0;
+        const cnt = Array.isArray(r.students) ? r.students.length : 0;
         return {
           route: r.name || '—',
           vehicle: v?.registration || '—',
           driver: v?.driver || '—',
           driverPhone: v?.driverPhone || '—',
           capacity: v?.capacity || 0,
-          students,
-          utilization: v?.capacity ? Math.round((students / v.capacity) * 100) + '%' : '—',
+          students: cnt,
+          utilization: v?.capacity ? Math.round((cnt / v.capacity) * 100) + '%' : '—',
           feePerStudent: parseFloat(r.fee || 0),
-          monthlyRevenue: students * parseFloat(r.fee || 0)
+          monthlyRevenue: cnt * parseFloat(r.fee || 0)
         };
       }).sort((a, b) => b.monthlyRevenue - a.monthlyRevenue);
+
+      // Student-level rows: which student is on which route
+      const studentRows = [];
+      routes.forEach(r => {
+        const v = vehicles.find(x => x.id === r.vehicleId);
+        const sids = Array.isArray(r.students) ? r.students : [];
+        sids.forEach(sid => {
+          const s = students.find(x => x.id === sid);
+          studentRows.push({
+            student: s ? `${s.firstName} ${s.lastName}` : 'Unknown',
+            admissionNumber: s?.admissionNumber || '—',
+            entity: s ? getStudentEntityName(s) : '—',
+            route: r.name || '—',
+            vehicle: v?.registration || '—',
+            driver: v?.driver || '—',
+            driverPhone: v?.driverPhone || '—',
+            fee: parseFloat(r.fee || 0),
+            pickupPoint: Array.isArray(r.pickupPoints) && r.pickupPoints[0] ? r.pickupPoints[0] : '—'
+          });
+        });
+      });
 
       setReportData({
         type: 'transport',
         summary: { totalRoutes, totalVehicles, totalStudents, monthlyRevenue },
         charts: { routeChart, capacityChart },
-        rows
+        rows: routeRows,
+        studentRows
       });
     } catch (err) { console.error(err); alert('Failed to generate transport report'); }
     finally { setLoading(false); }
@@ -15371,7 +15121,6 @@ const ReportsModule = ({
       await fetchOnce('hostels');
       let target = hostels;
       if (hostelGenderFilter) target = target.filter(h => h.gender === hostelGenderFilter);
-
       const totalHostels = target.length;
       let totalBeds = 0, totalOccupied = 0;
       target.forEach(h => {
@@ -15382,20 +15131,18 @@ const ReportsModule = ({
       });
       const occupancyRate = totalBeds > 0 ? ((totalOccupied / totalBeds) * 100).toFixed(1) : '0.0';
       const emptyBeds = totalBeds - totalOccupied;
-
       const hostelChart = target.map(h => {
         const beds = (h.rooms || []).reduce((s, r) => s + (r.beds || 0), 0);
         const occ = (h.rooms || []).reduce((s, r) => s + ((r.students || []).length), 0);
         return { name: h.name || '—', beds, occupied: occ, empty: beds - occ };
       });
-
       const genderChart = [
         { name: 'Boys', value: target.filter(h => h.gender === 'BOYS').length },
         { name: 'Girls', value: target.filter(h => h.gender === 'GIRLS').length },
         { name: 'Mixed', value: target.filter(h => h.gender === 'MIXED').length }
       ].filter(x => x.value > 0);
 
-      const rows = target.map(h => {
+      const hostelRows = target.map(h => {
         const beds = (h.rooms || []).reduce((s, r) => s + (r.beds || 0), 0);
         const occ = (h.rooms || []).reduce((s, r) => s + ((r.students || []).length), 0);
         return {
@@ -15404,18 +15151,40 @@ const ReportsModule = ({
           warden: h.warden || '—',
           wardenPhone: h.wardenPhone || '—',
           capacity: h.capacity || 0,
-          beds,
-          occupied: occ,
-          empty: beds - occ,
+          beds, occupied: occ, empty: beds - occ,
           occupancyRate: beds > 0 ? ((occ / beds) * 100).toFixed(1) + '%' : '0%'
         };
       }).sort((a, b) => parseFloat(b.occupancyRate) - parseFloat(a.occupancyRate));
+
+      // Student-level rows: which student is in which room
+      const studentRows = [];
+      target.forEach(h => {
+        (h.rooms || []).forEach(room => {
+          const sids = Array.isArray(room.students) ? room.students : [];
+          sids.forEach(sid => {
+            const s = students.find(x => x.id === sid);
+            studentRows.push({
+              student: s ? `${s.firstName} ${s.lastName}` : 'Unknown',
+              admissionNumber: s?.admissionNumber || '—',
+              entity: s ? getStudentEntityName(s) : '—',
+              hostel: h.name || '—',
+              hostelGender: h.gender || '—',
+              room: room.roomNumber || room.name || '—',
+              warden: h.warden || '—',
+              wardenPhone: h.wardenPhone || '—',
+              beds: room.beds || 0,
+              roomOccupied: sids.length
+            });
+          });
+        });
+      });
 
       setReportData({
         type: 'hostel',
         summary: { totalHostels, totalBeds, totalOccupied, emptyBeds, occupancyRate },
         charts: { hostelChart, genderChart },
-        rows
+        rows: hostelRows,
+        studentRows
       });
     } catch (err) { console.error(err); alert('Failed to generate hostel report'); }
     finally { setLoading(false); }
@@ -15448,20 +15217,16 @@ const ReportsModule = ({
       });
       const categoryChart = Object.values(byCategory);
 
-      // Top borrowed books
       const borrowCountByBook = {};
-      borrows.forEach(br => {
-        borrowCountByBook[br.bookId] = (borrowCountByBook[br.bookId] || 0) + 1;
-      });
+      borrows.forEach(br => { borrowCountByBook[br.bookId] = (borrowCountByBook[br.bookId] || 0) + 1; });
       const topBorrowed = Object.keys(borrowCountByBook)
         .map(bookId => {
           const b = books.find(x => x.id === bookId);
           return { name: b?.title?.substring(0, 20) || 'Unknown', count: borrowCountByBook[bookId] };
         })
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 10);
+        .sort((a, b) => b.count - a.count).slice(0, 10);
 
-      const rows = target.map(b => {
+      const bookRows = target.map(b => {
         const timesBorrowed = borrows.filter(br => br.bookId === b.id).length;
         return {
           title: b.title || '—',
@@ -15476,11 +15241,39 @@ const ReportsModule = ({
         };
       }).sort((a, b) => b.timesBorrowed - a.timesBorrowed);
 
+      // Student-level: who borrowed what
+      const borrowRows = borrows.map(br => {
+        const student = students.find(s => s.id === br.studentId);
+        const book = books.find(b => b.id === br.bookId);
+        const today = new Date();
+        const due = br.dueDate ? new Date(br.dueDate) : null;
+        const isOverdue = br.status === 'BORROWED' && due && due < today;
+        const daysOverdue = isOverdue ? Math.floor((today - due) / (1000 * 60 * 60 * 24)) : 0;
+        return {
+          student: student ? `${student.firstName} ${student.lastName}` : '—',
+          admissionNumber: student?.admissionNumber || '—',
+          entity: student ? getStudentEntityName(student) : '—',
+          book: book?.title || '—',
+          author: book?.author || '—',
+          borrowDate: br.borrowDate ? new Date(br.borrowDate).toLocaleDateString() : '—',
+          dueDate: br.dueDate ? new Date(br.dueDate).toLocaleDateString() : '—',
+          returnDate: br.returnDate ? new Date(br.returnDate).toLocaleDateString() : '—',
+          status: br.status || '—',
+          daysOverdue,
+          fine: parseFloat(br.fine || 0)
+        };
+      }).sort((a, b) => {
+        // Overdue first, then most recent
+        if (a.daysOverdue !== b.daysOverdue) return b.daysOverdue - a.daysOverdue;
+        return new Date(b.borrowDate) - new Date(a.borrowDate);
+      });
+
       setReportData({
         type: 'library',
         summary: { totalTitles, totalCopies, availableCopies, borrowedCopies, overdueCount: overdueBorrows.length, totalFines },
         charts: { categoryChart, topBorrowed },
-        rows
+        rows: bookRows,
+        borrowRows
       });
     } catch (err) { console.error(err); alert('Failed to generate library report'); }
     finally { setLoading(false); }
@@ -15547,10 +15340,19 @@ const ReportsModule = ({
     </div>
   );
 
-  const FilterBar = ({ children }) => (
-    <Card className="no-print">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">{children}</div>
-    </Card>
+  // Two-mode toggle (used in transport / hostel / library)
+  const ModeToggle = ({ value, onChange, options }) => (
+    <div className="inline-flex rounded-lg border bg-white p-0.5 no-print">
+      {options.map(o => (
+        <button
+          key={o.value}
+          onClick={() => onChange(o.value)}
+          className={`px-3 py-1.5 text-sm rounded-md transition-colors ${value === o.value ? 'bg-indigo-600 text-white' : 'text-gray-700 hover:bg-gray-100'}`}
+        >
+          <i className={`fas ${o.icon} mr-1`}></i>{o.label}
+        </button>
+      ))}
+    </div>
   );
 
   // ==================== RENDER ====================
@@ -15822,29 +15624,6 @@ const ReportsModule = ({
                   ))}
                 </TableWrap>
               </Card>
-
-              {reportData.subjectRows.some(s => s.exams.length > 0) && (
-                <Card>
-                  <h3 className="font-semibold mb-3">Exam-by-Exam Detail</h3>
-                  <div className="space-y-4">
-                    {reportData.subjectRows.map((s, i) => (
-                      <div key={i} className="border rounded-lg p-3">
-                        <h4 className="font-medium text-sm mb-2">{s.subject}</h4>
-                        <TableWrap headers={['Exam','Date','Marks','Grade']}>
-                          {s.exams.map((e, j) => (
-                            <tr key={j} className="hover:bg-gray-50">
-                              <td className="px-3 py-1.5 text-xs">{e.exam}</td>
-                              <td className="px-3 py-1.5 text-xs">{e.date ? new Date(e.date).toLocaleDateString() : '—'}</td>
-                              <td className="px-3 py-1.5 font-bold">{e.marks}</td>
-                              <td className="px-3 py-1.5 text-xs">{e.grade || '—'}</td>
-                            </tr>
-                          ))}
-                        </TableWrap>
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-              )}
             </>
           )}
         </div>
@@ -15894,16 +15673,6 @@ const ReportsModule = ({
                         </Pie>
                         <Tooltip formatter={formatCurrency} />
                       </PieChart>
-                    </ChartCard>
-                  )}
-                  {reportData.charts.feeChart.length > 0 && (
-                    <ChartCard title="By Fee">
-                      <BarChart data={reportData.charts.feeChart}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" angle={-30} textAnchor="end" height={60} interval={0} />
-                        <YAxis /><Tooltip formatter={formatCurrency} />
-                        <Bar dataKey="amount" fill="#4f46e5" />
-                      </BarChart>
                     </ChartCard>
                   )}
                 </div>
@@ -16110,26 +15879,6 @@ const ReportsModule = ({
                         <Bar dataKey="expenses" fill="#ef4444" name="Expenses" />
                         <Line type="monotone" dataKey="profit" stroke="#4f46e5" name="Profit" strokeWidth={2} />
                       </ComposedChart>
-                    </ChartCard>
-                  )}
-                  {reportData.charts.methodChart.length > 0 && (
-                    <ChartCard title="Income by Method">
-                      <PieChart>
-                        <Pie data={reportData.charts.methodChart} cx="50%" cy="50%" label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} dataKey="value">
-                          {reportData.charts.methodChart.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                        </Pie>
-                        <Tooltip formatter={formatCurrency} />
-                      </PieChart>
-                    </ChartCard>
-                  )}
-                  {reportData.charts.categoryChart.length > 0 && (
-                    <ChartCard title="Expenses by Category">
-                      <PieChart>
-                        <Pie data={reportData.charts.categoryChart} cx="50%" cy="50%" label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} dataKey="value">
-                          {reportData.charts.categoryChart.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                        </Pie>
-                        <Tooltip formatter={formatCurrency} />
-                      </PieChart>
                     </ChartCard>
                   )}
                 </div>
@@ -16355,17 +16104,6 @@ const ReportsModule = ({
                 <StatCard label="Collection Rate" value={`${reportData.summary.collectionRate}%`} color="yellow" />
               </div>
 
-              {showCharts && reportData.charts.feeChart.length > 0 && (
-                <ChartCard title="Allocated by Fee">
-                  <BarChart data={reportData.charts.feeChart}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" angle={-30} textAnchor="end" height={60} interval={0} />
-                    <YAxis /><Tooltip formatter={formatCurrency} />
-                    <Bar dataKey="allocated" fill="#4f46e5" />
-                  </BarChart>
-                </ChartCard>
-              )}
-
               <Card>
                 <div className="flex justify-between items-center mb-3">
                   <h3 className="font-semibold">Allocation Records ({reportData.rows.length})</h3>
@@ -16419,30 +16157,6 @@ const ReportsModule = ({
                 <StatCard label="Out of Stock" value={reportData.summary.outOfStock} color="red" />
               </div>
 
-              {showCharts && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {reportData.charts.categoryChart.length > 0 && (
-                    <ChartCard title="Value by Category">
-                      <BarChart data={reportData.charts.categoryChart}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" angle={-30} textAnchor="end" height={60} interval={0} />
-                        <YAxis /><Tooltip formatter={formatCurrency} />
-                        <Bar dataKey="value" fill="#4f46e5" />
-                      </BarChart>
-                    </ChartCard>
-                  )}
-                  {reportData.charts.lowStockList.length > 0 && (
-                    <ChartCard title="Low Stock Items">
-                      <BarChart data={reportData.charts.lowStockList} layout="vertical">
-                        <CartesianGrid strokeDasharray="3 3" /><XAxis type="number" />
-                        <YAxis type="category" dataKey="name" width={140} />
-                        <Tooltip /><Bar dataKey="quantity" fill="#ef4444" />
-                      </BarChart>
-                    </ChartCard>
-                  )}
-                </div>
-              )}
-
               <Card>
                 <div className="flex justify-between items-center mb-3">
                   <h3 className="font-semibold">Inventory Items ({reportData.rows.length})</h3>
@@ -16478,14 +16192,27 @@ const ReportsModule = ({
       {activeTab === 'transport' && (
         <div className="space-y-6">
           <Card className="no-print">
-            <h3 className="text-lg font-semibold mb-4">Transport Report</h3>
+            <div className="flex justify-between items-start flex-wrap gap-3 mb-4">
+              <h3 className="text-lg font-semibold">Transport Report</h3>
+              <ModeToggle
+                value={transportView}
+                onChange={setTransportView}
+                options={[
+                  { value: 'routes', label: 'Routes', icon: 'fa-bus' },
+                  { value: 'students', label: 'Students', icon: 'fa-user-graduate' }
+                ]}
+              />
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Search route</label>
                 <input value={transportSearch} onChange={(e) => setTransportSearch(e.target.value)} placeholder="Type to filter..." className="w-full px-3 py-2 border rounded-lg" />
               </div>
             </div>
-            <button onClick={generateTransportReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
+            <div className="flex gap-2">
+              <button onClick={generateTransportReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
+              <PrintBtn />
+            </div>
           </Card>
 
           {reportData?.type === 'transport' && (
@@ -16497,7 +16224,7 @@ const ReportsModule = ({
                 <StatCard label="Monthly Revenue" value={formatCurrency(reportData.summary.monthlyRevenue)} color="yellow" />
               </div>
 
-              {showCharts && (
+              {showCharts && transportView === 'routes' && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {reportData.charts.routeChart.length > 0 && (
                     <ChartCard title="Students per Route">
@@ -16523,27 +16250,53 @@ const ReportsModule = ({
                 </div>
               )}
 
-              <Card>
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-semibold">Transport Routes ({reportData.rows.length})</h3>
-                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'transport.csv')} />
-                </div>
-                <TableWrap headers={['Route','Vehicle','Driver','Phone','Capacity','Students','Utilization','Fee/Student','Monthly Revenue']}>
-                  {reportData.rows.map((r, i) => (
-                    <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 font-medium">{r.route}</td>
-                      <td className="px-3 py-2 font-mono text-xs">{r.vehicle}</td>
-                      <td className="px-3 py-2">{r.driver}</td>
-                      <td className="px-3 py-2 text-xs">{r.driverPhone}</td>
-                      <td className="px-3 py-2">{r.capacity}</td>
-                      <td className="px-3 py-2">{r.students}</td>
-                      <td className="px-3 py-2">{r.utilization}</td>
-                      <td className="px-3 py-2">{formatCurrency(r.feePerStudent)}</td>
-                      <td className="px-3 py-2 font-bold text-green-700">{formatCurrency(r.monthlyRevenue)}</td>
-                    </tr>
-                  ))}
-                </TableWrap>
-              </Card>
+              {transportView === 'routes' && (
+                <Card>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold">Transport Routes ({reportData.rows.length})</h3>
+                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'transport_routes.csv')} />
+                  </div>
+                  <TableWrap headers={['Route','Vehicle','Driver','Phone','Capacity','Students','Utilization','Fee/Student','Monthly Revenue']}>
+                    {reportData.rows.map((r, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-medium">{r.route}</td>
+                        <td className="px-3 py-2 font-mono text-xs">{r.vehicle}</td>
+                        <td className="px-3 py-2">{r.driver}</td>
+                        <td className="px-3 py-2 text-xs">{r.driverPhone}</td>
+                        <td className="px-3 py-2">{r.capacity}</td>
+                        <td className="px-3 py-2">{r.students}</td>
+                        <td className="px-3 py-2">{r.utilization}</td>
+                        <td className="px-3 py-2">{formatCurrency(r.feePerStudent)}</td>
+                        <td className="px-3 py-2 font-bold text-green-700">{formatCurrency(r.monthlyRevenue)}</td>
+                      </tr>
+                    ))}
+                  </TableWrap>
+                </Card>
+              )}
+
+              {transportView === 'students' && (
+                <Card>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold">Students on Transport ({reportData.studentRows.length})</h3>
+                    <ExportBtn onClick={() => exportCSV(reportData.studentRows, 'transport_students.csv')} />
+                  </div>
+                  <TableWrap headers={['Student','Admission','Class/Course','Route','Vehicle','Driver','Phone','Fee','Pickup']}>
+                    {reportData.studentRows.map((r, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-medium">{r.student}</td>
+                        <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
+                        <td className="px-3 py-2 text-xs">{r.entity}</td>
+                        <td className="px-3 py-2">{r.route}</td>
+                        <td className="px-3 py-2 font-mono text-xs">{r.vehicle}</td>
+                        <td className="px-3 py-2">{r.driver}</td>
+                        <td className="px-3 py-2 text-xs">{r.driverPhone}</td>
+                        <td className="px-3 py-2">{formatCurrency(r.fee)}</td>
+                        <td className="px-3 py-2 text-xs">{r.pickupPoint}</td>
+                      </tr>
+                    ))}
+                  </TableWrap>
+                </Card>
+              )}
             </>
           )}
         </div>
@@ -16553,11 +16306,24 @@ const ReportsModule = ({
       {activeTab === 'hostel' && (
         <div className="space-y-6">
           <Card className="no-print">
-            <h3 className="text-lg font-semibold mb-4">Hostel Report</h3>
+            <div className="flex justify-between items-start flex-wrap gap-3 mb-4">
+              <h3 className="text-lg font-semibold">Hostel Report</h3>
+              <ModeToggle
+                value={hostelView}
+                onChange={setHostelView}
+                options={[
+                  { value: 'hostels', label: 'Hostels', icon: 'fa-hotel' },
+                  { value: 'students', label: 'Students', icon: 'fa-user-graduate' }
+                ]}
+              />
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
               <SearchableSelect label="Gender" value={hostelGenderFilter} onChange={(e) => setHostelGenderFilter(e.target.value)} options={[{value:'BOYS',label:'Boys'},{value:'GIRLS',label:'Girls'},{value:'MIXED',label:'Mixed'}]} placeholder="All hostels" />
             </div>
-            <button onClick={generateHostelReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
+            <div className="flex gap-2">
+              <button onClick={generateHostelReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
+              <PrintBtn />
+            </div>
           </Card>
 
           {reportData?.type === 'hostel' && (
@@ -16570,53 +16336,64 @@ const ReportsModule = ({
                 <StatCard label="Occupancy Rate" value={`${reportData.summary.occupancyRate}%`} color="indigo" />
               </div>
 
-              {showCharts && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {reportData.charts.hostelChart.length > 0 && (
-                    <ChartCard title="Beds vs Occupied by Hostel" span>
-                      <BarChart data={reportData.charts.hostelChart}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" /><YAxis /><Tooltip /><Legend />
-                        <Bar dataKey="beds" fill="#94a3b8" name="Total Beds" />
-                        <Bar dataKey="occupied" fill="#4f46e5" name="Occupied" />
-                        <Bar dataKey="empty" fill="#10b981" name="Empty" />
-                      </BarChart>
-                    </ChartCard>
-                  )}
-                  {reportData.charts.genderChart.length > 0 && (
-                    <ChartCard title="Hostel Gender Distribution">
-                      <PieChart>
-                        <Pie data={reportData.charts.genderChart} cx="50%" cy="50%" label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} dataKey="value">
-                          {reportData.charts.genderChart.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                        </Pie>
-                        <Tooltip />
-                      </PieChart>
-                    </ChartCard>
-                  )}
-                </div>
+              {showCharts && hostelView === 'hostels' && reportData.charts.hostelChart.length > 0 && (
+                <ChartCard title="Beds vs Occupied by Hostel" span>
+                  <BarChart data={reportData.charts.hostelChart}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" /><YAxis /><Tooltip /><Legend />
+                    <Bar dataKey="beds" fill="#94a3b8" name="Total Beds" />
+                    <Bar dataKey="occupied" fill="#4f46e5" name="Occupied" />
+                    <Bar dataKey="empty" fill="#10b981" name="Empty" />
+                  </BarChart>
+                </ChartCard>
               )}
 
-              <Card>
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-semibold">Hostels ({reportData.rows.length})</h3>
-                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'hostels.csv')} />
-                </div>
-                <TableWrap headers={['Hostel','Gender','Warden','Phone','Capacity','Beds','Occupied','Empty','Occupancy']}>
-                  {reportData.rows.map((r, i) => (
-                    <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 font-medium">{r.hostel}</td>
-                      <td className="px-3 py-2">{r.gender}</td>
-                      <td className="px-3 py-2">{r.warden}</td>
-                      <td className="px-3 py-2 text-xs">{r.wardenPhone}</td>
-                      <td className="px-3 py-2">{r.capacity}</td>
-                      <td className="px-3 py-2">{r.beds}</td>
-                      <td className="px-3 py-2 text-green-700">{r.occupied}</td>
-                      <td className="px-3 py-2 text-yellow-700">{r.empty}</td>
-                      <td className="px-3 py-2 font-bold">{r.occupancyRate}</td>
-                    </tr>
-                  ))}
-                </TableWrap>
-              </Card>
+              {hostelView === 'hostels' && (
+                <Card>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold">Hostels ({reportData.rows.length})</h3>
+                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'hostels.csv')} />
+                  </div>
+                  <TableWrap headers={['Hostel','Gender','Warden','Phone','Capacity','Beds','Occupied','Empty','Occupancy']}>
+                    {reportData.rows.map((r, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-medium">{r.hostel}</td>
+                        <td className="px-3 py-2">{r.gender}</td>
+                        <td className="px-3 py-2">{r.warden}</td>
+                        <td className="px-3 py-2 text-xs">{r.wardenPhone}</td>
+                        <td className="px-3 py-2">{r.capacity}</td>
+                        <td className="px-3 py-2">{r.beds}</td>
+                        <td className="px-3 py-2 text-green-700">{r.occupied}</td>
+                        <td className="px-3 py-2 text-yellow-700">{r.empty}</td>
+                        <td className="px-3 py-2 font-bold">{r.occupancyRate}</td>
+                      </tr>
+                    ))}
+                  </TableWrap>
+                </Card>
+              )}
+
+              {hostelView === 'students' && (
+                <Card>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold">Students in Hostels ({reportData.studentRows.length})</h3>
+                    <ExportBtn onClick={() => exportCSV(reportData.studentRows, 'hostel_students.csv')} />
+                  </div>
+                  <TableWrap headers={['Student','Admission','Class/Course','Hostel','Gender','Room','Warden','Phone']}>
+                    {reportData.studentRows.map((r, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-medium">{r.student}</td>
+                        <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
+                        <td className="px-3 py-2 text-xs">{r.entity}</td>
+                        <td className="px-3 py-2">{r.hostel}</td>
+                        <td className="px-3 py-2">{r.hostelGender}</td>
+                        <td className="px-3 py-2 font-medium">{r.room}</td>
+                        <td className="px-3 py-2">{r.warden}</td>
+                        <td className="px-3 py-2 text-xs">{r.wardenPhone}</td>
+                      </tr>
+                    ))}
+                  </TableWrap>
+                </Card>
+              )}
             </>
           )}
         </div>
@@ -16626,11 +16403,24 @@ const ReportsModule = ({
       {activeTab === 'library' && (
         <div className="space-y-6">
           <Card className="no-print">
-            <h3 className="text-lg font-semibold mb-4">Library Report</h3>
+            <div className="flex justify-between items-start flex-wrap gap-3 mb-4">
+              <h3 className="text-lg font-semibold">Library Report</h3>
+              <ModeToggle
+                value={libraryView}
+                onChange={setLibraryView}
+                options={[
+                  { value: 'books', label: 'Books', icon: 'fa-book' },
+                  { value: 'borrows', label: 'Borrowers', icon: 'fa-user-graduate' }
+                ]}
+              />
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
               <SearchableSelect label="Category" value={libraryCategory} onChange={(e) => setLibraryCategory(e.target.value)} options={[...new Set(books.map(b => b.category).filter(Boolean))].map(c => ({ value: c, label: c }))} placeholder="All categories" />
             </div>
-            <button onClick={generateLibraryReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
+            <div className="flex gap-2">
+              <button onClick={generateLibraryReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
+              <PrintBtn />
+            </div>
           </Card>
 
           {reportData?.type === 'library' && (
@@ -16644,51 +16434,62 @@ const ReportsModule = ({
                 <StatCard label="Fines" value={formatCurrency(reportData.summary.totalFines)} color="indigo" />
               </div>
 
-              {showCharts && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {reportData.charts.categoryChart.length > 0 && (
-                    <ChartCard title="Copies by Category">
-                      <BarChart data={reportData.charts.categoryChart}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" angle={-30} textAnchor="end" height={60} interval={0} />
-                        <YAxis /><Tooltip />
-                        <Bar dataKey="copies" fill="#4f46e5" />
-                      </BarChart>
-                    </ChartCard>
-                  )}
-                  {reportData.charts.topBorrowed.length > 0 && (
-                    <ChartCard title="Top Borrowed Books">
-                      <BarChart data={reportData.charts.topBorrowed} layout="vertical">
-                        <CartesianGrid strokeDasharray="3 3" /><XAxis type="number" />
-                        <YAxis type="category" dataKey="name" width={140} />
-                        <Tooltip /><Bar dataKey="count" fill="#10b981" />
-                      </BarChart>
-                    </ChartCard>
-                  )}
-                </div>
+              {libraryView === 'books' && (
+                <Card>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold">Books ({reportData.rows.length})</h3>
+                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'library_books.csv')} />
+                  </div>
+                  <TableWrap headers={['Title','Author','ISBN','Category','Quantity','Available','Borrowed','Times Borrowed','Location']}>
+                    {reportData.rows.map((r, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-medium">{r.title}</td>
+                        <td className="px-3 py-2">{r.author}</td>
+                        <td className="px-3 py-2 font-mono text-xs">{r.isbn}</td>
+                        <td className="px-3 py-2">{r.category}</td>
+                        <td className="px-3 py-2">{r.quantity}</td>
+                        <td className="px-3 py-2 text-green-700">{r.available}</td>
+                        <td className="px-3 py-2 text-red-700">{r.borrowed}</td>
+                        <td className="px-3 py-2 font-bold">{r.timesBorrowed}</td>
+                        <td className="px-3 py-2 text-xs">{r.location}</td>
+                      </tr>
+                    ))}
+                  </TableWrap>
+                </Card>
               )}
 
-              <Card>
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-semibold">Books ({reportData.rows.length})</h3>
-                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'library.csv')} />
-                </div>
-                <TableWrap headers={['Title','Author','ISBN','Category','Quantity','Available','Borrowed','Times Borrowed','Location']}>
-                  {reportData.rows.map((r, i) => (
-                    <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 font-medium">{r.title}</td>
-                      <td className="px-3 py-2">{r.author}</td>
-                      <td className="px-3 py-2 font-mono text-xs">{r.isbn}</td>
-                      <td className="px-3 py-2">{r.category}</td>
-                      <td className="px-3 py-2">{r.quantity}</td>
-                      <td className="px-3 py-2 text-green-700">{r.available}</td>
-                      <td className="px-3 py-2 text-red-700">{r.borrowed}</td>
-                      <td className="px-3 py-2 font-bold">{r.timesBorrowed}</td>
-                      <td className="px-3 py-2 text-xs">{r.location}</td>
-                    </tr>
-                  ))}
-                </TableWrap>
-              </Card>
+              {libraryView === 'borrows' && (
+                <Card>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold">Borrowers ({reportData.borrowRows.length})</h3>
+                    <ExportBtn onClick={() => exportCSV(reportData.borrowRows, 'library_borrowers.csv')} />
+                  </div>
+                  <TableWrap headers={['Student','Admission','Class/Course','Book','Author','Borrowed','Due','Returned','Status','Days Overdue','Fine']}>
+                    {reportData.borrowRows.map((r, i) => (
+                      <tr key={i} className={`hover:bg-gray-50 ${r.daysOverdue > 0 ? 'bg-red-50' : ''}`}>
+                        <td className="px-3 py-2 font-medium">{r.student}</td>
+                        <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
+                        <td className="px-3 py-2 text-xs">{r.entity}</td>
+                        <td className="px-3 py-2">{r.book}</td>
+                        <td className="px-3 py-2 text-xs">{r.author}</td>
+                        <td className="px-3 py-2 text-xs">{r.borrowDate}</td>
+                        <td className="px-3 py-2 text-xs">{r.dueDate}</td>
+                        <td className="px-3 py-2 text-xs">{r.returnDate}</td>
+                        <td className="px-3 py-2">
+                          <span className={`px-2 py-0.5 rounded-full text-xs ${
+                            r.status === 'RETURNED' ? 'bg-green-100 text-green-800' :
+                            r.status === 'BORROWED' && r.daysOverdue > 0 ? 'bg-red-100 text-red-800' :
+                            r.status === 'BORROWED' ? 'bg-blue-100 text-blue-800' :
+                            'bg-gray-100 text-gray-700'
+                          }`}>{r.status}</span>
+                        </td>
+                        <td className="px-3 py-2 text-xs">{r.daysOverdue > 0 ? `${r.daysOverdue} days` : '—'}</td>
+                        <td className="px-3 py-2 font-bold text-red-700">{r.fine > 0 ? formatCurrency(r.fine) : '—'}</td>
+                      </tr>
+                    ))}
+                  </TableWrap>
+                </Card>
+              )}
             </>
           )}
         </div>
@@ -17762,29 +17563,29 @@ const StaffAttendanceReportsModule = ({ staff, currentSchool, user }) => {
   );
 };
 
-// ==================== STAFF MODULE WITH FIXED SEARCHABLE SELECTS - ALL SCHOOL TYPES ====================
-const StaffModule = ({ 
-  staff = [], 
-  setStaff, 
-  users = [], 
-  payroll = [], 
-  setPayroll, 
-  form, 
-  setForm, 
-  onCreate, 
-  onUpdate, 
-  onDelete, 
-  currentSchool, 
+// ==================== STAFF MODULE — FIXED INPUTS & SEARCHABLE SELECTS ====================
+const StaffModule = ({
+  staff = [],
+  setStaff,
+  users = [],
+  payroll = [],
+  setPayroll,
+  form,
+  setForm,
+  onCreate,
+  onUpdate,
+  onDelete,
+  currentSchool,
   user,
-  departments = [] 
+  departments = []
 }) => {
   // ==================== STATE ====================
   const [editingId, setEditingId] = useState(null);
   const [showPayrollForm, setShowPayrollForm] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [payrollForm, setPayrollForm] = useState({ 
-    month: new Date().getMonth() + 1, 
-    year: new Date().getFullYear() 
+  const [payrollForm, setPayrollForm] = useState({
+    month: new Date().getMonth() + 1,
+    year: new Date().getFullYear()
   });
   const [searchTerm, setSearchTerm] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('');
@@ -17798,37 +17599,39 @@ const StaffModule = ({
   const canDelete = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL'].includes(user?.role);
   const canProcessPayroll = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
 
-  // ==================== SCHOOL TYPE DETECTION ====================
+  // ==================== SCHOOL TYPE ====================
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
   const isUniversity = schoolCategory === 'UNIVERSITY';
   const isTVET = schoolCategory === 'COLLEGE_TVET';
   const isRegularSchool = !isUniversity && !isTVET;
   const isPrimary = schoolCategory === 'ECDE_PRIMARY_JSS';
   const isSecondary = schoolCategory === 'SENIOR_SECONDARY';
-  
+
   const showDepartment = isUniversity || isTVET;
   const showSubjects = isRegularSchool && !isPrimary;
 
-  // ==================== HELPER FUNCTIONS ====================
+  // ==================== HELPERS ====================
   const getUserDisplayName = (member) => {
     if (!member) return 'Unknown Staff';
     const userData = member.User || {};
-    return `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || member.employeeId || 'Unknown Staff';
+    return `${userData.firstName || ''} ${userData.lastName || ''}`.trim()
+      || member.employeeId
+      || 'Unknown Staff';
   };
 
   const getUserInitials = (member) => {
     if (!member) return '?';
     const userData = member.User || {};
-    const firstName = userData.firstName || '';
-    const lastName = userData.lastName || '';
-    return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase() || '?';
+    const f = userData.firstName || '';
+    const l = userData.lastName || '';
+    return `${f.charAt(0)}${l.charAt(0)}`.toUpperCase() || '?';
   };
 
   const getTotalSalary = (member) => {
     if (!member || !member.salary) return 0;
-    return (parseFloat(member.salary.basic) || 0) + 
-           (parseFloat(member.salary.house) || 0) + 
-           (parseFloat(member.salary.transport) || 0);
+    return (parseFloat(member.salary.basic) || 0)
+         + (parseFloat(member.salary.house) || 0)
+         + (parseFloat(member.salary.transport) || 0);
   };
 
   const getDepartmentName = (departmentId) => {
@@ -17845,119 +17648,124 @@ const StaffModule = ({
     }).format(amount || 0);
   };
 
-  // ==================== STAFF ROLE OPTIONS BASED ON SCHOOL TYPE ====================
-  const getStaffRoleOptions = useMemo(() => {
+  // ==================== STAFF ROLE OPTIONS ====================
+  const staffRoleOptions = useMemo(() => {
     if (isUniversity) {
       return [
-        { value: 'PROFESSOR', label: 'Professor' },
-        { value: 'SENIOR_LECTURER', label: 'Senior Lecturer' },
-        { value: 'LECTURER', label: 'Lecturer' },
-        { value: 'ASSISTANT_LECTURER', label: 'Assistant Lecturer' },
-        { value: 'TUTOR', label: 'Tutor' },
-        { value: 'HOD_LECTURER', label: 'Head of Department (Academic)' },
-        { value: 'DEAN', label: 'Dean' },
-        { value: 'REGISTRAR', label: 'Registrar' },
-        { value: 'LIBRARIAN', label: 'Librarian' },
-        { value: 'IT_OFFICER', label: 'IT Officer' },
-        { value: 'ADMINISTRATOR', label: 'Administrator' },
-        { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
-        { value: 'SUPPORT_STAFF', label: 'Support Staff' },
-        { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
-        { value: 'COUNSELOR', label: 'Counselor' },
-        { value: 'NURSE', label: 'Nurse' },
+        { value: 'PROFESSOR',            label: 'Professor' },
+        { value: 'SENIOR_LECTURER',      label: 'Senior Lecturer' },
+        { value: 'LECTURER',             label: 'Lecturer' },
+        { value: 'ASSISTANT_LECTURER',   label: 'Assistant Lecturer' },
+        { value: 'TUTOR',                label: 'Tutor' },
+        { value: 'HOD_LECTURER',         label: 'Head of Department (Academic)' },
+        { value: 'DEAN',                 label: 'Dean' },
+        { value: 'REGISTRAR',            label: 'Registrar' },
+        { value: 'LIBRARIAN',            label: 'Librarian' },
+        { value: 'IT_OFFICER',           label: 'IT Officer' },
+        { value: 'ADMINISTRATOR',        label: 'Administrator' },
+        { value: 'FINANCE_OFFICER',      label: 'Finance Officer' },
+        { value: 'SUPPORT_STAFF',        label: 'Support Staff' },
+        { value: 'LAB_TECHNICIAN',       label: 'Lab Technician' },
+        { value: 'COUNSELOR',            label: 'Counselor' },
+        { value: 'NURSE',                label: 'Nurse' },
       ];
-    } else if (isTVET) {
+    }
+    if (isTVET) {
       return [
         { value: 'TECHNICAL_INSTRUCTOR', label: 'Technical Instructor' },
-        { value: 'WORKSHOP_SUPERVISOR', label: 'Workshop Supervisor' },
-        { value: 'HOD', label: 'Head of Department' },
-        { value: 'PRINCIPAL', label: 'Principal' },
-        { value: 'DEPUTY_PRINCIPAL', label: 'Deputy Principal' },
-        { value: 'CLASS_TEACHER', label: 'Class Teacher' },
-        { value: 'SUBJECT_TEACHER', label: 'Subject Teacher' },
-        { value: 'SUPPORT_STAFF', label: 'Support Staff' },
-        { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
-        { value: 'LIBRARIAN', label: 'Librarian' },
-        { value: 'ADMINISTRATOR', label: 'Administrator' },
-        { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
-        { value: 'IT_OFFICER', label: 'IT Officer' },
-        { value: 'COUNSELOR', label: 'Counselor' },
-        { value: 'NURSE', label: 'Nurse' },
-      ];
-    } else if (isSecondary) {
-      return [
-        { value: 'PRINCIPAL', label: 'Principal' },
-        { value: 'DEPUTY_PRINCIPAL', label: 'Deputy Principal' },
-        { value: 'HOD', label: 'Head of Department' },
-        { value: 'CLASS_TEACHER', label: 'Class Teacher' },
-        { value: 'SUBJECT_TEACHER', label: 'Subject Teacher' },
-        { value: 'SUPPORT_STAFF', label: 'Support Staff' },
-        { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
-        { value: 'LIBRARIAN', label: 'Librarian' },
-        { value: 'ADMINISTRATOR', label: 'Administrator' },
-        { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
-        { value: 'IT_OFFICER', label: 'IT Officer' },
-        { value: 'COUNSELOR', label: 'Counselor' },
-        { value: 'NURSE', label: 'Nurse' },
-      ];
-    } else {
-      // Primary / ECDE / JSS
-      return [
-        { value: 'HEAD_TEACHER', label: 'Head Teacher' },
-        { value: 'DEPUTY_HEAD_TEACHER', label: 'Deputy Head Teacher' },
-        { value: 'SENIOR_TEACHER', label: 'Senior Teacher' },
-        { value: 'CLASS_TEACHER', label: 'Class Teacher' },
-        { value: 'SUBJECT_TEACHER', label: 'Subject Teacher' },
-        { value: 'SUPPORT_STAFF', label: 'Support Staff' },
-        { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
-        { value: 'LIBRARIAN', label: 'Librarian' },
-        { value: 'ADMINISTRATOR', label: 'Administrator' },
-        { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
-        { value: 'IT_OFFICER', label: 'IT Officer' },
-        { value: 'COUNSELOR', label: 'Counselor' },
-        { value: 'NURSE', label: 'Nurse' },
+        { value: 'WORKSHOP_SUPERVISOR',  label: 'Workshop Supervisor' },
+        { value: 'HOD',                  label: 'Head of Department' },
+        { value: 'PRINCIPAL',            label: 'Principal' },
+        { value: 'DEPUTY_PRINCIPAL',     label: 'Deputy Principal' },
+        { value: 'CLASS_TEACHER',        label: 'Class Teacher' },
+        { value: 'SUBJECT_TEACHER',      label: 'Subject Teacher' },
+        { value: 'SUPPORT_STAFF',        label: 'Support Staff' },
+        { value: 'LAB_TECHNICIAN',       label: 'Lab Technician' },
+        { value: 'LIBRARIAN',            label: 'Librarian' },
+        { value: 'ADMINISTRATOR',        label: 'Administrator' },
+        { value: 'FINANCE_OFFICER',      label: 'Finance Officer' },
+        { value: 'IT_OFFICER',           label: 'IT Officer' },
+        { value: 'COUNSELOR',            label: 'Counselor' },
+        { value: 'NURSE',                label: 'Nurse' },
       ];
     }
+    if (isSecondary) {
+      return [
+        { value: 'PRINCIPAL',            label: 'Principal' },
+        { value: 'DEPUTY_PRINCIPAL',     label: 'Deputy Principal' },
+        { value: 'HOD',                  label: 'Head of Department' },
+        { value: 'CLASS_TEACHER',        label: 'Class Teacher' },
+        { value: 'SUBJECT_TEACHER',      label: 'Subject Teacher' },
+        { value: 'SUPPORT_STAFF',        label: 'Support Staff' },
+        { value: 'LAB_TECHNICIAN',       label: 'Lab Technician' },
+        { value: 'LIBRARIAN',            label: 'Librarian' },
+        { value: 'ADMINISTRATOR',        label: 'Administrator' },
+        { value: 'FINANCE_OFFICER',      label: 'Finance Officer' },
+        { value: 'IT_OFFICER',           label: 'IT Officer' },
+        { value: 'COUNSELOR',            label: 'Counselor' },
+        { value: 'NURSE',                label: 'Nurse' },
+      ];
+    }
+    // Primary / ECDE / JSS
+    return [
+      { value: 'HEAD_TEACHER',         label: 'Head Teacher' },
+      { value: 'DEPUTY_HEAD_TEACHER',  label: 'Deputy Head Teacher' },
+      { value: 'SENIOR_TEACHER',       label: 'Senior Teacher' },
+      { value: 'CLASS_TEACHER',        label: 'Class Teacher' },
+      { value: 'SUBJECT_TEACHER',      label: 'Subject Teacher' },
+      { value: 'SUPPORT_STAFF',        label: 'Support Staff' },
+      { value: 'LAB_TECHNICIAN',       label: 'Lab Technician' },
+      { value: 'LIBRARIAN',            label: 'Librarian' },
+      { value: 'ADMINISTRATOR',        label: 'Administrator' },
+      { value: 'FINANCE_OFFICER',      label: 'Finance Officer' },
+      { value: 'IT_OFFICER',           label: 'IT Officer' },
+      { value: 'COUNSELOR',            label: 'Counselor' },
+      { value: 'NURSE',                label: 'Nurse' },
+    ];
   }, [isUniversity, isTVET, isSecondary]);
 
-  // ==================== FILTER STAFF ====================
-  const filteredStaff = useMemo(() => {
-    let filtered = [...staff];
+  // ==================== OPTIONS ====================
+  const departmentOptions = useMemo(() => {
+    if (!departments || departments.length === 0) return [];
+    return departments.map(d => ({
+      value: d.id,
+      label: d.name,
+      subLabel: d.faculty?.name || ''
+    }));
+  }, [departments]);
 
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(member => {
-        const userData = member.User || {};
-        const name = `${userData.firstName || ''} ${userData.lastName || ''}`.toLowerCase();
-        const employeeId = (member.employeeId || '').toLowerCase();
-        const jobTitle = (member.jobTitle || '').toLowerCase();
-        const department = (member.department || '').toLowerCase();
-        const email = (userData.email || '').toLowerCase();
-        const staffRole = (member.staffRole || '').replace(/_/g, ' ').toLowerCase();
-        return name.includes(term) || 
-               employeeId.includes(term) || 
-               jobTitle.includes(term) || 
-               department.includes(term) ||
-               email.includes(term) ||
-               staffRole.includes(term);
-      });
-    }
+  const userOptions = useMemo(() => {
+    if (!users || users.length === 0) return [];
+    const existingUserIds = new Set(staff.map(s => s.userId).filter(Boolean));
+    return users
+      .filter(u => !existingUserIds.has(u.id) || u.id === form.userId)
+      .map(u => ({
+        value: u.id,
+        label: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email,
+        subLabel: `${u.role || 'User'} • ${u.email}`
+      }));
+  }, [users, staff, form.userId]);
 
-    if (departmentFilter) {
-      filtered = filtered.filter(member => 
-        member.departmentId === departmentFilter || 
-        member.department === departmentFilter
-      );
-    }
+  const staffTypeOptions = [
+    { value: 'TEACHING',     label: 'Teaching Staff' },
+    { value: 'NON_TEACHING', label: 'Non-Teaching Staff' }
+  ];
 
-    if (staffTypeFilter) {
-      filtered = filtered.filter(member => member.staffType === staffTypeFilter);
-    }
+  const monthOptions = [
+    { value: 1,  label: 'January'   },
+    { value: 2,  label: 'February'  },
+    { value: 3,  label: 'March'     },
+    { value: 4,  label: 'April'     },
+    { value: 5,  label: 'May'       },
+    { value: 6,  label: 'June'      },
+    { value: 7,  label: 'July'      },
+    { value: 8,  label: 'August'    },
+    { value: 9,  label: 'September' },
+    { value: 10, label: 'October'   },
+    { value: 11, label: 'November'  },
+    { value: 12, label: 'December'  }
+  ];
 
-    return filtered;
-  }, [staff, searchTerm, departmentFilter, staffTypeFilter]);
-
-  // ==================== UNIQUE DEPARTMENTS FOR FILTER ====================
   const uniqueDepartments = useMemo(() => {
     const deptMap = new Map();
     staff.forEach(member => {
@@ -17974,141 +17782,85 @@ const StaffModule = ({
     return Array.from(deptMap.values());
   }, [staff, departments]);
 
-  // ==================== OPTIONS FOR SELECTS ====================
-  const departmentOptions = useMemo(() => {
-    if (!departments || departments.length === 0) {
-      return [];
-    }
-    return departments.map(d => ({
-      value: d.id,
-      label: d.name,
-      subLabel: d.faculty?.name || ''
-    }));
-  }, [departments]);
-
-  const userOptions = useMemo(() => {
-    if (!users || users.length === 0) {
-      return [];
-    }
-    const existingUserIds = new Set(staff.map(s => s.userId).filter(Boolean));
-    
-    return users
-      .filter(u => !existingUserIds.has(u.id) || u.id === form.userId)
-      .map(u => ({
-        value: u.id,
-        label: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email,
-        subLabel: `${u.role || 'User'} • ${u.email}`
-      }));
-  }, [users, staff, form.userId]);
-
-  const staffTypeOptions = [
-    { value: 'TEACHING', label: 'Teaching Staff' },
-    { value: 'NON_TEACHING', label: 'Non-Teaching Staff' }
-  ];
-
-  const monthOptions = [
-    { value: 1, label: 'January' },
-    { value: 2, label: 'February' },
-    { value: 3, label: 'March' },
-    { value: 4, label: 'April' },
-    { value: 5, label: 'May' },
-    { value: 6, label: 'June' },
-    { value: 7, label: 'July' },
-    { value: 8, label: 'August' },
-    { value: 9, label: 'September' },
-    { value: 10, label: 'October' },
-    { value: 11, label: 'November' },
-    { value: 12, label: 'December' }
-  ];
-
   const departmentFilterOptions = useMemo(() => {
-    if (!uniqueDepartments || uniqueDepartments.length === 0) {
-      return [];
-    }
-    return uniqueDepartments.map(dept => ({
-      value: dept.id,
-      label: dept.name
-    }));
+    if (!uniqueDepartments || uniqueDepartments.length === 0) return [];
+    return uniqueDepartments.map(dept => ({ value: dept.id, label: dept.name }));
   }, [uniqueDepartments]);
 
   // ==================== FIXED SEARCHABLE SELECT ====================
-  const SearchableSelect = ({ 
-    label, 
-    value, 
-    onChange, 
-    options = [], 
-    placeholder = "Search...", 
+  // Key fixes vs. the broken version:
+  //  1. `options` cannot be undefined — always an array
+  //  2. When the user clicks the input, we *copy* the current label into search
+  //  3. On blur, we do NOT wipe search — we simply close the dropdown
+  //  4. When the user types free text, the value stays unchanged UNLESS they
+  //     explicitly pick an option — so typing can't be interrupted
+  //  5. The input is fully editable even if the value isn't in the options
+  const SearchableSelect = ({
+    label,
+    value,
+    onChange,
+    options = [],
+    placeholder = 'Search...',
     disabled,
     required,
     className,
-    emptyMessage = "No options available",
-    noOptionsMessage = "No results found"
+    emptyMessage = 'No options available',
+    noOptionsMessage = 'No results found'
   }) => {
     const [search, setSearch] = useState('');
     const [isOpen, setIsOpen] = useState(false);
+    const [isFocused, setIsFocused] = useState(false);
     const dropdownRef = useRef(null);
     const inputRef = useRef(null);
 
-    // Filter options based on search
+    const safeOptions = Array.isArray(options) ? options : [];
+
     const filteredOptions = useMemo(() => {
-      if (!options || options.length === 0) return [];
-      if (!search.trim()) return options;
-      
-      const searchLower = search.toLowerCase();
-      return options.filter(opt => {
+      if (!safeOptions.length) return [];
+      if (!search.trim()) return safeOptions;
+      const s = search.toLowerCase();
+      return safeOptions.filter(opt => {
         if (!opt) return false;
-        const label = (opt.label || '').toLowerCase();
-        const subLabel = (opt.subLabel || '').toLowerCase();
-        const valueStr = String(opt.value || '').toLowerCase();
-        return label.includes(searchLower) || 
-               subLabel.includes(searchLower) || 
-               valueStr.includes(searchLower);
+        return (opt.label || '').toLowerCase().includes(s)
+            || (opt.subLabel || '').toLowerCase().includes(s)
+            || String(opt.value || '').toLowerCase().includes(s);
       });
-    }, [options, search]);
+    }, [safeOptions, search]);
 
-    // Get selected option
     const selectedOption = useMemo(() => {
-      if (!options || options.length === 0) return null;
       if (!value && value !== 0) return null;
-      return options.find(opt => opt.value === value) || null;
-    }, [options, value]);
+      return safeOptions.find(opt => opt.value === value) || null;
+    }, [safeOptions, value]);
 
-    // Click outside handler
+    // Close dropdown when clicking outside
     useEffect(() => {
       const handleClickOutside = (event) => {
         if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
           setIsOpen(false);
+          setIsFocused(false);
         }
       };
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    // Update search when value changes externally
-    useEffect(() => {
-      if (!isOpen && selectedOption) {
-        setSearch(selectedOption.label);
-      } else if (!isOpen && !selectedOption) {
-        setSearch('');
-      }
-    }, [selectedOption, isOpen]);
-
     const handleSelect = (selectedValue) => {
       onChange({ target: { value: selectedValue } });
-      const selected = options.find(opt => opt.value === selectedValue);
-      setSearch(selected ? selected.label : '');
+      const opt = safeOptions.find(o => o.value === selectedValue);
+      setSearch(opt ? opt.label : '');
       setIsOpen(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
+      setIsFocused(false);
+      // Return focus to the input so Tab/Shift+Tab still work
+      if (inputRef.current) inputRef.current.focus();
     };
 
     const handleInputChange = (e) => {
       const val = e.target.value;
       setSearch(val);
+      setIsFocused(true);
       setIsOpen(true);
-      
-      // If search is empty, clear the selection
+
+      // Only clear the value if the user deletes everything
       if (val === '') {
         onChange({ target: { value: '' } });
       }
@@ -18116,10 +17868,22 @@ const StaffModule = ({
 
     const handleFocus = () => {
       if (disabled) return;
+      setIsFocused(true);
       setIsOpen(true);
-      if (selectedOption && !search) {
-        setSearch(selectedOption.label);
-      }
+      // Populate search with current label so the dropdown filters on it
+      if (selectedOption && !search) setSearch(selectedOption.label);
+    };
+
+    const handleBlur = () => {
+      // Delay so a click on a dropdown option registers first
+      setTimeout(() => {
+        // Only close if focus has actually left this component
+        if (dropdownRef.current?.contains(document.activeElement)) return;
+        setIsOpen(false);
+        setIsFocused(false);
+        // Reset search to the selected label (or empty if nothing selected)
+        setSearch(selectedOption ? selectedOption.label : '');
+      }, 150);
     };
 
     const handleClear = (e) => {
@@ -18127,13 +17891,12 @@ const StaffModule = ({
       onChange({ target: { value: '' } });
       setSearch('');
       setIsOpen(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
+      setIsFocused(false);
+      if (inputRef.current) inputRef.current.focus();
     };
 
-    // Determine display value
-    const displayValue = isOpen ? search : (selectedOption ? selectedOption.label : '');
+    // What the input shows: when focused, show raw search; otherwise show label
+    const displayValue = isFocused ? search : (selectedOption ? selectedOption.label : '');
 
     return (
       <div className="relative" ref={dropdownRef}>
@@ -18143,46 +17906,42 @@ const StaffModule = ({
             {required && <span className="text-red-500 ml-1">*</span>}
           </label>
         )}
-        
+
         <div className="relative">
           <input
             ref={inputRef}
             type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
+            className={`w-full px-3 py-2 pr-16 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
               disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
             } ${className || ''}`}
             value={displayValue}
             onChange={handleInputChange}
             onFocus={handleFocus}
-            onBlur={() => {
-              setTimeout(() => {
-                if (!dropdownRef.current?.contains(document.activeElement)) {
-                  setIsOpen(false);
-                  if (!selectedOption) {
-                    setSearch('');
-                  }
-                }
-              }, 200);
-            }}
+            onBlur={handleBlur}
             placeholder={placeholder}
             disabled={disabled}
             autoComplete="off"
           />
-          
+
           {value && !disabled && (
             <button
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={handleClear}
-              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
+              className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
+              tabIndex={-1}
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           )}
-          
-          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+            <svg
+              className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+            >
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </div>
@@ -18190,28 +17949,22 @@ const StaffModule = ({
 
         {isOpen && !disabled && (
           <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-            {options && options.length === 0 ? (
+            {safeOptions.length === 0 ? (
               <div className="px-3 py-4 text-center text-gray-500 text-sm">
                 {emptyMessage}
               </div>
             ) : filteredOptions.length > 0 ? (
-              filteredOptions.map((opt) => (
+              filteredOptions.map(opt => (
                 <div
-                  key={opt.value || opt.key || opt.id || Math.random().toString()}
+                  key={String(opt.value || opt.key || opt.id || Math.random())}
                   className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
                     opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
                   } ${opt.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                   onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    if (!opt.disabled) {
-                      handleSelect(opt.value);
-                    }
-                  }}
+                  onClick={() => { if (!opt.disabled) handleSelect(opt.value); }}
                 >
                   <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && (
-                    <div className="text-xs text-gray-500">{opt.subLabel}</div>
-                  )}
+                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
                 </div>
               ))
             ) : (
@@ -18225,35 +17978,115 @@ const StaffModule = ({
     );
   };
 
-  // ==================== HANDLE FORM SUBMIT ====================
+  // ==================== PLAIN TEXT INPUT ====================
+  // Used for Job Title, Employee ID, etc. — always editable, never overlaid
+  const TextInput = ({ label, value, onChange, placeholder, required, disabled, type = 'text' }) => (
+    <div>
+      {label && (
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          {label}
+          {required && <span className="text-red-500 ml-1">*</span>}
+        </label>
+      )}
+      <input
+        type={type}
+        value={value ?? ''}
+        onChange={onChange}
+        placeholder={placeholder}
+        disabled={disabled}
+        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:bg-gray-100"
+        autoComplete="off"
+      />
+    </div>
+  );
+
+  // ==================== MONEY INPUT ====================
+  // Uses type="text" + inputMode="numeric" so the user can actually type freely.
+  // Browser number inputs hide the caret, clamp values oddly, and make clearing
+  // the field painful. We store the raw string in state and parse on submit.
+  const MoneyInput = ({ label, value, onChange, placeholder, disabled, min = 0 }) => {
+    // Displayed value: show '' when the value is 0 AND the user hasn't touched it,
+    // so placeholder appears. Otherwise show the raw number as typed.
+    const display = (value === 0 || value === '0' || value === undefined || value === null)
+      ? ''
+      : String(value);
+
+    return (
+      <div>
+        {label && (
+          <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+        )}
+        <input
+          type="text"
+          inputMode="decimal"
+          value={display}
+          onChange={(e) => {
+            const raw = e.target.value;
+            // Allow digits, one dot, one leading minus
+            if (raw === '' || /^\d*\.?\d*$/.test(raw)) {
+              onChange(raw);       // pass raw string up
+            }
+          }}
+          placeholder={placeholder || '0'}
+          disabled={disabled}
+          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:bg-gray-100"
+          autoComplete="off"
+        />
+      </div>
+    );
+  };
+
+  // ==================== FILTERED STAFF ====================
+  const filteredStaff = useMemo(() => {
+    let filtered = [...staff];
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(member => {
+        const u = member.User || {};
+        return `${u.firstName || ''} ${u.lastName || ''}`.toLowerCase().includes(term)
+            || (member.employeeId || '').toLowerCase().includes(term)
+            || (member.jobTitle || '').toLowerCase().includes(term)
+            || (member.department || '').toLowerCase().includes(term)
+            || (u.email || '').toLowerCase().includes(term)
+            || (member.staffRole || '').replace(/_/g, ' ').toLowerCase().includes(term);
+      });
+    }
+    if (departmentFilter) {
+      filtered = filtered.filter(m =>
+        m.departmentId === departmentFilter || m.department === departmentFilter
+      );
+    }
+    if (staffTypeFilter) {
+      filtered = filtered.filter(m => m.staffType === staffTypeFilter);
+    }
+    return filtered;
+  }, [staff, searchTerm, departmentFilter, staffTypeFilter]);
+
+  // ==================== SUBMIT ====================
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (!canEdit) {
       setErrorMessage('You do not have permission to add/edit staff');
       setTimeout(() => setErrorMessage(''), 3000);
       return;
     }
-
     if (!form.userId) {
       setErrorMessage('Please select a user account');
       setTimeout(() => setErrorMessage(''), 3000);
       return;
     }
-
     if (!form.staffRole) {
       setErrorMessage('Please select a staff role');
       setTimeout(() => setErrorMessage(''), 3000);
       return;
     }
-
     if (!form.employmentDate) {
       setErrorMessage('Please select employment date');
       setTimeout(() => setErrorMessage(''), 3000);
       return;
     }
-
-    if (!form.jobTitle) {
+    if (!form.jobTitle || !String(form.jobTitle).trim()) {
       setErrorMessage('Please enter a job title');
       setTimeout(() => setErrorMessage(''), 3000);
       return;
@@ -18278,16 +18111,13 @@ const StaffModule = ({
         employmentDate: formattedDate,
         schoolId: currentSchool?.id || user?.schoolId,
         salary: {
-          basic: parseFloat(form.salary?.basic) || 0,
-          house: parseFloat(form.salary?.house) || 0,
+          basic:     parseFloat(form.salary?.basic)     || 0,
+          house:     parseFloat(form.salary?.house)     || 0,
           transport: parseFloat(form.salary?.transport) || 0
         }
       };
-      
-      if (!showSubjects) {
-        delete formData.subjects;
-      }
 
+      if (!showSubjects) delete formData.subjects;
       if (!showDepartment) {
         delete formData.departmentId;
         delete formData.department;
@@ -18299,35 +18129,17 @@ const StaffModule = ({
 
       console.log('📤 Submitting staff data:', formData);
 
-      let response;
       if (editingId) {
-        response = await onUpdate(editingId, formData);
+        await onUpdate(editingId, formData);
         setSuccessMessage('✅ Staff member updated successfully!');
       } else {
-        response = await onCreate(formData);
+        await onCreate(formData);
         setSuccessMessage('✅ Staff member added successfully!');
       }
 
       setEditingId(null);
-      setForm({
-        userId: '',
-        employeeId: '',
-        tscNumber: '',
-        departmentId: '',
-        department: '',
-        jobTitle: '',
-        employmentDate: new Date().toISOString().split('T')[0],
-        qualifications: [],
-        specialization: '',
-        subjects: [],
-        staffType: 'TEACHING',
-        staffRole: '',
-        bankDetails: { bank: '', branch: '', account: '' },
-        salary: { basic: 0, house: 0, transport: 0 }
-      });
-
+      resetForm();
       setTimeout(() => setSuccessMessage(''), 5000);
-
     } catch (error) {
       console.error('❌ Staff submit error:', error);
       setErrorMessage(error.response?.data?.message || 'Failed to save staff member');
@@ -18337,98 +18149,7 @@ const StaffModule = ({
     }
   };
 
-  // ==================== PROCESS PAYROLL ====================
-  const processPayroll = async () => {
-    if (!canProcessPayroll) {
-      setErrorMessage('You do not have permission to process payroll');
-      setTimeout(() => setErrorMessage(''), 3000);
-      return;
-    }
-
-    if (staff.length === 0) {
-      setErrorMessage('No staff members to process payroll for');
-      setTimeout(() => setErrorMessage(''), 3000);
-      return;
-    }
-
-    setLoading(true);
-    setErrorMessage('');
-    setSuccessMessage('');
-
-    try {
-      const res = await api.post('/payroll/process', {
-        month: payrollForm.month,
-        year: payrollForm.year,
-        schoolId: currentSchool?.id
-      });
-      
-      setPayroll(res.data.payrolls || []);
-      setShowPayrollForm(false);
-      setSuccessMessage(`✅ Payroll processed successfully for ${res.data.payrolls?.length || 0} staff members!`);
-      setTimeout(() => setSuccessMessage(''), 5000);
-      
-    } catch (error) {
-      console.error('❌ Payroll error:', error);
-      setErrorMessage(error.response?.data?.message || 'Failed to process payroll');
-      setTimeout(() => setErrorMessage(''), 5000);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ==================== HANDLE DELETE ====================
-  const handleDelete = async (memberId, memberName) => {
-    if (!canDelete) {
-      setErrorMessage('You do not have permission to delete staff');
-      setTimeout(() => setErrorMessage(''), 3000);
-      return;
-    }
-
-    if (!window.confirm(`Are you sure you want to delete ${memberName}? This action cannot be undone.`)) {
-      return;
-    }
-
-    setLoading(true);
-    setErrorMessage('');
-    setSuccessMessage('');
-
-    try {
-      await onDelete(memberId);
-      setSuccessMessage(`✅ ${memberName} deleted successfully!`);
-      setTimeout(() => setSuccessMessage(''), 5000);
-    } catch (error) {
-      console.error('❌ Delete error:', error);
-      setErrorMessage(error.response?.data?.message || 'Failed to delete staff member');
-      setTimeout(() => setErrorMessage(''), 5000);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ==================== HANDLE EDIT ====================
-  const handleEdit = (member) => {
-    if (!canEdit) {
-      setErrorMessage('You do not have permission to edit staff');
-      setTimeout(() => setErrorMessage(''), 3000);
-      return;
-    }
-
-    setForm({
-      ...member,
-      employmentDate: member.employmentDate 
-        ? new Date(member.employmentDate).toISOString().split('T')[0]
-        : new Date().toISOString().split('T')[0],
-      salary: member.salary || { basic: 0, house: 0, transport: 0 },
-      departmentId: member.departmentId || '',
-      department: member.department || '',
-      staffRole: member.staffRole || ''
-    });
-    setEditingId(member.id);
-  };
-
-  // ==================== HANDLE CANCEL ====================
-  const handleCancel = () => {
-    setEditingId(null);
+  const resetForm = () => {
     setForm({
       userId: '',
       employeeId: '',
@@ -18447,45 +18168,107 @@ const StaffModule = ({
     });
   };
 
-  // ==================== INPUT FIELD COMPONENT ====================
-  const InputField = ({ label, type, value, onChange, placeholder, required, disabled, min, step }) => (
-    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">
-        {label}
-        {required && <span className="text-red-500 ml-1">*</span>}
-      </label>
-      <input
-        type={type || 'text'}
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-        disabled={disabled}
-        min={min}
-        step={step}
-      />
-    </div>
-  );
+  // ==================== PAYROLL ====================
+  const processPayroll = async () => {
+    if (!canProcessPayroll) {
+      setErrorMessage('You do not have permission to process payroll');
+      setTimeout(() => setErrorMessage(''), 3000);
+      return;
+    }
+    if (staff.length === 0) {
+      setErrorMessage('No staff members to process payroll for');
+      setTimeout(() => setErrorMessage(''), 3000);
+      return;
+    }
+    setLoading(true);
+    setErrorMessage('');
+    setSuccessMessage('');
+    try {
+      const res = await api.post('/payroll/process', {
+        month: payrollForm.month,
+        year: payrollForm.year,
+        schoolId: currentSchool?.id
+      });
+      setPayroll(res.data.payrolls || []);
+      setShowPayrollForm(false);
+      setSuccessMessage(`✅ Payroll processed for ${res.data.payrolls?.length || 0} staff members!`);
+      setTimeout(() => setSuccessMessage(''), 5000);
+    } catch (error) {
+      console.error('❌ Payroll error:', error);
+      setErrorMessage(error.response?.data?.message || 'Failed to process payroll');
+      setTimeout(() => setErrorMessage(''), 5000);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==================== DELETE ====================
+  const handleDelete = async (memberId, memberName) => {
+    if (!canDelete) {
+      setErrorMessage('You do not have permission to delete staff');
+      setTimeout(() => setErrorMessage(''), 3000);
+      return;
+    }
+    if (!window.confirm(`Delete ${memberName}? This cannot be undone.`)) return;
+    setLoading(true);
+    try {
+      await onDelete(memberId);
+      setSuccessMessage(`✅ ${memberName} deleted successfully!`);
+      setTimeout(() => setSuccessMessage(''), 5000);
+    } catch (error) {
+      setErrorMessage(error.response?.data?.message || 'Failed to delete staff member');
+      setTimeout(() => setErrorMessage(''), 5000);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==================== EDIT ====================
+  const handleEdit = (member) => {
+    if (!canEdit) {
+      setErrorMessage('You do not have permission to edit staff');
+      setTimeout(() => setErrorMessage(''), 3000);
+      return;
+    }
+    setForm({
+      ...member,
+      employmentDate: member.employmentDate
+        ? new Date(member.employmentDate).toISOString().split('T')[0]
+        : new Date().toISOString().split('T')[0],
+      salary: member.salary || { basic: 0, house: 0, transport: 0 },
+      departmentId: member.departmentId || '',
+      department: member.department || '',
+      staffRole: member.staffRole || ''
+    });
+    setEditingId(member.id);
+    setTimeout(() => {
+      document.getElementById('staff-form')?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+  };
+
+  const handleCancel = () => {
+    setEditingId(null);
+    resetForm();
+  };
 
   // ==================== RENDER ====================
   return (
     <div className="space-y-6">
-      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
-      
+      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50" />}
+
       {successMessage && (
         <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center justify-between">
-          <span><i className="fas fa-check-circle mr-2"></i>{successMessage}</span>
+          <span><i className="fas fa-check-circle mr-2" />{successMessage}</span>
           <button onClick={() => setSuccessMessage('')} className="text-green-500 hover:text-green-700">
-            <i className="fas fa-times"></i>
+            <i className="fas fa-times" />
           </button>
         </div>
       )}
-      
       {errorMessage && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
-          <span><i className="fas fa-exclamation-circle mr-2"></i>{errorMessage}</span>
+          <span><i className="fas fa-exclamation-circle mr-2" />{errorMessage}</span>
           <button onClick={() => setErrorMessage('')} className="text-red-500 hover:text-red-700">
-            <i className="fas fa-times"></i>
+            <i className="fas fa-times" />
           </button>
         </div>
       )}
@@ -18495,7 +18278,7 @@ const StaffModule = ({
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Staff Management</h2>
           <p className="text-sm text-gray-500 mt-1">
-            {staff.length} staff members • {staff.filter(s => s.staffType === 'TEACHING').length} teaching • 
+            {staff.length} staff members • {staff.filter(s => s.staffType === 'TEACHING').length} teaching •{' '}
             {staff.filter(s => s.staffType === 'NON_TEACHING').length} non-teaching
           </p>
         </div>
@@ -18503,10 +18286,9 @@ const StaffModule = ({
           {canProcessPayroll && (
             <button
               onClick={() => setShowPayrollForm(true)}
-              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
+              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center gap-2"
             >
-              <i className="fas fa-money-bill-wave"></i>
-              Process Payroll
+              <i className="fas fa-money-bill-wave" />Process Payroll
             </button>
           )}
           {canEdit && (
@@ -18517,32 +18299,30 @@ const StaffModule = ({
                   document.getElementById('staff-form')?.scrollIntoView({ behavior: 'smooth' });
                 }, 100);
               }}
-              className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2"
             >
-              <i className="fas fa-plus"></i>
-              {editingId ? 'Cancel Edit' : 'Add Staff'}
+              <i className="fas fa-plus" />{editingId ? 'Cancel Edit' : 'Add Staff'}
             </button>
           )}
           <button
             onClick={() => setShowFilters(!showFilters)}
-            className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors flex items-center gap-2"
+            className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 flex items-center gap-2"
           >
-            <i className="fas fa-filter"></i>
-            Filters
+            <i className="fas fa-filter" />Filters
           </button>
         </div>
       </div>
 
-      {/* School Info */}
       {currentSchool && (
         <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
           <p className="text-sm text-blue-700">
-            <i className="fas fa-school mr-2"></i>
+            <i className="fas fa-school mr-2" />
             Managing staff for: <strong>{currentSchool.name}</strong>
             <span className="ml-2 text-xs text-blue-500">
-              ({schoolCategory === 'UNIVERSITY' ? 'University' : 
-                schoolCategory === 'COLLEGE_TVET' ? 'TVET' : 
-                schoolCategory === 'SENIOR_SECONDARY' ? 'Secondary' : 'Primary/JSS'})
+              ({schoolCategory === 'UNIVERSITY' ? 'University'
+                : schoolCategory === 'COLLEGE_TVET' ? 'TVET'
+                : schoolCategory === 'SENIOR_SECONDARY' ? 'Secondary'
+                : 'Primary/JSS'})
             </span>
           </p>
         </div>
@@ -18552,16 +18332,12 @@ const StaffModule = ({
       {showFilters && (
         <div className="bg-white p-4 rounded-xl shadow-sm border">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Search</label>
-              <input
-                type="text"
-                placeholder="Search by name, ID, or job title..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-              />
-            </div>
+            <TextInput
+              label="Search"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Name, ID, or job title..."
+            />
             <SearchableSelect
               label="Department"
               value={departmentFilter}
@@ -18584,11 +18360,7 @@ const StaffModule = ({
               Showing {filteredStaff.length} of {staff.length} staff members
             </span>
             <button
-              onClick={() => {
-                setSearchTerm('');
-                setDepartmentFilter('');
-                setStaffTypeFilter('');
-              }}
+              onClick={() => { setSearchTerm(''); setDepartmentFilter(''); setStaffTypeFilter(''); }}
               className="text-sm text-indigo-600 hover:text-indigo-800"
             >
               Clear Filters
@@ -18601,132 +18373,107 @@ const StaffModule = ({
       {canEdit && (
         <div id="staff-form" className="bg-white p-6 rounded-xl shadow-sm border-2 border-indigo-100">
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            {editingId ? (
-              <>
-                <i className="fas fa-edit text-indigo-600"></i>
-                Edit Staff Member
-              </>
-            ) : (
-              <>
-                <i className="fas fa-user-plus text-indigo-600"></i>
-                Add New Staff
-              </>
-            )}
+            {editingId
+              ? <><i className="fas fa-edit text-indigo-600" />Edit Staff Member</>
+              : <><i className="fas fa-user-plus text-indigo-600" />Add New Staff</>
+            }
           </h3>
-          
+
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* User Account */}
             <SearchableSelect
               label="User Account"
               value={form.userId || ''}
-              onChange={(e) => setForm({...form, userId: e.target.value})}
+              onChange={(e) => setForm({ ...form, userId: e.target.value })}
               options={userOptions}
               placeholder="Search users..."
               emptyMessage="No users available"
               required
-              disabled={loading || editingId}
+              disabled={loading || !!editingId}
             />
             {editingId && (
               <p className="text-xs text-gray-500 mt-1">
-                <i className="fas fa-info-circle mr-1"></i>
-                User account cannot be changed after creation
+                <i className="fas fa-info-circle mr-1" />User account cannot be changed after creation
               </p>
             )}
 
-            {/* Employee ID & TSC Number */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <InputField
+              <TextInput
                 label="Employee ID"
                 value={form.employeeId || ''}
-                onChange={(e) => setForm({...form, employeeId: e.target.value})}
+                onChange={(e) => setForm({ ...form, employeeId: e.target.value })}
                 placeholder="e.g., EMP001"
                 disabled={loading}
               />
-              <InputField
+              <TextInput
                 label="TSC Number"
                 value={form.tscNumber || ''}
-                onChange={(e) => setForm({...form, tscNumber: e.target.value})}
+                onChange={(e) => setForm({ ...form, tscNumber: e.target.value })}
                 placeholder="e.g., TSC-12345"
                 disabled={loading}
               />
             </div>
 
-            {/* Staff Role */}
             <SearchableSelect
               label="Staff Role"
               value={form.staffRole || ''}
-              onChange={(e) => setForm({...form, staffRole: e.target.value})}
-              options={getStaffRoleOptions}
+              onChange={(e) => setForm({ ...form, staffRole: e.target.value })}
+              options={staffRoleOptions}
               placeholder="Select staff role..."
               emptyMessage="No staff roles available"
               required
               disabled={loading}
             />
-            <p className="text-xs text-gray-500 mt-1">
-              <i className="fas fa-info-circle mr-1"></i>
-              {isUniversity ? 'Academic or administrative role within the institution' : 
-               isTVET ? 'Teaching or technical role within the institution' : 
-               'Teaching or administrative role within the school'}
-            </p>
 
-            {/* Department field - Only shown for University and TVET */}
-            {showDepartment && (
+            {/* Department (University/TVET) or Job Title (rest) */}
+            {showDepartment ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <SearchableSelect
-                  label={isUniversity ? "Faculty/Department" : "Department"}
+                  label={isUniversity ? 'Faculty/Department' : 'Department'}
                   value={form.departmentId || ''}
                   onChange={(e) => {
                     const deptId = e.target.value;
                     const dept = departments?.find(d => d.id === deptId);
-                    setForm({
-                      ...form, 
-                      departmentId: deptId,
-                      department: dept?.name || ''
-                    });
+                    setForm({ ...form, departmentId: deptId, department: dept?.name || '' });
                   }}
                   options={departmentOptions}
                   placeholder="Search departments..."
-                  emptyMessage={departments && departments.length > 0 ? "No departments available" : "No departments configured for this school"}
-                  required={isUniversity || isTVET}
+                  emptyMessage={departments?.length > 0 ? 'No departments available' : 'No departments configured for this school'}
+                  required
                   disabled={loading}
                 />
-                <InputField
+                <TextInput
                   label="Job Title"
                   value={form.jobTitle || ''}
-                  onChange={(e) => setForm({...form, jobTitle: e.target.value})}
-                  placeholder={isUniversity ? "e.g., Senior Lecturer" : isTVET ? "e.g., Workshop Supervisor" : "e.g., Class Teacher"}
+                  onChange={(e) => setForm({ ...form, jobTitle: e.target.value })}
+                  placeholder={isUniversity ? 'e.g., Senior Lecturer' : 'e.g., Workshop Supervisor'}
                   required
                   disabled={loading}
                 />
               </div>
-            )}
-
-            {/* If no department, show job title full width */}
-            {!showDepartment && (
-              <InputField
+            ) : (
+              <TextInput
                 label="Job Title"
                 value={form.jobTitle || ''}
-                onChange={(e) => setForm({...form, jobTitle: e.target.value})}
+                onChange={(e) => setForm({ ...form, jobTitle: e.target.value })}
                 placeholder="e.g., Class Teacher"
                 required
                 disabled={loading}
               />
             )}
 
-            {/* Employment Date & Staff Type */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <InputField
+              <TextInput
                 label="Employment Date"
                 type="date"
                 value={form.employmentDate || new Date().toISOString().split('T')[0]}
-                onChange={(e) => setForm({...form, employmentDate: e.target.value})}
+                onChange={(e) => setForm({ ...form, employmentDate: e.target.value })}
                 required
                 disabled={loading}
               />
               <SearchableSelect
                 label="Staff Type"
                 value={form.staffType || ''}
-                onChange={(e) => setForm({...form, staffType: e.target.value})}
+                onChange={(e) => setForm({ ...form, staffType: e.target.value })}
                 options={staffTypeOptions}
                 placeholder="Select staff type..."
                 emptyMessage="No staff types available"
@@ -18734,32 +18481,29 @@ const StaffModule = ({
               />
             </div>
 
-            {/* Subjects - Only for Secondary Schools */}
             {showSubjects && (
               <div>
-                <InputField
+                <TextInput
                   label="Subjects (comma separated)"
                   value={form.subjects?.join(', ') || ''}
                   onChange={(e) => setForm({
                     ...form,
-                    subjects: e.target.value.split(',').map(s => s.trim()).filter(s => s)
+                    subjects: e.target.value.split(',').map(s => s.trim()).filter(Boolean)
                   })}
                   placeholder="Mathematics, Physics, Chemistry"
                   disabled={loading}
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  <i className="fas fa-info-circle mr-1"></i>
-                  Enter subjects separated by commas
+                  <i className="fas fa-info-circle mr-1" />Enter subjects separated by commas
                 </p>
               </div>
             )}
 
-            {/* Specialization - Only for University/TVET */}
             {(isUniversity || isTVET) && (
-              <InputField
+              <TextInput
                 label="Specialization"
                 value={form.specialization || ''}
-                onChange={(e) => setForm({...form, specialization: e.target.value})}
+                onChange={(e) => setForm({ ...form, specialization: e.target.value })}
                 placeholder="e.g., Electrical Engineering, Computer Science"
                 disabled={loading}
               />
@@ -18768,48 +18512,38 @@ const StaffModule = ({
             {/* Salary Details */}
             <div className="border-t pt-4">
               <h4 className="font-medium text-gray-700 mb-3 flex items-center gap-2">
-                <i className="fas fa-money-bill text-green-600"></i>
-                Salary Details
+                <i className="fas fa-money-bill text-green-600" />Salary Details
               </h4>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <InputField
+                <MoneyInput
                   label="Basic Salary"
-                  type="number"
-                  value={form.salary?.basic || 0}
-                  onChange={(e) => setForm({
+                  value={form.salary?.basic || ''}
+                  onChange={(raw) => setForm({
                     ...form,
-                    salary: { ...form.salary, basic: parseFloat(e.target.value) || 0 }
+                    salary: { ...form.salary, basic: raw }
                   })}
-                  placeholder="0.00"
+                  placeholder="e.g., 50000"
                   disabled={loading}
-                  min="0"
-                  step="1000"
                 />
-                <InputField
+                <MoneyInput
                   label="House Allowance"
-                  type="number"
-                  value={form.salary?.house || 0}
-                  onChange={(e) => setForm({
+                  value={form.salary?.house || ''}
+                  onChange={(raw) => setForm({
                     ...form,
-                    salary: { ...form.salary, house: parseFloat(e.target.value) || 0 }
+                    salary: { ...form.salary, house: raw }
                   })}
-                  placeholder="0.00"
+                  placeholder="e.g., 15000"
                   disabled={loading}
-                  min="0"
-                  step="1000"
                 />
-                <InputField
+                <MoneyInput
                   label="Transport Allowance"
-                  type="number"
-                  value={form.salary?.transport || 0}
-                  onChange={(e) => setForm({
+                  value={form.salary?.transport || ''}
+                  onChange={(raw) => setForm({
                     ...form,
-                    salary: { ...form.salary, transport: parseFloat(e.target.value) || 0 }
+                    salary: { ...form.salary, transport: raw }
                   })}
-                  placeholder="0.00"
+                  placeholder="e.g., 5000"
                   disabled={loading}
-                  min="0"
-                  step="500"
                 />
               </div>
               <div className="mt-2 p-3 bg-gray-50 rounded-lg">
@@ -18817,8 +18551,8 @@ const StaffModule = ({
                   <span className="text-sm font-medium text-gray-600">Total Monthly Salary:</span>
                   <span className="text-lg font-bold text-green-600">
                     {formatCurrency(
-                      (parseFloat(form.salary?.basic) || 0) + 
-                      (parseFloat(form.salary?.house) || 0) + 
+                      (parseFloat(form.salary?.basic)     || 0) +
+                      (parseFloat(form.salary?.house)     || 0) +
                       (parseFloat(form.salary?.transport) || 0)
                     )}
                   </span>
@@ -18826,26 +18560,23 @@ const StaffModule = ({
               </div>
             </div>
 
-            {/* Form Actions */}
             <div className="flex flex-wrap gap-3 pt-2 border-t">
               <button
                 type="submit"
-                className="flex-1 bg-indigo-600 text-white py-2.5 px-4 rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center disabled:opacity-50 gap-2"
                 disabled={loading}
+                className="flex-1 bg-indigo-600 text-white py-2.5 px-4 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {loading ? (
-                  <><i className="fas fa-spinner fa-spin"></i>Saving...</>
-                ) : (
-                  <><i className={`fas fa-${editingId ? 'save' : 'plus-circle'}`}></i>
-                  {editingId ? 'Update Staff' : 'Add Staff'}</>
-                )}
+                {loading
+                  ? <><i className="fas fa-spinner fa-spin" />Saving...</>
+                  : <><i className={`fas fa-${editingId ? 'save' : 'plus-circle'}`} />{editingId ? 'Update Staff' : 'Add Staff'}</>
+                }
               </button>
               {editingId && (
                 <button
                   type="button"
                   onClick={handleCancel}
-                  className="bg-gray-500 text-white py-2.5 px-6 rounded-lg hover:bg-gray-600 transition-colors"
                   disabled={loading}
+                  className="bg-gray-500 text-white py-2.5 px-6 rounded-lg hover:bg-gray-600"
                 >
                   Cancel
                 </button>
@@ -18859,8 +18590,7 @@ const StaffModule = ({
       <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-200">
         <div className="px-6 py-4 bg-gray-50 border-b flex justify-between items-center flex-wrap gap-2">
           <h3 className="font-semibold text-lg flex items-center gap-2">
-            <i className="fas fa-users text-indigo-600"></i>
-            Staff List
+            <i className="fas fa-users text-indigo-600" />Staff List
             <span className="text-sm font-normal text-gray-500">
               ({filteredStaff.length} {filteredStaff.length === 1 ? 'member' : 'members'})
             </span>
@@ -18875,75 +18605,54 @@ const StaffModule = ({
           </div>
         </div>
 
-        {/* Staff Cards Grid */}
         <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto">
           {filteredStaff.length === 0 ? (
             <div className="col-span-full text-center py-12 text-gray-500">
-              <i className="fas fa-users text-5xl text-gray-300 mb-3 block"></i>
+              <i className="fas fa-users text-5xl text-gray-300 mb-3 block" />
               <p className="text-lg font-medium">No staff members found</p>
               <p className="text-sm text-gray-400 mt-1">
-                {searchTerm || departmentFilter || staffTypeFilter ? 
-                  'Try adjusting your filters' : 
-                  'Click "Add Staff" to get started'}
+                {searchTerm || departmentFilter || staffTypeFilter
+                  ? 'Try adjusting your filters'
+                  : 'Click "Add Staff" to get started'}
               </p>
-              {(searchTerm || departmentFilter || staffTypeFilter) && (
-                <button
-                  onClick={() => {
-                    setSearchTerm('');
-                    setDepartmentFilter('');
-                    setStaffTypeFilter('');
-                  }}
-                  className="mt-3 text-indigo-600 hover:text-indigo-800 text-sm font-medium"
-                >
-                  Clear all filters
-                </button>
-              )}
             </div>
           ) : (
-            filteredStaff.map((member) => {
-              const userData = member.User || {};
+            filteredStaff.map(member => {
+              const u = member.User || {};
               const totalSalary = getTotalSalary(member);
               const departmentName = getDepartmentName(member.departmentId) || member.department || 'N/A';
-              const staffRoleDisplay = member.staffRole 
-                ? member.staffRole.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase()) 
+              const staffRoleDisplay = member.staffRole
+                ? member.staffRole.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase())
                 : 'N/A';
-              
+
               return (
                 <div
                   key={member.id}
                   className="border rounded-lg p-4 hover:shadow-md transition-shadow bg-white hover:bg-gray-50"
                 >
                   <div className="flex justify-between items-start">
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <div className="flex items-center space-x-3">
                         <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0">
-                          <span className="text-indigo-600 font-bold text-lg">
-                            {getUserInitials(member)}
-                          </span>
+                          <span className="text-indigo-600 font-bold text-lg">{getUserInitials(member)}</span>
                         </div>
                         <div className="min-w-0">
-                          <h4 className="font-semibold text-gray-800 truncate">
-                            {getUserDisplayName(member)}
-                          </h4>
+                          <h4 className="font-semibold text-gray-800 truncate">{getUserDisplayName(member)}</h4>
                           <p className="text-sm text-gray-600 truncate">{member.jobTitle || 'No Job Title'}</p>
-                          <p className="text-xs text-gray-400 truncate">{userData.email || 'No email'}</p>
+                          <p className="text-xs text-gray-400 truncate">{u.email || 'No email'}</p>
                         </div>
                       </div>
-                      
+
                       <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                         <div>
                           <span className="text-gray-500">Staff Type:</span>
-                          <span className={`ml-1 font-medium ${
-                            member.staffType === 'TEACHING' ? 'text-green-600' : 'text-blue-600'
-                          }`}>
+                          <span className={`ml-1 font-medium ${member.staffType === 'TEACHING' ? 'text-green-600' : 'text-blue-600'}`}>
                             {member.staffType === 'TEACHING' ? 'Teaching' : 'Non-Teaching'}
                           </span>
                         </div>
                         <div>
                           <span className="text-gray-500">Role:</span>
-                          <span className="ml-1 font-medium text-indigo-600">
-                            {staffRoleDisplay}
-                          </span>
+                          <span className="ml-1 font-medium text-indigo-600">{staffRoleDisplay}</span>
                         </div>
                         {showDepartment && (
                           <div className="col-span-2">
@@ -18968,10 +18677,7 @@ const StaffModule = ({
                           <span className="text-xs text-gray-500">Subjects:</span>
                           <div className="flex flex-wrap gap-1 mt-1">
                             {member.subjects.slice(0, 3).map((subject, idx) => (
-                              <span
-                                key={`${member.id}-subject-${idx}`}
-                                className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-xs"
-                              >
+                              <span key={`${member.id}-sub-${idx}`} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-xs">
                                 {subject}
                               </span>
                             ))}
@@ -18986,35 +18692,20 @@ const StaffModule = ({
 
                       <div className="mt-2 pt-2 border-t text-sm">
                         <span className="text-gray-500">Salary:</span>
-                        <span className="ml-2 font-medium text-green-600">
-                          {formatCurrency(totalSalary)}
-                        </span>
-                        {member.salary && (member.salary.basic > 0 || member.salary.house > 0 || member.salary.transport > 0) && (
-                          <span className="text-xs text-gray-400 ml-2">
-                            (Basic: {formatCurrency(member.salary.basic || 0)})
-                          </span>
-                        )}
+                        <span className="ml-2 font-medium text-green-600">{formatCurrency(totalSalary)}</span>
                       </div>
                     </div>
 
                     {(canEdit || canDelete) && (
                       <div className="flex flex-col space-y-1 ml-2">
                         {canEdit && (
-                          <button
-                            onClick={() => handleEdit(member)}
-                            className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                            title="Edit Staff"
-                          >
-                            <i className="fas fa-edit"></i>
+                          <button onClick={() => handleEdit(member)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg" title="Edit">
+                            <i className="fas fa-edit" />
                           </button>
                         )}
                         {canDelete && (
-                          <button
-                            onClick={() => handleDelete(member.id, getUserDisplayName(member))}
-                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                            title="Delete Staff"
-                          >
-                            <i className="fas fa-trash"></i>
+                          <button onClick={() => handleDelete(member.id, getUserDisplayName(member))} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
+                            <i className="fas fa-trash" />
                           </button>
                         )}
                       </div>
@@ -19025,74 +18716,51 @@ const StaffModule = ({
             })
           )}
         </div>
-
-        {staff.length > 0 && (
-          <div className="px-6 py-3 bg-gray-50 border-t flex flex-wrap justify-between items-center text-sm text-gray-500">
-            <div className="flex flex-wrap gap-4">
-              <span>👥 Total: <span className="font-medium">{staff.length}</span></span>
-              <span>👨‍🏫 Teaching: <span className="font-medium text-green-600">{staff.filter(s => s.staffType === 'TEACHING').length}</span></span>
-              <span>👔 Non-Teaching: <span className="font-medium text-blue-600">{staff.filter(s => s.staffType === 'NON_TEACHING').length}</span></span>
-              {showDepartment && <span>🏢 Departments: <span className="font-medium">{uniqueDepartments.length}</span></span>}
-            </div>
-            <div className="text-xs text-gray-400">
-              Last updated: {new Date().toLocaleString()}
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* Payroll Form Modal */}
+      {/* Payroll modal */}
       {showPayrollForm && canProcessPayroll && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold flex items-center gap-2">
-                <i className="fas fa-calculator text-green-600"></i>
-                Process Monthly Payroll
+                <i className="fas fa-calculator text-green-600" />Process Monthly Payroll
               </h3>
-              <button 
-                onClick={() => setShowPayrollForm(false)} 
-                className="text-gray-500 hover:text-gray-700"
-                disabled={loading}
-              >
-                <i className="fas fa-times"></i>
+              <button onClick={() => setShowPayrollForm(false)} className="text-gray-500 hover:text-gray-700" disabled={loading}>
+                <i className="fas fa-times" />
               </button>
             </div>
-            
+
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <SearchableSelect
                   label="Month"
                   value={payrollForm.month}
-                  onChange={(e) => setPayrollForm({...payrollForm, month: parseInt(e.target.value)})}
+                  onChange={(e) => setPayrollForm({ ...payrollForm, month: parseInt(e.target.value) })}
                   options={monthOptions}
                   placeholder="Select month..."
                   emptyMessage="No months available"
                   disabled={loading}
                 />
-                <InputField
+                <TextInput
                   label="Year"
                   type="number"
                   value={payrollForm.year}
-                  onChange={(e) => setPayrollForm({...payrollForm, year: parseInt(e.target.value)})}
-                  min="2020"
-                  max="2030"
+                  onChange={(e) => setPayrollForm({ ...payrollForm, year: parseInt(e.target.value) })}
                   disabled={loading}
                 />
               </div>
 
               <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
                 <div className="flex items-start">
-                  <i className="fas fa-info-circle text-yellow-600 mt-0.5 mr-2"></i>
+                  <i className="fas fa-info-circle text-yellow-600 mt-0.5 mr-2" />
                   <div>
                     <p className="text-sm text-yellow-800 font-medium">Payroll Summary</p>
                     <p className="text-sm text-yellow-700 mt-1">
-                      Processing payroll for <span className="font-bold">{staff.length}</span> staff members for 
-                      <span className="font-bold"> {new Date(payrollForm.year, payrollForm.month - 1).toLocaleString('default', { month: 'long' })} {payrollForm.year}</span>.
-                    </p>
-                    <p className="text-xs text-yellow-600 mt-2">
-                      <i className="fas fa-shield-alt mr-1"></i>
-                      This will create expense records for salaries and deductions.
+                      Processing payroll for <strong>{staff.length}</strong> staff members for{' '}
+                      <strong>
+                        {new Date(payrollForm.year, payrollForm.month - 1).toLocaleString('default', { month: 'long' })} {payrollForm.year}
+                      </strong>.
                     </p>
                   </div>
                 </div>
@@ -19101,20 +18769,12 @@ const StaffModule = ({
               <div className="flex space-x-3 pt-2">
                 <button
                   onClick={processPayroll}
-                  className="flex-1 bg-green-600 text-white py-2.5 px-4 rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center disabled:opacity-50 gap-2"
                   disabled={loading || staff.length === 0}
+                  className="flex-1 bg-green-600 text-white py-2.5 px-4 rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  {loading ? (
-                    <><i className="fas fa-spinner fa-spin"></i>Processing...</>
-                  ) : (
-                    <><i className="fas fa-calculator"></i>Process Payroll</>
-                  )}
+                  {loading ? <><i className="fas fa-spinner fa-spin" />Processing...</> : <><i className="fas fa-calculator" />Process Payroll</>}
                 </button>
-                <button
-                  onClick={() => setShowPayrollForm(false)}
-                  className="bg-gray-500 text-white py-2.5 px-6 rounded-lg hover:bg-gray-600 transition-colors"
-                  disabled={loading}
-                >
+                <button onClick={() => setShowPayrollForm(false)} disabled={loading} className="bg-gray-500 text-white py-2.5 px-6 rounded-lg hover:bg-gray-600">
                   Cancel
                 </button>
               </div>
@@ -19125,6 +18785,7 @@ const StaffModule = ({
     </div>
   );
 };
+
 // ==================== FIXED LIBRARY MODULE WITH SCHOOLID ====================
 const LibraryModule = ({ 
   books, setBooks, borrows, setBorrows, students, 
@@ -42669,12 +42330,13 @@ const HealthModule = ({ students, currentSchool, user, hostels, onDataChange }) 
     </div>
   );
 };
+
 const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user, onPatientChange }) => {
   console.log('🏥 SickBayModule RENDERED');
   console.log('📦 Hostels received:', hostels?.length);
   console.log('👥 Students received:', students?.length);
   console.log('📋 Health records received:', healthRecords?.length);
-  
+
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -42702,22 +42364,26 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
   const canManagePatients = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'MATRON', 'NURSE'].includes(user?.role);
   const isNurse = user?.role === 'NURSE';
 
-  const SearchableSelect = ({ 
-    label, 
-    value, 
-    onChange, 
-    options, 
-    placeholder, 
-    disabled, 
-    required, 
+  // ==================== FIXED SEARCHABLE SELECT (PORTAL + TALL DROPDOWN) ====================
+  const SearchableSelect = ({
+    label,
+    value,
+    onChange,
+    options,
+    placeholder,
+    disabled,
+    required,
     className,
-    showClear = true 
+    showClear = true
   }) => {
     const [search, setSearch] = useState('');
     const [isOpen, setIsOpen] = useState(false);
     const [isFocused, setIsFocused] = useState(false);
+    const [dropdownRect, setDropdownRect] = useState(null);
     const dropdownRef = useRef(null);
     const inputRef = useRef(null);
+    const listRef = useRef(null);
+    const portalRef = useRef(null);
 
     const optionsWithEmpty = useMemo(() => {
       const hasEmpty = options.some(opt => opt.value === '' || opt.value === null || opt.value === undefined);
@@ -42728,7 +42394,7 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
     const filteredOptions = useMemo(() => {
       if (!search.trim()) return optionsWithEmpty;
       const searchLower = search.toLowerCase();
-      return optionsWithEmpty.filter(opt => 
+      return optionsWithEmpty.filter(opt =>
         opt.label?.toLowerCase().includes(searchLower) ||
         opt.subLabel?.toLowerCase().includes(searchLower) ||
         opt.value?.toString().toLowerCase().includes(searchLower)
@@ -42737,9 +42403,24 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
 
     const selectedOption = optionsWithEmpty.find(opt => opt.value === value);
 
+    // Position the portal dropdown under the input
+    const updateDropdownRect = () => {
+      if (!inputRef.current) return;
+      const r = inputRef.current.getBoundingClientRect();
+      setDropdownRect({
+        top: r.bottom + 4 + window.scrollY,
+        left: r.left + window.scrollX,
+        width: r.width,
+        bottom: r.bottom
+      });
+    };
+
+    // Click outside — check both the input AND the portal
     useEffect(() => {
       const handleClickOutside = (event) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        const inInput = dropdownRef.current && dropdownRef.current.contains(event.target);
+        const inPortal = portalRef.current && portalRef.current.contains(event.target);
+        if (!inInput && !inPortal) {
           setIsOpen(false);
           setIsFocused(false);
         }
@@ -42747,6 +42428,19 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
+
+    // Reposition on scroll/resize while open
+    useEffect(() => {
+      if (!isOpen) return;
+      const onScroll = () => updateDropdownRect();
+      const onResize = () => updateDropdownRect();
+      window.addEventListener('scroll', onScroll, true);
+      window.addEventListener('resize', onResize);
+      return () => {
+        window.removeEventListener('scroll', onScroll, true);
+        window.removeEventListener('resize', onResize);
+      };
+    }, [isOpen]);
 
     useEffect(() => {
       if (selectedOption && !isFocused) {
@@ -42762,9 +42456,7 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
       setSearch(selected ? selected.label : '');
       setIsOpen(false);
       setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
+      if (inputRef.current) inputRef.current.focus();
     };
 
     const handleInputChange = (e) => {
@@ -42772,30 +42464,25 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
       setSearch(newValue);
       setIsOpen(true);
       setIsFocused(true);
-      if (newValue === '') {
-        onChange({ target: { value: '' } });
-      }
+      if (newValue === '') onChange({ target: { value: '' } });
     };
 
     const handleFocus = () => {
       setIsFocused(true);
       setIsOpen(true);
+      updateDropdownRect();
     };
 
-    const handleBlur = (e) => {
-      const relatedTarget = e.relatedTarget;
-      if (dropdownRef.current && dropdownRef.current.contains(relatedTarget)) {
-        return;
-      }
+    const handleBlur = () => {
       setTimeout(() => {
-        if (document.activeElement !== inputRef.current) {
+        const active = document.activeElement;
+        const inInput = inputRef.current === active;
+        const inPortal = portalRef.current && portalRef.current.contains(active);
+        if (!inInput && !inPortal) {
           setIsOpen(false);
           setIsFocused(false);
-          if (selectedOption) {
-            setSearch(selectedOption.label);
-          } else {
-            setSearch('');
-          }
+          if (selectedOption) setSearch(selectedOption.label);
+          else setSearch('');
         }
       }, 150);
     };
@@ -42806,8 +42493,17 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
       setSearch('');
       setIsOpen(false);
       setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
+      if (inputRef.current) inputRef.current.focus();
+    };
+
+    // Prevent the wheel inside the dropdown from scrolling the page
+    const handleWheel = (e) => {
+      if (!listRef.current) return;
+      const { scrollTop, scrollHeight, clientHeight } = listRef.current;
+      const atTop = scrollTop === 0 && e.deltaY < 0;
+      const atBottom = scrollTop + clientHeight >= scrollHeight - 1 && e.deltaY > 0;
+      if (!atTop && !atBottom) {
+        e.stopPropagation();
       }
     };
 
@@ -42836,7 +42532,7 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
             onChange={handleInputChange}
             onFocus={handleFocus}
             onBlur={handleBlur}
-            placeholder={placeholder || "Search and select..."}
+            placeholder={placeholder || 'Search and select...'}
             disabled={disabled}
             autoComplete="off"
           />
@@ -42844,7 +42540,7 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
             <button
               type="button"
               onClick={handleClear}
-              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-red-500 z-10"
+              className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 z-10"
               title="Clear selection"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -42852,38 +42548,57 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
               </svg>
             </button>
           )}
-          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
             <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </div>
         </div>
-        {isOpen && !disabled && (
-          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-            {filteredOptions.length > 0 ? (
-              filteredOptions.map((opt) => (
-                <div
-                  key={opt.value || Math.random().toString()}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
-                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
-                  }`}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => handleSelect(opt.value)}
-                >
-                  <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+
+        {/* Dropdown rendered in a portal so it escapes any overflow:hidden ancestor */}
+        {isOpen && !disabled && dropdownRect && ReactDOM.createPortal(
+          <div
+            ref={portalRef}
+            style={{
+              position: 'absolute',
+              top: dropdownRect.top,
+              left: dropdownRect.left,
+              width: dropdownRect.width,
+              zIndex: 9999
+            }}
+          >
+            <div
+              ref={listRef}
+              onWheel={handleWheel}
+              className="bg-white border rounded-lg shadow-2xl max-h-96 overflow-y-auto overscroll-contain"
+            >
+              {filteredOptions.length > 0 ? (
+                filteredOptions.map((opt) => (
+                  <div
+                    key={opt.value || Math.random().toString()}
+                    className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
+                      opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
+                    }`}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleSelect(opt.value)}
+                  >
+                    <div className="font-medium">{opt.label}</div>
+                    {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+                  </div>
+                ))
+              ) : (
+                <div className="px-3 py-4 text-center text-gray-500 text-sm">
+                  {search.trim() ? 'No results found' : 'Type to search...'}
                 </div>
-              ))
-            ) : (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {search.trim() ? 'No results found' : 'Type to search...'}
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          </div>,
+          document.body
         )}
       </div>
     );
   };
+  // ==================== END FIXED SEARCHABLE SELECT ====================
 
   const studentOptions = useMemo(() => {
     const opts = [{ value: '', label: '' }];
@@ -42901,9 +42616,9 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
     if (!hostels || hostels.length === 0) return null;
     for (const hostel of hostels) {
       const rooms = hostel.rooms || [];
-      const room = rooms.find(r => 
-        r.roomNumber === 'Sick Bay' || 
-        r.name === 'Sick Bay' || 
+      const room = rooms.find(r =>
+        r.roomNumber === 'Sick Bay' ||
+        r.name === 'Sick Bay' ||
         r.type === 'SICK_BAY' ||
         r.isSickBay === true ||
         hostel.name?.toLowerCase().includes('sick') ||
@@ -42967,11 +42682,8 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
           roomNumber: 'SB-01',
           beds: 4
         });
-        if (onPatientChange) {
-          onPatientChange();
-        } else {
-          window.location.reload();
-        }
+        if (onPatientChange) onPatientChange();
+        else window.location.reload();
       } else {
         throw new Error(response.data.message || 'Failed to create Sick Bay');
       }
@@ -42986,9 +42698,7 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
   const handleAdmit = async (student) => {
     if (!sickBayRoom) {
       alert('No Sick Bay found. Please create one first.');
-      if (canCreateSickBay) {
-        setShowCreateForm(true);
-      }
+      if (canCreateSickBay) setShowCreateForm(true);
       return;
     }
     if (sickBayPatients.length >= sickBayRoom.beds) {
@@ -43002,14 +42712,8 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
       const updatedRooms = (hostel.rooms || []).map(room => {
         if (room.roomNumber === sickBayRoom.roomNumber || room.name === 'Sick Bay' || room.type === 'SICK_BAY') {
           const studentsList = [...(room.students || [])];
-          if (!studentsList.includes(student.id)) {
-            studentsList.push(student.id);
-          }
-          return {
-            ...room,
-            students: studentsList,
-            occupied: studentsList.length
-          };
+          if (!studentsList.includes(student.id)) studentsList.push(student.id);
+          return { ...room, students: studentsList, occupied: studentsList.length };
         }
         return room;
       });
@@ -43031,11 +42735,8 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
         });
         if (healthResponse.data.success || healthResponse.data.record) {
           alert(`✅ ${student.firstName} ${student.lastName} admitted to Sick Bay`);
-          if (onPatientChange) {
-            onPatientChange();
-          } else {
-            window.location.reload();
-          }
+          if (onPatientChange) onPatientChange();
+          else window.location.reload();
         } else {
           throw new Error('Health record creation failed');
         }
@@ -43058,11 +42759,7 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
       const updatedRooms = (hostel.rooms || []).map(room => {
         if (room.roomNumber === sickBayRoom.roomNumber || room.name === 'Sick Bay' || room.type === 'SICK_BAY') {
           const studentsList = (room.students || []).filter(id => id !== patient.id);
-          return {
-            ...room,
-            students: studentsList,
-            occupied: studentsList.length
-          };
+          return { ...room, students: studentsList, occupied: studentsList.length };
         }
         return room;
       });
@@ -43078,11 +42775,8 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
           });
         }
         alert(`✅ ${patient.firstName} ${patient.lastName} discharged successfully`);
-        if (onPatientChange) {
-          onPatientChange();
-        } else {
-          window.location.reload();
-        }
+        if (onPatientChange) onPatientChange();
+        else window.location.reload();
       } else {
         throw new Error(hostelResponse.data.message || 'Failed to discharge');
       }
@@ -43119,11 +42813,8 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
       }
       alert('✅ Diagnosis updated successfully');
       setShowEditModal(false);
-      if (onPatientChange) {
-        onPatientChange();
-      } else {
-        window.location.reload();
-      }
+      if (onPatientChange) onPatientChange();
+      else window.location.reload();
     } catch (error) {
       console.error('Error updating diagnosis:', error);
       alert('❌ Failed to update diagnosis');
@@ -43140,11 +42831,7 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
       const updatedRooms = (hostel.rooms || []).map(room => {
         if (room.roomNumber === sickBayRoom.roomNumber || room.name === 'Sick Bay' || room.type === 'SICK_BAY') {
           const studentsList = (room.students || []).filter(id => id !== patient.id);
-          return {
-            ...room,
-            students: studentsList,
-            occupied: studentsList.length
-          };
+          return { ...room, students: studentsList, occupied: studentsList.length };
         }
         return room;
       });
@@ -43154,11 +42841,8 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
       });
       if (response.data.success || response.data.hostel) {
         alert(`✅ ${patient.firstName} ${patient.lastName} removed from Sick Bay`);
-        if (onPatientChange) {
-          onPatientChange();
-        } else {
-          window.location.reload();
-        }
+        if (onPatientChange) onPatientChange();
+        else window.location.reload();
       } else {
         throw new Error(response.data.message || 'Failed to remove');
       }
@@ -43170,10 +42854,10 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
     }
   };
 
-  const occupancyPercentage = sickBayRoom 
+  const occupancyPercentage = sickBayRoom
     ? ((sickBayPatients.length / sickBayRoom.beds) * 100).toFixed(0)
     : 0;
-  
+
   const getOccupancyColor = () => {
     if (occupancyPercentage >= 90) return 'bg-red-500';
     if (occupancyPercentage >= 70) return 'bg-yellow-500';
@@ -43193,7 +42877,7 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
   return (
     <div className="space-y-6">
       {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
-      
+
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
@@ -43208,7 +42892,7 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
             <div className="mt-2 flex items-center gap-3">
               <div className="flex items-center gap-2">
                 <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
-                  <div 
+                  <div
                     className={`h-full ${getOccupancyColor()} transition-all duration-300`}
                     style={{ width: `${Math.min(100, occupancyPercentage)}%` }}
                   />
@@ -43218,9 +42902,9 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
             </div>
           )}
         </div>
-        
+
         {!sickBayRoom && canCreateSickBay && (
-          <button 
+          <button
             onClick={() => setShowCreateForm(true)}
             className="bg-green-600 text-white px-5 py-2.5 rounded-xl hover:bg-green-700 transition-all shadow-md hover:shadow-lg flex items-center gap-2"
           >
@@ -43277,8 +42961,8 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
               </div>
             </div>
             <div className="flex gap-3">
-              <button 
-                type="submit" 
+              <button
+                type="submit"
                 className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition-all flex items-center gap-2"
                 disabled={loading}
               >
@@ -43288,9 +42972,9 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
                   <><i className="fas fa-save"></i> Create Sick Bay</>
                 )}
               </button>
-              <button 
-                type="button" 
-                onClick={() => setShowCreateForm(false)} 
+              <button
+                type="button"
+                onClick={() => setShowCreateForm(false)}
                 className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600 transition-all"
                 disabled={loading}
               >
@@ -43316,7 +43000,7 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
                 </div>
               </div>
             </div>
-            
+
             <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl p-5 text-white shadow-lg">
               <div className="flex items-center justify-between">
                 <div>
@@ -43329,7 +43013,7 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
                 </div>
               </div>
             </div>
-            
+
             <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl p-5 text-white shadow-lg">
               <div className="flex items-center justify-between">
                 <div>
@@ -43342,7 +43026,7 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
                 </div>
               </div>
             </div>
-            
+
             <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl p-5 text-white shadow-lg">
               <div className="flex items-center justify-between">
                 <div>
@@ -43373,7 +43057,7 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
                 </div>
               </div>
             </div>
-            
+
             {sickBayPatients.length > 0 ? (
               <div className="overflow-x-auto">
                 <table className="w-full">
@@ -43481,7 +43165,7 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
           </div>
 
           {canManagePatients && (
-            <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+            <div className="bg-white rounded-xl shadow-lg">
               <div className="px-6 py-4 bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
                 <h3 className="font-semibold text-lg text-gray-800 flex items-center gap-2">
                   <i className="fas fa-user-plus text-green-500"></i>
@@ -43548,12 +43232,12 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
                 <i className="fas fa-times text-xl"></i>
               </button>
             </div>
-            
+
             <div className="mb-4 p-3 bg-gray-50 rounded-lg">
               <p className="text-sm text-gray-600">Patient: <span className="font-semibold">{selectedPatient.firstName} {selectedPatient.lastName}</span></p>
               <p className="text-sm text-gray-600">Admission: <span className="font-mono">{selectedPatient.admissionNumber}</span></p>
             </div>
-            
+
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Diagnosis *</label>
@@ -43566,7 +43250,7 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
                   required
                 />
               </div>
-              
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Additional Notes</label>
                 <textarea
@@ -43577,7 +43261,7 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
                   placeholder="Any additional notes..."
                 />
               </div>
-              
+
               <div className="flex gap-3 pt-2">
                 <button
                   onClick={handleUpdateDiagnosis}
@@ -43611,7 +43295,7 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
                 <i className="fas fa-times text-xl"></i>
               </button>
             </div>
-            
+
             <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-5 mb-6">
               <div className="flex items-center gap-4">
                 <div className="w-16 h-16 bg-indigo-600 rounded-full flex items-center justify-center">
@@ -43625,7 +43309,7 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
                 </div>
               </div>
             </div>
-            
+
             <div className="grid grid-cols-2 gap-4 mb-6">
               <div className="bg-gray-50 p-3 rounded-lg">
                 <p className="text-xs text-gray-500 uppercase">Diagnosis</p>
@@ -43648,7 +43332,7 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
                 <p className="font-medium mt-1">{selectedPatient.notes || 'No additional notes'}</p>
               </div>
             </div>
-            
+
             {canManagePatients && (
               <div className="flex gap-3 justify-end pt-4 border-t">
                 <button
@@ -43686,6 +43370,8 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
     </div>
   );
 };
+
+
 const SchemesOfWorkModule = ({ 
   timetable, 
   classes, 
