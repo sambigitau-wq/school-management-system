@@ -4327,7 +4327,7 @@ const StudentModule = ({
   user
 }) => {
   // ==================================================================
-  //  SAFE HELPERS — must live above every use of dates / numbers
+  //  SAFE HELPERS
   // ==================================================================
   const CURRENT_YEAR = new Date().getFullYear();
   const ADM_PREFIX = 'ADM';
@@ -4434,6 +4434,7 @@ const StudentModule = ({
   const [showAddParentModal, setShowAddParentModal] = useState(false);
   const [selectedStudentForParent, setSelectedStudentForParent] = useState(null);
 
+  // Auto / Manual mode for admission number
   const [autoAdm, setAutoAdm] = useState(true);
   const [admPreview, setAdmPreview] = useState('');
 
@@ -4501,7 +4502,6 @@ const StudentModule = ({
 
   useEffect(() => {
     if (!currentSchool?.id) return;
-    // Warm the preview once on mount so the user sees a number immediately
     fetchNextAdmissionNumber();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSchool?.id]);
@@ -4525,7 +4525,6 @@ const StudentModule = ({
         setFormState(prev => ({ ...prev, admissionNumber: safe }));
       }
     } catch (err) {
-      // Fallback — compute locally from the list we already have
       const safe = nextAdmissionNumber(students, CURRENT_YEAR);
       setAdmPreview(safe);
       if (autoAdm) {
@@ -4887,14 +4886,14 @@ const StudentModule = ({
     const prepared = { ...data };
     uuidFields.forEach(f => { if (prepared[f] === '') prepared[f] = null; });
 
-    // Admission number: if blank, omit so the backend generates one
+    // Admission number: if blank, omit so the backend generates one.
+    // If present, keep whatever the school typed (uppercased for consistency).
     if (!prepared.admissionNumber || !String(prepared.admissionNumber).trim()) {
       delete prepared.admissionNumber;
     } else {
       prepared.admissionNumber = String(prepared.admissionNumber).trim().toUpperCase();
     }
 
-    // Date: always normalize to YYYY-MM-DD or null
     if ('dateOfBirth' in prepared) {
       prepared.dateOfBirth = safeDateForApi(prepared.dateOfBirth);
     }
@@ -4955,7 +4954,7 @@ const StudentModule = ({
   const openAdd = () => {
     setEditingId(null);
     setFormState(emptyForm());
-    setAutoAdm(true);
+    setAutoAdm(true);        // start in Auto mode
     setSubmitError('');
     setShowForm(true);
     setTimeout(() => document.getElementById('student-form')?.scrollIntoView({ behavior: 'smooth' }), 100);
@@ -4965,7 +4964,7 @@ const StudentModule = ({
     if (!canEdit) { alert('You do not have permission to edit students'); return; }
     if (!student) return;
     setEditingId(student.id);
-    setAutoAdm(false);
+    setAutoAdm(false);       // editing always manual
     setSubmitError('');
     setFormState({
       admissionNumber: student.admissionNumber || '',
@@ -5034,7 +5033,6 @@ const StudentModule = ({
     if (isTVET && !f.programId) { setSubmitError('Please select a program.'); return; }
     if (!isUniversity && !isTVET && !f.classId) { setSubmitError('Please select a class.'); return; }
 
-    // Guardian validation
     const p = f.parent || {};
     if (!p.useExisting) {
       if (!p.firstName?.trim() || !p.lastName?.trim()) {
@@ -5055,7 +5053,6 @@ const StudentModule = ({
     try {
       const payload = prepareFormData(f);
 
-      // onSubmit is provided by the parent. It should return a promise.
       if (typeof onSubmit === 'function') {
         await onSubmit(e, payload);
       } else {
@@ -5067,7 +5064,6 @@ const StudentModule = ({
       setTimeout(() => setSuccessMessage(''), 4000);
     } catch (err) {
       const msg = err.response?.data?.message || err.message || 'Failed to register student';
-      // If the backend rejected the admission number, regenerate
       if (/admission/i.test(msg) && /(taken|exists|unique|duplicate)/i.test(msg)) {
         setSubmitError(`${msg}. Fetching the next available number…`);
         await fetchNextAdmissionNumber();
@@ -5231,7 +5227,6 @@ const StudentModule = ({
         schoolId: currentSchool?.id
       });
 
-      // Refresh parent list
       try {
         const pr = await api.get('/parents');
         if (setParents) setParents(pr.data.parents || []);
@@ -5503,42 +5498,76 @@ const StudentModule = ({
           )}
 
           <form onSubmit={editingId ? handleUpdateSubmit : handleCreate} className="space-y-4">
-            {/* Admission number */}
+            {/* ================= Admission number + Auto/Manual ================= */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Admission Number <span className="text-red-500">*</span>
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Admission Number
+                  </label>
+                  {!editingId && (
+                    <div className="flex items-center bg-gray-100 rounded-lg p-0.5 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => { setAutoAdm(true); fetchNextAdmissionNumber(); }}
+                        className={`px-3 py-1 rounded-md transition-colors ${
+                          autoAdm ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'
+                        }`}
+                      >
+                        <i className="fas fa-magic mr-1" />Auto
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAutoAdm(false);
+                          setFormState({ ...formState, admissionNumber: '' });
+                        }}
+                        className={`px-3 py-1 rounded-md transition-colors ${
+                          !autoAdm ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'
+                        }`}
+                      >
+                        <i className="fas fa-keyboard mr-1" />Manual
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={formState.admissionNumber || ''}
                     onChange={(e) => {
-                      setAutoAdm(false);
+                      if (autoAdm) setAutoAdm(false);
                       setFormState({ ...formState, admissionNumber: e.target.value });
                     }}
-                    readOnly={autoAdm && !editingId}
-                    placeholder={admPreview || 'ADM/2026/0001'}
-                    className={`flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
-                      autoAdm && !editingId ? 'bg-gray-50 text-gray-700' : 'bg-white'
-                    }`}
+                    placeholder={
+                      autoAdm && !editingId
+                        ? (admPreview || 'Auto-generated on save')
+                        : 'e.g., 123 or ADM/2026/0001'
+                    }
+                    className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
                   />
-                  {!editingId && (
+                  {!editingId && autoAdm && (
                     <button
                       type="button"
-                      onClick={() => { setAutoAdm(true); fetchNextAdmissionNumber(); }}
+                      onClick={() => fetchNextAdmissionNumber()}
                       disabled={loadingAdm}
                       className="px-3 py-2 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 border border-indigo-200 disabled:opacity-50"
-                      title="Regenerate"
+                      title="Regenerate auto number"
                     >
                       {loadingAdm ? <i className="fas fa-spinner fa-spin" /> : <i className="fas fa-sync-alt" />}
                     </button>
                   )}
                 </div>
+
                 <p className="text-xs text-gray-500 mt-1">
-                  {autoAdm && !editingId
-                    ? <>Auto-generated for {CURRENT_YEAR}. Click the sync button to refresh.</>
-                    : <>Manual entry — must be unique for this school.</>}
+                  {editingId ? (
+                    <>Update this only if the school uses its own numbering scheme.</>
+                  ) : autoAdm ? (
+                    <>Auto-generated for {CURRENT_YEAR} — or just start typing to enter your own.</>
+                  ) : (
+                    <>Manual entry — must be unique for this school. Leave blank to auto-generate instead.</>
+                  )}
                 </p>
               </div>
 
@@ -5619,7 +5648,7 @@ const StudentModule = ({
               </div>
             </div>
 
-            {/* Guardian — only on create (edit links via the details modal) */}
+            {/* Guardian */}
             {!editingId && (
               <div className="bg-gray-50 p-4 rounded-lg border border-indigo-100">
                 <h4 className="font-medium text-indigo-600 mb-3">
@@ -17589,7 +17618,8 @@ const StaffAttendanceReportsModule = ({ staff, currentSchool, user }) => {
   );
 };
 
-// ==================== STAFF MODULE — FIXED SEARCHABLE SELECT & MONEY INPUTS ====================
+// ==================== STAFF MODULE — STABLE INPUTS + SEARCHABLE SELECT ====================
+
 const StaffModule = ({
   staff = [],
   setStaff,
@@ -17605,31 +17635,57 @@ const StaffModule = ({
   user,
   departments = []
 }) => {
+
   // ==================== STATE ====================
+
   const [editingId, setEditingId] = useState(null);
   const [showPayrollForm, setShowPayrollForm] = useState(false);
   const [loading, setLoading] = useState(false);
+
   const [payrollForm, setPayrollForm] = useState({
     month: new Date().getMonth() + 1,
     year: new Date().getFullYear()
   });
+
   const [searchTerm, setSearchTerm] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('');
   const [staffTypeFilter, setStaffTypeFilter] = useState('');
   const [showFilters, setShowFilters] = useState(false);
+
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
   // ==================== PERMISSIONS ====================
-  const canEdit = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
-  const canDelete = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL'].includes(user?.role);
-  const canProcessPayroll = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
+
+  const canEdit = [
+    'SUPER_ADMIN',
+    'SCHOOL_ADMIN',
+    'PRINCIPAL',
+    'DEPUTY_PRINCIPAL'
+  ].includes(user?.role);
+
+  const canDelete = [
+    'SUPER_ADMIN',
+    'SCHOOL_ADMIN',
+    'PRINCIPAL'
+  ].includes(user?.role);
+
+  const canProcessPayroll = [
+    'SUPER_ADMIN',
+    'SCHOOL_ADMIN',
+    'PRINCIPAL',
+    'ACCOUNTANT'
+  ].includes(user?.role);
 
   // ==================== SCHOOL TYPE ====================
-  const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
+
+  const schoolCategory =
+    currentSchool?.category || 'ECDE_PRIMARY_JSS';
+
   const isUniversity = schoolCategory === 'UNIVERSITY';
   const isTVET = schoolCategory === 'COLLEGE_TVET';
   const isRegularSchool = !isUniversity && !isTVET;
+
   const isPrimary = schoolCategory === 'ECDE_PRIMARY_JSS';
   const isSecondary = schoolCategory === 'SENIOR_SECONDARY';
 
@@ -17637,32 +17693,50 @@ const StaffModule = ({
   const showSubjects = isRegularSchool && !isPrimary;
 
   // ==================== HELPERS ====================
+
   const getUserDisplayName = (member) => {
     if (!member) return 'Unknown Staff';
+
     const userData = member.User || {};
-    return `${userData.firstName || ''} ${userData.lastName || ''}`.trim()
-      || member.employeeId
-      || 'Unknown Staff';
+
+    return (
+      `${userData.firstName || ''} ${userData.lastName || ''}`.trim() ||
+      member.employeeId ||
+      'Unknown Staff'
+    );
   };
 
   const getUserInitials = (member) => {
     if (!member) return '?';
+
     const userData = member.User || {};
-    const f = userData.firstName || '';
-    const l = userData.lastName || '';
-    return `${f.charAt(0)}${l.charAt(0)}`.toUpperCase() || '?';
+
+    const first = userData.firstName || '';
+    const last = userData.lastName || '';
+
+    return (
+      `${first.charAt(0)}${last.charAt(0)}`.toUpperCase() ||
+      '?'
+    );
   };
 
   const getTotalSalary = (member) => {
-    if (!member || !member.salary) return 0;
-    return (parseFloat(member.salary.basic) || 0)
-         + (parseFloat(member.salary.house) || 0)
-         + (parseFloat(member.salary.transport) || 0);
+    if (!member?.salary) return 0;
+
+    return (
+      (parseFloat(member.salary.basic) || 0) +
+      (parseFloat(member.salary.house) || 0) +
+      (parseFloat(member.salary.transport) || 0)
+    );
   };
 
   const getDepartmentName = (departmentId) => {
     if (!departmentId) return 'N/A';
-    const dept = departments?.find(d => d.id === departmentId);
+
+    const dept = departments?.find(
+      d => String(d.id) === String(departmentId)
+    );
+
     return dept?.name || 'N/A';
   };
 
@@ -17674,342 +17748,832 @@ const StaffModule = ({
     }).format(amount || 0);
   };
 
-  // Money helpers — keep the raw string while typing, parse only at submit
-  const parseMoney = (v) => {
-    if (v === '' || v === null || v === undefined) return 0;
-    const n = parseFloat(String(v).replace(/,/g, ''));
-    return Number.isFinite(n) ? n : 0;
+  // ==================== MONEY HELPERS ====================
+
+  // IMPORTANT:
+  // We only convert money to a number when submitting.
+  // While typing, the exact string stays in state.
+
+  const parseMoney = (value) => {
+    if (
+      value === '' ||
+      value === null ||
+      value === undefined
+    ) {
+      return 0;
+    }
+
+    const number = parseFloat(
+      String(value).replace(/,/g, '')
+    );
+
+    return Number.isFinite(number) ? number : 0;
   };
 
   // ==================== STAFF ROLE OPTIONS ====================
+
   const staffRoleOptions = useMemo(() => {
+
     if (isUniversity) {
       return [
-        { value: 'PROFESSOR',            label: 'Professor' },
-        { value: 'SENIOR_LECTURER',      label: 'Senior Lecturer' },
-        { value: 'LECTURER',             label: 'Lecturer' },
-        { value: 'ASSISTANT_LECTURER',   label: 'Assistant Lecturer' },
-        { value: 'TUTOR',                label: 'Tutor' },
-        { value: 'HOD_LECTURER',         label: 'Head of Department (Academic)' },
-        { value: 'DEAN',                 label: 'Dean' },
-        { value: 'REGISTRAR',            label: 'Registrar' },
-        { value: 'LIBRARIAN',            label: 'Librarian' },
-        { value: 'IT_OFFICER',           label: 'IT Officer' },
-        { value: 'ADMINISTRATOR',        label: 'Administrator' },
-        { value: 'FINANCE_OFFICER',      label: 'Finance Officer' },
-        { value: 'SUPPORT_STAFF',        label: 'Support Staff' },
-        { value: 'LAB_TECHNICIAN',       label: 'Lab Technician' },
-        { value: 'COUNSELOR',            label: 'Counselor' },
-        { value: 'NURSE',                label: 'Nurse' },
+        {
+          value: 'PROFESSOR',
+          label: 'Professor'
+        },
+        {
+          value: 'SENIOR_LECTURER',
+          label: 'Senior Lecturer'
+        },
+        {
+          value: 'LECTURER',
+          label: 'Lecturer'
+        },
+        {
+          value: 'ASSISTANT_LECTURER',
+          label: 'Assistant Lecturer'
+        },
+        {
+          value: 'TUTOR',
+          label: 'Tutor'
+        },
+        {
+          value: 'HOD_LECTURER',
+          label: 'Head of Department (Academic)'
+        },
+        {
+          value: 'DEAN',
+          label: 'Dean'
+        },
+        {
+          value: 'REGISTRAR',
+          label: 'Registrar'
+        },
+        {
+          value: 'LIBRARIAN',
+          label: 'Librarian'
+        },
+        {
+          value: 'IT_OFFICER',
+          label: 'IT Officer'
+        },
+        {
+          value: 'ADMINISTRATOR',
+          label: 'Administrator'
+        },
+        {
+          value: 'FINANCE_OFFICER',
+          label: 'Finance Officer'
+        },
+        {
+          value: 'SUPPORT_STAFF',
+          label: 'Support Staff'
+        },
+        {
+          value: 'LAB_TECHNICIAN',
+          label: 'Lab Technician'
+        },
+        {
+          value: 'COUNSELOR',
+          label: 'Counselor'
+        },
+        {
+          value: 'NURSE',
+          label: 'Nurse'
+        }
       ];
     }
+
     if (isTVET) {
       return [
-        { value: 'TECHNICAL_INSTRUCTOR', label: 'Technical Instructor' },
-        { value: 'WORKSHOP_SUPERVISOR',  label: 'Workshop Supervisor' },
-        { value: 'HOD',                  label: 'Head of Department' },
-        { value: 'PRINCIPAL',            label: 'Principal' },
-        { value: 'DEPUTY_PRINCIPAL',     label: 'Deputy Principal' },
-        { value: 'CLASS_TEACHER',        label: 'Class Teacher' },
-        { value: 'SUBJECT_TEACHER',      label: 'Subject Teacher' },
-        { value: 'SUPPORT_STAFF',        label: 'Support Staff' },
-        { value: 'LAB_TECHNICIAN',       label: 'Lab Technician' },
-        { value: 'LIBRARIAN',            label: 'Librarian' },
-        { value: 'ADMINISTRATOR',        label: 'Administrator' },
-        { value: 'FINANCE_OFFICER',      label: 'Finance Officer' },
-        { value: 'IT_OFFICER',           label: 'IT Officer' },
-        { value: 'COUNSELOR',            label: 'Counselor' },
-        { value: 'NURSE',                label: 'Nurse' },
+        {
+          value: 'TECHNICAL_INSTRUCTOR',
+          label: 'Technical Instructor'
+        },
+        {
+          value: 'WORKSHOP_SUPERVISOR',
+          label: 'Workshop Supervisor'
+        },
+        {
+          value: 'HOD',
+          label: 'Head of Department'
+        },
+        {
+          value: 'PRINCIPAL',
+          label: 'Principal'
+        },
+        {
+          value: 'DEPUTY_PRINCIPAL',
+          label: 'Deputy Principal'
+        },
+        {
+          value: 'CLASS_TEACHER',
+          label: 'Class Teacher'
+        },
+        {
+          value: 'SUBJECT_TEACHER',
+          label: 'Subject Teacher'
+        },
+        {
+          value: 'SUPPORT_STAFF',
+          label: 'Support Staff'
+        },
+        {
+          value: 'LAB_TECHNICIAN',
+          label: 'Lab Technician'
+        },
+        {
+          value: 'LIBRARIAN',
+          label: 'Librarian'
+        },
+        {
+          value: 'ADMINISTRATOR',
+          label: 'Administrator'
+        },
+        {
+          value: 'FINANCE_OFFICER',
+          label: 'Finance Officer'
+        },
+        {
+          value: 'IT_OFFICER',
+          label: 'IT Officer'
+        },
+        {
+          value: 'COUNSELOR',
+          label: 'Counselor'
+        },
+        {
+          value: 'NURSE',
+          label: 'Nurse'
+        }
       ];
     }
+
     if (isSecondary) {
       return [
-        { value: 'PRINCIPAL',            label: 'Principal' },
-        { value: 'DEPUTY_PRINCIPAL',     label: 'Deputy Principal' },
-        { value: 'HOD',                  label: 'Head of Department' },
-        { value: 'CLASS_TEACHER',        label: 'Class Teacher' },
-        { value: 'SUBJECT_TEACHER',      label: 'Subject Teacher' },
-        { value: 'SUPPORT_STAFF',        label: 'Support Staff' },
-        { value: 'LAB_TECHNICIAN',       label: 'Lab Technician' },
-        { value: 'LIBRARIAN',            label: 'Librarian' },
-        { value: 'ADMINISTRATOR',        label: 'Administrator' },
-        { value: 'FINANCE_OFFICER',      label: 'Finance Officer' },
-        { value: 'IT_OFFICER',           label: 'IT Officer' },
-        { value: 'COUNSELOR',            label: 'Counselor' },
-        { value: 'NURSE',                label: 'Nurse' },
+        {
+          value: 'PRINCIPAL',
+          label: 'Principal'
+        },
+        {
+          value: 'DEPUTY_PRINCIPAL',
+          label: 'Deputy Principal'
+        },
+        {
+          value: 'HOD',
+          label: 'Head of Department'
+        },
+        {
+          value: 'CLASS_TEACHER',
+          label: 'Class Teacher'
+        },
+        {
+          value: 'SUBJECT_TEACHER',
+          label: 'Subject Teacher'
+        },
+        {
+          value: 'SUPPORT_STAFF',
+          label: 'Support Staff'
+        },
+        {
+          value: 'LAB_TECHNICIAN',
+          label: 'Lab Technician'
+        },
+        {
+          value: 'LIBRARIAN',
+          label: 'Librarian'
+        },
+        {
+          value: 'ADMINISTRATOR',
+          label: 'Administrator'
+        },
+        {
+          value: 'FINANCE_OFFICER',
+          label: 'Finance Officer'
+        },
+        {
+          value: 'IT_OFFICER',
+          label: 'IT Officer'
+        },
+        {
+          value: 'COUNSELOR',
+          label: 'Counselor'
+        },
+        {
+          value: 'NURSE',
+          label: 'Nurse'
+        }
       ];
     }
-    return [
-      { value: 'HEAD_TEACHER',         label: 'Head Teacher' },
-      { value: 'DEPUTY_HEAD_TEACHER',  label: 'Deputy Head Teacher' },
-      { value: 'SENIOR_TEACHER',       label: 'Senior Teacher' },
-      { value: 'CLASS_TEACHER',        label: 'Class Teacher' },
-      { value: 'SUBJECT_TEACHER',      label: 'Subject Teacher' },
-      { value: 'SUPPORT_STAFF',        label: 'Support Staff' },
-      { value: 'LAB_TECHNICIAN',       label: 'Lab Technician' },
-      { value: 'LIBRARIAN',            label: 'Librarian' },
-      { value: 'ADMINISTRATOR',        label: 'Administrator' },
-      { value: 'FINANCE_OFFICER',      label: 'Finance Officer' },
-      { value: 'IT_OFFICER',           label: 'IT Officer' },
-      { value: 'COUNSELOR',            label: 'Counselor' },
-      { value: 'NURSE',                label: 'Nurse' },
-    ];
-  }, [isUniversity, isTVET, isSecondary]);
 
-  // ==================== OPTIONS ====================
+    return [
+      {
+        value: 'HEAD_TEACHER',
+        label: 'Head Teacher'
+      },
+      {
+        value: 'DEPUTY_HEAD_TEACHER',
+        label: 'Deputy Head Teacher'
+      },
+      {
+        value: 'SENIOR_TEACHER',
+        label: 'Senior Teacher'
+      },
+      {
+        value: 'CLASS_TEACHER',
+        label: 'Class Teacher'
+      },
+      {
+        value: 'SUBJECT_TEACHER',
+        label: 'Subject Teacher'
+      },
+      {
+        value: 'SUPPORT_STAFF',
+        label: 'Support Staff'
+      },
+      {
+        value: 'LAB_TECHNICIAN',
+        label: 'Lab Technician'
+      },
+      {
+        value: 'LIBRARIAN',
+        label: 'Librarian'
+      },
+      {
+        value: 'ADMINISTRATOR',
+        label: 'Administrator'
+      },
+      {
+        value: 'FINANCE_OFFICER',
+        label: 'Finance Officer'
+      },
+      {
+        value: 'IT_OFFICER',
+        label: 'IT Officer'
+      },
+      {
+        value: 'COUNSELOR',
+        label: 'Counselor'
+      },
+      {
+        value: 'NURSE',
+        label: 'Nurse'
+      }
+    ];
+
+  }, [
+    isUniversity,
+    isTVET,
+    isSecondary
+  ]);
+
+  // ==================== DEPARTMENT OPTIONS ====================
+
   const departmentOptions = useMemo(() => {
-    if (!departments || departments.length === 0) return [];
-    return departments.map(d => ({
-      value: d.id,
-      label: d.name,
-      subLabel: d.faculty?.name || ''
+
+    if (!departments?.length) {
+      return [];
+    }
+
+    return departments.map(department => ({
+      value: department.id,
+      label: department.name,
+      subLabel: department.faculty?.name || ''
     }));
+
   }, [departments]);
 
+  // ==================== USER OPTIONS ====================
+
   const userOptions = useMemo(() => {
-    if (!users || users.length === 0) return [];
-    const existingUserIds = new Set(staff.map(s => s.userId).filter(Boolean));
+
+    if (!users?.length) {
+      return [];
+    }
+
+    const existingUserIds = new Set(
+      staff
+        .map(member => member.userId)
+        .filter(Boolean)
+    );
+
     return users
-      .filter(u => !existingUserIds.has(u.id) || u.id === form.userId)
-      .map(u => ({
-        value: u.id,
-        label: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email,
-        subLabel: `${u.role || 'User'} • ${u.email}`
+      .filter(userItem => (
+        !existingUserIds.has(userItem.id) ||
+        userItem.id === form?.userId
+      ))
+      .map(userItem => ({
+        value: userItem.id,
+        label:
+          `${userItem.firstName || ''} ${userItem.lastName || ''}`.trim() ||
+          userItem.email,
+        subLabel:
+          `${userItem.role || 'User'} • ${userItem.email}`
       }));
-  }, [users, staff, form.userId]);
+
+  }, [
+    users,
+    staff,
+    form?.userId
+  ]);
+
+  // ==================== STAFF TYPE OPTIONS ====================
 
   const staffTypeOptions = [
-    { value: 'TEACHING',     label: 'Teaching Staff' },
-    { value: 'NON_TEACHING', label: 'Non-Teaching Staff' }
+    {
+      value: 'TEACHING',
+      label: 'Teaching Staff'
+    },
+    {
+      value: 'NON_TEACHING',
+      label: 'Non-Teaching Staff'
+    }
   ];
+
+  // ==================== MONTH OPTIONS ====================
 
   const monthOptions = [
-    { value: 1,  label: 'January'   },
-    { value: 2,  label: 'February'  },
-    { value: 3,  label: 'March'     },
-    { value: 4,  label: 'April'     },
-    { value: 5,  label: 'May'       },
-    { value: 6,  label: 'June'      },
-    { value: 7,  label: 'July'      },
-    { value: 8,  label: 'August'    },
-    { value: 9,  label: 'September' },
-    { value: 10, label: 'October'   },
-    { value: 11, label: 'November'  },
-    { value: 12, label: 'December'  }
+    { value: 1, label: 'January' },
+    { value: 2, label: 'February' },
+    { value: 3, label: 'March' },
+    { value: 4, label: 'April' },
+    { value: 5, label: 'May' },
+    { value: 6, label: 'June' },
+    { value: 7, label: 'July' },
+    { value: 8, label: 'August' },
+    { value: 9, label: 'September' },
+    { value: 10, label: 'October' },
+    { value: 11, label: 'November' },
+    { value: 12, label: 'December' }
   ];
 
+  // ==================== UNIQUE DEPARTMENTS ====================
+
   const uniqueDepartments = useMemo(() => {
-    const deptMap = new Map();
+
+    const departmentMap = new Map();
+
     staff.forEach(member => {
+
       if (member.departmentId) {
-        const dept = departments?.find(d => d.id === member.departmentId);
-        if (dept && !deptMap.has(member.departmentId)) {
-          deptMap.set(member.departmentId, dept);
+
+        const department = departments?.find(
+          d => String(d.id) === String(member.departmentId)
+        );
+
+        if (
+          department &&
+          !departmentMap.has(member.departmentId)
+        ) {
+          departmentMap.set(
+            member.departmentId,
+            department
+          );
         }
       }
-      if (member.department && !deptMap.has(member.department)) {
-        deptMap.set(member.department, { id: member.department, name: member.department });
+
+      if (
+        member.department &&
+        !departmentMap.has(member.department)
+      ) {
+        departmentMap.set(
+          member.department,
+          {
+            id: member.department,
+            name: member.department
+          }
+        );
       }
+
     });
-    return Array.from(deptMap.values());
-  }, [staff, departments]);
+
+    return Array.from(departmentMap.values());
+
+  }, [
+    staff,
+    departments
+  ]);
 
   const departmentFilterOptions = useMemo(() => {
-    if (!uniqueDepartments || uniqueDepartments.length === 0) return [];
-    return uniqueDepartments.map(dept => ({ value: dept.id, label: dept.name }));
-  }, [uniqueDepartments]);
 
-  // ==================================================================
-  //  SEARCHABLE SELECT — non-blocking, keyboard-friendly
-  // ==================================================================
-  //  Critical rules that keep it from blocking fields below:
-  //   • The dropdown is absolutely positioned INSIDE a `relative` wrapper
-  //     that wraps ONLY the input (not the whole form row).
-  //   • It has a very high z-index (z-[9999]) and is only rendered when open.
-  //   • When it closes, the node is removed — no invisible overlay remains.
-  //   • The wrapper doesn't use `overflow-hidden` anywhere upstream.
-  // ==================================================================
+    return uniqueDepartments.map(department => ({
+      value: department.id,
+      label: department.name
+    }));
+
+  }, [
+    uniqueDepartments
+  ]);
+
+  // ============================================================
+  // SEARCHABLE SELECT
+  // ============================================================
+  //
+  // IMPORTANT:
+  // This component is ONLY used for selection fields.
+  //
+  // It NEVER controls Job Title.
+  // It NEVER controls Salary.
+  // It NEVER controls Allowances.
+  //
+  // There is also NO requestAnimationFrame focus restoration.
+  // That was one of the things capable of stealing focus from
+  // another input.
+  //
+  // ============================================================
+
   const SearchableSelect = ({
     label,
     value,
     onChange,
     options = [],
     placeholder = 'Search...',
-    disabled,
-    required,
-    className,
+    disabled = false,
+    required = false,
+    className = '',
     emptyMessage = 'No options available',
     noOptionsMessage = 'No results found'
   }) => {
+
     const [search, setSearch] = useState('');
     const [isOpen, setIsOpen] = useState(false);
-    const [isFocused, setIsFocused] = useState(false);
     const [highlightedIndex, setHighlightedIndex] = useState(-1);
-    const dropdownRef = useRef(null);
+
+    const wrapperRef = useRef(null);
     const inputRef = useRef(null);
     const listRef = useRef(null);
 
-    const safeOptions = Array.isArray(options) ? options : [];
-
-    const filteredOptions = useMemo(() => {
-      if (!safeOptions.length) return [];
-      if (!search.trim()) return safeOptions;
-      const s = search.toLowerCase();
-      return safeOptions.filter(opt => {
-        if (!opt) return false;
-        return (opt.label || '').toLowerCase().includes(s)
-            || (opt.subLabel || '').toLowerCase().includes(s)
-            || String(opt.value ?? '').toLowerCase().includes(s);
-      });
-    }, [safeOptions, search]);
+    const safeOptions = Array.isArray(options)
+      ? options
+      : [];
 
     const selectedOption = useMemo(() => {
-      if (value === undefined || value === null || value === '') return null;
-      return safeOptions.find(opt => String(opt.value) === String(value)) || null;
-    }, [safeOptions, value]);
 
-    // Close on outside click — but only on real pointerdown, and only when
-    // the target is truly outside BOTH the input and the dropdown.
+      if (
+        value === undefined ||
+        value === null ||
+        value === ''
+      ) {
+        return null;
+      }
+
+      return safeOptions.find(
+        option =>
+          String(option.value) === String(value)
+      ) || null;
+
+    }, [
+      safeOptions,
+      value
+    ]);
+
+    const filteredOptions = useMemo(() => {
+
+      if (!search.trim()) {
+        return safeOptions;
+      }
+
+      const term = search
+        .trim()
+        .toLowerCase();
+
+      return safeOptions.filter(option => {
+
+        if (!option) {
+          return false;
+        }
+
+        const labelText =
+          String(option.label || '')
+            .toLowerCase();
+
+        const subLabelText =
+          String(option.subLabel || '')
+            .toLowerCase();
+
+        const valueText =
+          String(option.value ?? '')
+            .toLowerCase();
+
+        return (
+          labelText.includes(term) ||
+          subLabelText.includes(term) ||
+          valueText.includes(term)
+        );
+
+      });
+
+    }, [
+      safeOptions,
+      search
+    ]);
+
+    // ==================== OUTSIDE CLICK ====================
+
     useEffect(() => {
-      if (!isOpen) return;
-      const handlePointerDown = (event) => {
-        const node = dropdownRef.current;
-        if (!node) return;
-        if (node.contains(event.target)) return;
-        setIsOpen(false);
-        setIsFocused(false);
-        setHighlightedIndex(-1);
+
+      if (!isOpen) {
+        return;
+      }
+
+      const handleOutsidePointer = (event) => {
+
+        if (
+          wrapperRef.current &&
+          !wrapperRef.current.contains(event.target)
+        ) {
+          setIsOpen(false);
+          setHighlightedIndex(-1);
+
+          setSearch(
+            selectedOption?.label || ''
+          );
+        }
+
       };
-      document.addEventListener('mousedown', handlePointerDown);
-      document.addEventListener('touchstart', handlePointerDown, { passive: true });
+
+      document.addEventListener(
+        'mousedown',
+        handleOutsidePointer
+      );
+
       return () => {
-        document.removeEventListener('mousedown', handlePointerDown);
-        document.removeEventListener('touchstart', handlePointerDown);
+        document.removeEventListener(
+          'mousedown',
+          handleOutsidePointer
+        );
       };
-    }, [isOpen]);
+
+    }, [
+      isOpen,
+      selectedOption
+    ]);
+
+    // ==================== OPEN ====================
 
     const openMenu = () => {
-      if (disabled) return;
-      setIsFocused(true);
-      setIsOpen(true);
-      // Preload search with the current label so the list filters sensibly
-      if (selectedOption && !search) setSearch(selectedOption.label);
-    };
 
-    const closeMenu = (restoreLabel = true) => {
-      setIsOpen(false);
-      setIsFocused(false);
-      setHighlightedIndex(-1);
-      if (restoreLabel) {
-        setSearch(selectedOption ? selectedOption.label : '');
+      if (disabled) {
+        return;
       }
-    };
 
-    const handleSelect = (opt) => {
-      if (!opt || opt.disabled) return;
-      onChange({ target: { value: opt.value } });
-      setSearch(opt.label);
-      setIsOpen(false);
-      setIsFocused(false);
-      setHighlightedIndex(-1);
-      // Return focus so the user can Tab onward
-      requestAnimationFrame(() => inputRef.current?.focus());
-    };
-
-    const handleInputChange = (e) => {
-      const val = e.target.value;
-      setSearch(val);
       setIsOpen(true);
-      setIsFocused(true);
       setHighlightedIndex(-1);
-      // Only clear the upstream value when the field is fully emptied
-      if (val === '') onChange({ target: { value: '' } });
+
+      if (
+        selectedOption &&
+        search === ''
+      ) {
+        setSearch(selectedOption.label);
+      }
+
     };
 
-    const handleKeyDown = (e) => {
-      if (disabled) return;
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        if (!isOpen) { openMenu(); return; }
-        setHighlightedIndex(i =>
-          filteredOptions.length === 0 ? -1 : (i + 1) % filteredOptions.length
-        );
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        if (!isOpen) { openMenu(); return; }
-        setHighlightedIndex(i =>
-          filteredOptions.length === 0
-            ? -1
-            : (i - 1 + filteredOptions.length) % filteredOptions.length
-        );
-      } else if (e.key === 'Enter') {
-        if (isOpen && highlightedIndex >= 0 && filteredOptions[highlightedIndex]) {
-          e.preventDefault();
-          handleSelect(filteredOptions[highlightedIndex]);
+    // ==================== CLOSE ====================
+
+    const closeMenu = () => {
+
+      setIsOpen(false);
+      setHighlightedIndex(-1);
+
+      setSearch(
+        selectedOption?.label || ''
+      );
+
+    };
+
+    // ==================== SELECT ====================
+
+    const handleSelect = (option) => {
+
+      if (!option || option.disabled) {
+        return;
+      }
+
+      onChange({
+        target: {
+          value: option.value
         }
-      } else if (e.key === 'Escape') {
+      });
+
+      setSearch(option.label);
+      setIsOpen(false);
+      setHighlightedIndex(-1);
+
+      // IMPORTANT:
+      // Do NOT call inputRef.current.focus().
+      // The user may immediately want to click/type
+      // in another field.
+    };
+
+    // ==================== SEARCH INPUT ====================
+
+    const handleInputChange = (event) => {
+
+      const valueEntered =
+        event.target.value;
+
+      setSearch(valueEntered);
+      setIsOpen(true);
+      setHighlightedIndex(-1);
+
+      // Only clear selected value when completely empty.
+      if (valueEntered === '') {
+
+        onChange({
+          target: {
+            value: ''
+          }
+        });
+
+      }
+
+    };
+
+    // ==================== KEYBOARD ====================
+
+    const handleKeyDown = (event) => {
+
+      if (disabled) {
+        return;
+      }
+
+      if (event.key === 'ArrowDown') {
+
+        event.preventDefault();
+
+        if (!isOpen) {
+          openMenu();
+          return;
+        }
+
+        setHighlightedIndex(current => {
+
+          if (!filteredOptions.length) {
+            return -1;
+          }
+
+          return (
+            current + 1
+          ) % filteredOptions.length;
+
+        });
+
+        return;
+      }
+
+      if (event.key === 'ArrowUp') {
+
+        event.preventDefault();
+
+        if (!isOpen) {
+          openMenu();
+          return;
+        }
+
+        setHighlightedIndex(current => {
+
+          if (!filteredOptions.length) {
+            return -1;
+          }
+
+          return (
+            current - 1 +
+            filteredOptions.length
+          ) % filteredOptions.length;
+
+        });
+
+        return;
+      }
+
+      if (event.key === 'Enter') {
+
+        if (
+          isOpen &&
+          highlightedIndex >= 0 &&
+          filteredOptions[highlightedIndex]
+        ) {
+
+          event.preventDefault();
+
+          handleSelect(
+            filteredOptions[highlightedIndex]
+          );
+
+        }
+
+        return;
+      }
+
+      if (event.key === 'Escape') {
+
         if (isOpen) {
-          e.preventDefault();
-          closeMenu(true);
+
+          event.preventDefault();
+
+          closeMenu();
+
         }
-      } else if (e.key === 'Tab') {
-        // Let the natural focus move happen, but close the menu first
-        closeMenu(true);
+
+        return;
       }
+
+      if (event.key === 'Tab') {
+
+        // Do not prevent the browser from moving
+        // focus naturally to the next input.
+
+        closeMenu();
+
+      }
+
     };
 
-    // Keep the highlighted item scrolled into view
-    useEffect(() => {
-      if (!isOpen || highlightedIndex < 0 || !listRef.current) return;
-      const el = listRef.current.children[highlightedIndex];
-      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
-    }, [highlightedIndex, isOpen]);
+    // ==================== CLEAR ====================
 
-    const handleClear = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      onChange({ target: { value: '' } });
+    const handleClear = (event) => {
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      onChange({
+        target: {
+          value: ''
+        }
+      });
+
       setSearch('');
       setIsOpen(false);
-      setIsFocused(false);
       setHighlightedIndex(-1);
-      requestAnimationFrame(() => inputRef.current?.focus());
+
+      // NO forced focus.
     };
 
-    // Display: when focused, show whatever the user is typing.
-    // Otherwise, show the selected label (or nothing).
-    const displayValue = isFocused ? search : (selectedOption ? selectedOption.label : '');
+    // ==================== HIGHLIGHT SCROLL ====================
+
+    useEffect(() => {
+
+      if (
+        !isOpen ||
+        highlightedIndex < 0 ||
+        !listRef.current
+      ) {
+        return;
+      }
+
+      const optionElement =
+        listRef.current.children[
+          highlightedIndex
+        ];
+
+      if (
+        optionElement &&
+        optionElement.scrollIntoView
+      ) {
+        optionElement.scrollIntoView({
+          block: 'nearest'
+        });
+      }
+
+    }, [
+      highlightedIndex,
+      isOpen
+    ]);
+
+    // ==================== DISPLAY VALUE ====================
+
+    const displayValue = isOpen
+      ? search
+      : selectedOption?.label || '';
+
+    // ==================== RENDER ====================
 
     return (
       <div className="w-full">
+
         {label && (
           <label className="block text-sm font-medium text-gray-700 mb-1">
             {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
+
+            {required && (
+              <span className="text-red-500 ml-1">
+                *
+              </span>
+            )}
           </label>
         )}
 
-        {/* The `relative` wrapper ONLY wraps the input. The dropdown is
-            absolutely positioned within it and given a very high z-index. */}
-        <div className="relative" ref={dropdownRef}>
+        <div
+          ref={wrapperRef}
+          className="relative w-full"
+        >
+
           <input
             ref={inputRef}
             type="text"
-            className={`w-full px-3 py-2 pr-16 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
-            } ${className || ''}`}
             value={displayValue}
             onChange={handleInputChange}
             onFocus={openMenu}
-            onBlur={() => {
-              // Do NOT immediately close — let clicks on dropdown items register.
-              // Use a micro-delay and then check whether focus went outside.
-              setTimeout(() => {
-                if (!dropdownRef.current) return;
-                if (dropdownRef.current.contains(document.activeElement)) return;
-                closeMenu(true);
-              }, 120);
-            }}
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
             disabled={disabled}
@@ -18017,197 +18581,578 @@ const StaffModule = ({
             role="combobox"
             aria-expanded={isOpen}
             aria-haspopup="listbox"
+            className={`
+              w-full
+              px-3
+              py-2
+              pr-16
+              border
+              rounded-lg
+              outline-none
+              focus:ring-2
+              focus:ring-indigo-500
+              focus:border-indigo-500
+              transition
+              ${disabled
+                ? 'bg-gray-100 cursor-not-allowed'
+                : 'bg-white'
+              }
+              ${className}
+            `}
           />
 
+          {/* CLEAR BUTTON */}
+
           {selectedOption && !disabled && (
+
             <button
               type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={handleClear}
-              className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
               tabIndex={-1}
               aria-label="Clear selection"
+              onMouseDown={(event) => {
+                event.preventDefault();
+              }}
+              onClick={handleClear}
+              className="
+                absolute
+                right-8
+                top-1/2
+                -translate-y-1/2
+                text-gray-400
+                hover:text-gray-700
+                z-10
+              "
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
               </svg>
             </button>
+
           )}
 
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+          {/* ARROW */}
+
+          <div
+            className="
+              absolute
+              right-3
+              top-1/2
+              -translate-y-1/2
+              pointer-events-none
+            "
+          >
             <svg
-              className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
-              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              className={`
+                w-4
+                h-4
+                text-gray-400
+                transition-transform
+                ${isOpen ? 'rotate-180' : ''}
+              `}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 9l-7 7-7-7"
+              />
             </svg>
           </div>
 
-          {/* Dropdown — rendered ONLY when open. No invisible overlay remains. */}
+          {/* DROPDOWN */}
+
           {isOpen && !disabled && (
+
             <div
               ref={listRef}
               role="listbox"
-              className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-auto"
-              style={{ zIndex: 9999 }}
+              className="
+                absolute
+                left-0
+                right-0
+                top-full
+                mt-1
+                bg-white
+                border
+                border-gray-200
+                rounded-lg
+                shadow-xl
+                max-h-60
+                overflow-y-auto
+              "
+              style={{
+                zIndex: 9999
+              }}
             >
-              {safeOptions.length === 0 ? (
+
+              {!safeOptions.length ? (
+
                 <div className="px-3 py-4 text-center text-gray-500 text-sm">
                   {emptyMessage}
                 </div>
+
               ) : filteredOptions.length > 0 ? (
-                filteredOptions.map((opt, idx) => (
-                  <div
-                    key={String(opt.value ?? opt.key ?? opt.id ?? idx)}
-                    role="option"
-                    aria-selected={String(opt.value) === String(value)}
-                    className={`px-3 py-2 cursor-pointer border-b last:border-b-0 transition-colors ${
-                      String(opt.value) === String(value)
-                        ? 'bg-indigo-50 text-indigo-700'
-                        : idx === highlightedIndex
-                          ? 'bg-gray-100'
-                          : 'text-gray-900 hover:bg-indigo-50'
-                    } ${opt.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onMouseEnter={() => setHighlightedIndex(idx)}
-                    onClick={() => handleSelect(opt)}
-                  >
-                    <div className="font-medium">{opt.label}</div>
-                    {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
-                  </div>
-                ))
+
+                filteredOptions.map(
+                  (option, index) => (
+
+                    <div
+                      key={
+                        String(
+                          option.value ??
+                          option.key ??
+                          option.id ??
+                          index
+                        )
+                      }
+                      role="option"
+                      aria-selected={
+                        String(option.value) ===
+                        String(value)
+                      }
+                      onMouseDown={(event) => {
+                        // Prevent the select from losing focus
+                        // before the click handler executes.
+                        event.preventDefault();
+                      }}
+                      onMouseEnter={() => {
+                        setHighlightedIndex(index);
+                      }}
+                      onClick={() => {
+                        handleSelect(option);
+                      }}
+                      className={`
+                        px-3
+                        py-2
+                        cursor-pointer
+                        border-b
+                        last:border-b-0
+                        transition-colors
+                        ${
+                          String(option.value) ===
+                          String(value)
+                            ? 'bg-indigo-50 text-indigo-700'
+                            : index === highlightedIndex
+                              ? 'bg-gray-100'
+                              : 'text-gray-900 hover:bg-indigo-50'
+                        }
+                        ${
+                          option.disabled
+                            ? 'opacity-50 cursor-not-allowed'
+                            : ''
+                        }
+                      `}
+                    >
+
+                      <div className="font-medium">
+                        {option.label}
+                      </div>
+
+                      {option.subLabel && (
+                        <div className="text-xs text-gray-500">
+                          {option.subLabel}
+                        </div>
+                      )}
+
+                    </div>
+
+                  )
+                )
+
               ) : (
+
                 <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                  {search.trim() ? `No results for "${search}"` : noOptionsMessage}
+                  {search.trim()
+                    ? `No results for "${search}"`
+                    : noOptionsMessage
+                  }
                 </div>
+
               )}
+
             </div>
+
           )}
+
         </div>
+
       </div>
     );
   };
 
-  // ==================== PLAIN TEXT INPUT ====================
-  const TextInput = ({ label, value, onChange, placeholder, required, disabled, type = 'text' }) => (
-    <div className="w-full">
-      {label && (
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
-        </label>
-      )}
-      <input
-        type={type}
-        value={value ?? ''}
-        onChange={onChange}
-        placeholder={placeholder}
-        disabled={disabled}
-        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:bg-gray-100"
-        autoComplete="off"
-      />
-    </div>
-  );
+  // ============================================================
+  // PLAIN TEXT INPUT
+  // ============================================================
+  //
+  // This is deliberately a NORMAL input.
+  // No searchable behavior.
+  // No focus manipulation.
+  // No blur logic.
+  // No cursor manipulation.
+  //
+  // ============================================================
 
-  // ==================== MONEY INPUT ====================
-  // Stores the raw string the user typed. Never coerces to 0 mid-typing.
-  // At submit time we call parseMoney() to convert to a number.
-  const MoneyInput = ({ label, value, onChange, placeholder, disabled }) => {
-    // Convert whatever's in state into the string we show.
-    // - '' / null / undefined → '' (placeholder shows)
-    // - number → String(number)
-    // - string → as-is
-    const display = (value === '' || value === null || value === undefined)
-      ? ''
-      : String(value);
+  const TextInput = ({
+    label,
+    value,
+    onChange,
+    placeholder,
+    required = false,
+    disabled = false,
+    type = 'text'
+  }) => {
 
-    const handleChange = (e) => {
-      const raw = e.target.value;
-      // Accept: empty, digits, one optional dot, at most 2 decimals
-      if (raw === '' || /^\d*\.?\d{0,2}$/.test(raw)) {
-        onChange(raw);           // store the raw string
+    return (
+      <div className="w-full">
+
+        {label && (
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            {label}
+
+            {required && (
+              <span className="text-red-500 ml-1">
+                *
+              </span>
+            )}
+          </label>
+        )}
+
+        <input
+          type={type}
+          value={value ?? ''}
+          onChange={onChange}
+          placeholder={placeholder}
+          disabled={disabled}
+          autoComplete="off"
+          className="
+            w-full
+            px-3
+            py-2
+            border
+            rounded-lg
+            outline-none
+            focus:ring-2
+            focus:ring-indigo-500
+            focus:border-indigo-500
+            disabled:bg-gray-100
+            disabled:cursor-not-allowed
+          "
+        />
+
+      </div>
+    );
+  };
+
+  // ============================================================
+  // MONEY INPUT
+  // ============================================================
+  //
+  // IMPORTANT:
+  // The input stores exactly what the user is typing.
+  //
+  // Examples:
+  //
+  // 5
+  // 50
+  // 500
+  // 5000
+  // 50000
+  //
+  // React does NOT convert it to 0 while typing.
+  //
+  // ============================================================
+
+  const MoneyInput = ({
+    label,
+    value,
+    onChange,
+    placeholder = '0',
+    disabled = false
+  }) => {
+
+    const displayValue =
+      value === null ||
+      value === undefined
+        ? ''
+        : String(value);
+
+    const handleChange = (event) => {
+
+      const rawValue =
+        event.target.value;
+
+      // Allow:
+      // empty
+      // whole numbers
+      // decimals
+      // up to two decimal places
+
+      if (
+        rawValue === '' ||
+        /^\d*\.?\d{0,2}$/.test(rawValue)
+      ) {
+        onChange(rawValue);
       }
+
     };
 
     return (
       <div className="w-full">
+
         {label && (
-          <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            {label}
+          </label>
         )}
+
         <input
           type="text"
           inputMode="decimal"
-          value={display}
+          value={displayValue}
           onChange={handleChange}
-          placeholder={placeholder || '0'}
+          placeholder={placeholder}
           disabled={disabled}
-          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:bg-gray-100"
           autoComplete="off"
+          className="
+            w-full
+            px-3
+            py-2
+            border
+            rounded-lg
+            outline-none
+            focus:ring-2
+            focus:ring-indigo-500
+            focus:border-indigo-500
+            disabled:bg-gray-100
+            disabled:cursor-not-allowed
+          "
         />
+
       </div>
     );
   };
 
   // ==================== FILTERED STAFF ====================
+
   const filteredStaff = useMemo(() => {
+
     let filtered = [...staff];
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
+
+    if (searchTerm.trim()) {
+
+      const term =
+        searchTerm.trim().toLowerCase();
+
       filtered = filtered.filter(member => {
-        const u = member.User || {};
-        return `${u.firstName || ''} ${u.lastName || ''}`.toLowerCase().includes(term)
-            || (member.employeeId || '').toLowerCase().includes(term)
-            || (member.jobTitle || '').toLowerCase().includes(term)
-            || (member.department || '').toLowerCase().includes(term)
-            || (u.email || '').toLowerCase().includes(term)
-            || (member.staffRole || '').replace(/_/g, ' ').toLowerCase().includes(term);
+
+        const memberUser =
+          member.User || {};
+
+        return (
+          `${memberUser.firstName || ''} ${memberUser.lastName || ''}`
+            .toLowerCase()
+            .includes(term) ||
+
+          String(member.employeeId || '')
+            .toLowerCase()
+            .includes(term) ||
+
+          String(member.jobTitle || '')
+            .toLowerCase()
+            .includes(term) ||
+
+          String(member.department || '')
+            .toLowerCase()
+            .includes(term) ||
+
+          String(memberUser.email || '')
+            .toLowerCase()
+            .includes(term) ||
+
+          String(member.staffRole || '')
+            .replace(/_/g, ' ')
+            .toLowerCase()
+            .includes(term)
+        );
+
       });
+
     }
+
     if (departmentFilter) {
-      filtered = filtered.filter(m =>
-        m.departmentId === departmentFilter || m.department === departmentFilter
+
+      filtered = filtered.filter(member =>
+        String(member.departmentId) ===
+          String(departmentFilter) ||
+        String(member.department) ===
+          String(departmentFilter)
       );
+
     }
+
     if (staffTypeFilter) {
-      filtered = filtered.filter(m => m.staffType === staffTypeFilter);
+
+      filtered = filtered.filter(
+        member =>
+          member.staffType === staffTypeFilter
+      );
+
     }
+
     return filtered;
-  }, [staff, searchTerm, departmentFilter, staffTypeFilter]);
+
+  }, [
+    staff,
+    searchTerm,
+    departmentFilter,
+    staffTypeFilter
+  ]);
+
+  // ============================================================
+  // FORM UPDATE HELPERS
+  // ============================================================
+  //
+  // Functional state updates are intentional.
+  // They prevent old `form` snapshots from overwriting
+  // characters while the user is typing.
+  //
+  // ============================================================
+
+  const updateFormField = (
+    field,
+    value
+  ) => {
+
+    setForm(previousForm => ({
+      ...previousForm,
+      [field]: value
+    }));
+
+  };
+
+  const updateSalaryField = (
+    field,
+    value
+  ) => {
+
+    setForm(previousForm => ({
+      ...previousForm,
+
+      salary: {
+        ...(previousForm?.salary || {}),
+        [field]: value
+      }
+
+    }));
+
+  };
 
   // ==================== SUBMIT ====================
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+
+  const handleSubmit = async (event) => {
+
+    event.preventDefault();
 
     if (!canEdit) {
-      setErrorMessage('You do not have permission to add/edit staff');
-      setTimeout(() => setErrorMessage(''), 3000);
-      return;
-    }
-    if (!form.userId) {
-      setErrorMessage('Please select a user account');
-      setTimeout(() => setErrorMessage(''), 3000);
-      return;
-    }
-    if (!form.staffRole) {
-      setErrorMessage('Please select a staff role');
-      setTimeout(() => setErrorMessage(''), 3000);
-      return;
-    }
-    if (!form.employmentDate) {
-      setErrorMessage('Please select employment date');
-      setTimeout(() => setErrorMessage(''), 3000);
-      return;
-    }
-    if (!form.jobTitle || !String(form.jobTitle).trim()) {
-      setErrorMessage('Please enter a job title');
-      setTimeout(() => setErrorMessage(''), 3000);
+
+      setErrorMessage(
+        'You do not have permission to add/edit staff'
+      );
+
+      setTimeout(
+        () => setErrorMessage(''),
+        3000
+      );
+
       return;
     }
 
-    const employmentDate = new Date(form.employmentDate);
-    if (isNaN(employmentDate.getTime())) {
-      setErrorMessage('Invalid employment date');
-      setTimeout(() => setErrorMessage(''), 3000);
+    if (!form?.userId) {
+
+      setErrorMessage(
+        'Please select a user account'
+      );
+
+      setTimeout(
+        () => setErrorMessage(''),
+        3000
+      );
+
+      return;
+    }
+
+    if (!form?.staffRole) {
+
+      setErrorMessage(
+        'Please select a staff role'
+      );
+
+      setTimeout(
+        () => setErrorMessage(''),
+        3000
+      );
+
+      return;
+    }
+
+    if (!form?.employmentDate) {
+
+      setErrorMessage(
+        'Please select employment date'
+      );
+
+      setTimeout(
+        () => setErrorMessage(''),
+        3000
+      );
+
+      return;
+    }
+
+    if (
+      !form?.jobTitle ||
+      !String(form.jobTitle).trim()
+    ) {
+
+      setErrorMessage(
+        'Please enter a job title'
+      );
+
+      setTimeout(
+        () => setErrorMessage(''),
+        3000
+      );
+
+      return;
+    }
+
+    const employmentDate =
+      new Date(form.employmentDate);
+
+    if (Number.isNaN(employmentDate.getTime())) {
+
+      setErrorMessage(
+        'Invalid employment date'
+      );
+
+      setTimeout(
+        () => setErrorMessage(''),
+        3000
+      );
+
       return;
     }
 
@@ -18216,52 +19161,123 @@ const StaffModule = ({
     setSuccessMessage('');
 
     try {
-      const formattedDate = employmentDate.toISOString().split('T')[0];
+
+      const formattedDate =
+        employmentDate
+          .toISOString()
+          .split('T')[0];
 
       const formData = {
         ...form,
-        employmentDate: formattedDate,
-        schoolId: currentSchool?.id || user?.schoolId,
+
+        employmentDate:
+          formattedDate,
+
+        schoolId:
+          currentSchool?.id ||
+          user?.schoolId,
+
         salary: {
-          basic:     parseMoney(form.salary?.basic),
-          house:     parseMoney(form.salary?.house),
-          transport: parseMoney(form.salary?.transport)
+          basic: parseMoney(
+            form.salary?.basic
+          ),
+
+          house: parseMoney(
+            form.salary?.house
+          ),
+
+          transport: parseMoney(
+            form.salary?.transport
+          )
         }
       };
 
-      if (!showSubjects) delete formData.subjects;
+      if (!showSubjects) {
+        delete formData.subjects;
+      }
+
       if (!showDepartment) {
         delete formData.departmentId;
         delete formData.department;
       }
 
-      ['employeeId', 'tscNumber', 'specialization'].forEach(field => {
-        if (formData[field] === '') formData[field] = null;
+      [
+        'employeeId',
+        'tscNumber',
+        'specialization'
+      ].forEach(field => {
+
+        if (formData[field] === '') {
+          formData[field] = null;
+        }
+
       });
 
-      console.log('📤 Submitting staff data:', formData);
+      console.log(
+        '📤 Submitting staff data:',
+        formData
+      );
 
       if (editingId) {
-        await onUpdate(editingId, formData);
-        setSuccessMessage('✅ Staff member updated successfully!');
+
+        await onUpdate(
+          editingId,
+          formData
+        );
+
+        setSuccessMessage(
+          '✅ Staff member updated successfully!'
+        );
+
       } else {
-        await onCreate(formData);
-        setSuccessMessage('✅ Staff member added successfully!');
+
+        await onCreate(
+          formData
+        );
+
+        setSuccessMessage(
+          '✅ Staff member added successfully!'
+        );
+
       }
 
       setEditingId(null);
       resetForm();
-      setTimeout(() => setSuccessMessage(''), 5000);
+
+      setTimeout(
+        () => setSuccessMessage(''),
+        5000
+      );
+
     } catch (error) {
-      console.error('❌ Staff submit error:', error);
-      setErrorMessage(error.response?.data?.message || 'Failed to save staff member');
-      setTimeout(() => setErrorMessage(''), 5000);
+
+      console.error(
+        '❌ Staff submit error:',
+        error
+      );
+
+      setErrorMessage(
+        error.response?.data?.message ||
+        'Failed to save staff member'
+      );
+
+      setTimeout(
+        () => setErrorMessage(''),
+        5000
+      );
+
     } finally {
+
       setLoading(false);
+
     }
+
   };
 
+  // ==================== RESET FORM ====================
+
   const resetForm = () => {
+
     setForm({
       userId: '',
       employeeId: '',
@@ -18269,273 +19285,797 @@ const StaffModule = ({
       departmentId: '',
       department: '',
       jobTitle: '',
-      employmentDate: new Date().toISOString().split('T')[0],
+
+      employmentDate:
+        new Date()
+          .toISOString()
+          .split('T')[0],
+
       qualifications: [],
       specialization: '',
       subjects: [],
+
       staffType: 'TEACHING',
       staffRole: '',
-      bankDetails: { bank: '', branch: '', account: '' },
-      // Store salary as strings so MoneyInput behaves
-      salary: { basic: '', house: '', transport: '' }
+
+      bankDetails: {
+        bank: '',
+        branch: '',
+        account: ''
+      },
+
+      salary: {
+        basic: '',
+        house: '',
+        transport: ''
+      }
     });
+
   };
 
   // ==================== PAYROLL ====================
+
   const processPayroll = async () => {
+
     if (!canProcessPayroll) {
-      setErrorMessage('You do not have permission to process payroll');
-      setTimeout(() => setErrorMessage(''), 3000);
+
+      setErrorMessage(
+        'You do not have permission to process payroll'
+      );
+
+      setTimeout(
+        () => setErrorMessage(''),
+        3000
+      );
+
       return;
     }
-    if (staff.length === 0) {
-      setErrorMessage('No staff members to process payroll for');
-      setTimeout(() => setErrorMessage(''), 3000);
+
+    if (!staff.length) {
+
+      setErrorMessage(
+        'No staff members to process payroll for'
+      );
+
+      setTimeout(
+        () => setErrorMessage(''),
+        3000
+      );
+
       return;
     }
+
     setLoading(true);
     setErrorMessage('');
     setSuccessMessage('');
+
     try {
-      const res = await api.post('/payroll/process', {
-        month: payrollForm.month,
-        year: payrollForm.year,
-        schoolId: currentSchool?.id
-      });
-      setPayroll(res.data.payrolls || []);
+
+      const response =
+        await api.post(
+          '/payroll/process',
+          {
+            month: payrollForm.month,
+            year: payrollForm.year,
+            schoolId: currentSchool?.id
+          }
+        );
+
+      setPayroll(
+        response.data.payrolls || []
+      );
+
       setShowPayrollForm(false);
-      setSuccessMessage(`✅ Payroll processed for ${res.data.payrolls?.length || 0} staff members!`);
-      setTimeout(() => setSuccessMessage(''), 5000);
+
+      setSuccessMessage(
+        `✅ Payroll processed for ${
+          response.data.payrolls?.length || 0
+        } staff members!`
+      );
+
+      setTimeout(
+        () => setSuccessMessage(''),
+        5000
+      );
+
     } catch (error) {
-      console.error('❌ Payroll error:', error);
-      setErrorMessage(error.response?.data?.message || 'Failed to process payroll');
-      setTimeout(() => setErrorMessage(''), 5000);
+
+      console.error(
+        '❌ Payroll error:',
+        error
+      );
+
+      setErrorMessage(
+        error.response?.data?.message ||
+        'Failed to process payroll'
+      );
+
+      setTimeout(
+        () => setErrorMessage(''),
+        5000
+      );
+
     } finally {
+
       setLoading(false);
+
     }
+
   };
 
   // ==================== DELETE ====================
-  const handleDelete = async (memberId, memberName) => {
+
+  const handleDelete = async (
+    memberId,
+    memberName
+  ) => {
+
     if (!canDelete) {
-      setErrorMessage('You do not have permission to delete staff');
-      setTimeout(() => setErrorMessage(''), 3000);
+
+      setErrorMessage(
+        'You do not have permission to delete staff'
+      );
+
+      setTimeout(
+        () => setErrorMessage(''),
+        3000
+      );
+
       return;
     }
-    if (!window.confirm(`Delete ${memberName}? This cannot be undone.`)) return;
-    setLoading(true);
-    try {
-      await onDelete(memberId);
-      setSuccessMessage(`✅ ${memberName} deleted successfully!`);
-      setTimeout(() => setSuccessMessage(''), 5000);
-    } catch (error) {
-      setErrorMessage(error.response?.data?.message || 'Failed to delete staff member');
-      setTimeout(() => setErrorMessage(''), 5000);
-    } finally {
-      setLoading(false);
+
+    if (
+      !window.confirm(
+        `Delete ${memberName}? This cannot be undone.`
+      )
+    ) {
+      return;
     }
+
+    setLoading(true);
+
+    try {
+
+      await onDelete(memberId);
+
+      setSuccessMessage(
+        `✅ ${memberName} deleted successfully!`
+      );
+
+      setTimeout(
+        () => setSuccessMessage(''),
+        5000
+      );
+
+    } catch (error) {
+
+      console.error(
+        '❌ Delete staff error:',
+        error
+      );
+
+      setErrorMessage(
+        error.response?.data?.message ||
+        'Failed to delete staff member'
+      );
+
+      setTimeout(
+        () => setErrorMessage(''),
+        5000
+      );
+
+    } finally {
+
+      setLoading(false);
+
+    }
+
   };
 
   // ==================== EDIT ====================
+
   const handleEdit = (member) => {
+
     if (!canEdit) {
-      setErrorMessage('You do not have permission to edit staff');
-      setTimeout(() => setErrorMessage(''), 3000);
+
+      setErrorMessage(
+        'You do not have permission to edit staff'
+      );
+
+      setTimeout(
+        () => setErrorMessage(''),
+        3000
+      );
+
       return;
     }
-    const salary = member.salary || {};
+
+    const salary =
+      member.salary || {};
+
     setForm({
       ...member,
-      employmentDate: member.employmentDate
-        ? new Date(member.employmentDate).toISOString().split('T')[0]
-        : new Date().toISOString().split('T')[0],
-      // Preserve raw values as strings so MoneyInput shows them nicely
+
+      employmentDate:
+        member.employmentDate
+          ? new Date(member.employmentDate)
+              .toISOString()
+              .split('T')[0]
+          : new Date()
+              .toISOString()
+              .split('T')[0],
+
       salary: {
-        basic:     salary.basic     !== undefined && salary.basic     !== null ? String(salary.basic)     : '',
-        house:     salary.house     !== undefined && salary.house     !== null ? String(salary.house)     : '',
-        transport: salary.transport !== undefined && salary.transport !== null ? String(salary.transport) : ''
+        basic:
+          salary.basic !== undefined &&
+          salary.basic !== null
+            ? String(salary.basic)
+            : '',
+
+        house:
+          salary.house !== undefined &&
+          salary.house !== null
+            ? String(salary.house)
+            : '',
+
+        transport:
+          salary.transport !== undefined &&
+          salary.transport !== null
+            ? String(salary.transport)
+            : ''
       },
-      departmentId: member.departmentId || '',
-      department: member.department || '',
-      staffRole: member.staffRole || ''
+
+      departmentId:
+        member.departmentId || '',
+
+      department:
+        member.department || '',
+
+      staffRole:
+        member.staffRole || ''
     });
+
     setEditingId(member.id);
+
     setTimeout(() => {
-      document.getElementById('staff-form')?.scrollIntoView({ behavior: 'smooth' });
+
+      document
+        .getElementById('staff-form')
+        ?.scrollIntoView({
+          behavior: 'smooth'
+        });
+
     }, 100);
+
   };
+
+  // ==================== CANCEL ====================
 
   const handleCancel = () => {
+
     setEditingId(null);
     resetForm();
+
   };
 
-  // ==================== RENDER ====================
+  // ============================================================
+  // RENDER
+  // ============================================================
+
   return (
+
     <div className="space-y-6">
-      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50" />}
+
+      {/* LOADING BAR */}
+
+      {loading && (
+        <div
+          className="
+            fixed
+            top-0
+            left-0
+            w-full
+            h-1
+            bg-indigo-600
+            animate-pulse
+            z-50
+          "
+        />
+      )}
+
+      {/* SUCCESS MESSAGE */}
 
       {successMessage && (
-        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center justify-between">
-          <span><i className="fas fa-check-circle mr-2" />{successMessage}</span>
-          <button onClick={() => setSuccessMessage('')} className="text-green-500 hover:text-green-700">
+
+        <div
+          className="
+            bg-green-50
+            border
+            border-green-200
+            text-green-700
+            px-4
+            py-3
+            rounded-lg
+            flex
+            items-center
+            justify-between
+          "
+        >
+
+          <span>
+            <i className="fas fa-check-circle mr-2" />
+            {successMessage}
+          </span>
+
+          <button
+            type="button"
+            onClick={() => {
+              setSuccessMessage('');
+            }}
+            className="
+              text-green-500
+              hover:text-green-700
+            "
+          >
             <i className="fas fa-times" />
           </button>
+
         </div>
-      )}
-      {errorMessage && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
-          <span><i className="fas fa-exclamation-circle mr-2" />{errorMessage}</span>
-          <button onClick={() => setErrorMessage('')} className="text-red-500 hover:text-red-700">
-            <i className="fas fa-times" />
-          </button>
-        </div>
+
       )}
 
-      {/* Header */}
-      <div className="flex flex-wrap justify-between items-center gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-800">Staff Management</h2>
-          <p className="text-sm text-gray-500 mt-1">
-            {staff.length} staff members • {staff.filter(s => s.staffType === 'TEACHING').length} teaching •{' '}
-            {staff.filter(s => s.staffType === 'NON_TEACHING').length} non-teaching
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {canProcessPayroll && (
-            <button
-              onClick={() => setShowPayrollForm(true)}
-              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center gap-2"
-            >
-              <i className="fas fa-money-bill-wave" />Process Payroll
-            </button>
-          )}
-          {canEdit && (
-            <button
-              onClick={() => {
-                handleCancel();
-                setTimeout(() => {
-                  document.getElementById('staff-form')?.scrollIntoView({ behavior: 'smooth' });
-                }, 100);
-              }}
-              className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2"
-            >
-              <i className="fas fa-plus" />{editingId ? 'Cancel Edit' : 'Add Staff'}
-            </button>
-          )}
+      {/* ERROR MESSAGE */}
+
+      {errorMessage && (
+
+        <div
+          className="
+            bg-red-50
+            border
+            border-red-200
+            text-red-700
+            px-4
+            py-3
+            rounded-lg
+            flex
+            items-center
+            justify-between
+          "
+        >
+
+          <span>
+            <i className="fas fa-exclamation-circle mr-2" />
+            {errorMessage}
+          </span>
+
           <button
-            onClick={() => setShowFilters(!showFilters)}
-            className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 flex items-center gap-2"
+            type="button"
+            onClick={() => {
+              setErrorMessage('');
+            }}
+            className="
+              text-red-500
+              hover:text-red-700
+            "
           >
-            <i className="fas fa-filter" />Filters
+            <i className="fas fa-times" />
           </button>
+
         </div>
+
+      )}
+
+      {/* ==================== HEADER ==================== */}
+
+      <div className="flex flex-wrap justify-between items-center gap-4">
+
+        <div>
+
+          <h2 className="text-2xl font-bold text-gray-800">
+            Staff Management
+          </h2>
+
+          <p className="text-sm text-gray-500 mt-1">
+
+            {staff.length} staff members •{' '}
+
+            {
+              staff.filter(
+                s => s.staffType === 'TEACHING'
+              ).length
+            } teaching •{' '}
+
+            {
+              staff.filter(
+                s => s.staffType === 'NON_TEACHING'
+              ).length
+            } non-teaching
+
+          </p>
+
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+
+          {canProcessPayroll && (
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowPayrollForm(true);
+              }}
+              className="
+                bg-green-600
+                text-white
+                px-4
+                py-2
+                rounded-lg
+                hover:bg-green-700
+                flex
+                items-center
+                gap-2
+              "
+            >
+              <i className="fas fa-money-bill-wave" />
+              Process Payroll
+            </button>
+
+          )}
+
+          {canEdit && (
+
+            <button
+              type="button"
+              onClick={() => {
+
+                handleCancel();
+
+                setTimeout(() => {
+
+                  document
+                    .getElementById('staff-form')
+                    ?.scrollIntoView({
+                      behavior: 'smooth'
+                    });
+
+                }, 100);
+
+              }}
+              className="
+                bg-indigo-600
+                text-white
+                px-4
+                py-2
+                rounded-lg
+                hover:bg-indigo-700
+                flex
+                items-center
+                gap-2
+              "
+            >
+              <i className="fas fa-plus" />
+
+              {editingId
+                ? 'Cancel Edit'
+                : 'Add Staff'
+              }
+
+            </button>
+
+          )}
+
+          <button
+            type="button"
+            onClick={() => {
+              setShowFilters(
+                previous => !previous
+              );
+            }}
+            className="
+              bg-gray-600
+              text-white
+              px-4
+              py-2
+              rounded-lg
+              hover:bg-gray-700
+              flex
+              items-center
+              gap-2
+            "
+          >
+            <i className="fas fa-filter" />
+            Filters
+          </button>
+
+        </div>
+
       </div>
 
+      {/* ==================== SCHOOL INFO ==================== */}
+
       {currentSchool && (
-        <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
+
+        <div
+          className="
+            bg-blue-50
+            p-3
+            rounded-lg
+            border
+            border-blue-200
+          "
+        >
+
           <p className="text-sm text-blue-700">
+
             <i className="fas fa-school mr-2" />
-            Managing staff for: <strong>{currentSchool.name}</strong>
+
+            Managing staff for:
+
+            <strong className="ml-1">
+              {currentSchool.name}
+            </strong>
+
             <span className="ml-2 text-xs text-blue-500">
-              ({schoolCategory === 'UNIVERSITY' ? 'University'
-                : schoolCategory === 'COLLEGE_TVET' ? 'TVET'
-                : schoolCategory === 'SENIOR_SECONDARY' ? 'Secondary'
-                : 'Primary/JSS'})
+
+              (
+              {
+                schoolCategory === 'UNIVERSITY'
+                  ? 'University'
+                  : schoolCategory === 'COLLEGE_TVET'
+                    ? 'TVET'
+                    : schoolCategory === 'SENIOR_SECONDARY'
+                      ? 'Secondary'
+                      : 'Primary/JSS'
+              }
+              )
+
             </span>
+
           </p>
+
         </div>
+
       )}
 
-      {/* Filters */}
+      {/* ==================== FILTERS ==================== */}
+
       {showFilters && (
-        <div className="bg-white p-4 rounded-xl shadow-sm border">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+        <div
+          className="
+            bg-white
+            p-4
+            rounded-xl
+            shadow-sm
+            border
+          "
+        >
+
+          <div
+            className="
+              grid
+              grid-cols-1
+              md:grid-cols-3
+              gap-4
+            "
+          >
+
             <TextInput
               label="Search"
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(event) => {
+                setSearchTerm(
+                  event.target.value
+                );
+              }}
               placeholder="Name, ID, or job title..."
             />
+
             <SearchableSelect
               label="Department"
               value={departmentFilter}
-              onChange={(e) => setDepartmentFilter(e.target.value)}
+              onChange={(event) => {
+                setDepartmentFilter(
+                  event.target.value
+                );
+              }}
               options={departmentFilterOptions}
               placeholder="All Departments"
               emptyMessage="No departments available"
             />
+
             <SearchableSelect
               label="Staff Type"
               value={staffTypeFilter}
-              onChange={(e) => setStaffTypeFilter(e.target.value)}
+              onChange={(event) => {
+                setStaffTypeFilter(
+                  event.target.value
+                );
+              }}
               options={staffTypeOptions}
               placeholder="All Staff Types"
               emptyMessage="No staff types available"
             />
+
           </div>
-          <div className="mt-4 flex justify-between items-center">
+
+          <div
+            className="
+              mt-4
+              flex
+              justify-between
+              items-center
+            "
+          >
+
             <span className="text-sm text-gray-500">
-              Showing {filteredStaff.length} of {staff.length} staff members
+
+              Showing {filteredStaff.length} of{' '}
+              {staff.length} staff members
+
             </span>
+
             <button
-              onClick={() => { setSearchTerm(''); setDepartmentFilter(''); setStaffTypeFilter(''); }}
-              className="text-sm text-indigo-600 hover:text-indigo-800"
+              type="button"
+              onClick={() => {
+
+                setSearchTerm('');
+                setDepartmentFilter('');
+                setStaffTypeFilter('');
+
+              }}
+              className="
+                text-sm
+                text-indigo-600
+                hover:text-indigo-800
+              "
             >
               Clear Filters
             </button>
+
           </div>
+
         </div>
+
       )}
 
-      {/* Staff Form */}
+      {/* ========================================================
+          STAFF FORM
+      ======================================================== */}
+
       {canEdit && (
-        <div id="staff-form" className="bg-white p-6 rounded-xl shadow-sm border-2 border-indigo-100">
-          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            {editingId
-              ? <><i className="fas fa-edit text-indigo-600" />Edit Staff Member</>
-              : <><i className="fas fa-user-plus text-indigo-600" />Add New Staff</>
-            }
+
+        <div
+          id="staff-form"
+          className="
+            bg-white
+            p-6
+            rounded-xl
+            shadow-sm
+            border-2
+            border-indigo-100
+          "
+        >
+
+          <h3
+            className="
+              text-lg
+              font-semibold
+              mb-4
+              flex
+              items-center
+              gap-2
+            "
+          >
+
+            {editingId ? (
+
+              <>
+                <i className="fas fa-edit text-indigo-600" />
+                Edit Staff Member
+              </>
+
+            ) : (
+
+              <>
+                <i className="fas fa-user-plus text-indigo-600" />
+                Add New Staff
+              </>
+
+            )}
+
           </h3>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form
+            onSubmit={handleSubmit}
+            className="space-y-4"
+            autoComplete="off"
+          >
+
+            {/* ================= USER ACCOUNT ================= */}
+
             <SearchableSelect
               label="User Account"
-              value={form.userId || ''}
-              onChange={(e) => setForm({ ...form, userId: e.target.value })}
+              value={form?.userId || ''}
+              onChange={(event) => {
+                updateFormField(
+                  'userId',
+                  event.target.value
+                );
+              }}
               options={userOptions}
               placeholder="Search users..."
               emptyMessage="No users available"
               required
-              disabled={loading || !!editingId}
+              disabled={
+                loading ||
+                Boolean(editingId)
+              }
             />
+
             {editingId && (
+
               <p className="text-xs text-gray-500 mt-1">
-                <i className="fas fa-info-circle mr-1" />User account cannot be changed after creation
+
+                <i className="fas fa-info-circle mr-1" />
+
+                User account cannot be changed
+                after creation
+
               </p>
+
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* ================= EMPLOYEE DETAILS ================= */}
+
+            <div
+              className="
+                grid
+                grid-cols-1
+                md:grid-cols-2
+                gap-4
+              "
+            >
+
               <TextInput
                 label="Employee ID"
-                value={form.employeeId || ''}
-                onChange={(e) => setForm({ ...form, employeeId: e.target.value })}
+                value={form?.employeeId || ''}
+                onChange={(event) => {
+                  updateFormField(
+                    'employeeId',
+                    event.target.value
+                  );
+                }}
                 placeholder="e.g., EMP001"
                 disabled={loading}
               />
+
               <TextInput
                 label="TSC Number"
-                value={form.tscNumber || ''}
-                onChange={(e) => setForm({ ...form, tscNumber: e.target.value })}
+                value={form?.tscNumber || ''}
+                onChange={(event) => {
+                  updateFormField(
+                    'tscNumber',
+                    event.target.value
+                  );
+                }}
                 placeholder="e.g., TSC-12345"
                 disabled={loading}
               />
+
             </div>
+
+            {/* ================= STAFF ROLE ================= */}
 
             <SearchableSelect
               label="Staff Role"
-              value={form.staffRole || ''}
-              onChange={(e) => setForm({ ...form, staffRole: e.target.value })}
+              value={form?.staffRole || ''}
+              onChange={(event) => {
+                updateFormField(
+                  'staffRole',
+                  event.target.value
+                );
+              }}
               options={staffRoleOptions}
               placeholder="Select staff role..."
               emptyMessage="No staff roles available"
@@ -18543,365 +20083,1360 @@ const StaffModule = ({
               disabled={loading}
             />
 
-            {/* Department (University/TVET) or Job Title (rest) */}
+            {/* ================= DEPARTMENT / JOB TITLE ================= */}
+
             {showDepartment ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+              <div
+                className="
+                  grid
+                  grid-cols-1
+                  md:grid-cols-2
+                  gap-4
+                "
+              >
+
                 <SearchableSelect
-                  label={isUniversity ? 'Faculty/Department' : 'Department'}
-                  value={form.departmentId || ''}
-                  onChange={(e) => {
-                    const deptId = e.target.value;
-                    const dept = departments?.find(d => d.id === deptId);
-                    setForm({ ...form, departmentId: deptId, department: dept?.name || '' });
+                  label={
+                    isUniversity
+                      ? 'Faculty/Department'
+                      : 'Department'
+                  }
+                  value={
+                    form?.departmentId || ''
+                  }
+                  onChange={(event) => {
+
+                    const departmentId =
+                      event.target.value;
+
+                    const department =
+                      departments?.find(
+                        item =>
+                          String(item.id) ===
+                          String(departmentId)
+                      );
+
+                    setForm(previousForm => ({
+                      ...previousForm,
+
+                      departmentId,
+
+                      department:
+                        department?.name || ''
+                    }));
+
                   }}
                   options={departmentOptions}
                   placeholder="Search departments..."
-                  emptyMessage={departments?.length > 0 ? 'No departments available' : 'No departments configured for this school'}
+                  emptyMessage={
+                    departments?.length
+                      ? 'No departments available'
+                      : 'No departments configured for this school'
+                  }
                   required
                   disabled={loading}
                 />
+
+                {/* =================================================
+                    JOB TITLE IS A NORMAL TEXT INPUT
+                    ================================================= */}
+
                 <TextInput
                   label="Job Title"
-                  value={form.jobTitle || ''}
-                  onChange={(e) => setForm({ ...form, jobTitle: e.target.value })}
-                  placeholder={isUniversity ? 'e.g., Senior Lecturer' : 'e.g., Workshop Supervisor'}
+                  value={form?.jobTitle || ''}
+                  onChange={(event) => {
+                    updateFormField(
+                      'jobTitle',
+                      event.target.value
+                    );
+                  }}
+                  placeholder={
+                    isUniversity
+                      ? 'e.g., Senior Lecturer'
+                      : 'e.g., Workshop Supervisor'
+                  }
                   required
                   disabled={loading}
                 />
+
               </div>
+
             ) : (
+
+              /* =================================================
+                 JOB TITLE IS STILL A NORMAL TEXT INPUT
+                 ================================================= */
+
               <TextInput
                 label="Job Title"
-                value={form.jobTitle || ''}
-                onChange={(e) => setForm({ ...form, jobTitle: e.target.value })}
+                value={form?.jobTitle || ''}
+                onChange={(event) => {
+                  updateFormField(
+                    'jobTitle',
+                    event.target.value
+                  );
+                }}
                 placeholder="e.g., Class Teacher"
                 required
                 disabled={loading}
               />
+
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* ================= EMPLOYMENT DATE ================= */}
+
+            <div
+              className="
+                grid
+                grid-cols-1
+                md:grid-cols-2
+                gap-4
+              "
+            >
+
               <TextInput
                 label="Employment Date"
                 type="date"
-                value={form.employmentDate || new Date().toISOString().split('T')[0]}
-                onChange={(e) => setForm({ ...form, employmentDate: e.target.value })}
+                value={
+                  form?.employmentDate ||
+                  new Date()
+                    .toISOString()
+                    .split('T')[0]
+                }
+                onChange={(event) => {
+                  updateFormField(
+                    'employmentDate',
+                    event.target.value
+                  );
+                }}
                 required
                 disabled={loading}
               />
+
               <SearchableSelect
                 label="Staff Type"
-                value={form.staffType || ''}
-                onChange={(e) => setForm({ ...form, staffType: e.target.value })}
+                value={
+                  form?.staffType || ''
+                }
+                onChange={(event) => {
+                  updateFormField(
+                    'staffType',
+                    event.target.value
+                  );
+                }}
                 options={staffTypeOptions}
                 placeholder="Select staff type..."
                 emptyMessage="No staff types available"
                 disabled={loading}
               />
+
             </div>
 
+            {/* ================= SUBJECTS ================= */}
+
             {showSubjects && (
+
               <div>
+
                 <TextInput
                   label="Subjects (comma separated)"
-                  value={form.subjects?.join(', ') || ''}
-                  onChange={(e) => setForm({
-                    ...form,
-                    subjects: e.target.value.split(',').map(s => s.trim()).filter(Boolean)
-                  })}
+                  value={
+                    form?.subjects?.join(', ') || ''
+                  }
+                  onChange={(event) => {
+
+                    const subjects =
+                      event.target.value
+                        .split(',')
+                        .map(subject =>
+                          subject.trim()
+                        )
+                        .filter(Boolean);
+
+                    updateFormField(
+                      'subjects',
+                      subjects
+                    );
+
+                  }}
                   placeholder="Mathematics, Physics, Chemistry"
                   disabled={loading}
                 />
+
                 <p className="text-xs text-gray-500 mt-1">
-                  <i className="fas fa-info-circle mr-1" />Enter subjects separated by commas
+
+                  <i className="fas fa-info-circle mr-1" />
+
+                  Enter subjects separated by commas
+
                 </p>
+
               </div>
+
             )}
 
+            {/* ================= SPECIALIZATION ================= */}
+
             {(isUniversity || isTVET) && (
+
               <TextInput
                 label="Specialization"
-                value={form.specialization || ''}
-                onChange={(e) => setForm({ ...form, specialization: e.target.value })}
+                value={
+                  form?.specialization || ''
+                }
+                onChange={(event) => {
+                  updateFormField(
+                    'specialization',
+                    event.target.value
+                  );
+                }}
                 placeholder="e.g., Electrical Engineering, Computer Science"
                 disabled={loading}
               />
+
             )}
 
-            {/* Salary Details */}
+            {/* ====================================================
+                SALARY DETAILS
+                ==================================================== */}
+
             <div className="border-t pt-4">
-              <h4 className="font-medium text-gray-700 mb-3 flex items-center gap-2">
-                <i className="fas fa-money-bill text-green-600" />Salary Details
+
+              <h4
+                className="
+                  font-medium
+                  text-gray-700
+                  mb-3
+                  flex
+                  items-center
+                  gap-2
+                "
+              >
+
+                <i className="fas fa-money-bill text-green-600" />
+
+                Salary Details
+
               </h4>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+              <div
+                className="
+                  grid
+                  grid-cols-1
+                  md:grid-cols-3
+                  gap-4
+                "
+              >
+
+                {/* BASIC SALARY */}
+
                 <MoneyInput
                   label="Basic Salary"
-                  value={form.salary?.basic ?? ''}
-                  onChange={(raw) => setForm({
-                    ...form,
-                    salary: { ...form.salary, basic: raw }
-                  })}
+                  value={
+                    form?.salary?.basic ?? ''
+                  }
+                  onChange={(rawValue) => {
+                    updateSalaryField(
+                      'basic',
+                      rawValue
+                    );
+                  }}
                   placeholder="e.g., 50000"
                   disabled={loading}
                 />
+
+                {/* HOUSE ALLOWANCE */}
+
                 <MoneyInput
                   label="House Allowance"
-                  value={form.salary?.house ?? ''}
-                  onChange={(raw) => setForm({
-                    ...form,
-                    salary: { ...form.salary, house: raw }
-                  })}
+                  value={
+                    form?.salary?.house ?? ''
+                  }
+                  onChange={(rawValue) => {
+                    updateSalaryField(
+                      'house',
+                      rawValue
+                    );
+                  }}
                   placeholder="e.g., 15000"
                   disabled={loading}
                 />
+
+                {/* TRANSPORT ALLOWANCE */}
+
                 <MoneyInput
                   label="Transport Allowance"
-                  value={form.salary?.transport ?? ''}
-                  onChange={(raw) => setForm({
-                    ...form,
-                    salary: { ...form.salary, transport: raw }
-                  })}
+                  value={
+                    form?.salary?.transport ?? ''
+                  }
+                  onChange={(rawValue) => {
+                    updateSalaryField(
+                      'transport',
+                      rawValue
+                    );
+                  }}
                   placeholder="e.g., 5000"
                   disabled={loading}
                 />
+
               </div>
-              <div className="mt-2 p-3 bg-gray-50 rounded-lg">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium text-gray-600">Total Monthly Salary:</span>
-                  <span className="text-lg font-bold text-green-600">
-                    {formatCurrency(
-                      parseMoney(form.salary?.basic) +
-                      parseMoney(form.salary?.house) +
-                      parseMoney(form.salary?.transport)
-                    )}
+
+              {/* TOTAL */}
+
+              <div
+                className="
+                  mt-2
+                  p-3
+                  bg-gray-50
+                  rounded-lg
+                "
+              >
+
+                <div
+                  className="
+                    flex
+                    justify-between
+                    items-center
+                  "
+                >
+
+                  <span
+                    className="
+                      text-sm
+                      font-medium
+                      text-gray-600
+                    "
+                  >
+                    Total Monthly Salary:
                   </span>
+
+                  <span
+                    className="
+                      text-lg
+                      font-bold
+                      text-green-600
+                    "
+                  >
+
+                    {formatCurrency(
+                      parseMoney(
+                        form?.salary?.basic
+                      ) +
+
+                      parseMoney(
+                        form?.salary?.house
+                      ) +
+
+                      parseMoney(
+                        form?.salary?.transport
+                      )
+                    )}
+
+                  </span>
+
                 </div>
+
               </div>
+
             </div>
 
-            <div className="flex flex-wrap gap-3 pt-2 border-t">
+            {/* ================= FORM BUTTONS ================= */}
+
+            <div
+              className="
+                flex
+                flex-wrap
+                gap-3
+                pt-2
+                border-t
+              "
+            >
+
               <button
                 type="submit"
                 disabled={loading}
-                className="flex-1 bg-indigo-600 text-white py-2.5 px-4 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                className="
+                  flex-1
+                  bg-indigo-600
+                  text-white
+                  py-2.5
+                  px-4
+                  rounded-lg
+                  hover:bg-indigo-700
+                  disabled:opacity-50
+                  flex
+                  items-center
+                  justify-center
+                  gap-2
+                "
               >
-                {loading
-                  ? <><i className="fas fa-spinner fa-spin" />Saving...</>
-                  : <><i className={`fas fa-${editingId ? 'save' : 'plus-circle'}`} />{editingId ? 'Update Staff' : 'Add Staff'}</>
-                }
+
+                {loading ? (
+
+                  <>
+                    <i className="fas fa-spinner fa-spin" />
+                    Saving...
+                  </>
+
+                ) : (
+
+                  <>
+                    <i
+                      className={
+                        `fas fa-${
+                          editingId
+                            ? 'save'
+                            : 'plus-circle'
+                        }`
+                      }
+                    />
+
+                    {
+                      editingId
+                        ? 'Update Staff'
+                        : 'Add Staff'
+                    }
+                  </>
+
+                )}
+
               </button>
+
               {editingId && (
+
                 <button
                   type="button"
                   onClick={handleCancel}
                   disabled={loading}
-                  className="bg-gray-500 text-white py-2.5 px-6 rounded-lg hover:bg-gray-600"
+                  className="
+                    bg-gray-500
+                    text-white
+                    py-2.5
+                    px-6
+                    rounded-lg
+                    hover:bg-gray-600
+                  "
                 >
                   Cancel
                 </button>
+
               )}
+
             </div>
+
           </form>
+
         </div>
+
       )}
 
-      {/* Staff List */}
-      <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-200">
-        <div className="px-6 py-4 bg-gray-50 border-b flex justify-between items-center flex-wrap gap-2">
-          <h3 className="font-semibold text-lg flex items-center gap-2">
-            <i className="fas fa-users text-indigo-600" />Staff List
-            <span className="text-sm font-normal text-gray-500">
-              ({filteredStaff.length} {filteredStaff.length === 1 ? 'member' : 'members'})
+      {/* ========================================================
+          STAFF LIST
+          ======================================================== */}
+
+      <div
+        className="
+          bg-white
+          rounded-xl
+          shadow-sm
+          overflow-hidden
+          border
+          border-gray-200
+        "
+      >
+
+        <div
+          className="
+            px-6
+            py-4
+            bg-gray-50
+            border-b
+            flex
+            justify-between
+            items-center
+            flex-wrap
+            gap-2
+          "
+        >
+
+          <h3
+            className="
+              font-semibold
+              text-lg
+              flex
+              items-center
+              gap-2
+            "
+          >
+
+            <i className="fas fa-users text-indigo-600" />
+
+            Staff List
+
+            <span
+              className="
+                text-sm
+                font-normal
+                text-gray-500
+              "
+            >
+              ({filteredStaff.length}{' '}
+              {filteredStaff.length === 1
+                ? 'member'
+                : 'members'}
+              )
             </span>
+
           </h3>
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full">
-              {staff.filter(s => s.staffType === 'TEACHING').length} Teaching
+
+          <div
+            className="
+              flex
+              items-center
+              gap-2
+              text-sm
+              text-gray-500
+            "
+          >
+
+            <span
+              className="
+                px-2
+                py-1
+                bg-green-100
+                text-green-800
+                rounded-full
+              "
+            >
+              {
+                staff.filter(
+                  s => s.staffType === 'TEACHING'
+                ).length
+              } Teaching
             </span>
-            <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full">
-              {staff.filter(s => s.staffType === 'NON_TEACHING').length} Non-Teaching
+
+            <span
+              className="
+                px-2
+                py-1
+                bg-blue-100
+                text-blue-800
+                rounded-full
+              "
+            >
+              {
+                staff.filter(
+                  s => s.staffType === 'NON_TEACHING'
+                ).length
+              } Non-Teaching
             </span>
+
           </div>
+
         </div>
 
-        <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto">
+        <div
+          className="
+            p-4
+            grid
+            grid-cols-1
+            md:grid-cols-2
+            lg:grid-cols-3
+            gap-4
+            max-h-[600px]
+            overflow-y-auto
+          "
+        >
+
           {filteredStaff.length === 0 ? (
-            <div className="col-span-full text-center py-12 text-gray-500">
-              <i className="fas fa-users text-5xl text-gray-300 mb-3 block" />
-              <p className="text-lg font-medium">No staff members found</p>
-              <p className="text-sm text-gray-400 mt-1">
-                {searchTerm || departmentFilter || staffTypeFilter
-                  ? 'Try adjusting your filters'
-                  : 'Click "Add Staff" to get started'}
+
+            <div
+              className="
+                col-span-full
+                text-center
+                py-12
+                text-gray-500
+              "
+            >
+
+              <i
+                className="
+                  fas
+                  fa-users
+                  text-5xl
+                  text-gray-300
+                  mb-3
+                  block
+                "
+              />
+
+              <p className="text-lg font-medium">
+                No staff members found
               </p>
+
+              <p className="text-sm text-gray-400 mt-1">
+
+                {
+                  searchTerm ||
+                  departmentFilter ||
+                  staffTypeFilter
+                    ? 'Try adjusting your filters'
+                    : 'Click "Add Staff" to get started'
+                }
+
+              </p>
+
             </div>
+
           ) : (
+
             filteredStaff.map(member => {
-              const u = member.User || {};
-              const totalSalary = getTotalSalary(member);
-              const departmentName = getDepartmentName(member.departmentId) || member.department || 'N/A';
-              const staffRoleDisplay = member.staffRole
-                ? member.staffRole.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase())
-                : 'N/A';
+
+              const memberUser =
+                member.User || {};
+
+              const totalSalary =
+                getTotalSalary(member);
+
+              const departmentName =
+                getDepartmentName(
+                  member.departmentId
+                ) ||
+                member.department ||
+                'N/A';
+
+              const staffRoleDisplay =
+                member.staffRole
+                  ? member.staffRole
+                      .replace(/_/g, ' ')
+                      .toLowerCase()
+                      .replace(
+                        /\b\w/g,
+                        letter =>
+                          letter.toUpperCase()
+                      )
+                  : 'N/A';
 
               return (
+
                 <div
                   key={member.id}
-                  className="border rounded-lg p-4 hover:shadow-md transition-shadow bg-white hover:bg-gray-50"
+                  className="
+                    border
+                    rounded-lg
+                    p-4
+                    hover:shadow-md
+                    transition-shadow
+                    bg-white
+                    hover:bg-gray-50
+                  "
                 >
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center space-x-3">
-                        <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0">
-                          <span className="text-indigo-600 font-bold text-lg">{getUserInitials(member)}</span>
+
+                  <div
+                    className="
+                      flex
+                      justify-between
+                      items-start
+                    "
+                  >
+
+                    <div
+                      className="
+                        flex-1
+                        min-w-0
+                      "
+                    >
+
+                      {/* PERSON */}
+
+                      <div
+                        className="
+                          flex
+                          items-center
+                          space-x-3
+                        "
+                      >
+
+                        <div
+                          className="
+                            w-12
+                            h-12
+                            bg-indigo-100
+                            rounded-full
+                            flex
+                            items-center
+                            justify-center
+                            flex-shrink-0
+                          "
+                        >
+
+                          <span
+                            className="
+                              text-indigo-600
+                              font-bold
+                              text-lg
+                            "
+                          >
+                            {getUserInitials(member)}
+                          </span>
+
                         </div>
+
                         <div className="min-w-0">
-                          <h4 className="font-semibold text-gray-800 truncate">{getUserDisplayName(member)}</h4>
-                          <p className="text-sm text-gray-600 truncate">{member.jobTitle || 'No Job Title'}</p>
-                          <p className="text-xs text-gray-400 truncate">{u.email || 'No email'}</p>
+
+                          <h4
+                            className="
+                              font-semibold
+                              text-gray-800
+                              truncate
+                            "
+                          >
+                            {getUserDisplayName(member)}
+                          </h4>
+
+                          <p
+                            className="
+                              text-sm
+                              text-gray-600
+                              truncate
+                            "
+                          >
+                            {member.jobTitle ||
+                              'No Job Title'}
+                          </p>
+
+                          <p
+                            className="
+                              text-xs
+                              text-gray-400
+                              truncate
+                            "
+                          >
+                            {memberUser.email ||
+                              'No email'}
+                          </p>
+
                         </div>
+
                       </div>
 
-                      <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                      {/* DETAILS */}
+
+                      <div
+                        className="
+                          mt-3
+                          grid
+                          grid-cols-2
+                          gap-2
+                          text-sm
+                        "
+                      >
+
                         <div>
-                          <span className="text-gray-500">Staff Type:</span>
-                          <span className={`ml-1 font-medium ${member.staffType === 'TEACHING' ? 'text-green-600' : 'text-blue-600'}`}>
-                            {member.staffType === 'TEACHING' ? 'Teaching' : 'Non-Teaching'}
+
+                          <span className="text-gray-500">
+                            Staff Type:
                           </span>
+
+                          <span
+                            className={`
+                              ml-1
+                              font-medium
+                              ${
+                                member.staffType ===
+                                'TEACHING'
+                                  ? 'text-green-600'
+                                  : 'text-blue-600'
+                              }
+                            `}
+                          >
+                            {
+                              member.staffType ===
+                              'TEACHING'
+                                ? 'Teaching'
+                                : 'Non-Teaching'
+                            }
+                          </span>
+
                         </div>
+
                         <div>
-                          <span className="text-gray-500">Role:</span>
-                          <span className="ml-1 font-medium text-indigo-600">{staffRoleDisplay}</span>
+
+                          <span className="text-gray-500">
+                            Role:
+                          </span>
+
+                          <span
+                            className="
+                              ml-1
+                              font-medium
+                              text-indigo-600
+                            "
+                          >
+                            {staffRoleDisplay}
+                          </span>
+
                         </div>
+
                         {showDepartment && (
+
                           <div className="col-span-2">
-                            <span className="text-gray-500">Department:</span>
-                            <span className="ml-1 font-medium truncate block">{departmentName}</span>
+
+                            <span className="text-gray-500">
+                              Department:
+                            </span>
+
+                            <span
+                              className="
+                                ml-1
+                                font-medium
+                                truncate
+                                block
+                              "
+                            >
+                              {departmentName}
+                            </span>
+
                           </div>
+
                         )}
+
                         <div>
-                          <span className="text-gray-500">Employee ID:</span>
-                          <span className="ml-1 font-mono text-sm">{member.employeeId || 'N/A'}</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-500">Hired:</span>
-                          <span className="ml-1 font-medium">
-                            {member.employmentDate ? new Date(member.employmentDate).toLocaleDateString() : 'N/A'}
+
+                          <span className="text-gray-500">
+                            Employee ID:
                           </span>
+
+                          <span
+                            className="
+                              ml-1
+                              font-mono
+                              text-sm
+                            "
+                          >
+                            {member.employeeId ||
+                              'N/A'}
+                          </span>
+
                         </div>
+
+                        <div>
+
+                          <span className="text-gray-500">
+                            Hired:
+                          </span>
+
+                          <span
+                            className="
+                              ml-1
+                              font-medium
+                            "
+                          >
+                            {
+                              member.employmentDate
+                                ? new Date(
+                                    member.employmentDate
+                                  ).toLocaleDateString()
+                                : 'N/A'
+                            }
+                          </span>
+
+                        </div>
+
                       </div>
 
-                      {showSubjects && member.subjects?.length > 0 && (
-                        <div className="mt-2">
-                          <span className="text-xs text-gray-500">Subjects:</span>
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {member.subjects.slice(0, 3).map((subject, idx) => (
-                              <span key={`${member.id}-sub-${idx}`} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-xs">
-                                {subject}
-                              </span>
-                            ))}
-                            {member.subjects.length > 3 && (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
-                                +{member.subjects.length - 3} more
-                              </span>
-                            )}
+                      {/* SUBJECTS */}
+
+                      {showSubjects &&
+                        member.subjects?.length > 0 && (
+
+                          <div className="mt-2">
+
+                            <span
+                              className="
+                                text-xs
+                                text-gray-500
+                              "
+                            >
+                              Subjects:
+                            </span>
+
+                            <div
+                              className="
+                                flex
+                                flex-wrap
+                                gap-1
+                                mt-1
+                              "
+                            >
+
+                              {member.subjects
+                                .slice(0, 3)
+                                .map(
+                                  (
+                                    subject,
+                                    index
+                                  ) => (
+
+                                    <span
+                                      key={
+                                        `${member.id}-subject-${index}`
+                                      }
+                                      className="
+                                        px-2
+                                        py-0.5
+                                        bg-indigo-50
+                                        text-indigo-700
+                                        rounded-full
+                                        text-xs
+                                      "
+                                    >
+                                      {subject}
+                                    </span>
+
+                                  )
+                                )}
+
+                              {member.subjects.length > 3 && (
+
+                                <span
+                                  className="
+                                    px-2
+                                    py-0.5
+                                    bg-gray-100
+                                    text-gray-600
+                                    rounded-full
+                                    text-xs
+                                  "
+                                >
+                                  +{member.subjects.length - 3} more
+                                </span>
+
+                              )}
+
+                            </div>
+
                           </div>
-                        </div>
-                      )}
 
-                      <div className="mt-2 pt-2 border-t text-sm">
-                        <span className="text-gray-500">Salary:</span>
-                        <span className="ml-2 font-medium text-green-600">{formatCurrency(totalSalary)}</span>
+                        )}
+
+                      {/* SALARY */}
+
+                      <div
+                        className="
+                          mt-2
+                          pt-2
+                          border-t
+                          text-sm
+                        "
+                      >
+
+                        <span className="text-gray-500">
+                          Salary:
+                        </span>
+
+                        <span
+                          className="
+                            ml-2
+                            font-medium
+                            text-green-600
+                          "
+                        >
+                          {formatCurrency(
+                            totalSalary
+                          )}
+                        </span>
+
                       </div>
+
                     </div>
 
+                    {/* ACTION BUTTONS */}
+
                     {(canEdit || canDelete) && (
-                      <div className="flex flex-col space-y-1 ml-2">
+
+                      <div
+                        className="
+                          flex
+                          flex-col
+                          space-y-1
+                          ml-2
+                        "
+                      >
+
                         {canEdit && (
-                          <button onClick={() => handleEdit(member)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg" title="Edit">
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleEdit(member);
+                            }}
+                            className="
+                              p-2
+                              text-indigo-600
+                              hover:bg-indigo-50
+                              rounded-lg
+                            "
+                            title="Edit"
+                          >
                             <i className="fas fa-edit" />
                           </button>
+
                         )}
+
                         {canDelete && (
-                          <button onClick={() => handleDelete(member.id, getUserDisplayName(member))} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleDelete(
+                                member.id,
+                                getUserDisplayName(member)
+                              );
+                            }}
+                            className="
+                              p-2
+                              text-red-600
+                              hover:bg-red-50
+                              rounded-lg
+                            "
+                            title="Delete"
+                          >
                             <i className="fas fa-trash" />
                           </button>
+
                         )}
+
                       </div>
+
                     )}
+
                   </div>
+
                 </div>
+
               );
+
             })
+
           )}
+
         </div>
+
       </div>
 
-      {/* Payroll modal */}
-      {showPayrollForm && canProcessPayroll && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold flex items-center gap-2">
-                <i className="fas fa-calculator text-green-600" />Process Monthly Payroll
-              </h3>
-              <button onClick={() => setShowPayrollForm(false)} className="text-gray-500 hover:text-gray-700" disabled={loading}>
-                <i className="fas fa-times" />
-              </button>
-            </div>
+      {/* ========================================================
+          PAYROLL MODAL
+          ======================================================== */}
 
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <SearchableSelect
-                  label="Month"
-                  value={payrollForm.month}
-                  onChange={(e) => setPayrollForm({ ...payrollForm, month: parseInt(e.target.value, 10) })}
-                  options={monthOptions}
-                  placeholder="Select month..."
-                  emptyMessage="No months available"
-                  disabled={loading}
-                />
-                <TextInput
-                  label="Year"
-                  type="number"
-                  value={payrollForm.year}
-                  onChange={(e) => setPayrollForm({ ...payrollForm, year: parseInt(e.target.value, 10) || '' })}
-                  disabled={loading}
-                />
-              </div>
+      {showPayrollForm &&
+        canProcessPayroll && (
 
-              <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-                <div className="flex items-start">
-                  <i className="fas fa-info-circle text-yellow-600 mt-0.5 mr-2" />
-                  <div>
-                    <p className="text-sm text-yellow-800 font-medium">Payroll Summary</p>
-                    <p className="text-sm text-yellow-700 mt-1">
-                      Processing payroll for <strong>{staff.length}</strong> staff members for{' '}
-                      <strong>
-                        {new Date(payrollForm.year, payrollForm.month - 1).toLocaleString('default', { month: 'long' })} {payrollForm.year}
-                      </strong>.
-                    </p>
-                  </div>
-                </div>
-              </div>
+          <div
+            className="
+              fixed
+              inset-0
+              bg-black
+              bg-opacity-50
+              flex
+              items-center
+              justify-center
+              z-50
+              p-4
+            "
+          >
 
-              <div className="flex space-x-3 pt-2">
-                <button
-                  onClick={processPayroll}
-                  disabled={loading || staff.length === 0}
-                  className="flex-1 bg-green-600 text-white py-2.5 px-4 rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
+            <div
+              className="
+                bg-white
+                rounded-xl
+                shadow-2xl
+                w-full
+                max-w-md
+                p-6
+                max-h-[90vh]
+                overflow-y-auto
+              "
+            >
+
+              {/* MODAL HEADER */}
+
+              <div
+                className="
+                  flex
+                  justify-between
+                  items-center
+                  mb-4
+                "
+              >
+
+                <h3
+                  className="
+                    text-xl
+                    font-bold
+                    flex
+                    items-center
+                    gap-2
+                  "
                 >
-                  {loading ? <><i className="fas fa-spinner fa-spin" />Processing...</> : <><i className="fas fa-calculator" />Process Payroll</>}
+
+                  <i
+                    className="
+                      fas
+                      fa-calculator
+                      text-green-600
+                    "
+                  />
+
+                  Process Monthly Payroll
+
+                </h3>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPayrollForm(false);
+                  }}
+                  disabled={loading}
+                  className="
+                    text-gray-500
+                    hover:text-gray-700
+                  "
+                >
+                  <i className="fas fa-times" />
                 </button>
-                <button onClick={() => setShowPayrollForm(false)} disabled={loading} className="bg-gray-500 text-white py-2.5 px-6 rounded-lg hover:bg-gray-600">
-                  Cancel
-                </button>
+
               </div>
+
+              <div className="space-y-4">
+
+                {/* MONTH / YEAR */}
+
+                <div
+                  className="
+                    grid
+                    grid-cols-2
+                    gap-4
+                  "
+                >
+
+                  <SearchableSelect
+                    label="Month"
+                    value={
+                      payrollForm.month
+                    }
+                    onChange={(event) => {
+
+                      const month =
+                        parseInt(
+                          event.target.value,
+                          10
+                        );
+
+                      setPayrollForm(
+                        previous => ({
+                          ...previous,
+                          month
+                        })
+                      );
+
+                    }}
+                    options={monthOptions}
+                    placeholder="Select month..."
+                    emptyMessage="No months available"
+                    disabled={loading}
+                  />
+
+                  <TextInput
+                    label="Year"
+                    type="number"
+                    value={
+                      payrollForm.year
+                    }
+                    onChange={(event) => {
+
+                      const raw =
+                        event.target.value;
+
+                      setPayrollForm(
+                        previous => ({
+                          ...previous,
+                          year:
+                            raw === ''
+                              ? ''
+                              : parseInt(
+                                  raw,
+                                  10
+                                ) || ''
+                        })
+                      );
+
+                    }}
+                    disabled={loading}
+                  />
+
+                </div>
+
+                {/* PAYROLL SUMMARY */}
+
+                <div
+                  className="
+                    bg-yellow-50
+                    p-4
+                    rounded-lg
+                    border
+                    border-yellow-200
+                  "
+                >
+
+                  <div className="flex items-start">
+
+                    <i
+                      className="
+                        fas
+                        fa-info-circle
+                        text-yellow-600
+                        mt-0.5
+                        mr-2
+                      "
+                    />
+
+                    <div>
+
+                      <p
+                        className="
+                          text-sm
+                          text-yellow-800
+                          font-medium
+                        "
+                      >
+                        Payroll Summary
+                      </p>
+
+                      <p
+                        className="
+                          text-sm
+                          text-yellow-700
+                          mt-1
+                        "
+                      >
+
+                        Processing payroll for{' '}
+
+                        <strong>
+                          {staff.length}
+                        </strong>{' '}
+
+                        staff members for{' '}
+
+                        <strong>
+
+                          {
+                            new Date(
+                              payrollForm.year,
+                              payrollForm.month - 1
+                            ).toLocaleString(
+                              'default',
+                              {
+                                month: 'long'
+                              }
+                            )
+                          }{' '}
+
+                          {payrollForm.year}
+
+                        </strong>.
+
+                      </p>
+
+                    </div>
+
+                  </div>
+
+                </div>
+
+                {/* PAYROLL BUTTONS */}
+
+                <div
+                  className="
+                    flex
+                    space-x-3
+                    pt-2
+                  "
+                >
+
+                  <button
+                    type="button"
+                    onClick={processPayroll}
+                    disabled={
+                      loading ||
+                      staff.length === 0
+                    }
+                    className="
+                      flex-1
+                      bg-green-600
+                      text-white
+                      py-2.5
+                      px-4
+                      rounded-lg
+                      hover:bg-green-700
+                      disabled:opacity-50
+                      flex
+                      items-center
+                      justify-center
+                      gap-2
+                    "
+                  >
+
+                    {loading ? (
+
+                      <>
+                        <i className="fas fa-spinner fa-spin" />
+                        Processing...
+                      </>
+
+                    ) : (
+
+                      <>
+                        <i className="fas fa-calculator" />
+                        Process Payroll
+                      </>
+
+                    )}
+
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPayrollForm(false);
+                    }}
+                    disabled={loading}
+                    className="
+                      bg-gray-500
+                      text-white
+                      py-2.5
+                      px-6
+                      rounded-lg
+                      hover:bg-gray-600
+                    "
+                  >
+                    Cancel
+                  </button>
+
+                </div>
+
+              </div>
+
             </div>
+
           </div>
-        </div>
-      )}
+
+        )}
+
     </div>
+
   );
 };
 // ==================== FIXED LIBRARY MODULE WITH SCHOOLID ====================
