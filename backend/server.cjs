@@ -13202,7 +13202,7 @@ app.get('/api/timetable', authenticate, async (req, res) => {
     const where = { schoolId: req.user.schoolId };
 
     // ⬅️ Filter by timetable type. Defaults to CLASS so old clients keep working.
-    const validTypes = ['CLASS', 'TUITION', 'EXAM', 'EXTRA', 'REMEDIAL'];
+    const validTypes = ['CLASS', 'TUITION', 'EXTRA', 'REMEDIAL'];
     where.timetableType = validTypes.includes(timetableType) ? timetableType : 'CLASS';
 
     const school = await School.findByPk(req.user.schoolId);
@@ -13304,7 +13304,7 @@ app.post('/api/timetable', authenticate, requireSchoolAdmin, async (req, res) =>
     const isBreak = isBreakRaw === true || isBreakRaw === 'true';
 
     // ⬅️ NEW: validate + default the timetable type
-    const validTypes = ['CLASS', 'TUITION', 'EXAM', 'EXTRA', 'REMEDIAL'];
+    const validTypes = ['CLASS', 'TUITION',  'EXTRA', 'REMEDIAL'];
     const timetableType = validTypes.includes(rawType) ? rawType : 'CLASS';
 
     // These are always required
