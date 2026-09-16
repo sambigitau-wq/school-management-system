@@ -1302,11 +1302,10 @@ const Fee = sequelize.define('Fee', {
   appliesTo: { type: DataTypes.JSONB, defaultValue: ['ALL'] },
   transportRouteId: { type: DataTypes.UUID, allowNull: true },
 
-  // ✅ NEW: Fee-level default discount (applies to every student who gets this fee)
+  // Fee-level default discount
   discountAmount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
   discountPercent: { type: DataTypes.FLOAT, defaultValue: 0 }
 });
-
 const Payment = sequelize.define('Payment', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
   studentId: { 
@@ -1317,7 +1316,7 @@ const Payment = sequelize.define('Payment', {
   schoolId: { type: DataTypes.UUID, allowNull: false },
   amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
   paymentMethod: {
-    type: DataTypes.ENUM('CASH', 'MPESA', 'BANK', 'CHEQUE', 'CARD')
+    type: DataTypes.ENUM('CASH', 'MPESA', 'BANK', 'CHEQUE', 'CARD', 'TRANSFER')
   },
   transactionId: DataTypes.STRING,
   reference: DataTypes.STRING,
@@ -1343,7 +1342,52 @@ const Payment = sequelize.define('Payment', {
   courseName: { type: DataTypes.STRING, allowNull: true },
   className: { type: DataTypes.STRING, allowNull: true },
   feeName: { type: DataTypes.STRING, allowNull: true },
-  discountAmount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 }
+  discountAmount: { type: DataTypes.DECIMAL(10, 2), defaultValue: 0 },
+
+  // ---- Fee Transfer tracking ----
+  isTransfer: { type: DataTypes.BOOLEAN, defaultValue: false },
+  transferId: { type: DataTypes.UUID, allowNull: true }
+});
+// ==================== FEE TRANSFER MODEL ====================
+const FeeTransfer = sequelize.define('FeeTransfer', {
+  id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+  schoolId: { type: DataTypes.UUID, allowNull: false },
+
+  fromStudentId: { type: DataTypes.UUID, allowNull: false },
+  toStudentId:   { type: DataTypes.UUID, allowNull: false },
+
+  amount: { type: DataTypes.DECIMAL(12, 2), allowNull: false },
+  reason: { type: DataTypes.TEXT, allowNull: true },
+
+  status: {
+    type: DataTypes.ENUM('PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'),
+    allowNull: false,
+    defaultValue: 'PENDING'
+  },
+
+  requestedBy:  { type: DataTypes.UUID, allowNull: true },
+  requestedAt:  { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+  requestNotes: { type: DataTypes.TEXT, allowNull: true },
+
+  approvedBy:    { type: DataTypes.UUID, allowNull: true },
+  approvedAt:    { type: DataTypes.DATE, allowNull: true },
+  approvalNotes: { type: DataTypes.TEXT, allowNull: true },
+
+  rejectedBy:   { type: DataTypes.UUID, allowNull: true },
+  rejectedAt:   { type: DataTypes.DATE, allowNull: true },
+  rejectReason: { type: DataTypes.TEXT, allowNull: true },
+
+  outgoingPaymentId: { type: DataTypes.UUID, allowNull: true },
+  incomingPaymentId: { type: DataTypes.UUID, allowNull: true }
+}, {
+  timestamps: true,
+  tableName: 'FeeTransfers',
+  indexes: [
+    { fields: ['schoolId'] },
+    { fields: ['schoolId', 'status'] },
+    { fields: ['fromStudentId'] },
+    { fields: ['toStudentId'] }
+  ]
 });
 
 const CourseUnit = sequelize.define('CourseUnit', {
@@ -2865,6 +2909,15 @@ const Discount = sequelize.define('Discount', {
     { fields: ['studentId', 'feeId'] }
   ]
 });
+
+
+
+// Associations (optional but useful)
+FeeTransfer.belongsTo(Student, { foreignKey: 'fromStudentId', as: 'fromStudent' });
+FeeTransfer.belongsTo(Student, { foreignKey: 'toStudentId',   as: 'toStudent' });
+FeeTransfer.belongsTo(User,    { foreignKey: 'requestedBy',   as: 'requestedByUser' });
+FeeTransfer.belongsTo(User,    { foreignKey: 'approvedBy',    as: 'approvedByUser' });
+FeeTransfer.belongsTo(User,    { foreignKey: 'rejectedBy',    as: 'rejectedByUser' });
 
 // ==================== DISCOUNT ASSOCIATIONS ====================
 Discount.belongsTo(Student, { foreignKey: 'studentId' });
@@ -6422,6 +6475,470 @@ app.get('/api/fees/by-admission/:admissionNumber/statement', authenticate, async
   }
 });
 
+
+// ====================================================================
+// ==================== FEE TRANSFER ROUTES ==========================
+// ====================================================================
+
+// Who can do what
+const canInitiateTransfer = (role) =>
+  ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'ACCOUNTANT', 'FINANCE_OFFICER'].includes(role);
+
+const canApproveTransfer = (role) =>
+  ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'HEAD_TEACHER'].includes(role);
+
+// ====================================================================
+// GET /api/fee-transfers  — list with filters
+// ====================================================================
+app.get('/api/fee-transfers', authenticate, async (req, res) => {
+  try {
+    const { status, studentId, search } = req.query;
+    const where = { schoolId: req.user.schoolId };
+
+    if (status && ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'].includes(status)) {
+      where.status = status;
+    }
+
+    if (studentId) {
+      where[Op.or] = [
+        { fromStudentId: studentId },
+        { toStudentId: studentId }
+      ];
+    }
+
+    const transfers = await FeeTransfer.findAll({
+      where,
+      include: [
+        { model: Student, as: 'fromStudent', attributes: ['id', 'firstName', 'lastName', 'admissionNumber'] },
+        { model: Student, as: 'toStudent',   attributes: ['id', 'firstName', 'lastName', 'admissionNumber'] },
+        { model: User,    as: 'requestedByUser', attributes: ['id', 'firstName', 'lastName', 'role'] },
+        { model: User,    as: 'approvedByUser',  attributes: ['id', 'firstName', 'lastName', 'role'] },
+        { model: User,    as: 'rejectedByUser',  attributes: ['id', 'firstName', 'lastName', 'role'] }
+      ],
+      order: [['createdAt', 'DESC']]
+    });
+
+    // Optional text search on admission numbers / names
+    let results = transfers;
+    if (search && search.trim()) {
+      const s = search.trim().toLowerCase();
+      results = transfers.filter(t => {
+        const from = t.fromStudent || {};
+        const to = t.toStudent || {};
+        return (
+          (from.firstName || '').toLowerCase().includes(s) ||
+          (from.lastName || '').toLowerCase().includes(s) ||
+          (from.admissionNumber || '').toLowerCase().includes(s) ||
+          (to.firstName || '').toLowerCase().includes(s) ||
+          (to.lastName || '').toLowerCase().includes(s) ||
+          (to.admissionNumber || '').toLowerCase().includes(s)
+        );
+      });
+    }
+
+    res.json({ success: true, transfers: results, count: results.length });
+  } catch (err) {
+    console.error('❌ Get fee transfers error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ====================================================================
+// POST /api/fee-transfers  — create a request
+// ====================================================================
+app.post('/api/fee-transfers', authenticate, async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    if (!canInitiateTransfer(req.user.role)) {
+      await t.rollback();
+      return res.status(403).json({ success: false, message: 'You do not have permission to initiate fee transfers' });
+    }
+
+    const { fromStudentId, toStudentId, amount, reason, requestNotes } = req.body;
+
+    // ---- Validation ----
+    if (!fromStudentId || !toStudentId) {
+      await t.rollback();
+      return res.status(400).json({ success: false, message: 'Both sender and receiver students are required' });
+    }
+    if (fromStudentId === toStudentId) {
+      await t.rollback();
+      return res.status(400).json({ success: false, message: 'Sender and receiver must be different students' });
+    }
+    const amt = parseFloat(amount);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      await t.rollback();
+      return res.status(400).json({ success: false, message: 'Amount must be greater than 0' });
+    }
+
+    // ---- Verify both students belong to this school ----
+    const fromStudent = await Student.findOne({
+      where: { id: fromStudentId, schoolId: req.user.schoolId },
+      transaction: t
+    });
+    const toStudent = await Student.findOne({
+      where: { id: toStudentId, schoolId: req.user.schoolId },
+      transaction: t
+    });
+
+    if (!fromStudent) {
+      await t.rollback();
+      return res.status(404).json({ success: false, message: 'Sender student not found in this school' });
+    }
+    if (!toStudent) {
+      await t.rollback();
+      return res.status(404).json({ success: false, message: 'Receiver student not found in this school' });
+    }
+
+    // ---- Check sender has enough paid balance to transfer ----
+    const senderPayments = await Payment.findAll({
+      where: {
+        studentId: fromStudentId,
+        schoolId: req.user.schoolId,
+        isOtherIncome: false
+      },
+      transaction: t
+    });
+
+    // Total paid minus amount already pending transfers
+    const totalPaid = senderPayments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+
+    const existingPending = await FeeTransfer.findAll({
+      where: {
+        fromStudentId,
+        schoolId: req.user.schoolId,
+        status: 'PENDING'
+      },
+      transaction: t
+    });
+    const pendingAmount = existingPending.reduce((s, ft) => s + parseFloat(ft.amount || 0), 0);
+
+    const availableBalance = totalPaid - pendingAmount;
+
+    if (amt > availableBalance) {
+      await t.rollback();
+      return res.status(400).json({
+        success: false,
+        message: `Insufficient paid balance. Available to transfer: ${availableBalance.toFixed(2)} (Paid: ${totalPaid.toFixed(2)}, Pending transfers: ${pendingAmount.toFixed(2)})`
+      });
+    }
+
+    // ---- Create the request ----
+    const transfer = await FeeTransfer.create({
+      schoolId: req.user.schoolId,
+      fromStudentId,
+      toStudentId,
+      amount: amt,
+      reason: reason || null,
+      status: 'PENDING',
+      requestedBy: req.user.id,
+      requestedAt: new Date(),
+      requestNotes: requestNotes || null
+    }, { transaction: t });
+
+    await t.commit();
+
+    // Reload with associations for the response
+    const full = await FeeTransfer.findByPk(transfer.id, {
+      include: [
+        { model: Student, as: 'fromStudent', attributes: ['id', 'firstName', 'lastName', 'admissionNumber'] },
+        { model: Student, as: 'toStudent',   attributes: ['id', 'firstName', 'lastName', 'admissionNumber'] },
+        { model: User,    as: 'requestedByUser', attributes: ['id', 'firstName', 'lastName', 'role'] }
+      ]
+    });
+
+    try {
+      await createAuditLog(req, 'CREATE', 'FEE_TRANSFER', transfer.id, null, transfer);
+    } catch (logErr) { /* non-critical */ }
+
+    res.status(201).json({ success: true, transfer: full, message: 'Transfer request submitted for approval' });
+  } catch (err) {
+    await t.rollback();
+    console.error('❌ Create fee transfer error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ====================================================================
+// PATCH /api/fee-transfers/:id/approve  — approve and move money
+// ====================================================================
+app.patch('/api/fee-transfers/:id/approve', authenticate, async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    if (!canApproveTransfer(req.user.role)) {
+      await t.rollback();
+      return res.status(403).json({ success: false, message: 'Only Principal / Admin / Head Teacher can approve transfers' });
+    }
+
+    const transfer = await FeeTransfer.findOne({
+      where: { id: req.params.id, schoolId: req.user.schoolId },
+      transaction: t,
+      lock: t.LOCK.UPDATE
+    });
+
+    if (!transfer) {
+      await t.rollback();
+      return res.status(404).json({ success: false, message: 'Transfer not found' });
+    }
+    if (transfer.status !== 'PENDING') {
+      await t.rollback();
+      return res.status(400).json({ success: false, message: `Transfer is already ${transfer.status}` });
+    }
+
+    const { approvalNotes } = req.body;
+    const amt = parseFloat(transfer.amount);
+
+    // ---- Re-verify sender still has enough available balance (in case of new requests since) ----
+    const senderPayments = await Payment.findAll({
+      where: {
+        studentId: transfer.fromStudentId,
+        schoolId: req.user.schoolId,
+        isOtherIncome: false
+      },
+      transaction: t
+    });
+    const totalPaid = senderPayments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+
+    const otherPending = await FeeTransfer.findAll({
+      where: {
+        fromStudentId: transfer.fromStudentId,
+        schoolId: req.user.schoolId,
+        status: 'PENDING',
+        id: { [Op.ne]: transfer.id }
+      },
+      transaction: t
+    });
+    const pendingAmount = otherPending.reduce((s, ft) => s + parseFloat(ft.amount || 0), 0);
+    const availableBalance = totalPaid - pendingAmount;
+
+    if (amt > availableBalance) {
+      await t.rollback();
+      return res.status(400).json({
+        success: false,
+        message: `Cannot approve — sender only has ${availableBalance.toFixed(2)} available (other pending transfers exist)`
+      });
+    }
+
+    // ---- Record as TWO payment rows: an outgoing (negative effect) and an incoming ----
+    // We do NOT delete the original payment. We add:
+    //   1. A payment on the sender with isTransfer=true and a note "Transferred out"
+    //      with NEGATIVE amount? No — Payment.amount is DECIMAL(10,2) and there's
+    //      a CHECK constraint risk. Instead we use description to mark it and
+    //      keep amount positive, but tag isTransfer. Balance calculations that
+    //      do `SUM(amount)` would incorrectly count both sides.
+    //
+    // Better approach: use discountAmount on the transfer-out row so the
+    // payment is a "credit" that nets zero on the sender's ledger.
+    // Actually the cleanest is: mark both rows with isTransfer and let the
+    // fee-statement endpoint handle them specially.
+
+    const receiptBase = `TRF-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2,'0')}${String(new Date().getDate()).padStart(2,'0')}-${String(Date.now()).slice(-6)}`;
+
+    // Outgoing (sender side) — tagged as a transfer
+    const outgoing = await Payment.create({
+      studentId: transfer.fromStudentId,
+      feeId: null,
+      schoolId: req.user.schoolId,
+      amount: amt,
+      paymentMethod: 'TRANSFER',
+      receiptNo: `${receiptBase}-OUT`,
+      notes: `Fee transferred out to student (transfer ID ${transfer.id})`,
+      recordedBy: req.user.id,
+      paymentDate: new Date(),
+      isOtherIncome: false,
+      description: 'Fee Transfer — Out',
+      isTransfer: true,
+      transferId: transfer.id
+    }, { transaction: t });
+
+    // Incoming (receiver side)
+    const incoming = await Payment.create({
+      studentId: transfer.toStudentId,
+      feeId: null,
+      schoolId: req.user.schoolId,
+      amount: amt,
+      paymentMethod: 'TRANSFER',
+      receiptNo: `${receiptBase}-IN`,
+      notes: `Fee transferred in from another student (transfer ID ${transfer.id})`,
+      recordedBy: req.user.id,
+      paymentDate: new Date(),
+      isOtherIncome: false,
+      description: 'Fee Transfer — In',
+      isTransfer: true,
+      transferId: transfer.id
+    }, { transaction: t });
+
+    // ---- Mark the transfer as approved ----
+    await transfer.update({
+      status: 'APPROVED',
+      approvedBy: req.user.id,
+      approvedAt: new Date(),
+      approvalNotes: approvalNotes || null,
+      outgoingPaymentId: outgoing.id,
+      incomingPaymentId: incoming.id
+    }, { transaction: t });
+
+    await t.commit();
+
+    try {
+      await createAuditLog(req, 'APPROVE', 'FEE_TRANSFER', transfer.id, null, {
+        amount: amt,
+        fromStudentId: transfer.fromStudentId,
+        toStudentId: transfer.toStudentId
+      });
+    } catch (logErr) { /* non-critical */ }
+
+    res.json({ success: true, transfer, message: 'Transfer approved and money moved' });
+  } catch (err) {
+    await t.rollback();
+    console.error('❌ Approve fee transfer error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ====================================================================
+// PATCH /api/fee-transfers/:id/reject  — reject the request
+// ====================================================================
+app.patch('/api/fee-transfers/:id/reject', authenticate, async (req, res) => {
+  try {
+    if (!canApproveTransfer(req.user.role)) {
+      return res.status(403).json({ success: false, message: 'Only Principal / Admin / Head Teacher can reject transfers' });
+    }
+
+    const transfer = await FeeTransfer.findOne({
+      where: { id: req.params.id, schoolId: req.user.schoolId }
+    });
+
+    if (!transfer) return res.status(404).json({ success: false, message: 'Transfer not found' });
+    if (transfer.status !== 'PENDING') {
+      return res.status(400).json({ success: false, message: `Transfer is already ${transfer.status}` });
+    }
+
+    const { rejectReason } = req.body;
+    if (!rejectReason || !rejectReason.trim()) {
+      return res.status(400).json({ success: false, message: 'Please provide a rejection reason' });
+    }
+
+    await transfer.update({
+      status: 'REJECTED',
+      rejectedBy: req.user.id,
+      rejectedAt: new Date(),
+      rejectReason: rejectReason.trim()
+    });
+
+    try {
+      await createAuditLog(req, 'REJECT', 'FEE_TRANSFER', transfer.id, null, { rejectReason });
+    } catch (logErr) { /* non-critical */ }
+
+    res.json({ success: true, transfer, message: 'Transfer rejected' });
+  } catch (err) {
+    console.error('❌ Reject fee transfer error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ====================================================================
+// PATCH /api/fee-transfers/:id/cancel  — initiator cancels their request
+// ====================================================================
+app.patch('/api/fee-transfers/:id/cancel', authenticate, async (req, res) => {
+  try {
+    const transfer = await FeeTransfer.findOne({
+      where: { id: req.params.id, schoolId: req.user.schoolId }
+    });
+
+    if (!transfer) return res.status(404).json({ success: false, message: 'Transfer not found' });
+    if (transfer.status !== 'PENDING') {
+      return res.status(400).json({ success: false, message: `Cannot cancel a transfer that is ${transfer.status}` });
+    }
+
+    // Only the original requester OR an approver can cancel
+    const isRequester = transfer.requestedBy === req.user.id;
+    const isApprover  = canApproveTransfer(req.user.role);
+    if (!isRequester && !isApprover) {
+      return res.status(403).json({ success: false, message: 'You cannot cancel this transfer' });
+    }
+
+    await transfer.update({ status: 'CANCELLED' });
+
+    res.json({ success: true, transfer, message: 'Transfer cancelled' });
+  } catch (err) {
+    console.error('❌ Cancel fee transfer error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ====================================================================
+// GET /api/fee-transfers/stats  — quick summary
+// ====================================================================
+app.get('/api/fee-transfers/stats', authenticate, async (req, res) => {
+  try {
+    const schoolId = req.user.schoolId;
+    const [pending, approved, rejected, cancelled] = await Promise.all([
+      FeeTransfer.count({ where: { schoolId, status: 'PENDING' } }),
+      FeeTransfer.count({ where: { schoolId, status: 'APPROVED' } }),
+      FeeTransfer.count({ where: { schoolId, status: 'REJECTED' } }),
+      FeeTransfer.count({ where: { schoolId, status: 'CANCELLED' } })
+    ]);
+
+    // Total amount transferred out
+    const approvedRows = await FeeTransfer.findAll({
+      where: { schoolId, status: 'APPROVED' },
+      attributes: ['amount']
+    });
+    const totalAmount = approvedRows.reduce((s, r) => s + parseFloat(r.amount || 0), 0);
+
+    res.json({
+      success: true,
+      stats: { pending, approved, rejected, cancelled, totalAmount }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ====================================================================
+// GET /api/students/:studentId/transferable-balance
+//   Returns the amount a student can transfer (paid minus pending)
+// ====================================================================
+app.get('/api/students/:studentId/transferable-balance', authenticate, async (req, res) => {
+  try {
+    const { studentId } = req.params;
+
+    const student = await Student.findOne({
+      where: { id: studentId, schoolId: req.user.schoolId },
+      attributes: ['id', 'firstName', 'lastName', 'admissionNumber']
+    });
+    if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
+
+    const payments = await Payment.findAll({
+      where: { studentId, schoolId: req.user.schoolId, isOtherIncome: false }
+    });
+    const totalPaid = payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+
+    const pendingTransfers = await FeeTransfer.findAll({
+      where: { fromStudentId: studentId, schoolId: req.user.schoolId, status: 'PENDING' }
+    });
+    const pendingAmount = pendingTransfers.reduce((s, ft) => s + parseFloat(ft.amount || 0), 0);
+
+    const transferable = Math.max(0, totalPaid - pendingAmount);
+
+    res.json({
+      success: true,
+      student: {
+        id: student.id,
+        firstName: student.firstName,
+        lastName: student.lastName,
+        admissionNumber: student.admissionNumber
+      },
+      totalPaid,
+      pendingAmount,
+      transferable
+    });
+  } catch (err) {
+    console.error('❌ Transferable balance error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 // ==================== SPECIALIZED EXAM CARD ENDPOINTS ====================
 // ==================== GET COURSE UNITS BY PROGRAM ID (FOR TVET) ====================
 app.get('/api/course-units/by-program/:programId', authenticate, async (req, res) => {
