@@ -13205,31 +13205,45 @@ app.get('/api/timetable', authenticate, async (req, res) => {
   }
 });
 
-// ==================== FIXED POST TIMETABLE ====================
 app.post('/api/timetable', authenticate, requireSchoolAdmin, async (req, res) => {
   try {
     const {
       classId, courseId, programId, year, semester, module, day, period, startTime, endTime,
-      subjectId, unitId, teacherId, room
+      subjectId, unitId, teacherId, room,
+      isBreak: isBreakRaw, breakName
     } = req.body;
 
-    if (!day) return res.status(400).json({ message: 'Day is required' });
-    if (!period) return res.status(400).json({ message: 'Period is required' });
-    if (!teacherId) return res.status(400).json({ message: 'Teacher is required' });
+    // ⬅️ CHANGED: normalise isBreak to a real boolean
+    const isBreak = isBreakRaw === true || isBreakRaw === 'true';
+
+    // ⬅️ CHANGED: these two are always required, break or not
+    if (!day)       return res.status(400).json({ message: 'Day is required' });
+    if (!period)    return res.status(400).json({ message: 'Period is required' });
     if (!startTime) return res.status(400).json({ message: 'Start time is required' });
-    if (!endTime) return res.status(400).json({ message: 'End time is required' });
+    if (!endTime)   return res.status(400).json({ message: 'End time is required' });
+
+    // ⬅️ CHANGED: teacher is only required for real classes, not for breaks
+    if (!isBreak && !teacherId) {
+      return res.status(400).json({ message: 'Teacher is required' });
+    }
 
     const school = await School.findByPk(req.user.schoolId);
     if (!school) return res.status(404).json({ message: 'School not found' });
-    
+
+    // ⬅️ CHANGED: build the payload with a shared shape.
+    // Teacher, room, subject/unit are force-nulled when this is a break.
     let timetableData = {
       day,
       period: parseInt(period),
       startTime,
       endTime,
-      teacherId,
-      room: room || null,
+      teacherId: isBreak ? null : teacherId,
+      room:      isBreak ? null : (room || null),
       schoolId: req.user.schoolId,
+      isBreak,
+      breakName: isBreak ? (breakName || 'Break') : null,
+
+      // scope fields default to null, set below by school type
       classId: null,
       courseId: null,
       programId: null,
@@ -13240,96 +13254,97 @@ app.post('/api/timetable', authenticate, requireSchoolAdmin, async (req, res) =>
       module: null
     };
 
+    // ==================== SCHOOL-TYPE-SPECIFIC VALIDATION ====================
+    // ⬅️ CHANGED: breaks skip the subject/unit requirement entirely; they only
+    // need the scope identifiers (class/course/program) so filtering works.
     if (school.category === 'UNIVERSITY') {
       if (!courseId) {
-        return res.status(400).json({ 
-          message: 'Course ID is required for university' 
-        });
+        return res.status(400).json({ message: 'Course ID is required for university' });
       }
-      if (!unitId) {
-        return res.status(400).json({ 
-          message: 'Unit ID is required for university' 
-        });
+      if (!isBreak && !unitId) {
+        return res.status(400).json({ message: 'Unit ID is required for university' });
       }
-      
       timetableData.courseId = courseId;
-      timetableData.unitId = unitId;
+      timetableData.unitId = isBreak ? null : unitId;
       timetableData.year = year ? parseInt(year) : null;
       timetableData.semester = semester ? parseInt(semester) : null;
     } else if (school.category === 'COLLEGE_TVET') {
       if (!programId) {
-        return res.status(400).json({ 
-          message: 'Program ID is required for TVET' 
-        });
+        return res.status(400).json({ message: 'Program ID is required for TVET' });
       }
-      if (!unitId) {
-        return res.status(400).json({ 
-          message: 'Unit/Module ID is required for TVET' 
-        });
+      if (!isBreak && !unitId) {
+        return res.status(400).json({ message: 'Unit/Module ID is required for TVET' });
       }
-      
       timetableData.programId = programId;
-      timetableData.unitId = unitId;
+      timetableData.unitId = isBreak ? null : unitId;
       timetableData.year = year ? parseInt(year) : null;
       timetableData.module = module ? parseInt(module) : null;
     } else {
       if (!classId) {
-        return res.status(400).json({ 
-          message: 'Class ID is required for regular schools' 
-        });
+        return res.status(400).json({ message: 'Class ID is required for regular schools' });
       }
-      if (!subjectId) {
-        return res.status(400).json({ 
-          message: 'Subject ID is required for regular schools' 
-        });
+      if (!isBreak && !subjectId) {
+        return res.status(400).json({ message: 'Subject ID is required for regular schools' });
       }
-      
       timetableData.classId = classId;
-      timetableData.subjectId = subjectId;
+      timetableData.subjectId = isBreak ? null : subjectId;
     }
 
-    // Check for scheduling conflicts
-    const conflictWhere = {
-      schoolId: req.user.schoolId,
-      day,
-      period: parseInt(period)
-    };
+    // ==================== CONFLICT CHECK ====================
+    // ⬅️ CHANGED: breaks skip all conflict detection (no teacher/room/unit)
+    if (!isBreak) {
+      const conflictWhere = {
+        schoolId: req.user.schoolId,
+        day,
+        period: parseInt(period),
+        isBreak: false          // ⬅️ CHANGED: never match break rows
+      };
 
-    if (school.category === 'UNIVERSITY') {
-      conflictWhere.courseId = courseId;
-    } else if (school.category === 'COLLEGE_TVET') {
-      conflictWhere.programId = programId;
-    } else {
-      conflictWhere.classId = classId;
-    }
-
-    const teacherConflict = await Timetable.findOne({
-      where: {
-        ...conflictWhere,
-        teacherId: teacherId
+      if (school.category === 'UNIVERSITY') {
+        conflictWhere.courseId = courseId;
+      } else if (school.category === 'COLLEGE_TVET') {
+        conflictWhere.programId = programId;
+      } else {
+        conflictWhere.classId = classId;
       }
-    });
 
-    if (teacherConflict) {
-      return res.status(400).json({ 
-        message: 'Teacher is already assigned to another class at this time' 
+      const teacherConflict = await Timetable.findOne({
+        where: { ...conflictWhere, teacherId }
       });
+
+      if (teacherConflict) {
+        return res.status(400).json({
+          message: 'Teacher is already assigned to another class at this time'
+        });
+      }
     }
 
     const timetable = await Timetable.create(timetableData);
-    
-    await createAuditLog(req, 'CREATE', 'TIMETABLE', timetable.id, null, timetable);
 
+    await createAuditLog(
+      req,
+      'CREATE',
+      'TIMETABLE',
+      timetable.id,
+      null,
+      timetable
+    );
+
+    // ==================== RESPONSE WITH INCLUDES ====================
+    // ⬅️ CHANGED: breaks have no teacher/unit/subject, so those includes
+    // return null and the frontend just renders the break name.
     let createdTimetable;
+
     if (school.category === 'UNIVERSITY') {
       createdTimetable = await Timetable.findByPk(timetable.id, {
         include: [
           { model: Course, attributes: ['id', 'name', 'code'] },
           { model: CourseUnit, as: 'unit', attributes: ['id', 'name', 'code'] },
-          { 
-            model: Staff, 
-            as: 'teacher', 
-            include: [{ model: User, attributes: ['id', 'firstName', 'lastName'] }]
+          {
+            model: Staff,
+            as: 'teacher',
+            include: [{ model: User, attributes: ['id', 'firstName', 'lastName'] }],
+            required: false
           }
         ]
       });
@@ -13338,10 +13353,11 @@ app.post('/api/timetable', authenticate, requireSchoolAdmin, async (req, res) =>
         include: [
           { model: Program, attributes: ['id', 'name', 'code'] },
           { model: CourseUnit, as: 'unit', attributes: ['id', 'name', 'code'] },
-          { 
-            model: Staff, 
-            as: 'teacher', 
-            include: [{ model: User, attributes: ['id', 'firstName', 'lastName'] }]
+          {
+            model: Staff,
+            as: 'teacher',
+            include: [{ model: User, attributes: ['id', 'firstName', 'lastName'] }],
+            required: false
           }
         ]
       });
@@ -13350,10 +13366,11 @@ app.post('/api/timetable', authenticate, requireSchoolAdmin, async (req, res) =>
         include: [
           { model: Subject, attributes: ['id', 'name', 'code'] },
           { model: Class, attributes: ['id', 'name'] },
-          { 
-            model: Staff, 
-            as: 'teacher', 
-            include: [{ model: User, attributes: ['id', 'firstName', 'lastName'] }]
+          {
+            model: Staff,
+            as: 'teacher',
+            include: [{ model: User, attributes: ['id', 'firstName', 'lastName'] }],
+            required: false
           }
         ]
       });
@@ -13362,22 +13379,22 @@ app.post('/api/timetable', authenticate, requireSchoolAdmin, async (req, res) =>
     res.status(201).json({ success: true, timetable: createdTimetable });
   } catch (error) {
     console.error('Create timetable error:', error);
-    
+
     if (error.name === 'SequelizeForeignKeyConstraintError') {
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: 'Invalid reference: The selected course, program, unit, or teacher does not exist',
-        details: error.message 
+        details: error.message
       });
     }
     if (error.name === 'SequelizeValidationError') {
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: 'Validation error',
-        details: error.errors.map(e => e.message) 
+        details: error.errors.map(e => e.message)
       });
     }
-    
-    res.status(500).json({ 
-      success: false, 
+
+    res.status(500).json({
+      success: false,
       message: 'Server error creating timetable',
       error: error.message
     });
