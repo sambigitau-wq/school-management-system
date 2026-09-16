@@ -3209,7 +3209,7 @@ StaffAttendance.belongsTo(User, {
   foreignKey: 'approvedBy', 
   constraints: false 
 });
-StaffAttendance.belongsTo(Staff, { foreignKey: 'staffId', as: 'Staff' });
+
 Staff.hasMany(StaffAttendance, { foreignKey: 'staffId', as: 'attendances' });
 
 Sponsor.belongsTo(School, { foreignKey: 'schoolId' });
