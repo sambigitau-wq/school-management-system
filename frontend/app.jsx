@@ -8309,7 +8309,6 @@ const CourseUnitsModule = ({
     </div>
   );
 };
-
 const ExamModule = ({ 
   exams, setExams, 
   classes, subjects, students, 
@@ -8323,17 +8322,11 @@ const ExamModule = ({
   console.log('📚 Units received:', units?.length);
 
   // ============================================================
-  // SEARCHABLE SELECT COMPONENT - EMPTY BY DEFAULT
+  // SEARCHABLE SELECT COMPONENT
   // ============================================================
   const SearchableSelect = ({ 
-    label, 
-    value, 
-    onChange, 
-    options = [], 
-    placeholder = "", 
-    disabled,
-    required,
-    className,
+    label, value, onChange, options = [], placeholder = "",
+    disabled, required, className,
     noOptionsMessage = "No results found",
     emptyMessage = "No options available"
   }) => {
@@ -8351,9 +8344,7 @@ const ExamModule = ({
         const label = opt.label?.toLowerCase() || '';
         const subLabel = opt.subLabel?.toLowerCase() || '';
         const valueStr = opt.value?.toString().toLowerCase() || '';
-        return label.includes(searchLower) || 
-               subLabel.includes(searchLower) || 
-               valueStr.includes(searchLower);
+        return label.includes(searchLower) || subLabel.includes(searchLower) || valueStr.includes(searchLower);
       });
     }, [options, search]);
 
@@ -8366,62 +8357,45 @@ const ExamModule = ({
     useEffect(() => {
       const handleClickOutside = (event) => {
         if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-          setIsOpen(false);
-          setIsFocused(false);
+          setIsOpen(false); setIsFocused(false);
         }
       };
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    useEffect(() => {
-      if (!isOpen) setSearch('');
-    }, [isOpen]);
+    useEffect(() => { if (!isOpen) setSearch(''); }, [isOpen]);
 
     const handleSelect = (selectedValue) => {
       onChange({ target: { value: selectedValue } });
-      setSearch('');
-      setIsOpen(false);
-      setIsFocused(false);
+      setSearch(''); setIsOpen(false); setIsFocused(false);
     };
-
     const handleInputChange = (e) => {
-      const value = e.target.value;
-      setSearch(value);
-      setIsOpen(true);
-      setIsFocused(true);
+      setSearch(e.target.value); setIsOpen(true); setIsFocused(true);
     };
-
     const handleFocus = () => {
       if (disabled) return;
-      setIsFocused(true);
-      setIsOpen(true);
+      setIsFocused(true); setIsOpen(true);
       if (selectedOption) setSearch(selectedOption.label);
     };
-
     const handleClear = (e) => {
       e.stopPropagation();
       onChange({ target: { value: '' } });
-      setSearch('');
-      setIsOpen(false);
-      setIsFocused(false);
+      setSearch(''); setIsOpen(false); setIsFocused(false);
     };
 
     let displayValue = '';
     if (isFocused) displayValue = search;
     else if (selectedOption) displayValue = selectedOption.label;
-
     const showPlaceholder = !displayValue && placeholder;
 
     return (
       <div className="relative" ref={dropdownRef}>
         {label && (
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
+            {label}{required && <span className="text-red-500 ml-1">*</span>}
           </label>
         )}
-        
         <div className="relative">
           <input
             type="text"
@@ -8434,8 +8408,7 @@ const ExamModule = ({
             onBlur={() => {
               setTimeout(() => {
                 if (!dropdownRef.current?.contains(document.activeElement)) {
-                  setIsOpen(false);
-                  setIsFocused(false);
+                  setIsOpen(false); setIsFocused(false);
                   if (!selectedOption) setSearch('');
                 }
               }, 200);
@@ -8444,32 +8417,25 @@ const ExamModule = ({
             disabled={disabled}
             autoComplete="off"
           />
-          
           {value && !disabled && (
-            <button
-              type="button"
-              onClick={handleClear}
-              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-            >
+            <button type="button" onClick={handleClear}
+              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           )}
-          
           <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </div>
         </div>
-
         {isOpen && !disabled && (
           <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
             {options && options.length === 0 ? (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {emptyMessage}
-              </div>
+              <div className="px-3 py-4 text-center text-gray-500 text-sm">{emptyMessage}</div>
             ) : filteredOptions.length > 0 ? (
               filteredOptions.map((opt) => (
                 <div
@@ -8481,9 +8447,7 @@ const ExamModule = ({
                   onMouseDown={(e) => e.preventDefault()}
                 >
                   <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && (
-                    <div className="text-xs text-gray-500">{opt.subLabel}</div>
-                  )}
+                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
                 </div>
               ))
             ) : (
@@ -8521,12 +8485,9 @@ const ExamModule = ({
   
   const [filteredUnitsForFilters, setFilteredUnitsForFilters] = useState([]);
   const [filteredUnitsForForm, setFilteredUnitsForForm] = useState([]);
-  
-  // ✅ TWO SEPARATE LISTS — one for the Filter Exams section, one for the Create Exam form
   const [filteredSubjectsForFilters, setFilteredSubjectsForFilters] = useState([]);
   const [filteredSubjectsForForm, setFilteredSubjectsForForm] = useState([]);
   
-  // ============ TEACHING STAFF STATE ============
   const [teachingStaff, setTeachingStaff] = useState([]);
   const [loadingStaff, setLoadingStaff] = useState(false);
   const [staffLoadError, setStaffLoadError] = useState('');
@@ -8589,62 +8550,40 @@ const ExamModule = ({
   // ============================================================
   // TEACHING STAFF FETCHING
   // ============================================================
-
   const extractStaffArray = (payload) => {
     if (!payload) return [];
     if (Array.isArray(payload)) return payload;
     return (
-      payload.staff ||
-      payload.Staff ||
-      payload.staffMembers ||
-      payload.staff_members ||
-      payload.teachers ||
-      payload.Teachers ||
-      payload.employees ||
-      payload.Employees ||
-      payload.data?.staff ||
-      payload.data?.staffMembers ||
-      payload.data?.teachers ||
-      payload.data?.employees ||
+      payload.staff || payload.Staff || payload.staffMembers || payload.staff_members ||
+      payload.teachers || payload.Teachers || payload.employees || payload.Employees ||
+      payload.data?.staff || payload.data?.staffMembers || payload.data?.teachers || payload.data?.employees ||
       (Array.isArray(payload.data) ? payload.data : null) ||
-      payload.results ||
-      payload.items ||
-      []
+      payload.results || payload.items || []
     );
   };
 
   const isTeachingStaff = (s) => {
     if (!s) return false;
-
     const candidates = [
       s.staffType, s.staff_type, s.type, s.role, s.category,
       s.staffCategory, s.staff_category, s.position, s.designation,
       s.jobTitle, s.job_title,
       s.StaffType?.name, s.Role?.name, s.StaffCategory?.name,
       s.User?.role, s.user?.role,
-    ]
-      .filter(Boolean)
-      .map(v => String(v).toUpperCase().replace(/[\s-]+/g, '_'));
+    ].filter(Boolean).map(v => String(v).toUpperCase().replace(/[\s-]+/g, '_'));
 
     if (candidates.length === 0) return false;
 
-    const TEACHING_MARKERS = [
-      'TEACH', 'TUTOR', 'LECTURER', 'INSTRUCTOR', 'TRAINER', 'FACILITATOR', 'PROFESSOR',
-    ];
-
+    const TEACHING_MARKERS = ['TEACH', 'TUTOR', 'LECTURER', 'INSTRUCTOR', 'TRAINER', 'FACILITATOR', 'PROFESSOR'];
     const NON_TEACHING_MARKERS = [
       'NON_TEACHING', 'NONTEACHING', 'SUPPORT_STAFF',
       'ADMIN', 'ACCOUNTANT', 'BURSAR', 'SECRETARY',
       'DRIVER', 'SECURITY', 'CLEANER', 'COOK', 'LIBRARIAN',
       'STUDENT', 'PARENT', 'GUARDIAN',
-      'SUPER_ADMIN', 'SCHOOL_ADMIN',
-      'PRINCIPAL', 'DEPUTY_PRINCIPAL',
+      'SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL',
     ];
 
-    if (candidates.some(c => NON_TEACHING_MARKERS.some(m => c.includes(m)))) {
-      return false;
-    }
-
+    if (candidates.some(c => NON_TEACHING_MARKERS.some(m => c.includes(m)))) return false;
     return candidates.some(c => TEACHING_MARKERS.some(m => c.includes(m)));
   };
 
@@ -8654,34 +8593,22 @@ const ExamModule = ({
     const first = u.firstName || u.first_name || s.firstName || s.first_name || '';
     const last = u.lastName || u.last_name || s.lastName || s.last_name || '';
     const full = `${first} ${last}`.trim();
-    return (
-      full || s.name || s.fullName || s.displayName ||
-      u.name || u.email || s.email ||
-      `Staff ${s.id}`
-    );
+    return full || s.name || s.fullName || s.displayName || u.name || u.email || s.email || `Staff ${s.id}`;
   };
 
   const getStaffSubLabel = (s) => {
     if (!s) return '';
     return (
-      s.department?.name ||
-      s.Department?.name ||
-      s.department ||
-      s.subject?.name ||
-      s.Subject?.name ||
-      s.staffType ||
-      s.type ||
-      s.role ||
-      ''
+      s.department?.name || s.Department?.name || s.department ||
+      s.subject?.name || s.Subject?.name ||
+      s.staffType || s.type || s.role || ''
     );
   };
 
   const fetchTeachingStaff = async () => {
     setLoadingStaff(true);
     setStaffLoadError('');
-
     const schoolId = currentSchool?.id;
-
     const endpoints = [];
     if (schoolId) {
       endpoints.push(`/staff?schoolId=${schoolId}`);
@@ -8701,11 +8628,7 @@ const ExamModule = ({
         const res = await api.get(url);
         const arr = extractStaffArray(res.data);
         console.log(`📥 ${url} → returned ${arr.length} record(s)`);
-        if (arr.length > 0) {
-          rawStaff = arr;
-          usedEndpoint = url;
-          break;
-        }
+        if (arr.length > 0) { rawStaff = arr; usedEndpoint = url; break; }
       } catch (err) {
         console.warn(`⚠️ Endpoint failed: ${url}`, err?.response?.status, err?.message);
         lastError = err;
@@ -8713,34 +8636,14 @@ const ExamModule = ({
     }
 
     if (rawStaff.length === 0) {
-      console.error('❌ No staff records could be retrieved from any /staff endpoint.');
-      setStaffLoadError(
-        lastError?.response?.data?.message ||
-        lastError?.message ||
-        'No staff records found for this school. Add staff in the Staff module first.'
-      );
-      setTeachingStaff([]);
-      setLoadingStaff(false);
-      return;
+      setStaffLoadError(lastError?.response?.data?.message || lastError?.message || 'No staff records found for this school. Add staff in the Staff module first.');
+      setTeachingStaff([]); setLoadingStaff(false); return;
     }
 
-    console.log('📋 Sample staff record:', rawStaff[0]);
-
     const teaching = rawStaff.filter(isTeachingStaff);
-    console.log(`✅ ${rawStaff.length} staff total, ${teaching.length} matched teaching filter (from ${usedEndpoint})`);
-
     if (teaching.length === 0) {
-      console.warn(
-        '⚠️ None of the staff records matched the strict "teaching" filter. ' +
-        'Check the "Sample staff record" log above and confirm the role/staffType field name.'
-      );
-      setStaffLoadError(
-        `Found ${rawStaff.length} staff record(s) but none matched a teaching role. ` +
-        `Check the browser console for "Sample staff record" to confirm the field name.`
-      );
-      setTeachingStaff([]);
-      setLoadingStaff(false);
-      return;
+      setStaffLoadError(`Found ${rawStaff.length} staff record(s) but none matched a teaching role.`);
+      setTeachingStaff([]); setLoadingStaff(false); return;
     }
 
     const seen = new Set();
@@ -8748,18 +8651,14 @@ const ExamModule = ({
       const key = s?.id ?? s?.staffId ?? s?.userId;
       if (!key) return true;
       if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
+      seen.add(key); return true;
     });
 
     setTeachingStaff(deduped);
     setLoadingStaff(false);
   };
 
-  useEffect(() => {
-    fetchTeachingStaff();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSchool?.id]);
+  useEffect(() => { fetchTeachingStaff(); }, [currentSchool?.id]);
 
   // ============================================================
   // CHECK INVIGILATOR CONFLICTS
@@ -8791,16 +8690,8 @@ const ExamModule = ({
 
   useEffect(() => {
     if (examForm.invigilatorId && examForm.date && examForm.startTime && examForm.endTime) {
-      checkInvigilatorConflicts(
-        examForm.invigilatorId, 
-        examForm.date, 
-        examForm.startTime, 
-        examForm.endTime, 
-        selectedExam?.id
-      );
-    } else {
-      setInvigilatorConflicts([]);
-    }
+      checkInvigilatorConflicts(examForm.invigilatorId, examForm.date, examForm.startTime, examForm.endTime, selectedExam?.id);
+    } else { setInvigilatorConflicts([]); }
   }, [examForm.invigilatorId, examForm.date, examForm.startTime, examForm.endTime, selectedExam]);
 
   // ============================================================
@@ -8837,13 +8728,11 @@ const ExamModule = ({
     }));
   }, [filteredUnitsForForm, isUniversity]);
 
-  // ✅ Used by the Filter Exams section
   const getSubjectOptionsForFilters = useCallback(() => {
     if (!filteredSubjectsForFilters || filteredSubjectsForFilters.length === 0) return [];
     return filteredSubjectsForFilters.map(s => ({ value: s.id, label: s.name, subLabel: `Code: ${s.code || 'N/A'}` }));
   }, [filteredSubjectsForFilters]);
 
-  // ✅ Used by the Create Exam form
   const getSubjectOptionsForForm = useCallback(() => {
     if (!filteredSubjectsForForm || filteredSubjectsForForm.length === 0) return [];
     return filteredSubjectsForForm.map(s => ({ value: s.id, label: s.name, subLabel: `Code: ${s.code || 'N/A'}` }));
@@ -8852,9 +8741,7 @@ const ExamModule = ({
   const getInvigilatorOptions = useCallback(() => {
     if (!teachingStaff || teachingStaff.length === 0) return [];
     return teachingStaff.map(s => ({
-      value: s.id,
-      label: getStaffDisplayName(s),
-      subLabel: getStaffSubLabel(s) || 'Teaching Staff'
+      value: s.id, label: getStaffDisplayName(s), subLabel: getStaffSubLabel(s) || 'Teaching Staff'
     }));
   }, [teachingStaff]);
 
@@ -8874,9 +8761,7 @@ const ExamModule = ({
       setFilteredUnitsForFilters(units.filter(u => u.courseId === selectedCourse));
     } else if (isTVET && selectedProgram && units && units.length > 0) {
       setFilteredUnitsForFilters(units.filter(u => u.programId === selectedProgram));
-    } else {
-      setFilteredUnitsForFilters([]);
-    }
+    } else { setFilteredUnitsForFilters([]); }
   }, [selectedCourse, selectedProgram, units, isUniversity, isTVET]);
 
   useEffect(() => {
@@ -8884,58 +8769,32 @@ const ExamModule = ({
       setFilteredUnitsForForm(units.filter(u => u.courseId === examForm.courseId));
     } else if (isTVET && examForm.programId && units && units.length > 0) {
       setFilteredUnitsForForm(units.filter(u => u.programId === examForm.programId));
-    } else {
-      setFilteredUnitsForForm([]);
-    }
+    } else { setFilteredUnitsForForm([]); }
   }, [examForm.courseId, examForm.programId, units, isUniversity, isTVET]);
 
   // ============================================================
-  // ✅ SUBJECT FILTERING — TWO SEPARATE EFFECTS
+  // SUBJECT FILTERING — TWO SEPARATE EFFECTS
   // ============================================================
-
-  // 1) For the Filter Exams section — driven by selectedClass
   useEffect(() => {
-    if (!isRegularSchool || !subjects || subjects.length === 0) {
-      setFilteredSubjectsForFilters([]);
-      return;
-    }
-    if (!selectedClass) {
-      setFilteredSubjectsForFilters([]);
-      return;
-    }
+    if (!isRegularSchool || !subjects || subjects.length === 0) { setFilteredSubjectsForFilters([]); return; }
+    if (!selectedClass) { setFilteredSubjectsForFilters([]); return; }
     const filtered = subjects.filter(s => {
       if (!s) return false;
-      const subjectClassId =
-        s.classId ?? s.class_id ?? s.ClassId ?? s.classID ??
-        s.class?.id ?? s.Class?.id;
+      const subjectClassId = s.classId ?? s.class_id ?? s.ClassId ?? s.classID ?? s.class?.id ?? s.Class?.id;
       if (subjectClassId === undefined || subjectClassId === null) return false;
       return String(subjectClassId) === String(selectedClass);
     });
     setFilteredSubjectsForFilters(filtered);
   }, [selectedClass, subjects, isRegularSchool]);
 
-  // 2) For the Create Exam form — driven by examForm.classId
   useEffect(() => {
-    if (!isRegularSchool || !subjects || subjects.length === 0) {
-      setFilteredSubjectsForForm([]);
-      return;
-    }
-    if (!examForm.classId) {
-      setFilteredSubjectsForForm([]);
-      return;
-    }
+    if (!isRegularSchool || !subjects || subjects.length === 0) { setFilteredSubjectsForForm([]); return; }
+    if (!examForm.classId) { setFilteredSubjectsForForm([]); return; }
     const filtered = subjects.filter(s => {
       if (!s) return false;
-      const subjectClassId =
-        s.classId ?? s.class_id ?? s.ClassId ?? s.classID ??
-        s.class?.id ?? s.Class?.id;
+      const subjectClassId = s.classId ?? s.class_id ?? s.ClassId ?? s.classID ?? s.class?.id ?? s.Class?.id;
       if (subjectClassId === undefined || subjectClassId === null) return false;
       return String(subjectClassId) === String(examForm.classId);
-    });
-    console.log('🔍 Subject form filter debug:', {
-      totalSubjects: subjects.length,
-      examFormClassId: examForm.classId,
-      matchedSubjects: filtered.length
     });
     setFilteredSubjectsForForm(filtered);
   }, [examForm.classId, subjects, isRegularSchool]);
@@ -9067,9 +8926,7 @@ const ExamModule = ({
     } catch (error) {
       console.error('Error refreshing exams:', error);
       setApiError('Failed to load exams. Please check your connection.');
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   // ============================================================
@@ -9095,9 +8952,7 @@ const ExamModule = ({
     if (examNameOption === 'new' && !customExamName) { alert('Please enter a new exam name'); return; }
 
     if (examForm.invigilatorId) {
-      const conflicts = await checkInvigilatorConflicts(
-        examForm.invigilatorId, examForm.date, examForm.startTime, examForm.endTime, selectedExam?.id
-      );
+      const conflicts = await checkInvigilatorConflicts(examForm.invigilatorId, examForm.date, examForm.startTime, examForm.endTime, selectedExam?.id);
       if (conflicts.length > 0) {
         const conflictNames = conflicts.map(c => c.name).join(', ');
         if (!window.confirm(`Warning: This invigilator is already assigned to: ${conflictNames} at this time. Continue anyway?`)) return;
@@ -9106,9 +8961,7 @@ const ExamModule = ({
     
     let examData;
     const selectedInvigilator = teachingStaff.find(s => s.id === examForm.invigilatorId);
-    const invigilatorName = selectedInvigilator 
-      ? getStaffDisplayName(selectedInvigilator) 
-      : examForm.invigilator;
+    const invigilatorName = selectedInvigilator ? getStaffDisplayName(selectedInvigilator) : examForm.invigilator;
     
     if (isUniversity) {
       examData = {
@@ -9151,8 +9004,6 @@ const ExamModule = ({
         schoolId: currentSchool?.id
       };
     }
-    
-    console.log('📤 Submitting exam data:', examData);
     
     try {
       let response;
@@ -9235,9 +9086,7 @@ const ExamModule = ({
       console.error('❌ Error saving result:', error);
       alert('❌ Failed to save result: ' + (error.response?.data?.message || error.message || 'Unknown error'));
       setApiError(error.response?.data?.message || error.message);
-    } finally {
-      setSavingResults(false);
-    }
+    } finally { setSavingResults(false); }
   };
 
   // ============================================================
@@ -9304,9 +9153,7 @@ const ExamModule = ({
     } catch (error) {
       console.error('Error loading students:', error);
       alert('Failed to load students: ' + (error.response?.data?.message || error.message));
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   // ============================================================
@@ -9383,9 +9230,7 @@ const ExamModule = ({
     } catch (error) {
       console.error('❌ Error saving bulk results:', error);
       alert('❌ Failed to save results: ' + (error.response?.data?.message || error.message));
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   // ============================================================
@@ -9425,6 +9270,340 @@ const ExamModule = ({
   const uniqueGrades = [...new Set(bulkResults.map(e => e.grade).filter(Boolean))];
 
   // ============================================================
+  // PRINT HELPERS
+  // ============================================================
+  const openPrintWindow = (html) => {
+    const w = window.open('', '_blank', 'width=1200,height=800');
+    if (!w) { alert('Please allow pop-ups to print.'); return; }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    w.onload = () => setTimeout(() => { w.focus(); w.print(); }, 300);
+    setTimeout(() => { try { w.focus(); w.print(); } catch (e) {} }, 800);
+  };
+
+  const escapeHtml = (str) => {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  };
+
+  // ============================================================
+  // PRINT EXAMS LIST
+  // ============================================================
+  const handlePrintExams = () => {
+    if (!filteredExams || filteredExams.length === 0) {
+      alert('No exams to print. Adjust your filters first.');
+      return;
+    }
+
+    const schoolName = currentSchool?.name || 'School';
+    const schoolLogo = currentSchool?.contact?.logo || currentSchool?.branding?.logo || currentSchool?.logo || '';
+
+    const filterBits = [];
+    if (isUniversity && selectedCourse) filterBits.push(`Course: ${getCourseName(selectedCourse)}`);
+    if (isTVET && selectedProgram) filterBits.push(`Program: ${getProgramName(selectedProgram)}`);
+    if (isRegularSchool && selectedClass) filterBits.push(`Class: ${getClassName(selectedClass)}`);
+    if (selectedYear) filterBits.push(`Year ${selectedYear}`);
+    if (selectedSemester) filterBits.push(`Semester ${selectedSemester}`);
+    if (selectedModule) filterBits.push(`Module ${selectedModule}`);
+    if (selectedUnit) filterBits.push(`Unit: ${getUnitName(selectedUnit)}`);
+    if (selectedSubject) filterBits.push(`Subject: ${getSubjectName(selectedSubject)}`);
+
+    const headerHtml = `
+      <div class="print-header">
+        ${schoolLogo ? `<img src="${schoolLogo}" alt="Logo" class="print-logo" />` : ''}
+        <div class="print-title-block">
+          <h1 class="print-school-name">${escapeHtml(schoolName)}</h1>
+          <h2 class="print-doc-title">Examination Schedule</h2>
+          <p class="print-generated">Generated on ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+        </div>
+      </div>
+    `;
+    const filterHtml = filterBits.length
+      ? `<p class="print-filters">${filterBits.map(escapeHtml).join(' &nbsp;•&nbsp; ')}</p>`
+      : '';
+
+    const rows = filteredExams.map((exam, i) => {
+      const paper = isUniversity || isTVET ? getUnitName(exam.unitId) : getSubjectName(exam.subjectId);
+      const scope = isUniversity
+        ? `${getCourseName(exam.courseId)} • Y${exam.year || '?'} S${exam.semester || '?'}`
+        : isTVET
+          ? `${getProgramName(exam.programId)} • Y${exam.year || '?'} M${exam.module || '?'}`
+          : `${getClassName(exam.classId)} • ${exam.term || 'Term 1'}`;
+      const time = exam.startTime && exam.endTime
+        ? `${String(exam.startTime).substring(0, 5)} – ${String(exam.endTime).substring(0, 5)}`
+        : '—';
+      const date = exam.date ? new Date(exam.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+
+      return `
+        <tr>
+          <td class="num">${i + 1}</td>
+          <td><div class="strong">${escapeHtml(exam.name)}</div><div class="small">${escapeHtml(exam.type)}</div></td>
+          <td>${escapeHtml(paper)}</td>
+          <td>${escapeHtml(scope)}</td>
+          <td>${escapeHtml(date)}</td>
+          <td>${escapeHtml(time)}</td>
+          <td>${escapeHtml(exam.examHall || '—')}</td>
+          <td>${escapeHtml(exam.invigilator || '—')}</td>
+          <td>${exam.maxMarks || 100}</td>
+          <td><span class="status ${exam.isPublished ? 'status-published' : 'status-draft'}">${exam.isPublished ? 'Published' : 'Draft'}</span></td>
+        </tr>
+      `;
+    }).join('');
+
+    const footerHtml = `
+      <div class="print-footer">
+        <div class="signature-line"><span>Prepared by: __________________________</span></div>
+        <div class="signature-line"><span>Approved by (Principal/Dean): __________________________</span></div>
+      </div>
+    `;
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>${escapeHtml(schoolName)} — Examination Schedule</title>
+          <meta charset="UTF-8" />
+          <style>
+            @page { size: A4 landscape; margin: 12mm; }
+            * { box-sizing: border-box; }
+            body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; color: #1f2937; margin: 0; padding: 12px; background: #fff; }
+            .print-header { display: flex; align-items: center; gap: 16px; border-bottom: 3px double #4f46e5; padding-bottom: 12px; margin-bottom: 16px; }
+            .print-logo { width: 72px; height: 72px; object-fit: contain; border-radius: 8px; border: 1px solid #e5e7eb; padding: 4px; background: #fff; }
+            .print-title-block { flex: 1; text-align: center; }
+            .print-school-name { font-size: 22px; font-weight: 800; color: #4f46e5; text-transform: uppercase; letter-spacing: 1.2px; margin: 0 0 4px 0; }
+            .print-doc-title { font-size: 15px; font-weight: 600; color: #374151; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.8px; }
+            .print-generated { font-size: 11px; color: #6b7280; margin: 0; }
+            .print-filters { text-align: center; font-size: 12px; color: #4b5563; background: #eef2ff; padding: 6px 10px; border-radius: 6px; margin: 0 0 14px 0; }
+            table { width: 100%; border-collapse: collapse; font-size: 11px; }
+            th { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; padding: 8px 6px; text-align: left; font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
+            td { border: 1px solid #e5e7eb; padding: 6px; vertical-align: top; }
+            tr:nth-child(even) td { background: #fafaff; }
+            .num { text-align: center; font-weight: 700; color: #6b7280; width: 32px; }
+            .strong { font-weight: 700; color: #1f2937; }
+            .small { font-size: 10px; color: #6b7280; margin-top: 2px; }
+            .status { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 20px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+            .status-published { background: #dcfce7; color: #166534; }
+            .status-draft { background: #fef3c7; color: #92400e; }
+            .print-footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; gap: 32px; font-size: 11px; color: #4b5563; }
+            .signature-line { flex: 1; padding-top: 24px; }
+            @media print { body { padding: 0; } tr { page-break-inside: avoid; } thead { display: table-header-group; } }
+          </style>
+        </head>
+        <body>
+          ${headerHtml}
+          ${filterHtml}
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Exam</th>
+                <th>${isUniversity || isTVET ? 'Unit' : 'Subject'}</th>
+                <th>${isUniversity ? 'Course' : isTVET ? 'Program' : 'Class'}</th>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Hall</th>
+                <th>Invigilator</th>
+                <th>Max</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <p class="print-generated" style="text-align:right;margin-top:10px;">Total: ${filteredExams.length} exam(s)</p>
+          ${footerHtml}
+        </body>
+      </html>
+    `;
+
+    openPrintWindow(html);
+  };
+
+  // ============================================================
+  // PRINT RESULTS SHEET (Bulk Modal)
+  // ============================================================
+  const handlePrintResults = () => {
+    if (!selectedExamForResults) {
+      alert('No exam selected.');
+      return;
+    }
+    if (!bulkResults || bulkResults.length === 0) {
+      alert('No students to print.');
+      return;
+    }
+
+    const exam = exams.find(e => e.id === selectedExamForResults);
+    if (!exam) { alert('Exam not found.'); return; }
+
+    const schoolName = currentSchool?.name || 'School';
+    const schoolLogo = currentSchool?.contact?.logo || currentSchool?.branding?.logo || currentSchool?.logo || '';
+    const paper = isUniversity || isTVET ? getUnitName(exam.unitId) : getSubjectName(exam.subjectId);
+
+    const scope = isUniversity
+      ? `${getCourseName(exam.courseId)} • Year ${exam.year || '?'} • Semester ${exam.semester || '?'}`
+      : isTVET
+        ? `${getProgramName(exam.programId)} • Year ${exam.year || '?'} • Module ${exam.module || '?'}`
+        : `${getClassName(exam.classId)} • ${exam.term || 'Term 1'}`;
+
+    // Print only the rows that match the current filter/search
+    const rowsToPrint = filteredBulkResults;
+
+    const rows = rowsToPrint.map((entry, i) => {
+      const marksDisplay = entry.isAbsent ? 'ABS' : (entry.marks === '' || entry.marks === null ? '—' : entry.marks);
+      const gradeClass = (() => {
+        const g = entry.grade || '';
+        if (['A', 'A-', 'Exceeding Expectations', 'DISTINCTION'].includes(g)) return 'grade-pass';
+        if (['E', 'Needs Improvement', 'FAIL'].includes(g)) return 'grade-fail';
+        if (['D+', 'D', 'D-', 'Below Expectations', 'PASS'].includes(g)) return 'grade-warn';
+        return 'grade-mid';
+      })();
+
+      return `
+        <tr>
+          <td class="num">${i + 1}</td>
+          <td class="mono">${escapeHtml(entry.admissionNumber || '—')}</td>
+          <td>${escapeHtml(entry.studentName)}</td>
+          <td class="center ${entry.isAbsent ? 'absent' : ''}">${escapeHtml(String(marksDisplay))}</td>
+          <td class="center"><span class="grade ${gradeClass}">${escapeHtml(entry.grade || '—')}</span></td>
+          <td class="center">${entry.points !== undefined && entry.points !== null ? Number(entry.points).toFixed(1) : '—'}</td>
+        </tr>
+      `;
+    }).join('');
+
+    // Summary stats
+    const present = rowsToPrint.filter(e => !e.isAbsent && e.marks !== '' && e.marks !== null).length;
+    const absent = rowsToPrint.filter(e => e.isAbsent).length;
+    const numericMarks = rowsToPrint
+      .filter(e => !e.isAbsent && e.marks !== '' && e.marks !== null)
+      .map(e => parseFloat(e.marks))
+      .filter(n => Number.isFinite(n));
+    const avg = numericMarks.length > 0
+      ? (numericMarks.reduce((a, b) => a + b, 0) / numericMarks.length).toFixed(2)
+      : '—';
+    const highest = numericMarks.length > 0 ? Math.max(...numericMarks) : '—';
+    const lowest = numericMarks.length > 0 ? Math.min(...numericMarks) : '—';
+
+    const headerHtml = `
+      <div class="print-header">
+        ${schoolLogo ? `<img src="${schoolLogo}" alt="Logo" class="print-logo" />` : ''}
+        <div class="print-title-block">
+          <h1 class="print-school-name">${escapeHtml(schoolName)}</h1>
+          <h2 class="print-doc-title">${escapeHtml(exam.name)} — Mark Sheet</h2>
+          <p class="print-generated">
+            ${escapeHtml(paper)} &nbsp;•&nbsp; ${escapeHtml(scope)}
+          </p>
+        </div>
+      </div>
+    `;
+
+    const metaHtml = `
+      <div class="meta">
+        <span><strong>Exam Type:</strong> ${escapeHtml(exam.type || '—')}</span>
+        <span><strong>Date:</strong> ${exam.date ? new Date(exam.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</span>
+        <span><strong>Time:</strong> ${exam.startTime && exam.endTime ? `${String(exam.startTime).substring(0,5)} – ${String(exam.endTime).substring(0,5)}` : '—'}</span>
+        <span><strong>Max Marks:</strong> ${exam.maxMarks || 100}</span>
+        <span><strong>Hall:</strong> ${escapeHtml(exam.examHall || '—')}</span>
+        <span><strong>Invigilator:</strong> ${escapeHtml(exam.invigilator || '—')}</span>
+      </div>
+    `;
+
+    const summaryHtml = `
+      <div class="summary">
+        <div class="stat"><span class="stat-label">Students</span><span class="stat-value">${rowsToPrint.length}</span></div>
+        <div class="stat"><span class="stat-label">Present</span><span class="stat-value">${present}</span></div>
+        <div class="stat"><span class="stat-label">Absent</span><span class="stat-value">${absent}</span></div>
+        <div class="stat"><span class="stat-label">Average</span><span class="stat-value">${avg}</span></div>
+        <div class="stat"><span class="stat-label">Highest</span><span class="stat-value">${highest}</span></div>
+        <div class="stat"><span class="stat-label">Lowest</span><span class="stat-value">${lowest}</span></div>
+      </div>
+    `;
+
+    const footerHtml = `
+      <div class="print-footer">
+        <div class="signature-line"><span>Class Teacher / Lecturer: __________________________</span></div>
+        <div class="signature-line"><span>HOD / Dean: __________________________</span></div>
+        <div class="signature-line"><span>Principal: __________________________</span></div>
+      </div>
+    `;
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>${escapeHtml(schoolName)} — ${escapeHtml(exam.name)} Mark Sheet</title>
+          <meta charset="UTF-8" />
+          <style>
+            @page { size: A4 portrait; margin: 14mm; }
+            * { box-sizing: border-box; }
+            body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; color: #1f2937; margin: 0; padding: 12px; background: #fff; }
+            .print-header { display: flex; align-items: center; gap: 16px; border-bottom: 3px double #4f46e5; padding-bottom: 12px; margin-bottom: 12px; }
+            .print-logo { width: 72px; height: 72px; object-fit: contain; border-radius: 8px; border: 1px solid #e5e7eb; padding: 4px; background: #fff; }
+            .print-title-block { flex: 1; text-align: center; }
+            .print-school-name { font-size: 22px; font-weight: 800; color: #4f46e5; text-transform: uppercase; letter-spacing: 1.2px; margin: 0 0 4px 0; }
+            .print-doc-title { font-size: 15px; font-weight: 600; color: #374151; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.8px; }
+            .print-generated { font-size: 11px; color: #6b7280; margin: 0; }
+
+            .meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 18px; font-size: 11px; background: #f9fafb; padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; border: 1px solid #e5e7eb; }
+            .meta span { color: #374151; }
+
+            .summary { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 14px; }
+            .stat { background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 6px; padding: 8px; text-align: center; }
+            .stat-label { display: block; font-size: 9px; text-transform: uppercase; letter-spacing: 0.6px; color: #4338ca; font-weight: 700; }
+            .stat-value { display: block; font-size: 16px; font-weight: 800; color: #1e1b4b; margin-top: 2px; }
+
+            table { width: 100%; border-collapse: collapse; font-size: 11px; }
+            th { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; padding: 8px 6px; text-align: left; font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
+            td { border: 1px solid #e5e7eb; padding: 6px; vertical-align: middle; }
+            tr:nth-child(even) td { background: #fafaff; }
+            .num { text-align: center; font-weight: 700; color: #6b7280; width: 32px; }
+            .mono { font-family: 'Courier New', monospace; }
+            .center { text-align: center; }
+            .absent { color: #b91c1c; font-weight: 700; }
+            .grade { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 20px; font-weight: 700; letter-spacing: 0.3px; }
+            .grade-pass { background: #dcfce7; color: #166534; }
+            .grade-mid { background: #dbeafe; color: #1e40af; }
+            .grade-warn { background: #fef3c7; color: #92400e; }
+            .grade-fail { background: #fee2e2; color: #991b1b; }
+
+            .print-footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; gap: 24px; font-size: 11px; color: #4b5563; }
+            .signature-line { flex: 1; padding-top: 24px; }
+            @media print { body { padding: 0; } tr { page-break-inside: avoid; } thead { display: table-header-group; } }
+          </style>
+        </head>
+        <body>
+          ${headerHtml}
+          ${metaHtml}
+          ${summaryHtml}
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Admission No.</th>
+                <th>Student Name</th>
+                <th>Marks</th>
+                <th>Grade</th>
+                <th>Points</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <p class="print-generated" style="text-align:right;margin-top:10px;">
+            Printed on ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}
+          </p>
+          ${footerHtml}
+        </body>
+      </html>
+    `;
+
+    openPrintWindow(html);
+  };
+
+  // ============================================================
   // RENDER
   // ============================================================
   return (
@@ -9444,14 +9623,10 @@ const ExamModule = ({
           <div>
             <i className="fas fa-exclamation-triangle mr-2"></i>
             {staffLoadError}
-            <span className="text-xs ml-2 text-yellow-700">
-              (Invigilator list may be incomplete.)
-            </span>
+            <span className="text-xs ml-2 text-yellow-700">(Invigilator list may be incomplete.)</span>
           </div>
-          <button
-            onClick={fetchTeachingStaff}
-            className="text-xs bg-yellow-600 text-white px-3 py-1 rounded hover:bg-yellow-700"
-          >
+          <button onClick={fetchTeachingStaff}
+            className="text-xs bg-yellow-600 text-white px-3 py-1 rounded hover:bg-yellow-700">
             Retry
           </button>
         </div>
@@ -9477,7 +9652,7 @@ const ExamModule = ({
       )}
       
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center flex-wrap gap-2">
         <h2 className="text-2xl font-bold text-gray-800">
           {isUniversity ? '📚 Course Exam Management' : 
            isTVET ? '🔧 Program Exam Management' : 
@@ -9485,9 +9660,19 @@ const ExamModule = ({
            '🎯 Primary Assessment Management'}
         </h2>
         
-        <div className="flex space-x-2">
-          <button onClick={refreshExams} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center">
-            <i className="fas fa-sync-alt mr-2"></i>Refresh
+        <div className="flex flex-wrap gap-2">
+          <button onClick={refreshExams} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center gap-2">
+            <i className="fas fa-sync-alt"></i>Refresh
+          </button>
+          
+          {/* ⬅️ NEW: Print button */}
+          <button
+            onClick={handlePrintExams}
+            disabled={filteredExams.length === 0}
+            className="bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            title="Print the currently filtered exams"
+          >
+            <i className="fas fa-print"></i>Print Exams
           </button>
           
           {canCreateExams && (
@@ -9510,9 +9695,9 @@ const ExamModule = ({
                 setInvigilatorConflicts([]);
                 setShowExamForm(true);
               }}
-              className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center"
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2"
             >
-              <i className="fas fa-plus mr-2"></i>
+              <i className="fas fa-plus"></i>
               {isUniversity ? 'Create Course Exam' : isTVET ? 'Create Program Exam' : 'Create Exam'}
             </button>
           )}
@@ -9523,47 +9708,41 @@ const ExamModule = ({
       <div className="bg-white p-6 rounded-xl shadow-sm">
         <h3 className="text-lg font-semibold mb-4">🔍 Filter Exams</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {isUniversity && (
-            <>
-              <SearchableSelect label="Course" value={selectedCourse}
-                onChange={(e) => { setSelectedCourse(e.target.value); setSelectedUnit(''); setSelectedSemester(''); }}
-                options={courseOptions} placeholder="Search course..." emptyMessage="No courses available" />
-              <SearchableSelect label="Year" value={selectedYear}
-                onChange={(e) => setSelectedYear(e.target.value)}
-                options={[{ value: '1', label: 'Year 1' }, { value: '2', label: 'Year 2' }, { value: '3', label: 'Year 3' }, { value: '4', label: 'Year 4' }]}
-                placeholder="All Years" emptyMessage="No years available" />
-              <SearchableSelect label="Semester" value={selectedSemester}
-                onChange={(e) => setSelectedSemester(e.target.value)}
-                options={[{ value: '1', label: 'Semester 1' }, { value: '2', label: 'Semester 2' }]}
-                placeholder="All Semesters" emptyMessage="No semesters available" />
-            </>
-          )}
-          {isTVET && (
-            <>
-              <SearchableSelect label="Program" value={selectedProgram}
-                onChange={(e) => { setSelectedProgram(e.target.value); setSelectedUnit(''); setSelectedModule(''); }}
-                options={programOptions} placeholder="Search program..." emptyMessage="No programs available" />
-              <SearchableSelect label="Year" value={selectedYear}
-                onChange={(e) => setSelectedYear(e.target.value)}
-                options={[{ value: '1', label: 'Year 1' }, { value: '2', label: 'Year 2' }, { value: '3', label: 'Year 3' }]}
-                placeholder="All Years" emptyMessage="No years available" />
-              <SearchableSelect label="Module" value={selectedModule}
-                onChange={(e) => setSelectedModule(e.target.value)}
-                options={[{ value: '1', label: 'Module 1' }, { value: '2', label: 'Module 2' }, { value: '3', label: 'Module 3' }, { value: '4', label: 'Module 4' }]}
-                placeholder="All Modules" emptyMessage="No modules available" />
-            </>
-          )}
-          {isRegularSchool && (
-            <>
-              <SearchableSelect label="Class" value={selectedClass}
-                onChange={(e) => { setSelectedClass(e.target.value); setSelectedSubject(''); }}
-                options={classOptions} placeholder="Search class..." emptyMessage="No classes available" />
-              <SearchableSelect label="Subject" value={selectedSubject}
-                onChange={(e) => setSelectedSubject(e.target.value)}
-                options={getSubjectOptionsForFilters()} placeholder="Search subject..." emptyMessage="No subjects available"
-                disabled={!selectedClass} />
-            </>
-          )}
+          {isUniversity && (<>
+            <SearchableSelect label="Course" value={selectedCourse}
+              onChange={(e) => { setSelectedCourse(e.target.value); setSelectedUnit(''); setSelectedSemester(''); }}
+              options={courseOptions} placeholder="Search course..." emptyMessage="No courses available" />
+            <SearchableSelect label="Year" value={selectedYear}
+              onChange={(e) => setSelectedYear(e.target.value)}
+              options={[{ value: '1', label: 'Year 1' }, { value: '2', label: 'Year 2' }, { value: '3', label: 'Year 3' }, { value: '4', label: 'Year 4' }]}
+              placeholder="All Years" emptyMessage="No years available" />
+            <SearchableSelect label="Semester" value={selectedSemester}
+              onChange={(e) => setSelectedSemester(e.target.value)}
+              options={[{ value: '1', label: 'Semester 1' }, { value: '2', label: 'Semester 2' }]}
+              placeholder="All Semesters" emptyMessage="No semesters available" />
+          </>)}
+          {isTVET && (<>
+            <SearchableSelect label="Program" value={selectedProgram}
+              onChange={(e) => { setSelectedProgram(e.target.value); setSelectedUnit(''); setSelectedModule(''); }}
+              options={programOptions} placeholder="Search program..." emptyMessage="No programs available" />
+            <SearchableSelect label="Year" value={selectedYear}
+              onChange={(e) => setSelectedYear(e.target.value)}
+              options={[{ value: '1', label: 'Year 1' }, { value: '2', label: 'Year 2' }, { value: '3', label: 'Year 3' }]}
+              placeholder="All Years" emptyMessage="No years available" />
+            <SearchableSelect label="Module" value={selectedModule}
+              onChange={(e) => setSelectedModule(e.target.value)}
+              options={[{ value: '1', label: 'Module 1' }, { value: '2', label: 'Module 2' }, { value: '3', label: 'Module 3' }, { value: '4', label: 'Module 4' }]}
+              placeholder="All Modules" emptyMessage="No modules available" />
+          </>)}
+          {isRegularSchool && (<>
+            <SearchableSelect label="Class" value={selectedClass}
+              onChange={(e) => { setSelectedClass(e.target.value); setSelectedSubject(''); }}
+              options={classOptions} placeholder="Search class..." emptyMessage="No classes available" />
+            <SearchableSelect label="Subject" value={selectedSubject}
+              onChange={(e) => setSelectedSubject(e.target.value)}
+              options={getSubjectOptionsForFilters()} placeholder="Search subject..." emptyMessage="No subjects available"
+              disabled={!selectedClass} />
+          </>)}
           {(isUniversity || isTVET) && (
             <SearchableSelect label={isUniversity ? "Unit" : "Module"} value={selectedUnit}
               onChange={(e) => setSelectedUnit(e.target.value)}
@@ -9577,18 +9756,28 @@ const ExamModule = ({
           <p className="text-sm text-gray-500">
             Found <span className="font-bold text-indigo-600">{filteredExams.length}</span> exam(s)
           </p>
-          {(selectedCourse || selectedProgram || selectedClass || selectedSubject || selectedUnit || selectedYear || selectedSemester || selectedModule) && (
-            <button
-              onClick={() => {
-                setSelectedCourse(''); setSelectedProgram(''); setSelectedClass('');
-                setSelectedSubject(''); setSelectedUnit(''); setSelectedYear('');
-                setSelectedSemester(''); setSelectedModule('');
-              }}
-              className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
-            >
-              Clear all filters
-            </button>
-          )}
+          <div className="flex gap-3">
+            {(selectedCourse || selectedProgram || selectedClass || selectedSubject || selectedUnit || selectedYear || selectedSemester || selectedModule) && (
+              <button
+                onClick={() => {
+                  setSelectedCourse(''); setSelectedProgram(''); setSelectedClass('');
+                  setSelectedSubject(''); setSelectedUnit(''); setSelectedYear('');
+                  setSelectedSemester(''); setSelectedModule('');
+                }}
+                className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+              >
+                Clear all filters
+              </button>
+            )}
+            {filteredExams.length > 0 && (
+              <button
+                onClick={handlePrintExams}
+                className="text-sm text-slate-700 hover:text-slate-900 font-medium flex items-center gap-1"
+              >
+                <i className="fas fa-print"></i> Print this list
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -9611,8 +9800,6 @@ const ExamModule = ({
             
             <form onSubmit={handleExamSubmit} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                
-                {/* Exam Name */}
                 <div className="col-span-2">
                   <div className="flex space-x-4 mb-2">
                     <label className="flex items-center">
@@ -9641,7 +9828,6 @@ const ExamModule = ({
                   )}
                 </div>
 
-                {/* Exam Type */}
                 <div className="col-span-2 md:col-span-1">
                   <label className="block text-sm font-medium mb-1">Exam Type *</label>
                   <select value={examForm.type}
@@ -9677,7 +9863,6 @@ const ExamModule = ({
                   </select>
                 </div>
 
-                {/* Date */}
                 <div className="col-span-2 md:col-span-1">
                   <label className="block text-sm font-medium mb-1">Date *</label>
                   <input type="date" value={examForm.date}
@@ -9732,11 +9917,7 @@ const ExamModule = ({
                     <SearchableSelect label="Subject *" value={examForm.subjectId}
                       onChange={(e) => setExamForm({...examForm, subjectId: e.target.value})}
                       options={getSubjectOptionsForForm()} placeholder="Search subject..."
-                      emptyMessage={
-                        !examForm.classId
-                          ? "Select a class first"
-                          : "No subjects available for this class"
-                      }
+                      emptyMessage={!examForm.classId ? "Select a class first" : "No subjects available for this class"}
                       required disabled={!examForm.classId} />
                     {examForm.classId && filteredSubjectsForForm.length > 0 && (
                       <p className="text-xs text-green-600 mt-1">
@@ -9809,25 +9990,11 @@ const ExamModule = ({
                     value={examForm.invigilatorId}
                     onChange={(e) => setExamForm({...examForm, invigilatorId: e.target.value})}
                     options={getInvigilatorOptions()}
-                    placeholder={
-                      loadingStaff
-                        ? "Loading teaching staff..."
-                        : teachingStaff.length === 0
-                          ? "No teaching staff available"
-                          : "Select invigilator..."
-                    }
-                    emptyMessage={
-                      loadingStaff
-                        ? "Loading..."
-                        : staffLoadError
-                          ? "Could not load teaching staff — click Retry above"
-                          : "No teaching staff found in this school"
-                    }
+                    placeholder={loadingStaff ? "Loading teaching staff..." : teachingStaff.length === 0 ? "No teaching staff available" : "Select invigilator..."}
+                    emptyMessage={loadingStaff ? "Loading..." : staffLoadError ? "Could not load teaching staff — click Retry above" : "No teaching staff found in this school"}
                   />
                   {examForm.invigilatorId && (
-                    <p className="text-xs text-gray-500 mt-1">
-                      Selected: {getStaffName(examForm.invigilatorId)}
-                    </p>
+                    <p className="text-xs text-gray-500 mt-1">Selected: {getStaffName(examForm.invigilatorId)}</p>
                   )}
                   {!loadingStaff && teachingStaff.length > 0 && (
                     <p className="text-xs text-green-600 mt-1">
@@ -9836,11 +10003,8 @@ const ExamModule = ({
                     </p>
                   )}
                   {!loadingStaff && teachingStaff.length === 0 && (
-                    <button
-                      type="button"
-                      onClick={fetchTeachingStaff}
-                      className="text-xs text-indigo-600 hover:text-indigo-800 mt-1 underline"
-                    >
+                    <button type="button" onClick={fetchTeachingStaff}
+                      className="text-xs text-indigo-600 hover:text-indigo-800 mt-1 underline">
                       Reload teaching staff
                     </button>
                   )}
@@ -9932,9 +10096,20 @@ const ExamModule = ({
           <div className="bg-white p-6 rounded-xl shadow-sm max-w-6xl w-full max-h-[90vh] overflow-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold">📊 Bulk Results Entry</h3>
-              <button onClick={() => setShowBulkResultForm(false)} className="text-gray-500 hover:text-gray-700">
-                <i className="fas fa-times"></i>
-              </button>
+              <div className="flex gap-2">
+                {/* ⬅️ NEW: Print Results button */}
+                <button
+                  onClick={handlePrintResults}
+                  disabled={bulkResults.length === 0}
+                  className="bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  title="Print mark sheet for this exam"
+                >
+                  <i className="fas fa-print"></i>Print Results
+                </button>
+                <button onClick={() => setShowBulkResultForm(false)} className="text-gray-500 hover:text-gray-700 text-xl px-2">
+                  <i className="fas fa-times"></i>
+                </button>
+              </div>
             </div>
             <div className="mb-4 flex flex-wrap gap-3">
               <input type="text" placeholder="Search students..." value={resultSearch}
@@ -10186,6 +10361,7 @@ const ExamModule = ({
     </div>
   );
 };
+
 
 // ==================== COMPLETE FIXED RESULTS MODULE ====================
 const ResultsModule = ({ 
