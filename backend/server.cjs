@@ -3980,22 +3980,52 @@ const hasPermission = async (userId, permissionKey) => {
 };
 // ==================== HELPER FUNCTIONS ====================
 
-const generateAdmissionNumber = async (schoolId) => {
-  const year = new Date().getFullYear();
-  const lastStudent = await Student.findOne({
-    where: { schoolId },
-    order: [['createdAt', 'DESC']]
-  });
-  
-  let sequence = 1;
-  if (lastStudent) {
-    const lastNum = parseInt(lastStudent.admissionNumber.split('-')[1]);
-    sequence = lastNum + 1;
-  }
-  
-  return `${year}-${sequence.toString().padStart(4, '0')}`;
+// ==================== ADMISSION NUMBER GENERATOR ====================
+// Format: ADM/<YEAR>/<NNNN>   e.g. ADM/2026/0001
+// Safe against NaN, missing students, malformed existing numbers.
+const buildAdmissionNumber = (year, seq, prefix = 'ADM') => {
+  const y = Number.parseInt(year, 10);
+  const safeYear = Number.isFinite(y) && y > 1900 && y < 3000
+    ? y
+    : new Date().getFullYear();
+
+  const s = Number.parseInt(seq, 10);
+  const safeSeq = Number.isFinite(s) && s > 0 ? s : 1;
+
+  return `${prefix}/${safeYear}/${String(safeSeq).padStart(4, '0')}`;
 };
 
+const extractAdmissionSeq = (adm, year, prefix = 'ADM') => {
+  if (!adm || typeof adm !== 'string') return 0;
+  const expected = `${prefix}/${year}/`;
+  if (!adm.startsWith(expected)) return 0;
+  const tail = adm.slice(expected.length);
+  const n = Number.parseInt(tail, 10);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const generateAdmissionNumber = async (schoolId, year, transaction) => {
+  const y = Number.isFinite(Number(year)) ? Number(year) : new Date().getFullYear();
+  const prefix = `ADM/${y}/`;
+
+  // Find the highest existing admission number for this school + year
+  const last = await Student.findOne({
+    where: {
+      schoolId,
+      admissionNumber: { [Op.like]: `${prefix}%` }
+    },
+    order: [['admissionNumber', 'DESC']],
+    transaction
+  });
+
+  let nextSeq = 1;
+  if (last?.admissionNumber) {
+    const parsed = extractAdmissionSeq(last.admissionNumber, y);
+    if (parsed > 0) nextSeq = parsed + 1;
+  }
+
+  return buildAdmissionNumber(y, nextSeq);
+};
 // Fix the generateReceiptNo function in your backend (server.cjs)
 
 const generateReceiptNo = async () => {
@@ -5461,74 +5491,312 @@ app.delete('/api/classes/:id', authenticate, requireSchoolAdmin, async (req, res
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
-
-// ==================== COMPLETE BACKEND WITH OPTION 2 (ADMISSION NUMBER BASED) ====================
-
 // ==================== STUDENT ROUTES ====================
 
-// POST create a new student
-app.post('/api/students', authenticate, async (req, res) => {
+// GET next available admission number (single source of truth for auto-gen)
+app.get('/api/students/next-admission-number', authenticate, async (req, res) => {
   try {
-    const studentData = { ...req.body };
-    
-    const school = await School.findByPk(req.user.schoolId);
-    if (!school) return res.status(404).json({ message: 'School not found' });
+    const { schoolId } = req.query;
+    const year = Number.parseInt(req.query.year, 10) || new Date().getFullYear();
 
-    const uuidFields = ['classId', 'courseId', 'programId', 'facultyId', 'departmentId', 'transportRouteId'];
-    uuidFields.forEach(field => {
-      if (studentData[field] === '') studentData[field] = null;
-    });
-
-    if (school.category === 'UNIVERSITY') {
-      if (!studentData.courseId) {
-        return res.status(400).json({ message: 'Course ID is required for university students' });
-      }
-      if (!studentData.currentYear) studentData.currentYear = 1;
-      if (!studentData.currentSemester) studentData.currentSemester = 1;
-    } else if (school.category === 'COLLEGE_TVET') {
-      if (!studentData.programId) {
-        return res.status(400).json({ message: 'Program ID is required for TVET students' });
-      }
-      if (!studentData.currentModule) studentData.currentModule = 'Module 1';
-    } else {
-      if (!studentData.classId) {
-        return res.status(400).json({ message: 'Class ID is required' });
-      }
+    if (!schoolId) {
+      return res.status(400).json({ success: false, message: 'schoolId is required' });
+    }
+    if (!Number.isFinite(year)) {
+      return res.status(400).json({ success: false, message: 'Invalid year' });
     }
 
-    let admissionNumber = studentData.admissionNumber;
-    if (!admissionNumber) {
-      admissionNumber = await generateAdmissionNumber(req.user.schoolId);
-    } else {
-      const existingStudent = await Student.findOne({
-        where: { admissionNumber, schoolId: req.user.schoolId }
+    const prefix = `ADM/${year}/`;
+
+    const last = await Student.findOne({
+      where: {
+        schoolId,
+        admissionNumber: { [Op.like]: `${prefix}%` }
+      },
+      order: [['admissionNumber', 'DESC']]
+    });
+
+    let nextSeq = 1;
+    if (last?.admissionNumber) {
+      const parsed = extractAdmissionSeq(last.admissionNumber, year);
+      if (parsed > 0) nextSeq = parsed + 1;
+    }
+
+    let admissionNumber = buildAdmissionNumber(year, nextSeq);
+
+    // Belt-and-braces: walk forward if the number somehow already exists
+    let attempts = 0;
+    while (attempts < 50) {
+      const exists = await Student.findOne({
+        where: { schoolId, admissionNumber }
       });
-      if (existingStudent) {
-        return res.status(400).json({ 
-          message: `Admission number '${admissionNumber}' already exists.` 
-        });
-      }
+      if (!exists) break;
+      nextSeq += 1;
+      attempts += 1;
+      admissionNumber = buildAdmissionNumber(year, nextSeq);
     }
 
-    const student = await Student.create({
-      ...studentData,
-      admissionNumber,
-      schoolId: req.user.schoolId,
-      enrollmentDate: studentData.enrollmentDate || new Date(),
-    });
-
-    await createAuditLog(req, 'CREATE', 'STUDENT', student.id, null, student);
-    res.status(201).json({ success: true, student });
-  } catch (error) {
-    console.error('Create student error:', error);
-    if (error.name === 'SequelizeUniqueConstraintError') {
-      return res.status(400).json({ message: 'Admission number already exists' });
-    }
-    res.status(500).json({ message: error.message });
+    res.json({ success: true, admissionNumber, year, nextSeq });
+  } catch (err) {
+    console.error('next-admission-number error:', err);
+    res.status(500).json({ success: false, message: 'Failed to generate admission number' });
   }
 });
-// ==================== STUDENTS ROUTES ====================
 
+
+
+// ==================== CREATE STUDENT (transaction-safe) ====================
+app.post('/api/students', authenticate, async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    // ---- Permissions ----
+    if (!['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(req.user.role)) {
+      await transaction.rollback();
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    const studentData = { ...req.body };
+    const { studentLogin, parent, ...studentFields } = studentData;
+
+    const schoolId = req.user.schoolId;
+    studentFields.schoolId = schoolId;
+
+    // ---- Normalize empty UUIDs to null ----
+    ['classId', 'courseId', 'programId', 'facultyId', 'departmentId', 'transportRouteId']
+      .forEach(f => { if (studentFields[f] === '') studentFields[f] = null; });
+
+    // ---- Normalize DOB: empty string -> null, invalid -> null ----
+    if ('dateOfBirth' in studentFields) {
+      if (!studentFields.dateOfBirth) {
+        studentFields.dateOfBirth = null;
+      } else {
+        const d = new Date(studentFields.dateOfBirth);
+        studentFields.dateOfBirth = Number.isNaN(d.getTime())
+          ? null
+          : d.toISOString().split('T')[0];
+      }
+    }
+
+    // ---- Validate required academic scope ----
+    const school = await School.findByPk(schoolId, { transaction });
+    if (!school) {
+      await transaction.rollback();
+      return res.status(404).json({ success: false, message: 'School not found' });
+    }
+
+    if (school.category === 'UNIVERSITY' && !studentFields.courseId) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'Course is required for university students' });
+    }
+    if (school.category === 'COLLEGE_TVET' && !studentFields.programId) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'Program is required for TVET students' });
+    }
+    if (!['UNIVERSITY', 'COLLEGE_TVET'].includes(school.category) && !studentFields.classId) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'Class is required' });
+    }
+
+    // ---- Admission number ----
+    let admissionNumber = (studentFields.admissionNumber || '').trim();
+    if (admissionNumber) {
+      // User supplied a number — check uniqueness
+      const existing = await Student.findOne({
+        where: { schoolId, admissionNumber },
+        transaction
+      });
+      if (existing) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Admission number '${admissionNumber}' already exists in this school`
+        });
+      }
+      // Normalize format if possible
+      admissionNumber = admissionNumber.toUpperCase();
+    } else {
+      // Auto-generate
+      admissionNumber = await generateAdmissionNumber(
+        schoolId,
+        new Date().getFullYear(),
+        transaction
+      );
+    }
+    studentFields.admissionNumber = admissionNumber;
+
+    // ---- Defaults based on school category ----
+    if (school.category === 'UNIVERSITY') {
+      if (!studentFields.currentYear) studentFields.currentYear = 1;
+      if (!studentFields.currentSemester) studentFields.currentSemester = 1;
+    } else if (school.category === 'COLLEGE_TVET') {
+      if (!studentFields.currentModule) studentFields.currentModule = 'Module 1';
+    }
+    if (!studentFields.enrollmentDate) {
+      studentFields.enrollmentDate = new Date().toISOString().split('T')[0];
+    }
+
+    // ==================== 1. Create the student ====================
+    const student = await Student.create(studentFields, { transaction });
+
+    // ==================== 2. Optional student login ====================
+    if (studentLogin?.createAccount && studentLogin.email && studentLogin.password) {
+      const hashed = await bcrypt.hash(studentLogin.password, 10);
+      const studentUser = await User.create({
+        email: studentLogin.email.trim(),
+        password: hashed,
+        firstName: studentFields.firstName,
+        lastName: studentFields.lastName,
+        role: 'STUDENT',
+        schoolId,
+        phone: studentFields.phone || null,
+      }, { transaction });
+
+      await student.update({ userId: studentUser.id }, { transaction });
+    }
+
+    // ==================== 3. Parent / Guardian ====================
+    if (parent) {
+      // Case A: link to an existing parent user
+      if (parent.useExisting && parent.existingUserId) {
+        const existingUser = await User.findOne({
+          where: { id: parent.existingUserId, schoolId },
+          transaction,
+        });
+
+        if (!existingUser) {
+          await transaction.rollback();
+          return res.status(400).json({ success: false, message: 'Selected existing parent not found' });
+        }
+
+        await Parent.create({
+          userId: existingUser.id,
+          studentId: student.id,
+          relationship: parent.relationship || 'Guardian',
+          isPrimary: parent.isPrimary ?? false,
+          emergencyContact: parent.emergencyContact ?? false,
+          occupation: parent.occupation || null,
+          employer: parent.employer || null,
+          monthlyIncome: parent.monthlyIncome || null,
+          schoolId,
+          hasPortalAccount: true,
+        }, { transaction });
+      }
+      // Case B: new guardian
+      else {
+        const {
+          firstName, lastName, email, phone,
+          relationship = 'Guardian',
+          isPrimary = false,
+          emergencyContact = false,
+          occupation = null,
+          employer = null,
+          monthlyIncome = null,
+          grantPortalAccess = false,
+          password = null,
+        } = parent;
+
+        if (!firstName?.trim() || !lastName?.trim()) {
+          await transaction.rollback();
+          return res.status(400).json({ success: false, message: 'Guardian first and last name are required' });
+        }
+        if (!phone?.trim() && !email?.trim()) {
+          await transaction.rollback();
+          return res.status(400).json({ success: false, message: 'Provide at least a phone or email for the guardian' });
+        }
+        if (grantPortalAccess) {
+          if (!email?.trim()) {
+            await transaction.rollback();
+            return res.status(400).json({ success: false, message: 'Email is required to grant portal access' });
+          }
+          if (!password || password.length < 6) {
+            await transaction.rollback();
+            return res.status(400).json({ success: false, message: 'Password (min 6 chars) is required for portal access' });
+          }
+        }
+
+        let linkedUserId = null;
+
+        if (grantPortalAccess) {
+          const existingUser = await User.findOne({
+            where: { email: email.trim(), schoolId },
+            transaction,
+          });
+
+          if (existingUser) {
+            linkedUserId = existingUser.id;
+          } else {
+            const hashed = await bcrypt.hash(password, 10);
+            const newUser = await User.create({
+              email: email.trim(),
+              password: hashed,
+              firstName: firstName.trim(),
+              lastName: lastName.trim(),
+              phone: phone?.trim() || null,
+              role: 'PARENT',
+              schoolId,
+            }, { transaction });
+            linkedUserId = newUser.id;
+          }
+        }
+
+        await Parent.create({
+          userId: linkedUserId,
+          studentId: student.id,
+          relationship,
+          isPrimary,
+          emergencyContact,
+          occupation,
+          employer,
+          monthlyIncome,
+          schoolId,
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          email: email?.trim() || null,
+          phone: phone?.trim() || null,
+          hasPortalAccount: !!linkedUserId,
+        }, { transaction });
+      }
+    }
+
+    // ==================== Commit ====================
+    await transaction.commit();
+
+    // Reload with associations
+    const fullStudent = await Student.findByPk(student.id, {
+      include: [
+        { model: User,   as: 'user',    required: false },
+        { model: Parent, as: 'parents', required: false },
+      ],
+    });
+
+    try {
+      await createAuditLog(req, 'CREATE', 'STUDENT', student.id, null, fullStudent);
+    } catch (logErr) {
+      console.warn('Audit log failed (non-critical):', logErr.message);
+    }
+
+    res.status(201).json({ success: true, student: fullStudent });
+  } catch (error) {
+    await transaction.rollback();
+    console.error('❌ Create student error:', error);
+
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      return res.status(409).json({
+        success: false,
+        message: 'Admission number already exists. Please try again.'
+      });
+    }
+    if (error.name === 'SequelizeValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: error.errors.map(e => e.message)
+      });
+    }
+
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 app.get('/api/students', authenticate, async (req, res) => {
   try {
     const { classId, courseId, programId, search } = req.query;
@@ -5831,198 +6099,7 @@ app.get('/api/students/:id', authenticate, async (req, res) => {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
-// ==================== CREATE STUDENT ====================
-app.post('/api/students', authenticate, async (req, res) => {
-  const transaction = await sequelize.transaction();
-  try {
-    const studentData = { ...req.body };
 
-    // ---- Permissions ----
-    if (!['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(req.user.role)) {
-      await transaction.rollback();
-      return res.status(403).json({ message: 'Access denied' });
-    }
-
-    // ---- Extract nested payloads so they don't leak into Student.create ----
-    const { studentLogin, parent, ...studentFields } = studentData;
-
-    // ---- Generate admission number if not provided ----
-    if (!studentFields.admissionNumber) {
-      const year = new Date().getFullYear();
-      const count = await Student.count({
-        where: { schoolId: req.user.schoolId },
-        transaction,
-      }) + 1;
-      studentFields.admissionNumber = `${year}-${count.toString().padStart(4, '0')}`;
-    }
-
-    // ---- Ensure schoolId ----
-    studentFields.schoolId = req.user.schoolId;
-
-    // ---- Normalize empty UUIDs to null ----
-    ['classId', 'courseId', 'programId', 'facultyId', 'departmentId', 'transportRouteId']
-      .forEach(f => { if (studentFields[f] === '') studentFields[f] = null; });
-
-    // ==================== 1. Create the student ====================
-    const student = await Student.create(studentFields, { transaction });
-
-    // ==================== 2. Optional student login ====================
-    if (studentLogin?.createAccount && studentLogin.email && studentLogin.password) {
-      const studentUser = await User.create({
-        email: studentLogin.email,
-        password: studentLogin.password, // hashed via User model hook if you have one
-        firstName: studentFields.firstName,
-        lastName: studentFields.lastName,
-        role: 'STUDENT',
-        schoolId: req.user.schoolId,
-        phone: studentFields.phone || null,
-      }, { transaction });
-
-      await student.update({ userId: studentUser.id }, { transaction });
-    }
-
-    // ==================== 3. Parent / Guardian (REQUIRED DETAILS, OPTIONAL PORTAL) ====================
-    if (parent) {
-      // ---------- Case A: Link to an existing parent user ----------
-      if (parent.useExisting && parent.existingUserId) {
-        const existingUser = await User.findOne({
-          where: { id: parent.existingUserId, schoolId: req.user.schoolId },
-          transaction,
-        });
-
-        if (!existingUser) {
-          await transaction.rollback();
-          return res.status(400).json({ message: 'Selected existing parent not found' });
-        }
-
-        await Parent.create({
-          userId: existingUser.id,
-          studentId: student.id,
-          relationship: parent.relationship || 'Guardian',
-          isPrimary: parent.isPrimary ?? false,
-          emergencyContact: parent.emergencyContact ?? false,
-          occupation: parent.occupation || null,
-          employer: parent.employer || null,
-          monthlyIncome: parent.monthlyIncome || null,
-          schoolId: req.user.schoolId,
-        }, { transaction });
-      }
-
-      // ---------- Case B: New guardian (details required) ----------
-      else {
-        const {
-          firstName, lastName, email, phone,
-          relationship = 'Guardian',
-          isPrimary = false,
-          emergencyContact = false,
-          occupation = null,
-          employer = null,
-          monthlyIncome = null,
-          grantPortalAccess = false,
-          password = null,
-        } = parent;
-
-        // ---- Required: first & last name ----
-        if (!firstName?.trim() || !lastName?.trim()) {
-          await transaction.rollback();
-          return res.status(400).json({
-            message: 'Guardian first name and last name are required',
-          });
-        }
-
-        // ---- Required: at least one contact channel ----
-        if (!phone?.trim() && !email?.trim()) {
-          await transaction.rollback();
-          return res.status(400).json({
-            message: 'Provide at least a phone number or email for the guardian',
-          });
-        }
-
-        // ---- If portal requested, email + password are required ----
-        if (grantPortalAccess) {
-          if (!email?.trim()) {
-            await transaction.rollback();
-            return res.status(400).json({ message: 'Email is required to grant portal access' });
-          }
-          if (!password || password.length < 6) {
-            await transaction.rollback();
-            return res.status(400).json({
-              message: 'Password (min 6 chars) is required to grant portal access',
-            });
-          }
-        }
-
-        let linkedUserId = null;
-
-        // ---- Create a User account ONLY if portal access is requested ----
-        if (grantPortalAccess) {
-          // Prevent duplicate user accounts by email within the school
-          const existingUser = await User.findOne({
-            where: { email: email.trim(), schoolId: req.user.schoolId },
-            transaction,
-          });
-
-          if (existingUser) {
-            // Reuse the existing user (already has a login)
-            linkedUserId = existingUser.id;
-          } else {
-            const newUser = await User.create({
-              email: email.trim(),
-              password, // hash in User model hook
-              firstName: firstName.trim(),
-              lastName: lastName.trim(),
-              phone: phone?.trim() || null,
-              role: 'PARENT',
-              schoolId: req.user.schoolId,
-            }, { transaction });
-
-            linkedUserId = newUser.id;
-          }
-        }
-
-        // ---- Always create the Parent link record ----
-        // userId may be null when no portal account was created.
-        // Contact details are stored regardless, using the fallback columns.
-        await Parent.create({
-          userId: linkedUserId,                    // nullable
-          studentId: student.id,
-          relationship,
-          isPrimary,
-          emergencyContact,
-          occupation,
-          employer,
-          monthlyIncome,
-          schoolId: req.user.schoolId,
-
-          // Fallback contact info — safe even if no User exists
-          firstName: firstName.trim(),
-          lastName: lastName.trim(),
-          email: email?.trim() || null,
-          phone: phone?.trim() || null,
-          hasPortalAccount: !!linkedUserId,
-        }, { transaction });
-      }
-    }
-
-    // ==================== Commit ====================
-    await transaction.commit();
-
-    // Reload with associations for the response
-    const fullStudent = await Student.findByPk(student.id, {
-      include: [
-        { model: User,   as: 'user',    required: false },
-        { model: Parent, as: 'parents', required: false },
-      ],
-    });
-
-    res.json({ success: true, student: fullStudent });
-
-  } catch (error) {
-    await transaction.rollback();
-    console.error('Create student error:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
-});
 // UPDATE student
 app.put('/api/students/:id', authenticate, async (req, res) => {
   try {
