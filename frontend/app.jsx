@@ -4298,536 +4298,907 @@ const ClassModule = ({
     </div>
   );
 };
-// ==================== COMPLETE STUDENT MODULE ====================
-// Parent/Guardian REQUIRED • Portal access OPTIONAL
 
-// ==================== STUDENT MODULE ====================
-const StudentModule = ({ 
-  students, setStudents, 
-  classes, routes, courses, faculties, departments, programs,
-  parents, setParents,
-  fees, payments,
-  form, setForm, 
-  onSubmit, 
+// ==================== STUDENT MODULE — SAFE REWRITE ====================
+const StudentModule = ({
+  students = [],
+  setStudents,
+  classes = [],
+  routes = [],
+  courses = [],
+  faculties = [],
+  departments = [],
+  programs = [],
+  parents = [],
+  setParents,
+  fees = [],
+  payments = [],
+  form,
+  setForm,
+  onSubmit,
   currentSchool,
   handleUpdate,
   handleDelete,
-  exams,
-  subjects,
-  units,
-  attendance,
+  exams = [],
+  subjects = [],
+  units = [],
+  attendance = [],
   setAttendance,
   user
 }) => {
-  // ==================== SEARCHABLE SELECT ====================
-  const SearchableSelect = ({ 
-    label, value, onChange, options = [], placeholder = "Search...", 
-    disabled, required, className,
-    noOptionsMessage = "No results found",
-    emptyMessage = "No options available"
-  }) => {
-    const [search, setSearch] = useState('');
-    const [isOpen, setIsOpen] = useState(false);
-    const [isFocused, setIsFocused] = useState(false);
-    const dropdownRef = useRef(null);
+  // ==================================================================
+  //  SAFE HELPERS — must live above every use of dates / numbers
+  // ==================================================================
+  const CURRENT_YEAR = new Date().getFullYear();
+  const ADM_PREFIX = 'ADM';
 
-    const filteredOptions = useMemo(() => {
-      if (!options || options.length === 0) return [];
-      if (!search.trim()) return options;
-      const s = search.toLowerCase();
-      return options.filter(opt => {
-        if (!opt) return false;
-        return (opt.label?.toLowerCase() || '').includes(s) ||
-               (opt.subLabel?.toLowerCase() || '').includes(s) ||
-               (opt.value?.toString().toLowerCase() || '').includes(s);
-      });
-    }, [options, search]);
-
-    const selectedOption = useMemo(() => {
-      if (!options || options.length === 0) return null;
-      if (!value && value !== 0) return null;
-      return options.find(opt => opt.value === value) || null;
-    }, [options, value]);
-
-    useEffect(() => {
-      const handler = (e) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-          setIsOpen(false); setIsFocused(false);
-        }
-      };
-      document.addEventListener('mousedown', handler);
-      return () => document.removeEventListener('mousedown', handler);
-    }, []);
-
-    useEffect(() => { if (!isOpen) setSearch(''); }, [isOpen]);
-
-    const handleSelect = (selectedValue) => {
-      onChange({ target: { value: selectedValue } });
-      setSearch(''); setIsOpen(false); setIsFocused(false);
-    };
-
-    let displayValue = '';
-    if (isFocused) displayValue = search;
-    else if (selectedOption) displayValue = selectedOption.label;
-
-    return (
-      <div className="relative" ref={dropdownRef}>
-        {label && (
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}{required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-        )}
-        <div className="relative">
-          <input
-            type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-pointer'
-            } ${className || ''}`}
-            value={displayValue}
-            onChange={(e) => { setSearch(e.target.value); setIsOpen(true); setIsFocused(true); }}
-            onFocus={() => {
-              if (disabled) return;
-              setIsFocused(true); setIsOpen(true);
-              if (selectedOption) setSearch(selectedOption.label);
-            }}
-            onBlur={() => setTimeout(() => {
-              if (!dropdownRef.current?.contains(document.activeElement)) {
-                setIsOpen(false); setIsFocused(false);
-                if (!selectedOption) setSearch('');
-              }
-            }, 200)}
-            placeholder={placeholder}
-            disabled={disabled}
-            autoComplete="off"
-          />
-          {value && !disabled && (
-            <button type="button"
-              onClick={(e) => { e.stopPropagation(); onChange({ target: { value: '' } }); setSearch(''); }}
-              className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-        </div>
-        {isOpen && !disabled && (
-          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-            {options && options.length === 0 ? (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">{emptyMessage}</div>
-            ) : filteredOptions.length > 0 ? (
-              filteredOptions.map((opt) => (
-                <div key={opt.value || opt.key || opt.id || Math.random().toString()}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 ${
-                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
-                  } ${opt.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  onClick={() => { if (!opt.disabled) handleSelect(opt.value); }}
-                  onMouseDown={(e) => e.preventDefault()}>
-                  <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
-                </div>
-              ))
-            ) : (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {search ? `No results for "${search}"` : noOptionsMessage}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
+  const toDateInput = (value) => {
+    if (!value) return '';
+    const d = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(d.getTime())) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
   };
 
-  // ==================== SCHOOL TYPE ====================
+  const safeDateForApi = (value) => {
+    const iso = toDateInput(value);
+    return iso || null;
+  };
+
+  const formatDate = (value) => {
+    const iso = toDateInput(value);
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  const buildAdmissionNumber = (year, seq, prefix = ADM_PREFIX) => {
+    const y = Number.parseInt(year, 10);
+    const safeYear = Number.isFinite(y) && y > 1900 && y < 3000 ? y : CURRENT_YEAR;
+    const s = Number.parseInt(seq, 10);
+    const safeSeq = Number.isFinite(s) && s > 0 ? s : 1;
+    return `${prefix}/${safeYear}/${String(safeSeq).padStart(4, '0')}`;
+  };
+
+  const extractAdmissionSeq = (adm, year, prefix = ADM_PREFIX) => {
+    if (!adm || typeof adm !== 'string') return 0;
+    const expected = `${prefix}/${year}/`;
+    if (!adm.startsWith(expected)) return 0;
+    const tail = adm.slice(expected.length);
+    const n = Number.parseInt(tail, 10);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const nextAdmissionNumber = (list, year, prefix = ADM_PREFIX) => {
+    const arr = Array.isArray(list) ? list : [];
+    const y = Number.isFinite(Number(year)) ? Number(year) : CURRENT_YEAR;
+    const maxSeq = arr.reduce((max, s) => {
+      const n = extractAdmissionSeq(s?.admissionNumber, y, prefix);
+      return n > max ? n : max;
+    }, 0);
+    return buildAdmissionNumber(y, maxSeq + 1, prefix);
+  };
+
+  // ==================================================================
+  //  PERMISSIONS
+  // ==================================================================
+  const canEdit = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER'].includes(user?.role);
+  const canDelete = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
+  const canAdd = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'CLASS_TEACHER'].includes(user?.role);
+
+  const isStudent = user?.role === 'STUDENT';
+  const isParent = user?.role === 'PARENT';
+
+  // ==================================================================
+  //  SCHOOL TYPE
+  // ==================================================================
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
   const isUniversity = schoolCategory === 'UNIVERSITY';
   const isTVET = schoolCategory === 'COLLEGE_TVET';
   const isSecondary = schoolCategory === 'SENIOR_SECONDARY';
   const isPrimary = schoolCategory === 'ECDE_PRIMARY_JSS';
 
-  const enableParentPortal = currentSchool?.enableParentPortal === true ||
-                             currentSchool?.settings?.enableParentPortal === true;
+  const enableParentPortal =
+    currentSchool?.enableParentPortal === true ||
+    currentSchool?.settings?.enableParentPortal === true;
 
-  // ==================== PERMISSIONS ====================
-  const isStudent = user?.role === 'STUDENT';
-  const isParent = user?.role === 'PARENT';
-  const canEdit = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER'].includes(user?.role);
-  const canDelete = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
-  const canAdd = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'CLASS_TEACHER'].includes(user?.role);
+  // ==================================================================
+  //  STATE
+  // ==================================================================
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [loadingAdm, setLoadingAdm] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [submitError, setSubmitError] = useState('');
 
-  // ==================== STATE ====================
+  const [showFilters, setShowFilters] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [classFilter, setClassFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [viewMode, setViewMode] = useState('grid');
+
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [studentDetails, setStudentDetails] = useState(null);
+  const [studentParents, setStudentParents] = useState([]);
+  const [studentPayments, setStudentPayments] = useState([]);
+  const [studentResults, setStudentResults] = useState([]);
+  const [studentAttendance, setStudentAttendance] = useState([]);
+  const [activeDetailTab, setActiveDetailTab] = useState('overview');
+
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showAddParentModal, setShowAddParentModal] = useState(false);
+  const [selectedStudentForParent, setSelectedStudentForParent] = useState(null);
+
+  const [autoAdm, setAutoAdm] = useState(true);
+  const [admPreview, setAdmPreview] = useState('');
+
+  const [localForm, setLocalForm] = useState(() => emptyForm());
+  const formState = form ?? localForm;
+  const setFormState = setForm ?? setLocalForm;
+
+  // Student's own record (student role only)
   const [myStudentRecord, setMyStudentRecord] = useState(null);
   const [loadingMyData, setLoadingMyData] = useState(false);
   const [showAdmissionModal, setShowAdmissionModal] = useState(false);
   const [admissionNumber, setAdmissionNumber] = useState(() => localStorage.getItem('studentAdmissionNumber'));
 
-  const [viewMode, setViewMode] = useState('grid');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedClass, setSelectedClass] = useState('');
-  const [selectedCourse, setSelectedCourse] = useState('');
-  const [selectedProgram, setSelectedProgram] = useState('');
-  const [selectedYear, setSelectedYear] = useState('');
-  const [selectedModule, setSelectedModule] = useState('');
-  const [selectedStatus, setSelectedStatus] = useState('all');
-  const [showFilters, setShowFilters] = useState(false);
-  const [loading, setLoading] = useState(false);
-
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [showDetailsModal, setShowDetailsModal] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [showAddParentModal, setShowAddParentModal] = useState(false);
-  const [selectedStudent, setSelectedStudent] = useState(null);
-  const [selectedStudentForParent, setSelectedStudentForParent] = useState(null);
-  const [activeDetailTab, setActiveDetailTab] = useState('overview');
-
-  const [studentDetails, setStudentDetails] = useState(null);
-  const [studentFeeSummary, setStudentFeeSummary] = useState(null);
-  const [studentPayments, setStudentPayments] = useState([]);
-  const [studentParents, setStudentParents] = useState([]);
-  const [studentResults, setStudentResults] = useState([]);
-  const [studentAttendance, setStudentAttendance] = useState([]);
-
-  // Submission error banner (shown inside Add/Edit modal instead of a toast)
-  const [submitError, setSubmitError] = useState('');
-
-  // ==================== PARENT FORM STATE ====================
+  // Parent form (link / create)
   const [parentForm, setParentForm] = useState({
-    userId: '',
-    studentId: '',
-    relationship: 'Mother',
-    isPrimary: true,
-    emergencyContact: false,
-    occupation: '',
-    employer: '',
-    monthlyIncome: '',
-    firstName: '',
-    middleName: '',
-    lastName: '',
-    email: '',
-    phone: '',
-    idNumber: '',
-    address: '',
-    grantPortalAccess: false,
-    password: ''
+    userId: '', studentId: '', relationship: 'Mother',
+    isPrimary: true, emergencyContact: false,
+    occupation: '', employer: '', monthlyIncome: '',
+    firstName: '', middleName: '', lastName: '',
+    email: '', phone: '', idNumber: '', address: '',
+    grantPortalAccess: false, password: ''
   });
-
-  const [searchParent, setSearchParent] = useState('');
   const [createNewParent, setCreateNewParent] = useState(true);
   const [selectedExistingParent, setSelectedExistingParent] = useState(null);
-  const [newParentUser, setNewParentUser] = useState({
-    email: '', password: '', firstName: '', lastName: '', phone: ''
-  });
 
-  const RELATIONSHIP_OPTIONS = [
-    'Mother', 'Father', 'Guardian', 'Grandparent',
-    'Sibling', 'Uncle', 'Aunt', 'Sponsor', 'Other'
-  ];
+  // ==================================================================
+  //  FORM INIT
+  // ==================================================================
+  function emptyForm() {
+    return {
+      admissionNumber: '',
+      firstName: '', middleName: '', lastName: '',
+      gender: 'MALE',
+      dateOfBirth: '',
+      nationality: 'Kenyan',
+      religion: '',
+      email: '', phone: '', address: '',
+      idType: 'BIRTH_CERTIFICATE', idNumber: '',
+      classId: '', courseId: '', programId: '',
+      facultyId: '', departmentId: '',
+      currentYear: 1, currentSemester: 1, currentModule: '',
+      boardingStatus: 'DAY',
+      transportRouteId: '',
+      medicalInfo: { bloodGroup: '', allergies: '', disabilities: '' },
+      studentLogin: { email: '', password: '', createAccount: false },
+      parent: {
+        firstName: '', middleName: '', lastName: '',
+        email: '', phone: '',
+        relationship: 'Mother',
+        isPrimary: true, emergencyContact: false,
+        occupation: '', employer: '', monthlyIncome: '',
+        grantPortalAccess: false, password: '',
+        useExisting: false, existingUserId: null
+      },
+      isActive: true
+    };
+  }
 
-  // ==================== LOAD STUDENT'S OWN DATA ====================
   useEffect(() => {
-    if (isStudent) {
-      if (!admissionNumber) setShowAdmissionModal(true);
-      else loadMyStudentData();
+    if (showForm && !editingId && autoAdm && currentSchool?.id) {
+      fetchNextAdmissionNumber();
     }
-  }, [isStudent, admissionNumber]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showForm, editingId, autoAdm, currentSchool?.id]);
 
-  const loadMyStudentData = async () => {
-    setLoadingMyData(true);
+  useEffect(() => {
+    if (!currentSchool?.id) return;
+    // Warm the preview once on mount so the user sees a number immediately
+    fetchNextAdmissionNumber();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSchool?.id]);
+
+  // ==================================================================
+  //  ADMISSION NUMBER — server-authoritative + local fallback
+  // ==================================================================
+  const fetchNextAdmissionNumber = async () => {
+    if (!currentSchool?.id) return;
+    setLoadingAdm(true);
     try {
-      const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(admissionNumber)}`);
-      if (studentRes.data.student) {
-        const myStudent = studentRes.data.student;
-        setMyStudentRecord(myStudent);
-        try {
-          const r = await api.get(`/results?studentId=${myStudent.id}`);
-          setStudentResults(r.data.results || []);
-        } catch (e) { console.error(e); }
-        try {
-          const a = await api.get(`/attendance?studentId=${myStudent.id}`);
-          setStudentAttendance(a.data.attendance || []);
-        } catch (e) { console.error(e); }
-        try {
-          const p = await api.get(`/payments?studentId=${myStudent.id}`);
-          setStudentPayments(p.data.payments || []);
-        } catch (e) { console.error(e); }
+      const res = await api.get('/students/next-admission-number', {
+        params: { schoolId: currentSchool.id, year: CURRENT_YEAR }
+      });
+      const next = res.data?.admissionNumber;
+      const safe = typeof next === 'string' && /\/\d{4}$/.test(next)
+        ? next
+        : nextAdmissionNumber(students, CURRENT_YEAR);
+      setAdmPreview(safe);
+      if (autoAdm) {
+        setFormState(prev => ({ ...prev, admissionNumber: safe }));
       }
-    } catch (error) {
-      console.error('❌ Error loading student data:', error);
-      if (error.response?.status === 404) {
-        localStorage.removeItem('studentAdmissionNumber');
-        setShowAdmissionModal(true);
+    } catch (err) {
+      // Fallback — compute locally from the list we already have
+      const safe = nextAdmissionNumber(students, CURRENT_YEAR);
+      setAdmPreview(safe);
+      if (autoAdm) {
+        setFormState(prev => ({ ...prev, admissionNumber: safe }));
       }
-    } finally { setLoadingMyData(false); }
+    } finally {
+      setLoadingAdm(false);
+    }
   };
 
-  // ==================== GRADE HELPERS ====================
-  const getUniversityGrade = (m) => {
-    if (!m && m !== 0) return { grade: '-', points: 0 };
-    if (m >= 70) return { grade: 'A', points: 5.0 };
-    if (m >= 60) return { grade: 'B', points: 4.0 };
-    if (m >= 50) return { grade: 'C', points: 3.0 };
-    if (m >= 40) return { grade: 'D', points: 2.0 };
-    return { grade: 'E', points: 1.0 };
-  };
-  const getSecondaryGrade = (m) => {
-    if (!m && m !== 0) return { grade: '-', points: 0 };
-    if (m >= 80) return { grade: 'A', points: 12 };
-    if (m >= 75) return { grade: 'A-', points: 11 };
-    if (m >= 70) return { grade: 'B+', points: 10 };
-    if (m >= 65) return { grade: 'B', points: 9 };
-    if (m >= 60) return { grade: 'B-', points: 8 };
-    if (m >= 55) return { grade: 'C+', points: 7 };
-    if (m >= 50) return { grade: 'C', points: 6 };
-    if (m >= 45) return { grade: 'C-', points: 5 };
-    if (m >= 40) return { grade: 'D+', points: 4 };
-    if (m >= 35) return { grade: 'D', points: 3 };
-    if (m >= 30) return { grade: 'D-', points: 2 };
-    return { grade: 'E', points: 1 };
-  };
-  const getPrimaryGrade = (m) => {
-    if (!m && m !== 0) return { grade: '-', points: 0 };
-    if (m >= 80) return { grade: 'Exceeding Expectations', points: 4 };
-    if (m >= 65) return { grade: 'Meeting Expectations', points: 3 };
-    if (m >= 50) return { grade: 'Approaching Expectations', points: 2 };
-    if (m >= 30) return { grade: 'Below Expectations', points: 1 };
-    return { grade: 'Needs Improvement', points: 0 };
-  };
-  const getTVETGrade = (m) => {
-    if (!m && m !== 0) return { grade: '-', points: 0 };
-    if (m >= 80) return { grade: 'DISTINCTION', points: 5 };
-    if (m >= 65) return { grade: 'CREDIT', points: 4 };
-    if (m >= 50) return { grade: 'MERIT', points: 3 };
-    if (m >= 40) return { grade: 'PASS', points: 2 };
-    return { grade: 'FAIL', points: 1 };
-  };
-  const getGrade = (marks) => {
-    if (marks === null || marks === undefined || marks === '') return { grade: '-', points: 0 };
-    const n = Number(marks);
-    if (isNaN(n)) return { grade: '-', points: 0 };
-    if (isUniversity) return getUniversityGrade(n);
-    if (isTVET) return getTVETGrade(n);
-    if (isPrimary) return getPrimaryGrade(n);
-    return getSecondaryGrade(n);
-  };
-  const getGradeColor = (grade) => {
-    if (!grade) return 'bg-gray-100 text-gray-800';
-    if (['A','A-','Exceeding Expectations','DISTINCTION'].includes(grade)) return 'bg-green-100 text-green-800';
-    if (['B+','B','B-','Meeting Expectations','CREDIT'].includes(grade)) return 'bg-blue-100 text-blue-800';
-    if (['C+','C','C-','Approaching Expectations','MERIT'].includes(grade)) return 'bg-yellow-100 text-yellow-800';
-    if (['D+','D','D-','Below Expectations','PASS'].includes(grade)) return 'bg-orange-100 text-orange-800';
-    if (['E','Needs Improvement','FAIL'].includes(grade)) return 'bg-red-100 text-red-800';
-    return 'bg-gray-100 text-gray-800';
+  // ==================================================================
+  //  SEARCHABLE SELECT — non-blocking
+  // ==================================================================
+  const SearchableSelect = ({
+    label, value, onChange, options = [], placeholder = 'Search...',
+    disabled, required, className,
+    noOptionsMessage = 'No results found',
+    emptyMessage = 'No options available'
+  }) => {
+    const [search, setSearch] = useState('');
+    const [isOpen, setIsOpen] = useState(false);
+    const [isFocused, setIsFocused] = useState(false);
+    const [highlighted, setHighlighted] = useState(-1);
+    const wrapRef = useRef(null);
+    const inputRef = useRef(null);
+    const listRef = useRef(null);
+
+    const safeOptions = Array.isArray(options) ? options : [];
+
+    const filtered = useMemo(() => {
+      if (!search.trim()) return safeOptions;
+      const s = search.toLowerCase();
+      return safeOptions.filter(o =>
+        (o.label || '').toLowerCase().includes(s) ||
+        (o.subLabel || '').toLowerCase().includes(s) ||
+        String(o.value ?? '').toLowerCase().includes(s)
+      );
+    }, [safeOptions, search]);
+
+    const selected = useMemo(
+      () => safeOptions.find(o => String(o.value) === String(value)) || null,
+      [safeOptions, value]
+    );
+
+    useEffect(() => {
+      if (!isOpen) return;
+      const onDown = (e) => {
+        if (!wrapRef.current) return;
+        if (wrapRef.current.contains(e.target)) return;
+        setIsOpen(false); setIsFocused(false); setHighlighted(-1);
+      };
+      document.addEventListener('mousedown', onDown);
+      document.addEventListener('touchstart', onDown, { passive: true });
+      return () => {
+        document.removeEventListener('mousedown', onDown);
+        document.removeEventListener('touchstart', onDown);
+      };
+    }, [isOpen]);
+
+    useEffect(() => {
+      if (!isOpen || highlighted < 0 || !listRef.current) return;
+      const el = listRef.current.children[highlighted];
+      if (el?.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+    }, [highlighted, isOpen]);
+
+    const open = () => {
+      if (disabled) return;
+      setIsFocused(true); setIsOpen(true);
+      if (selected && !search) setSearch(selected.label);
+    };
+    const close = (restore = true) => {
+      setIsOpen(false); setIsFocused(false); setHighlighted(-1);
+      if (restore) setSearch(selected ? selected.label : '');
+    };
+    const pick = (opt) => {
+      if (!opt || opt.disabled) return;
+      onChange({ target: { value: opt.value } });
+      setSearch(opt.label);
+      setIsOpen(false); setIsFocused(false); setHighlighted(-1);
+      requestAnimationFrame(() => inputRef.current?.focus());
+    };
+
+    const onKey = (e) => {
+      if (disabled) return;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (!isOpen) return open();
+        setHighlighted(i => filtered.length ? (i + 1) % filtered.length : -1);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (!isOpen) return open();
+        setHighlighted(i => filtered.length ? (i - 1 + filtered.length) % filtered.length : -1);
+      } else if (e.key === 'Enter') {
+        if (isOpen && highlighted >= 0 && filtered[highlighted]) {
+          e.preventDefault(); pick(filtered[highlighted]);
+        }
+      } else if (e.key === 'Escape') {
+        if (isOpen) { e.preventDefault(); close(true); }
+      } else if (e.key === 'Tab') {
+        close(true);
+      }
+    };
+
+    const display = isFocused ? search : (selected ? selected.label : '');
+
+    return (
+      <div className="w-full">
+        {label && (
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            {label}{required && <span className="text-red-500 ml-1">*</span>}
+          </label>
+        )}
+        <div className="relative" ref={wrapRef}>
+          <input
+            ref={inputRef}
+            type="text"
+            className={`w-full px-3 py-2 pr-14 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 ${
+              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
+            } ${className || ''}`}
+            value={display}
+            onChange={(e) => {
+              const v = e.target.value;
+              setSearch(v); setIsOpen(true); setIsFocused(true); setHighlighted(-1);
+              if (v === '') onChange({ target: { value: '' } });
+            }}
+            onFocus={open}
+            onBlur={() => setTimeout(() => {
+              if (!wrapRef.current) return;
+              if (wrapRef.current.contains(document.activeElement)) return;
+              close(true);
+            }, 120)}
+            onKeyDown={onKey}
+            placeholder={placeholder}
+            disabled={disabled}
+            autoComplete="off"
+          />
+          {selected && !disabled && (
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange({ target: { value: '' } });
+                setSearch(''); close(false);
+                requestAnimationFrame(() => inputRef.current?.focus());
+              }}
+              className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              tabIndex={-1}
+              aria-label="Clear"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+
+          {isOpen && !disabled && (
+            <div ref={listRef}
+                 className="absolute left-0 right-0 top-full mt-1 bg-white border rounded-lg shadow-xl max-h-60 overflow-auto"
+                 style={{ zIndex: 9999 }}>
+              {safeOptions.length === 0 ? (
+                <div className="px-3 py-4 text-center text-gray-500 text-sm">{emptyMessage}</div>
+              ) : filtered.length === 0 ? (
+                <div className="px-3 py-4 text-center text-gray-500 text-sm">No results for "{search}"</div>
+              ) : (
+                filtered.map((opt, i) => (
+                  <div
+                    key={String(opt.value ?? i)}
+                    className={`px-3 py-2 cursor-pointer border-b last:border-b-0 ${
+                      String(opt.value) === String(value)
+                        ? 'bg-indigo-50 text-indigo-700'
+                        : i === highlighted ? 'bg-gray-100' : 'hover:bg-indigo-50'
+                    }`}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onMouseEnter={() => setHighlighted(i)}
+                    onClick={() => pick(opt)}
+                  >
+                    <div className="font-medium">{opt.label}</div>
+                    {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
 
-  // ==================== PARENT SEARCH ====================
-  const parentUsers = useMemo(() => {
-    if (!parents) return [];
+  // ==================================================================
+  //  PLAIN INPUTS
+  // ==================================================================
+  const TextInput = ({ label, value, onChange, placeholder, required, disabled, type = 'text', min, max, textarea, rows }) => (
+    <div className="w-full">
+      {label && (
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          {label}{required && <span className="text-red-500 ml-1">*</span>}
+        </label>
+      )}
+      {textarea ? (
+        <textarea
+          value={value ?? ''}
+          onChange={onChange}
+          placeholder={placeholder}
+          disabled={disabled}
+          rows={rows || 3}
+          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none disabled:bg-gray-100"
+        />
+      ) : (
+        <input
+          type={type}
+          value={value ?? ''}
+          onChange={onChange}
+          placeholder={placeholder}
+          disabled={disabled}
+          min={min}
+          max={max}
+          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none disabled:bg-gray-100"
+          autoComplete="off"
+        />
+      )}
+    </div>
+  );
+
+  const SelectField = ({ label, value, onChange, options = [] }) => (
+    <div className="w-full">
+      {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
+      <select
+        value={value ?? ''}
+        onChange={onChange}
+        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+      >
+        {options.map(o => {
+          const val = typeof o === 'string' ? o : o.value;
+          const lbl = typeof o === 'string' ? o : o.label;
+          return <option key={String(val)} value={val}>{lbl}</option>;
+        })}
+      </select>
+    </div>
+  );
+
+  // ==================================================================
+  //  OPTIONS
+  // ==================================================================
+  const classOptions = useMemo(() => (classes || []).map(c => ({
+    value: c.id, label: c.name,
+    subLabel: c.capacity ? `Capacity ${c.capacity}` : ''
+  })), [classes]);
+
+  const courseOptions = useMemo(() => (courses || []).map(c => ({
+    value: c.id, label: c.name, subLabel: c.code || ''
+  })), [courses]);
+
+  const programOptions = useMemo(() => (programs || []).map(p => ({
+    value: p.id, label: p.name, subLabel: p.code || ''
+  })), [programs]);
+
+  const facultyOptions = useMemo(() => (faculties || []).map(f => ({
+    value: f.id, label: f.name, subLabel: f.dean ? `Dean: ${f.dean}` : ''
+  })), [faculties]);
+
+  const departmentOptions = useMemo(() => (departments || []).map(d => ({
+    value: d.id, label: d.name, subLabel: d.faculty?.name || ''
+  })), [departments]);
+
+  const routeOptions = useMemo(() => (routes || []).map(r => ({
+    value: r.id, label: r.name, subLabel: r.fee ? `Fee ${r.fee}` : ''
+  })), [routes]);
+
+  const classFilterOptions = useMemo(
+    () => classOptions.map(c => ({ value: c.value, label: c.label })),
+    [classOptions]
+  );
+
+  const parentUserOptions = useMemo(() => {
     const map = new Map();
-    parents.forEach(p => {
+    (parents || []).forEach(p => {
       if (p.User && !map.has(p.userId)) {
         map.set(p.userId, {
-          userId: p.userId,
-          firstName: p.User.firstName,
-          lastName: p.User.lastName,
-          email: p.User.email,
-          phone: p.User.phone,
-          existingRelationships: parents.filter(x => x.userId === p.userId).map(x => x.relationship)
+          value: p.userId,
+          label: `${p.User.firstName || ''} ${p.User.lastName || ''}`.trim() || p.User.email,
+          subLabel: `${p.User.email || ''}`
         });
       }
     });
     return Array.from(map.values());
   }, [parents]);
 
-  // ==================== HELPERS ====================
+  const relationshipOptions = ['Mother', 'Father', 'Guardian', 'Grandparent', 'Sibling', 'Uncle', 'Aunt', 'Sponsor', 'Other'];
+  const genderOptions = ['MALE', 'FEMALE'];
+  const boardingOptions = ['DAY', 'BOARDING', 'WEEKLY'];
+  const idTypeOptions = ['NATIONAL_ID', 'BIRTH_CERTIFICATE', 'PASSPORT', 'SCHOOL_ID', 'OTHER'];
+  const bloodGroupOptions = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-', 'Unknown'];
+  const moduleLevelOptions = ['Module 1', 'Module 2', 'Module 3', 'Module 4'];
+
+  // ==================================================================
+  //  GRADE HELPERS
+  // ==================================================================
+  const getGrade = (marks) => {
+    if (marks === null || marks === undefined || marks === '') return { grade: '-', points: 0 };
+    const n = Number(marks);
+    if (!Number.isFinite(n)) return { grade: '-', points: 0 };
+    if (isUniversity) {
+      if (n >= 70) return { grade: 'A', points: 5 };
+      if (n >= 60) return { grade: 'B', points: 4 };
+      if (n >= 50) return { grade: 'C', points: 3 };
+      if (n >= 40) return { grade: 'D', points: 2 };
+      return { grade: 'E', points: 1 };
+    }
+    if (isTVET) {
+      if (n >= 80) return { grade: 'DISTINCTION', points: 5 };
+      if (n >= 65) return { grade: 'CREDIT', points: 4 };
+      if (n >= 50) return { grade: 'MERIT', points: 3 };
+      if (n >= 40) return { grade: 'PASS', points: 2 };
+      return { grade: 'FAIL', points: 1 };
+    }
+    if (isPrimary) {
+      if (n >= 80) return { grade: 'Exceeding Expectations', points: 4 };
+      if (n >= 65) return { grade: 'Meeting Expectations', points: 3 };
+      if (n >= 50) return { grade: 'Approaching Expectations', points: 2 };
+      if (n >= 30) return { grade: 'Below Expectations', points: 1 };
+      return { grade: 'Needs Improvement', points: 0 };
+    }
+    if (n >= 80) return { grade: 'A', points: 12 };
+    if (n >= 75) return { grade: 'A-', points: 11 };
+    if (n >= 70) return { grade: 'B+', points: 10 };
+    if (n >= 65) return { grade: 'B', points: 9 };
+    if (n >= 60) return { grade: 'B-', points: 8 };
+    if (n >= 55) return { grade: 'C+', points: 7 };
+    if (n >= 50) return { grade: 'C', points: 6 };
+    if (n >= 45) return { grade: 'C-', points: 5 };
+    if (n >= 40) return { grade: 'D+', points: 4 };
+    if (n >= 35) return { grade: 'D', points: 3 };
+    if (n >= 30) return { grade: 'D-', points: 2 };
+    return { grade: 'E', points: 1 };
+  };
+
+  const getGradeColor = (grade) => {
+    if (!grade) return 'bg-gray-100 text-gray-800';
+    if (['A', 'A-', 'Exceeding Expectations', 'DISTINCTION'].includes(grade)) return 'bg-green-100 text-green-800';
+    if (['B+', 'B', 'B-', 'Meeting Expectations', 'CREDIT'].includes(grade)) return 'bg-blue-100 text-blue-800';
+    if (['C+', 'C', 'C-', 'Approaching Expectations', 'MERIT'].includes(grade)) return 'bg-yellow-100 text-yellow-800';
+    if (['D+', 'D', 'D-', 'Below Expectations', 'PASS'].includes(grade)) return 'bg-orange-100 text-orange-800';
+    if (['E', 'Needs Improvement', 'FAIL'].includes(grade)) return 'bg-red-100 text-red-800';
+    return 'bg-gray-100 text-gray-800';
+  };
+
+  // ==================================================================
+  //  PREPARE PAYLOAD
+  // ==================================================================
   const prepareFormData = (data) => {
     const uuidFields = ['classId', 'courseId', 'programId', 'facultyId', 'departmentId', 'transportRouteId'];
     const prepared = { ...data };
     uuidFields.forEach(f => { if (prepared[f] === '') prepared[f] = null; });
 
-    // Auto-generated admission number: strip the field entirely
-    // so the backend can generate one. NEVER send the string "AUTO" or similar.
-    if (!prepared.admissionNumber || String(prepared.admissionNumber).trim() === '') {
+    // Admission number: if blank, omit so the backend generates one
+    if (!prepared.admissionNumber || !String(prepared.admissionNumber).trim()) {
       delete prepared.admissionNumber;
     } else {
       prepared.admissionNumber = String(prepared.admissionNumber).trim().toUpperCase();
     }
+
+    // Date: always normalize to YYYY-MM-DD or null
+    if ('dateOfBirth' in prepared) {
+      prepared.dateOfBirth = safeDateForApi(prepared.dateOfBirth);
+    }
+
     return prepared;
   };
 
-  // ==================== FILTERED STUDENTS ====================
+  // ==================================================================
+  //  FILTERED LIST
+  // ==================================================================
   const filteredStudents = useMemo(() => {
+    const list = Array.isArray(students) ? students : [];
+
     if (isStudent && myStudentRecord) return [myStudentRecord];
     if (isParent) {
-      const myChildrenIds = parents?.filter(p => p.userId === user?.id).map(p => p.studentId) || [];
-      return students.filter(s => myChildrenIds.includes(s.id));
+      const myChildrenIds = (parents || []).filter(p => p.userId === user?.id).map(p => p.studentId);
+      return list.filter(s => myChildrenIds.includes(s.id));
     }
-    return students.filter(student => {
-      if (student.schoolId !== currentSchool?.id) return false;
-      const matchesSearch = searchTerm === '' ||
-        student.firstName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        student.lastName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        student.admissionNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        student.idNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        student.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        student.phone?.toLowerCase().includes(searchTerm.toLowerCase());
-      let matchesClass = true;
-      if (isUniversity) {
-        matchesClass = !selectedCourse || student.courseId === selectedCourse;
-        if (selectedYear) matchesClass = matchesClass && student.currentYear === parseInt(selectedYear);
-      } else if (isTVET) {
-        matchesClass = !selectedProgram || student.programId === selectedProgram;
-        if (selectedModule) matchesClass = matchesClass && student.currentModule === selectedModule;
-      } else {
-        matchesClass = !selectedClass || student.classId === selectedClass;
-      }
-      const matchesStatus = selectedStatus === 'all' ||
-        (selectedStatus === 'active' && student.isActive !== false) ||
-        (selectedStatus === 'inactive' && student.isActive === false);
-      return matchesSearch && matchesClass && matchesStatus;
-    });
-  }, [students, searchTerm, selectedClass, selectedCourse, selectedProgram, selectedYear, selectedModule, selectedStatus, isUniversity, isTVET, isStudent, myStudentRecord, isParent, parents, user, currentSchool]);
 
-  // ==================== LOAD STUDENT DETAILS ====================
-  const loadStudentDetails = async (student) => {
-    setLoading(true);
-    try {
-      setSelectedStudent(student);
-      setActiveDetailTab('overview');
-      const s = await api.get(`/students/${student.id}`);
-      setStudentDetails(s.data.student);
-      try { const f = await api.get(`/students/${student.id}/fee-statement`); setStudentFeeSummary(f.data.statement.summary); }
-      catch (e) { setStudentFeeSummary(null); }
-      try { const p = await api.get(`/payments?studentId=${student.id}`); setStudentPayments(p.data.payments || []); }
-      catch (e) { setStudentPayments([]); }
-      try { const g = await api.get(`/parents?studentId=${student.id}`); setStudentParents(g.data.parents || []); }
-      catch (e) { setStudentParents([]); }
-      try { const r = await api.get(`/results?studentId=${student.id}`); setStudentResults(r.data.results || []); }
-      catch (e) { setStudentResults([]); }
-      try { const a = await api.get(`/attendance?studentId=${student.id}&limit=100`); setStudentAttendance(a.data.attendance || []); }
-      catch (e) { setStudentAttendance([]); }
-      setShowDetailsModal(true);
-    } catch (error) {
-      console.error('Error loading student details:', error);
-      alert('Failed to load student details');
-    } finally { setLoading(false); }
+    return list.filter(student => {
+      if (!student) return false;
+      if (currentSchool?.id && student.schoolId !== currentSchool.id) return false;
+
+      const term = searchTerm.trim().toLowerCase();
+      const matchesSearch = !term ||
+        (student.firstName || '').toLowerCase().includes(term) ||
+        (student.lastName || '').toLowerCase().includes(term) ||
+        (student.admissionNumber || '').toLowerCase().includes(term) ||
+        (student.idNumber || '').toLowerCase().includes(term) ||
+        (student.email || '').toLowerCase().includes(term) ||
+        (student.phone || '').toLowerCase().includes(term);
+
+      let matchesScope = true;
+      if (isUniversity) {
+        matchesScope = !classFilter || student.courseId === classFilter;
+      } else if (isTVET) {
+        matchesScope = !classFilter || student.programId === classFilter;
+      } else {
+        matchesScope = !classFilter || student.classId === classFilter;
+      }
+
+      const matchesStatus =
+        statusFilter === 'all' ||
+        (statusFilter === 'active' && student.isActive !== false) ||
+        (statusFilter === 'inactive' && student.isActive === false);
+
+      return matchesSearch && matchesScope && matchesStatus;
+    });
+  }, [
+    students, searchTerm, classFilter, statusFilter,
+    isUniversity, isTVET, isStudent, myStudentRecord, isParent,
+    parents, user, currentSchool
+  ]);
+
+  // ==================================================================
+  //  OPEN / CLOSE FORM
+  // ==================================================================
+  const openAdd = () => {
+    setEditingId(null);
+    setFormState(emptyForm());
+    setAutoAdm(true);
+    setSubmitError('');
+    setShowForm(true);
+    setTimeout(() => document.getElementById('student-form')?.scrollIntoView({ behavior: 'smooth' }), 100);
   };
 
-  // ==================== EDIT ====================
-  const handleEditClick = (student) => {
+  const openEdit = (student) => {
     if (!canEdit) { alert('You do not have permission to edit students'); return; }
+    if (!student) return;
+    setEditingId(student.id);
+    setAutoAdm(false);
     setSubmitError('');
-    setSelectedStudent(student);
-    setForm({
-      ...student,
+    setFormState({
+      admissionNumber: student.admissionNumber || '',
+      firstName: student.firstName || '',
+      middleName: student.middleName || '',
+      lastName: student.lastName || '',
+      gender: student.gender || 'MALE',
+      dateOfBirth: toDateInput(student.dateOfBirth),
+      nationality: student.nationality || 'Kenyan',
+      religion: student.religion || '',
       email: student.email || '',
       phone: student.phone || '',
       address: student.address || '',
-      programId: student.programId || student.courseId || '',
+      idType: student.idType || 'BIRTH_CERTIFICATE',
+      idNumber: student.idNumber || '',
+      classId: student.classId || '',
       courseId: student.courseId || '',
+      programId: student.programId || '',
+      facultyId: student.facultyId || '',
+      departmentId: student.departmentId || '',
+      currentYear: student.currentYear || 1,
+      currentSemester: student.currentSemester || 1,
+      currentModule: student.currentModule || '',
+      boardingStatus: student.boardingStatus || 'DAY',
+      transportRouteId: student.transportRouteId || '',
+      medicalInfo: student.medicalInfo || { bloodGroup: '', allergies: '', disabilities: '' },
       studentLogin: { email: '', password: '', createAccount: false },
       parent: {
-        firstName: '', lastName: '', email: '', phone: '', password: '',
-        relationship: 'Mother', createAccount: false, grantPortalAccess: false,
+        firstName: '', middleName: '', lastName: '',
+        email: '', phone: '',
+        relationship: 'Mother',
+        isPrimary: true, emergencyContact: false,
+        occupation: '', employer: '', monthlyIncome: '',
+        grantPortalAccess: false, password: '',
         useExisting: false, existingUserId: null
-      }
+      },
+      isActive: student.isActive !== false
     });
-    setShowEditModal(true);
+    setShowForm(true);
+    setTimeout(() => document.getElementById('student-form')?.scrollIntoView({ behavior: 'smooth' }), 100);
   };
 
+  const closeForm = () => {
+    setShowForm(false);
+    setEditingId(null);
+    setAutoAdm(true);
+    setSubmitError('');
+    setFormState(emptyForm());
+  };
+
+  // ==================================================================
+  //  SUBMIT (create)
+  // ==================================================================
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    setSubmitError('');
+
+    if (!canAdd) { setSubmitError('You do not have permission to add students'); return; }
+    const f = formState;
+
+    if (!f.firstName?.trim() || !f.lastName?.trim()) {
+      setSubmitError('First and last name are required.'); return;
+    }
+    if (!f.dateOfBirth) { setSubmitError('Date of birth is required.'); return; }
+    if (isUniversity && !f.courseId) { setSubmitError('Please select a course.'); return; }
+    if (isTVET && !f.programId) { setSubmitError('Please select a program.'); return; }
+    if (!isUniversity && !isTVET && !f.classId) { setSubmitError('Please select a class.'); return; }
+
+    // Guardian validation
+    const p = f.parent || {};
+    if (!p.useExisting) {
+      if (!p.firstName?.trim() || !p.lastName?.trim()) {
+        setSubmitError('Guardian first name and last name are required.'); return;
+      }
+      if (!p.phone?.trim() && !p.email?.trim()) {
+        setSubmitError('Provide at least a phone number or email for the guardian.'); return;
+      }
+      if (p.grantPortalAccess) {
+        if (!p.email?.trim()) { setSubmitError('Email is required to grant portal access.'); return; }
+        if (!p.password?.trim()) { setSubmitError('Password is required to grant portal access.'); return; }
+      }
+    } else if (!p.existingUserId) {
+      setSubmitError('Please select an existing parent/guardian.'); return;
+    }
+
+    setLoading(true);
+    try {
+      const payload = prepareFormData(f);
+
+      // onSubmit is provided by the parent. It should return a promise.
+      if (typeof onSubmit === 'function') {
+        await onSubmit(e, payload);
+      } else {
+        await api.post('/students', { ...payload, schoolId: currentSchool?.id });
+      }
+
+      setSuccessMessage('✅ Student registered successfully');
+      closeForm();
+      setTimeout(() => setSuccessMessage(''), 4000);
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || 'Failed to register student';
+      // If the backend rejected the admission number, regenerate
+      if (/admission/i.test(msg) && /(taken|exists|unique|duplicate)/i.test(msg)) {
+        setSubmitError(`${msg}. Fetching the next available number…`);
+        await fetchNextAdmissionNumber();
+      } else {
+        setSubmitError(msg);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==================================================================
+  //  SUBMIT (update)
+  // ==================================================================
   const handleUpdateSubmit = async (e) => {
     e.preventDefault();
-    if (!canEdit) { alert('You do not have permission to update students'); return; }
-    setLoading(true);
+    if (!canEdit || !editingId) return;
     setSubmitError('');
-    try {
-      const updateData = { ...form };
-      if (isTVET && !updateData.programId) {
-        setSubmitError('Please select a program.');
-        setLoading(false); return;
-      }
-      if (isTVET) delete updateData.courseId;
-      await handleUpdate('/students', selectedStudent.id, prepareFormData(updateData), setStudents, students);
-      setShowEditModal(false);
-      setSelectedStudent(null);
-      alert('✅ Student updated successfully!');
-    } catch (error) {
-      console.error('Error updating student:', error);
-      const msg = error.response?.data?.message || error.message || 'Failed to update student';
-      setSubmitError(msg);
-    } finally { setLoading(false); }
-  };
-
-  // ==================== DELETE ====================
-  const handleDeleteClick = (student) => {
-    if (!canDelete) { alert('You do not have permission to delete students'); return; }
-    setSelectedStudent(student);
-    setShowDeleteConfirm(true);
-  };
-
-  const confirmDelete = async () => {
-    if (!canDelete) return;
     setLoading(true);
     try {
-      await handleDelete('/students', selectedStudent.id, setStudents, students);
+      const payload = prepareFormData(formState);
+      if (typeof handleUpdate === 'function') {
+        await handleUpdate('/students', editingId, payload, setStudents, students);
+      } else {
+        await api.put(`/students/${editingId}`, payload);
+      }
+      setSuccessMessage('✅ Student updated successfully');
+      closeForm();
+      setTimeout(() => setSuccessMessage(''), 4000);
+    } catch (err) {
+      setSubmitError(err.response?.data?.message || 'Failed to update student');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==================================================================
+  //  DELETE
+  // ==================================================================
+  const confirmDelete = async () => {
+    if (!canDelete || !selectedStudent) return;
+    setLoading(true);
+    try {
+      if (typeof handleDelete === 'function') {
+        await handleDelete('/students', selectedStudent.id, setStudents, students);
+      } else {
+        await api.delete(`/students/${selectedStudent.id}`);
+      }
+      setSuccessMessage('✅ Student deleted successfully');
       setShowDeleteConfirm(false);
       setSelectedStudent(null);
-      alert('✅ Student deleted successfully!');
-    } catch (error) {
-      console.error('Error deleting student:', error);
-      alert('❌ Failed to delete student');
-    } finally { setLoading(false); }
+      setTimeout(() => setSuccessMessage(''), 4000);
+    } catch (err) {
+      setErrorMessage(err.response?.data?.message || 'Failed to delete student');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // ==================== ADD PARENT ====================
+  // ==================================================================
+  //  LOAD DETAILS
+  // ==================================================================
+  const loadStudentDetails = async (student) => {
+    if (!student) return;
+    setLoading(true);
+    setSelectedStudent(student);
+    setActiveDetailTab('overview');
+    try {
+      const s = await api.get(`/students/${student.id}`);
+      setStudentDetails(s.data.student || student);
+      try { const r = await api.get(`/results?studentId=${student.id}`); setStudentResults(r.data.results || []); }
+      catch { setStudentResults([]); }
+      try { const p = await api.get(`/payments?studentId=${student.id}`); setStudentPayments(p.data.payments || []); }
+      catch { setStudentPayments([]); }
+      try { const g = await api.get(`/parents?studentId=${student.id}`); setStudentParents(g.data.parents || []); }
+      catch { setStudentParents([]); }
+      try { const a = await api.get(`/attendance?studentId=${student.id}&limit=100`); setStudentAttendance(a.data.attendance || []); }
+      catch { setStudentAttendance([]); }
+      setShowDetailsModal(true);
+    } catch (err) {
+      console.error('loadStudentDetails error:', err);
+      setErrorMessage('Failed to load student details');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==================================================================
+  //  ADD PARENT / GUARDIAN
+  // ==================================================================
   const handleAddParentClick = (student) => {
-    if (!canEdit) { alert('You do not have permission to add parents'); return; }
+    if (!canEdit || !student) return;
     setSelectedStudentForParent(student);
     setParentForm({
-      ...parentForm,
-      studentId: student.id,
-      relationship: 'Mother',
+      userId: '', studentId: student.id, relationship: 'Mother',
+      isPrimary: true, emergencyContact: false,
+      occupation: '', employer: '', monthlyIncome: '',
       firstName: '', middleName: '', lastName: '',
       email: '', phone: '', idNumber: '', address: '',
-      grantPortalAccess: false, password: '',
-      isPrimary: true, emergencyContact: false,
-      occupation: '', employer: '', monthlyIncome: ''
+      grantPortalAccess: false, password: ''
     });
     setCreateNewParent(true);
     setSelectedExistingParent(null);
-    setSearchParent('');
     setShowAddParentModal(true);
   };
 
   const handleAddParent = async () => {
-    if (!canEdit) return;
+    if (!canEdit || !selectedStudentForParent) return;
 
-    if (!parentForm.firstName?.trim() || !parentForm.lastName?.trim()) {
-      alert('Guardian first name and last name are required'); return;
-    }
-    if (!parentForm.phone?.trim() && !parentForm.email?.trim()) {
-      alert('Provide at least a phone number or email for the guardian'); return;
-    }
-    if (parentForm.grantPortalAccess && !parentForm.email?.trim()) {
-      alert('Email is required to grant portal access'); return;
-    }
-    if (parentForm.grantPortalAccess && !parentForm.password?.trim()) {
-      alert('Password is required to grant portal access'); return;
+    if (createNewParent) {
+      if (!parentForm.firstName?.trim() || !parentForm.lastName?.trim()) {
+        setErrorMessage('Guardian first and last name are required'); return;
+      }
+      if (!parentForm.phone?.trim() && !parentForm.email?.trim()) {
+        setErrorMessage('Provide at least a phone number or email'); return;
+      }
+      if (parentForm.grantPortalAccess) {
+        if (!parentForm.email?.trim()) { setErrorMessage('Email required for portal access'); return; }
+        if (!parentForm.password?.trim()) { setErrorMessage('Password required for portal access'); return; }
+      }
+    } else if (!selectedExistingParent) {
+      setErrorMessage('Please select an existing parent/guardian'); return;
     }
 
     setLoading(true);
     try {
-      let userId = parentForm.userId;
+      let userId = null;
 
-      if (!createNewParent && selectedExistingParent) {
+      if (!createNewParent) {
         userId = selectedExistingParent.userId;
-      }
-
-      if (createNewParent && parentForm.grantPortalAccess) {
+      } else if (parentForm.grantPortalAccess) {
         const userRes = await api.post('/users', {
           email: parentForm.email.trim(),
           password: parentForm.password,
@@ -4838,11 +5209,11 @@ const StudentModule = ({
           role: 'PARENT',
           schoolId: currentSchool?.id
         });
-        userId = userRes.data.user.id;
+        userId = userRes.data?.user?.id || null;
       }
 
       await api.post('/parents', {
-        userId: userId || null,
+        userId,
         studentId: selectedStudentForParent.id,
         relationship: parentForm.relationship,
         isPrimary: parentForm.isPrimary,
@@ -4860,120 +5231,88 @@ const StudentModule = ({
         schoolId: currentSchool?.id
       });
 
+      // Refresh parent list
       try {
         const pr = await api.get('/parents');
-        setParents(pr.data.parents || []);
-      } catch (e) { console.error(e); }
-
-      if (selectedStudent && selectedStudent.id === selectedStudentForParent.id) {
-        try {
-          const spr = await api.get(`/parents?studentId=${selectedStudent.id}`);
-          setStudentParents(spr.data.parents || []);
-        } catch (e) { console.error(e); }
-      }
+        if (setParents) setParents(pr.data.parents || []);
+      } catch {}
 
       setShowAddParentModal(false);
-      setParentForm({
-        userId: '', studentId: '', relationship: 'Mother',
-        isPrimary: true, emergencyContact: false,
-        occupation: '', employer: '', monthlyIncome: '',
-        firstName: '', middleName: '', lastName: '',
-        email: '', phone: '', idNumber: '', address: '',
-        grantPortalAccess: false, password: ''
-      });
-      setCreateNewParent(true);
-      setSelectedExistingParent(null);
-      alert('✅ Guardian added successfully!');
-    } catch (error) {
-      console.error('Error adding parent:', error);
-      alert('❌ Failed to add guardian: ' + (error.response?.data?.message || error.message));
-    } finally { setLoading(false); }
+      setSuccessMessage('✅ Guardian added successfully');
+      setTimeout(() => setSuccessMessage(''), 4000);
+    } catch (err) {
+      setErrorMessage(err.response?.data?.message || 'Failed to add guardian');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // ==================== UNIQUE VALUES ====================
-  const uniqueYears = [...new Set(students.map(s => s.currentYear).filter(Boolean))];
-  const uniqueModules = [...new Set(students.map(s => s.currentModule).filter(Boolean))];
+  // ==================================================================
+  //  STUDENT ROLE — load own data
+  // ==================================================================
+  useEffect(() => {
+    if (isStudent) {
+      if (!admissionNumber) setShowAdmissionModal(true);
+      else loadMyStudentData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStudent, admissionNumber]);
 
-  // ==================== OPTIONS ====================
-  const classOptions = useMemo(() => (classes || []).map(c => ({
-    value: c.id, label: c.name,
-    subLabel: `Capacity: ${c.capacity || 'N/A'} • Streams: ${c.streams?.length || 0}`
-  })), [classes]);
+  const loadMyStudentData = async () => {
+    if (!admissionNumber) return;
+    setLoadingMyData(true);
+    try {
+      const res = await api.get(`/students/by-admission/${encodeURIComponent(admissionNumber)}`);
+      const myStudent = res.data?.student;
+      if (myStudent) {
+        setMyStudentRecord(myStudent);
+        localStorage.setItem('studentAdmissionNumber', admissionNumber);
+        try { const r = await api.get(`/results?studentId=${myStudent.id}`); setStudentResults(r.data.results || []); } catch {}
+        try { const a = await api.get(`/attendance?studentId=${myStudent.id}`); setStudentAttendance(a.data.attendance || []); } catch {}
+        try { const p = await api.get(`/payments?studentId=${myStudent.id}`); setStudentPayments(p.data.payments || []); } catch {}
+        setShowAdmissionModal(false);
+      }
+    } catch (err) {
+      if (err.response?.status === 404) {
+        localStorage.removeItem('studentAdmissionNumber');
+        setShowAdmissionModal(true);
+      }
+    } finally {
+      setLoadingMyData(false);
+    }
+  };
 
-  const courseOptions = useMemo(() => (courses || []).map(c => ({
-    value: c.id, label: c.name, subLabel: c.code || ''
-  })), [courses]);
-
-  const programOptions = useMemo(() => (programs || []).map(p => ({
-    value: p.id, label: p.name, subLabel: p.code || `Level: ${p.level || 'N/A'}`
-  })), [programs]);
-
-  const facultyOptions = useMemo(() => (faculties || []).map(f => ({
-    value: f.id, label: f.name, subLabel: `Dean: ${f.dean || 'N/A'}`
-  })), [faculties]);
-
-  const departmentOptions = useMemo(() => (departments || []).map(d => ({
-    value: d.id, label: d.name, subLabel: d.faculty?.name || 'No Faculty'
-  })), [departments]);
-
-  const routeOptions = useMemo(() => (routes || []).map(r => ({
-    value: r.id, label: r.name, subLabel: `Fee: ${r.fee || 0}`
-  })), [routes]);
-
-  const parentUserOptions = useMemo(() => parentUsers.map(p => ({
-    value: p.userId,
-    label: `${p.firstName} ${p.lastName}`,
-    subLabel: `${p.email || ''} • ${p.existingRelationships?.join(', ') || 'No existing relationships'}`
-  })), [parentUsers]);
-
-  const yearOptions = useMemo(() => uniqueYears.sort().map(y => ({
-    value: y.toString(), label: `Year ${y}`,
-    subLabel: `${students.filter(s => s.currentYear === y).length} students`
-  })), [uniqueYears, students]);
-
-  const moduleOptions = useMemo(() => uniqueModules.sort().map(m => ({
-    value: m, label: m,
-    subLabel: `${students.filter(s => s.currentModule === m).length} students`
-  })), [uniqueModules, students]);
-
-  // ==================== STUDENT VIEW ====================
+  // ==================================================================
+  //  RENDER — student role view
+  // ==================================================================
   if (isStudent) {
     return (
       <>
         {showAdmissionModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-2xl font-bold">Student Access</h2>
-                <button onClick={() => setShowAdmissionModal(false)} className="text-gray-500 hover:text-gray-700">
-                  <i className="fas fa-times"></i>
-                </button>
-              </div>
-              <p className="text-gray-600 mb-6">Please enter your admission number to access your student dashboard.</p>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Admission Number <span className="text-red-500 ml-1">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={admissionNumber || ''}
-                    onChange={(e) => setAdmissionNumber(e.target.value.toUpperCase())}
-                    placeholder="e.g., BCM-05"
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-                <button onClick={loadMyStudentData}
-                  disabled={loadingMyData || !admissionNumber}
-                  className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-                  {loadingMyData ? 'Loading...' : 'Continue'}
-                </button>
-              </div>
+              <h2 className="text-2xl font-bold mb-2">Student Access</h2>
+              <p className="text-gray-600 mb-6">Enter your admission number to access your dashboard.</p>
+              <input
+                type="text"
+                value={admissionNumber || ''}
+                onChange={(e) => setAdmissionNumber(e.target.value.toUpperCase())}
+                placeholder="e.g., ADM/2026/0001"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 mb-4"
+              />
+              <button
+                onClick={loadMyStudentData}
+                disabled={loadingMyData || !admissionNumber}
+                className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {loadingMyData ? 'Loading…' : 'Continue'}
+              </button>
             </div>
           </div>
         )}
+
         <div className="space-y-6">
-          {loadingMyData && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
+          {loadingMyData && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50" />}
           <h2 className="text-2xl font-bold">My Student Profile</h2>
           {myStudentRecord ? (
             <div className="bg-white rounded-xl shadow-sm overflow-hidden">
@@ -4986,25 +5325,15 @@ const StudentModule = ({
                   </div>
                   <div>
                     <h3 className="text-2xl font-bold">{myStudentRecord.firstName} {myStudentRecord.lastName}</h3>
-                    <p className="text-indigo-100">Admission: {myStudentRecord.admissionNumber}</p>
+                    <p className="text-indigo-100">Admission: {myStudentRecord.admissionNumber || '—'}</p>
                     <p className="text-indigo-200 text-sm mt-1">
                       {isUniversity
-                        ? (myStudentRecord.course?.name || courses?.find(c => c.id === myStudentRecord.courseId)?.name || 'No Course')
+                        ? (courses.find(c => c.id === myStudentRecord.courseId)?.name || 'No Course')
                         : isTVET
-                        ? (myStudentRecord.program?.name || programs?.find(p => p.id === myStudentRecord.programId)?.name || 'No Program')
-                        : (myStudentRecord.class?.name || classes?.find(c => c.id === myStudentRecord.classId)?.name || 'No Class')}
-                      {myStudentRecord.currentYear && ` • Year ${myStudentRecord.currentYear}`}
-                      {isTVET && myStudentRecord.currentModule && ` • ${myStudentRecord.currentModule}`}
+                        ? (programs.find(p => p.id === myStudentRecord.programId)?.name || 'No Program')
+                        : (classes.find(c => c.id === myStudentRecord.classId)?.name || 'No Class')}
                     </p>
                   </div>
-                </div>
-                <div className="mt-4 flex justify-end">
-                  <button onClick={() => {
-                    localStorage.removeItem('studentAdmissionNumber');
-                    setAdmissionNumber(null); setMyStudentRecord(null); setShowAdmissionModal(true);
-                  }} className="text-white text-sm hover:text-indigo-200 transition-colors">
-                    <i className="fas fa-sign-out-alt mr-1"></i>Switch Account
-                  </button>
                 </div>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-6">
@@ -5029,66 +5358,11 @@ const StudentModule = ({
                   <p className="text-2xl font-bold text-purple-700">0</p>
                 </div>
               </div>
-              <div className="px-6 pb-6">
-                <h3 className="font-semibold text-lg mb-3">Contact Information</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-50 p-4 rounded-lg">
-                  <div><p className="text-xs text-gray-500">Email</p><p className="font-medium">{myStudentRecord.email || 'Not provided'}</p></div>
-                  <div><p className="text-xs text-gray-500">Phone</p><p className="font-medium">{myStudentRecord.phone || 'Not provided'}</p></div>
-                  <div><p className="text-xs text-gray-500">Address</p><p className="font-medium">{myStudentRecord.address || 'Not provided'}</p></div>
-                </div>
-              </div>
-              {studentResults.length > 0 && (
-                <div className="px-6 pb-6">
-                  <h3 className="font-semibold text-lg mb-3">Recent Results</h3>
-                  <div className="overflow-x-auto border rounded-lg">
-                    <table className="w-full">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-4 py-2 text-left">Exam</th>
-                          <th className="px-4 py-2 text-left">Subject/Unit</th>
-                          <th className="px-4 py-2 text-left">Marks</th>
-                          <th className="px-4 py-2 text-left">Grade</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {studentResults.slice(0, 3).map(result => {
-                          const exam = exams?.find(e => e.id === result.examId);
-                          let itemName = 'Unknown';
-                          if (isUniversity || isTVET) {
-                            itemName = units?.find(u => u.id === result.unitId)?.name || 'Unknown Unit';
-                          } else {
-                            itemName = subjects?.find(s => s.id === result.subjectId)?.name || 'Unknown Subject';
-                          }
-                          return (
-                            <tr key={result.id}>
-                              <td className="px-4 py-2">{exam?.name || 'Unknown Exam'}</td>
-                              <td className="px-4 py-2">{itemName}</td>
-                              <td className="px-4 py-2 font-bold">{result.marks}</td>
-                              <td className="px-4 py-2">
-                                <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(result.grade)}`}>{result.grade}</span>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 p-6 pt-0">
-                <button onClick={() => window.location.href = '/results'} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors"><i className="fas fa-file-alt mr-2"></i>View All Results</button>
-                <button onClick={() => window.location.href = '/attendance'} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"><i className="fas fa-calendar-check mr-2"></i>View Attendance</button>
-                <button onClick={() => window.location.href = '/fees'} className="bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 transition-colors"><i className="fas fa-money-bill-wave mr-2"></i>Fee Statement</button>
-                <button onClick={() => window.location.href = '/exam-cards'} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors"><i className="fas fa-id-card mr-2"></i>Exam Card</button>
-              </div>
             </div>
           ) : (
             <div className="bg-white p-12 rounded-xl shadow-sm text-center">
               <i className="fas fa-user-graduate text-6xl text-gray-300 mb-4"></i>
-              <p className="text-gray-500 text-lg">No student record found for your account.</p>
-              <button onClick={() => setShowAdmissionModal(true)} className="mt-4 bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700">
-                Enter Admission Number
-              </button>
+              <p className="text-gray-500 text-lg">No student record found.</p>
             </div>
           )}
         </div>
@@ -5096,523 +5370,431 @@ const StudentModule = ({
     );
   }
 
-  // ==================== TEACHER/ADMIN VIEW ====================
+  // ==================================================================
+  //  RENDER — admin / teacher view
+  // ==================================================================
   return (
     <div className="space-y-6">
-      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
+      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50" />}
 
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold">Student Management</h2>
-        <div className="flex space-x-2">
-          <button onClick={() => setShowFilters(!showFilters)} className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 flex items-center">
-            <i className="fas fa-filter mr-2"></i>Filters
+      {successMessage && (
+        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center justify-between">
+          <span><i className="fas fa-check-circle mr-2" />{successMessage}</span>
+          <button onClick={() => setSuccessMessage('')} className="text-green-500 hover:text-green-700">
+            <i className="fas fa-times" />
           </button>
-          <button onClick={() => setViewMode(viewMode === 'grid' ? 'table' : 'grid')} className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 flex items-center">
-            <i className={`fas fa-${viewMode === 'grid' ? 'table' : 'th-large'} mr-2`}></i>
-            {viewMode === 'grid' ? 'Table View' : 'Grid View'}
+        </div>
+      )}
+      {errorMessage && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
+          <span><i className="fas fa-exclamation-circle mr-2" />{errorMessage}</span>
+          <button onClick={() => setErrorMessage('')} className="text-red-500 hover:text-red-700">
+            <i className="fas fa-times" />
+          </button>
+        </div>
+      )}
+
+      {/* Header */}
+      <div className="flex flex-wrap justify-between items-center gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800">Student Management</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            {(students || []).length} enrolled • {(students || []).filter(s => s.isActive !== false).length} active
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => setShowFilters(v => !v)}
+                  className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 flex items-center gap-2">
+            <i className="fas fa-filter" />Filters
+          </button>
+          <button onClick={() => setViewMode(v => v === 'grid' ? 'table' : 'grid')}
+                  className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 flex items-center gap-2">
+            <i className={`fas fa-${viewMode === 'grid' ? 'table' : 'th-large'}`} />
+            {viewMode === 'grid' ? 'Table' : 'Grid'}
           </button>
           {canAdd && (
-            <button onClick={() => { setSubmitError(''); setShowAddModal(true); }} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center">
-              <i className="fas fa-plus mr-2"></i>Add Student
+            <button onClick={openAdd}
+                    className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2">
+              <i className="fas fa-plus" />Add Student
             </button>
           )}
         </div>
       </div>
 
+      {/* Filters */}
       {showFilters && (
-        <div className="bg-white p-6 rounded-xl shadow-sm">
-          <h3 className="text-lg font-semibold mb-4">🔍 Filter Students</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <SearchableSelect label="Search" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search by name, admission, email..."
-              options={students.slice(0, 20).map(s => ({
-                value: s.admissionNumber || s.id,
-                label: `${s.firstName} ${s.lastName}`,
-                subLabel: `Adm: ${s.admissionNumber || 'N/A'}`
-              }))}
-              emptyMessage="No students available" />
-            {isUniversity && (<>
-              <SearchableSelect label="Course" value={selectedCourse} onChange={(e) => setSelectedCourse(e.target.value)} options={courseOptions} placeholder="Search courses..." emptyMessage="No courses available" />
-              <SearchableSelect label="Year" value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} options={yearOptions} placeholder="All Years" emptyMessage="No years available" />
-            </>)}
-            {isTVET && (<>
-              <SearchableSelect label="Program" value={selectedProgram} onChange={(e) => setSelectedProgram(e.target.value)} options={programOptions} placeholder="Search programs..." emptyMessage="No programs available" />
-              <SearchableSelect label="Module" value={selectedModule} onChange={(e) => setSelectedModule(e.target.value)} options={moduleOptions} placeholder="All Modules" emptyMessage="No modules available" />
-            </>)}
+        <div className="bg-white p-4 rounded-xl shadow-sm border">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <TextInput
+              label="Search"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Name, admission no, email…"
+            />
             {!isUniversity && !isTVET && (
-              <SearchableSelect label="Class" value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)} options={classOptions} placeholder="Search classes..." emptyMessage="No classes available" />
+              <SearchableSelect
+                label="Class"
+                value={classFilter}
+                onChange={(e) => setClassFilter(e.target.value)}
+                options={classFilterOptions}
+                placeholder="All classes"
+              />
             )}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-              <select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg">
-                <option value="all">All Students</option>
-                <option value="active">Active Only</option>
-                <option value="inactive">Inactive Only</option>
-              </select>
-            </div>
+            {isUniversity && (
+              <SearchableSelect
+                label="Course"
+                value={classFilter}
+                onChange={(e) => setClassFilter(e.target.value)}
+                options={courseOptions}
+                placeholder="All courses"
+              />
+            )}
+            {isTVET && (
+              <SearchableSelect
+                label="Program"
+                value={classFilter}
+                onChange={(e) => setClassFilter(e.target.value)}
+                options={programOptions}
+                placeholder="All programs"
+              />
+            )}
+            <SelectField
+              label="Status"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              options={[
+                { value: 'all', label: 'All Students' },
+                { value: 'active', label: 'Active Only' },
+                { value: 'inactive', label: 'Inactive Only' }
+              ]}
+            />
           </div>
-          <div className="mt-4 flex justify-end space-x-2">
-            <button onClick={() => {
-              setSearchTerm(''); setSelectedClass(''); setSelectedCourse('');
-              setSelectedProgram(''); setSelectedYear(''); setSelectedModule(''); setSelectedStatus('all');
-            }} className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600">
-              <i className="fas fa-undo mr-1"></i> Clear Filters
+          <div className="mt-4 flex justify-between items-center">
+            <span className="text-sm text-gray-500">
+              Showing {filteredStudents.length} of {(students || []).length}
+            </span>
+            <button
+              onClick={() => { setSearchTerm(''); setClassFilter(''); setStatusFilter('all'); }}
+              className="text-sm text-indigo-600 hover:text-indigo-800"
+            >
+              Clear Filters
             </button>
-            <p className="text-sm text-gray-600 py-2">
-              Showing <span className="font-bold">{filteredStudents.length}</span> of <span className="font-bold">{students.length}</span> students
-            </p>
           </div>
         </div>
       )}
 
-      {/* ==================== ADD STUDENT MODAL ==================== */}
-      {showAddModal && canAdd && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
-          <div className="bg-white p-6 rounded-xl shadow-sm max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold">Register New Student</h3>
-              <button onClick={() => { setShowAddModal(false); setSubmitError(''); }} className="text-gray-500 hover:text-gray-700">
-                <i className="fas fa-times"></i>
-              </button>
+      {/* Form (Add or Edit) */}
+      {showForm && (canAdd || canEdit) && (
+        <div id="student-form" className="bg-white p-6 rounded-xl shadow-sm border-2 border-indigo-100">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-semibold flex items-center gap-2">
+              <i className={`fas fa-${editingId ? 'edit' : 'user-plus'} text-indigo-600`} />
+              {editingId ? 'Edit Student' : 'Register New Student'}
+            </h3>
+            <button onClick={closeForm} className="text-gray-500 hover:text-gray-700">
+              <i className="fas fa-times" />
+            </button>
+          </div>
+
+          {submitError && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
+              <i className="fas fa-exclamation-circle mr-2" />{submitError}
             </div>
+          )}
 
-            {submitError && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
-                <i className="fas fa-exclamation-circle mr-2"></i>
-                {submitError}
-              </div>
-            )}
-
-            <form onSubmit={async (e) => {
-              e.preventDefault();
-              setSubmitError('');
-
-              // Academic requirement check
-              if (isUniversity && !form.courseId) { setSubmitError('Please select a course.'); return; }
-              if (isTVET && !form.programId) { setSubmitError('Please select a program.'); return; }
-              if (!isUniversity && !isTVET && !form.classId) { setSubmitError('Please select a class.'); return; }
-
-              // Guardian validation — always required
-              const p = form.parent || {};
-              if (!p.firstName?.trim() || !p.lastName?.trim()) {
-                setSubmitError('Guardian first name and last name are required.'); return;
-              }
-              if (!p.phone?.trim() && !p.email?.trim()) {
-                setSubmitError('Provide at least a phone number or email for the guardian.'); return;
-              }
-              if (p.grantPortalAccess) {
-                if (!p.email?.trim()) { setSubmitError('Email is required to grant portal access.'); return; }
-                if (!p.password?.trim()) { setSubmitError('Password is required to grant portal access.'); return; }
-              }
-
-              try {
-                // Note: onSubmit is provided by the parent; it's responsible for
-                // calling the API and updating state. prepareFormData strips
-                // admissionNumber if blank so the backend auto-generates it.
-                await onSubmit(e, prepareFormData(form));
-                setShowAddModal(false);
-              } catch (err) {
-                console.error('Create student failed:', err);
-                const msg = err.response?.data?.message || err.message || 'Failed to register student';
-                setSubmitError(msg);
-              }
-            }} className="space-y-4">
-
-              {/* PERSONAL */}
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="font-medium text-indigo-600 mb-3">Personal Details</h4>
-                <div className="grid grid-cols-2 gap-4">
-                  <InputField label="First Name *" value={form.firstName || ''} onChange={(e) => setForm({...form, firstName: e.target.value})} required />
-                  <InputField label="Middle Name" value={form.middleName || ''} onChange={(e) => setForm({...form, middleName: e.target.value})} />
-                  <InputField label="Last Name *" value={form.lastName || ''} onChange={(e) => setForm({...form, lastName: e.target.value})} required />
-                  <InputField label="Date of Birth *" type="date" value={form.dateOfBirth || ''} onChange={(e) => setForm({...form, dateOfBirth: e.target.value})} required />
-                  <SelectField label="Gender *" value={form.gender || 'MALE'} onChange={(e) => setForm({...form, gender: e.target.value})} options={['MALE', 'FEMALE']} />
-                  <InputField label="Nationality" value={form.nationality || 'Kenyan'} onChange={(e) => setForm({...form, nationality: e.target.value})} />
-                  <InputField label="Religion" value={form.religion || ''} onChange={(e) => setForm({...form, religion: e.target.value})} />
+          <form onSubmit={editingId ? handleUpdateSubmit : handleCreate} className="space-y-4">
+            {/* Admission number */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Admission Number <span className="text-red-500">*</span>
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={formState.admissionNumber || ''}
+                    onChange={(e) => {
+                      setAutoAdm(false);
+                      setFormState({ ...formState, admissionNumber: e.target.value });
+                    }}
+                    readOnly={autoAdm && !editingId}
+                    placeholder={admPreview || 'ADM/2026/0001'}
+                    className={`flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+                      autoAdm && !editingId ? 'bg-gray-50 text-gray-700' : 'bg-white'
+                    }`}
+                  />
+                  {!editingId && (
+                    <button
+                      type="button"
+                      onClick={() => { setAutoAdm(true); fetchNextAdmissionNumber(); }}
+                      disabled={loadingAdm}
+                      className="px-3 py-2 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 border border-indigo-200 disabled:opacity-50"
+                      title="Regenerate"
+                    >
+                      {loadingAdm ? <i className="fas fa-spinner fa-spin" /> : <i className="fas fa-sync-alt" />}
+                    </button>
+                  )}
                 </div>
-              </div>
-
-              {/* CONTACT */}
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="font-medium text-indigo-600 mb-3">Contact Information</h4>
-                <div className="grid grid-cols-2 gap-4">
-                  <InputField label="Email Address" type="email" value={form.email || ''} onChange={(e) => setForm({...form, email: e.target.value})} placeholder="student@example.com" />
-                  <InputField label="Phone Number" value={form.phone || ''} onChange={(e) => setForm({...form, phone: e.target.value})} placeholder="e.g., 0712345678" />
-                  <div className="col-span-2">
-                    <InputField label="Physical Address" value={form.address || ''} onChange={(e) => setForm({...form, address: e.target.value})} placeholder="e.g., 123 Main Street, Nairobi" textarea rows="2" />
-                  </div>
-                </div>
-              </div>
-
-              {/* IDENTIFICATION */}
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="font-medium text-indigo-600 mb-3">Identification</h4>
-                <div className="grid grid-cols-2 gap-4">
-                  <InputField label="Admission Number" value={form.admissionNumber || ''} onChange={(e) => setForm({...form, admissionNumber: e.target.value})} placeholder="Leave blank to auto-generate" />
-                  <SelectField label="ID Type" value={form.idType || 'NATIONAL_ID'} onChange={(e) => setForm({...form, idType: e.target.value})} options={['NATIONAL_ID', 'BIRTH_CERTIFICATE', 'PASSPORT', 'SCHOOL_ID', 'OTHER']} />
-                  <InputField label="ID/Birth Certificate Number" value={form.idNumber || ''} onChange={(e) => setForm({...form, idNumber: e.target.value})} />
-                </div>
-                <p className="text-xs text-gray-500 mt-2">
-                  <i className="fas fa-info-circle mr-1"></i>
-                  Leave admission number blank to let the system generate one automatically.
+                <p className="text-xs text-gray-500 mt-1">
+                  {autoAdm && !editingId
+                    ? <>Auto-generated for {CURRENT_YEAR}. Click the sync button to refresh.</>
+                    : <>Manual entry — must be unique for this school.</>}
                 </p>
               </div>
 
-              {/* ACADEMIC */}
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="font-medium text-indigo-600 mb-3">Academic Information</h4>
-                <div className="grid grid-cols-2 gap-4">
-                  {isUniversity && (<>
-                    <SearchableSelect label="Faculty" value={form.facultyId || ''} onChange={(e) => setForm({...form, facultyId: e.target.value, departmentId: '', courseId: ''})} options={facultyOptions} placeholder="Search faculty..." emptyMessage="No faculties available" required />
-                    <SearchableSelect label="Department" value={form.departmentId || ''} onChange={(e) => setForm({...form, departmentId: e.target.value, courseId: ''})} options={departmentOptions} placeholder="Search department..." emptyMessage="No departments available" required disabled={!form.facultyId} />
-                    <SearchableSelect label="Course" value={form.courseId || ''} onChange={(e) => setForm({...form, courseId: e.target.value})} options={courseOptions} placeholder="Search course..." emptyMessage="No courses available" required disabled={!form.departmentId} />
-                    <InputField label="Year of Study" type="number" value={form.currentYear || 1} onChange={(e) => setForm({...form, currentYear: parseInt(e.target.value)})} min="1" max="6" required />
-                    <InputField label="Semester" type="number" value={form.currentSemester || 1} onChange={(e) => setForm({...form, currentSemester: parseInt(e.target.value)})} min="1" max="3" />
-                  </>)}
-                  {isTVET && (<>
-                    <SearchableSelect label="Department" value={form.departmentId || ''} onChange={(e) => setForm({...form, departmentId: e.target.value, programId: ''})} options={departmentOptions} placeholder="Search department..." emptyMessage="No departments available" required />
-                    <SearchableSelect label="Program *" value={form.programId || ''} onChange={(e) => setForm({...form, programId: e.target.value})} options={programOptions} placeholder="Search program..." emptyMessage="No programs available" required disabled={!form.departmentId} />
-                    <SearchableSelect label="Module Level *" value={form.currentModule || ''} onChange={(e) => setForm({...form, currentModule: e.target.value})}
-                      options={[
-                        { value: 'Module 1', label: 'Module 1' },
-                        { value: 'Module 2', label: 'Module 2' },
-                        { value: 'Module 3', label: 'Module 3' },
-                        { value: 'Module 4', label: 'Module 4' }
-                      ]}
-                      placeholder="Select module..." emptyMessage="No modules available" required disabled={!form.programId} />
-                  </>)}
-                  {!isUniversity && !isTVET && (
-                    <SearchableSelect label="Class" value={form.classId || ''} onChange={(e) => setForm({...form, classId: e.target.value})} options={classOptions} placeholder="Search class..." emptyMessage="No classes available" required />
-                  )}
-                  <SelectField label="Boarding Status" value={form.boardingStatus || 'DAY'} onChange={(e) => setForm({...form, boardingStatus: e.target.value})} options={['DAY', 'BOARDING', 'WEEKLY']} />
-                  <SearchableSelect label="Transport Route" value={form.transportRouteId || ''} onChange={(e) => setForm({...form, transportRouteId: e.target.value || null})} options={routeOptions} placeholder="Search transport route..." emptyMessage="No transport routes available" />
-                </div>
-              </div>
+              <SelectField
+                label="Status"
+                value={formState.isActive ? 'active' : 'inactive'}
+                onChange={(e) => setFormState({ ...formState, isActive: e.target.value === 'active' })}
+                options={[
+                  { value: 'active', label: 'Active' },
+                  { value: 'inactive', label: 'Inactive' }
+                ]}
+              />
+            </div>
 
-              {/* MEDICAL */}
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="font-medium text-indigo-600 mb-3">Medical Information</h4>
-                <div className="grid grid-cols-2 gap-4">
-                  <SearchableSelect label="Blood Group" value={form.medicalInfo?.bloodGroup || ''}
-                    onChange={(e) => setForm({...form, medicalInfo: { ...form.medicalInfo, bloodGroup: e.target.value }})}
-                    options={[
-                      { value: 'A+', label: 'A+' }, { value: 'A-', label: 'A-' },
-                      { value: 'B+', label: 'B+' }, { value: 'B-', label: 'B-' },
-                      { value: 'O+', label: 'O+' }, { value: 'O-', label: 'O-' },
-                      { value: 'AB+', label: 'AB+' }, { value: 'AB-', label: 'AB-' },
-                      { value: 'Unknown', label: 'Unknown' }
-                    ]}
-                    placeholder="Select blood group..." emptyMessage="No blood groups available" />
-                  <InputField label="Allergies" value={form.medicalInfo?.allergies || ''} onChange={(e) => setForm({...form, medicalInfo: { ...form.medicalInfo, allergies: e.target.value }})} placeholder="e.g., Peanuts, Penicillin" />
-                  <SelectField label="Disabilities" value={form.medicalInfo?.disabilities || ''} onChange={(e) => setForm({...form, medicalInfo: { ...form.medicalInfo, disabilities: e.target.value }})}
-                    options={[
-                      { value: 'None', label: 'None' },
-                      { value: 'Physical', label: 'Physical Disability' },
-                      { value: 'Visual', label: 'Visual Impairment' },
-                      { value: 'Hearing', label: 'Hearing Impairment' },
-                      { value: 'Speech', label: 'Speech Impairment' },
-                      { value: 'Learning', label: 'Learning Disability' },
-                      { value: 'Cognitive', label: 'Cognitive Disability' },
-                      { value: 'Mental Health', label: 'Mental Health Condition' },
-                      { value: 'Chronic Illness', label: 'Chronic Illness' },
-                      { value: 'Other', label: 'Other' }
-                    ]} />
-                </div>
+            {/* Personal */}
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h4 className="font-medium text-indigo-600 mb-3">Personal Details</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <TextInput label="First Name *" value={formState.firstName} onChange={(e) => setFormState({ ...formState, firstName: e.target.value })} required />
+                <TextInput label="Middle Name" value={formState.middleName} onChange={(e) => setFormState({ ...formState, middleName: e.target.value })} />
+                <TextInput label="Last Name *" value={formState.lastName} onChange={(e) => setFormState({ ...formState, lastName: e.target.value })} required />
+                <TextInput label="Date of Birth *" type="date" value={formState.dateOfBirth} onChange={(e) => setFormState({ ...formState, dateOfBirth: e.target.value })} required max={toDateInput(new Date())} />
+                <SelectField label="Gender *" value={formState.gender} onChange={(e) => setFormState({ ...formState, gender: e.target.value })} options={genderOptions} />
+                <TextInput label="Nationality" value={formState.nationality} onChange={(e) => setFormState({ ...formState, nationality: e.target.value })} />
               </div>
+            </div>
 
-              {/* STUDENT LOGIN */}
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="font-medium text-indigo-600 mb-3">Student Account (optional)</h4>
-                <div className="flex items-center space-x-2 mb-3">
-                  <input type="checkbox" id="createStudentAccount"
-                    checked={form.studentLogin?.createAccount || false}
-                    onChange={(e) => setForm({...form, studentLogin: { ...form.studentLogin, createAccount: e.target.checked }})}
-                    className="rounded" />
-                  <label htmlFor="createStudentAccount">Create login account for student</label>
-                </div>
-                {form.studentLogin?.createAccount && (
-                  <div className="grid grid-cols-2 gap-4 mt-2">
-                    <InputField label="Student Email *" type="email" value={form.studentLogin?.email || ''} onChange={(e) => setForm({...form, studentLogin: { ...form.studentLogin, email: e.target.value }})} required />
-                    <InputField label="Student Password *" type="password" value={form.studentLogin?.password || ''} onChange={(e) => setForm({...form, studentLogin: { ...form.studentLogin, password: e.target.value }})} required />
-                  </div>
+            {/* Contact */}
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h4 className="font-medium text-indigo-600 mb-3">Contact</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <TextInput label="Email" type="email" value={formState.email} onChange={(e) => setFormState({ ...formState, email: e.target.value })} />
+                <TextInput label="Phone" value={formState.phone} onChange={(e) => setFormState({ ...formState, phone: e.target.value })} />
+                <TextInput label="Address" value={formState.address} onChange={(e) => setFormState({ ...formState, address: e.target.value })} />
+              </div>
+            </div>
+
+            {/* Identification */}
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h4 className="font-medium text-indigo-600 mb-3">Identification</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <SelectField label="ID Type" value={formState.idType} onChange={(e) => setFormState({ ...formState, idType: e.target.value })} options={idTypeOptions} />
+                <TextInput label="ID / Birth Certificate Number" value={formState.idNumber} onChange={(e) => setFormState({ ...formState, idNumber: e.target.value })} />
+              </div>
+            </div>
+
+            {/* Academic */}
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h4 className="font-medium text-indigo-600 mb-3">Academic Information</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {isUniversity && (<>
+                  <SearchableSelect label="Faculty" value={formState.facultyId} onChange={(e) => setFormState({ ...formState, facultyId: e.target.value, departmentId: '', courseId: '' })} options={facultyOptions} placeholder="Search faculty…" required />
+                  <SearchableSelect label="Department" value={formState.departmentId} onChange={(e) => setFormState({ ...formState, departmentId: e.target.value, courseId: '' })} options={departmentOptions.filter(d => !formState.facultyId || d.value === formState.departmentId || departments.find(x => x.id === d.value)?.facultyId === formState.facultyId)} placeholder="Search department…" required disabled={!formState.facultyId} />
+                  <SearchableSelect label="Course *" value={formState.courseId} onChange={(e) => setFormState({ ...formState, courseId: e.target.value })} options={courseOptions} placeholder="Search course…" required disabled={!formState.departmentId} />
+                  <TextInput label="Year of Study" type="number" min="1" max="6" value={formState.currentYear} onChange={(e) => setFormState({ ...formState, currentYear: parseInt(e.target.value, 10) || 1 })} />
+                  <TextInput label="Semester" type="number" min="1" max="3" value={formState.currentSemester} onChange={(e) => setFormState({ ...formState, currentSemester: parseInt(e.target.value, 10) || 1 })} />
+                </>)}
+                {isTVET && (<>
+                  <SearchableSelect label="Department" value={formState.departmentId} onChange={(e) => setFormState({ ...formState, departmentId: e.target.value, programId: '' })} options={departmentOptions} placeholder="Search department…" required />
+                  <SearchableSelect label="Program *" value={formState.programId} onChange={(e) => setFormState({ ...formState, programId: e.target.value })} options={programOptions} placeholder="Search program…" required disabled={!formState.departmentId} />
+                  <SelectField label="Module Level *" value={formState.currentModule} onChange={(e) => setFormState({ ...formState, currentModule: e.target.value })} options={moduleLevelOptions} />
+                </>)}
+                {!isUniversity && !isTVET && (
+                  <SearchableSelect label="Class *" value={formState.classId} onChange={(e) => setFormState({ ...formState, classId: e.target.value })} options={classOptions} placeholder="Search class…" required />
                 )}
+                <SelectField label="Boarding Status" value={formState.boardingStatus} onChange={(e) => setFormState({ ...formState, boardingStatus: e.target.value })} options={boardingOptions} />
+                <SearchableSelect label="Transport Route" value={formState.transportRouteId} onChange={(e) => setFormState({ ...formState, transportRouteId: e.target.value || null })} options={routeOptions} placeholder="Search route…" />
               </div>
+            </div>
 
-              {/* PARENT / GUARDIAN */}
+            {/* Medical */}
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h4 className="font-medium text-indigo-600 mb-3">Medical Information</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <SelectField label="Blood Group" value={formState.medicalInfo?.bloodGroup || ''} onChange={(e) => setFormState({ ...formState, medicalInfo: { ...formState.medicalInfo, bloodGroup: e.target.value } })} options={bloodGroupOptions} />
+                <TextInput label="Allergies" value={formState.medicalInfo?.allergies || ''} onChange={(e) => setFormState({ ...formState, medicalInfo: { ...formState.medicalInfo, allergies: e.target.value } })} />
+                <TextInput label="Disabilities" value={formState.medicalInfo?.disabilities || ''} onChange={(e) => setFormState({ ...formState, medicalInfo: { ...formState.medicalInfo, disabilities: e.target.value } })} />
+              </div>
+            </div>
+
+            {/* Guardian — only on create (edit links via the details modal) */}
+            {!editingId && (
               <div className="bg-gray-50 p-4 rounded-lg border border-indigo-100">
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <h4 className="font-medium text-indigo-600">
-                      Parent / Guardian <span className="text-red-500">*</span>
-                    </h4>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Details are required. Portal login is optional.
-                    </p>
-                  </div>
-                </div>
+                <h4 className="font-medium text-indigo-600 mb-3">
+                  Parent / Guardian <span className="text-red-500">*</span>
+                </h4>
+                <p className="text-xs text-gray-500 mb-3">
+                  Details are required. Portal login is optional.
+                </p>
 
-                {enableParentPortal && parentUsers.length > 0 && (
-                  <div className="flex items-center space-x-4 mb-3">
+                {enableParentPortal && parentUserOptions.length > 0 && (
+                  <div className="flex items-center gap-4 mb-3">
                     <label className="flex items-center">
-                      <input type="radio"
-                        checked={!form.parent?.useExisting}
-                        onChange={() => setForm({...form, parent: { ...form.parent, useExisting: false, existingUserId: null }})}
-                        className="mr-2" />
+                      <input type="radio" className="mr-2"
+                        checked={!formState.parent?.useExisting}
+                        onChange={() => setFormState({ ...formState, parent: { ...formState.parent, useExisting: false, existingUserId: null } })} />
                       New Guardian
                     </label>
                     <label className="flex items-center">
-                      <input type="radio"
-                        checked={form.parent?.useExisting}
-                        onChange={() => setForm({...form, parent: { ...form.parent, useExisting: true }})}
-                        className="mr-2" />
-                      Use Existing Parent
+                      <input type="radio" className="mr-2"
+                        checked={!!formState.parent?.useExisting}
+                        onChange={() => setFormState({ ...formState, parent: { ...formState.parent, useExisting: true } })} />
+                      Use Existing
                     </label>
                   </div>
                 )}
 
-                {form.parent?.useExisting ? (
+                {formState.parent?.useExisting ? (
                   <SearchableSelect
                     label="Select Existing Parent/Guardian *"
-                    value={form.parent?.existingUserId || ''}
-                    onChange={(e) => setForm({...form, parent: { ...form.parent, existingUserId: e.target.value }})}
+                    value={formState.parent?.existingUserId || ''}
+                    onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, existingUserId: e.target.value } })}
                     options={parentUserOptions}
-                    placeholder="Search by name or email..."
-                    emptyMessage="No parents on record"
+                    placeholder="Search by name or email…"
                     required
                   />
                 ) : (
                   <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <InputField label="First Name *" value={form.parent?.firstName || ''}
-                        onChange={(e) => setForm({...form, parent: { ...form.parent, firstName: e.target.value }})}
-                        required />
-                      <InputField label="Last Name *" value={form.parent?.lastName || ''}
-                        onChange={(e) => setForm({...form, parent: { ...form.parent, lastName: e.target.value }})}
-                        required />
-                      <InputField label="Phone Number" value={form.parent?.phone || ''}
-                        onChange={(e) => setForm({...form, parent: { ...form.parent, phone: e.target.value }})}
-                        placeholder="e.g., 0712345678" />
-                      <InputField label="Email Address" type="email" value={form.parent?.email || ''}
-                        onChange={(e) => setForm({...form, parent: { ...form.parent, email: e.target.value }})}
-                        placeholder="parent@example.com" />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <TextInput label="First Name *" value={formState.parent?.firstName || ''} onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, firstName: e.target.value } })} required />
+                      <TextInput label="Last Name *" value={formState.parent?.lastName || ''} onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, lastName: e.target.value } })} required />
+                      <TextInput label="Phone" value={formState.parent?.phone || ''} onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, phone: e.target.value } })} />
+                      <TextInput label="Email" type="email" value={formState.parent?.email || ''} onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, email: e.target.value } })} />
                     </div>
-                    <p className="text-xs text-gray-500 -mt-2">
-                      Provide at least a phone number or email.
-                    </p>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <SelectField label="Relationship *"
-                        value={form.parent?.relationship || 'Mother'}
-                        onChange={(e) => setForm({...form, parent: { ...form.parent, relationship: e.target.value }})}
-                        options={RELATIONSHIP_OPTIONS} />
-                      <div className="flex flex-col justify-center space-y-2 pt-5">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <SelectField label="Relationship *" value={formState.parent?.relationship || 'Mother'} onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, relationship: e.target.value } })} options={relationshipOptions} />
+                      <div className="flex items-center gap-4 pt-5">
                         <label className="flex items-center text-sm">
-                          <input type="checkbox"
-                            checked={form.parent?.isPrimary !== false}
-                            onChange={(e) => setForm({...form, parent: { ...form.parent, isPrimary: e.target.checked }})}
-                            className="mr-2 rounded" />
-                          Primary Contact
+                          <input type="checkbox" className="mr-2"
+                            checked={formState.parent?.isPrimary !== false}
+                            onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, isPrimary: e.target.checked } })} />
+                          Primary
                         </label>
                         <label className="flex items-center text-sm">
-                          <input type="checkbox"
-                            checked={!!form.parent?.emergencyContact}
-                            onChange={(e) => setForm({...form, parent: { ...form.parent, emergencyContact: e.target.checked }})}
-                            className="mr-2 rounded" />
-                          Emergency Contact
+                          <input type="checkbox" className="mr-2"
+                            checked={!!formState.parent?.emergencyContact}
+                            onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, emergencyContact: e.target.checked } })} />
+                          Emergency
                         </label>
                       </div>
                     </div>
 
-                    <details className="text-sm">
-                      <summary className="cursor-pointer text-indigo-600 hover:text-indigo-800 select-none">
-                        Optional: occupation, employer, income
-                      </summary>
-                      <div className="grid grid-cols-3 gap-4 mt-3">
-                        <InputField label="Occupation" value={form.parent?.occupation || ''}
-                          onChange={(e) => setForm({...form, parent: { ...form.parent, occupation: e.target.value }})} />
-                        <InputField label="Employer" value={form.parent?.employer || ''}
-                          onChange={(e) => setForm({...form, parent: { ...form.parent, employer: e.target.value }})} />
-                        <InputField label="Monthly Income (KES)" type="number" value={form.parent?.monthlyIncome || ''}
-                          onChange={(e) => setForm({...form, parent: { ...form.parent, monthlyIncome: e.target.value }})} />
-                      </div>
-                    </details>
-
-                    <div className="border-t pt-3 mt-1">
-                      <label className="flex items-start cursor-pointer">
-                        <input type="checkbox"
-                          checked={!!form.parent?.grantPortalAccess}
-                          onChange={(e) => setForm({
-                            ...form,
-                            parent: { ...form.parent, grantPortalAccess: e.target.checked, password: e.target.checked ? form.parent?.password || '' : '' }
-                          })}
-                          className="mt-1 mr-2 rounded" />
-                        <span className="text-sm">
-                          <span className="font-medium text-gray-800">Grant portal access</span>
-                          <span className="block text-xs text-gray-500 mt-0.5">
-                            Optional. Creates a parent login so they can view fees, results, and attendance.
-                            Requires the email above and a password.
-                          </span>
+                    <label className="flex items-start cursor-pointer">
+                      <input type="checkbox" className="mt-1 mr-2"
+                        checked={!!formState.parent?.grantPortalAccess}
+                        onChange={(e) => setFormState({
+                          ...formState,
+                          parent: {
+                            ...formState.parent,
+                            grantPortalAccess: e.target.checked,
+                            password: e.target.checked ? (formState.parent?.password || '') : ''
+                          }
+                        })} />
+                      <span className="text-sm">
+                        <span className="font-medium">Grant portal access</span>
+                        <span className="block text-xs text-gray-500 mt-0.5">
+                          Optional. Requires the email above and a password.
                         </span>
-                      </label>
+                      </span>
+                    </label>
 
-                      {form.parent?.grantPortalAccess && (
-                        <div className="mt-3">
-                          <InputField label="Portal Password *" type="password"
-                            value={form.parent?.password || ''}
-                            onChange={(e) => setForm({...form, parent: { ...form.parent, password: e.target.value }})}
-                            required />
-                          {!form.parent?.email?.trim() && (
-                            <p className="text-xs text-amber-600 mt-1">
-                              <i className="fas fa-exclamation-triangle mr-1"></i>
-                              Enter the guardian's email above to enable portal access.
-                            </p>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                    {formState.parent?.grantPortalAccess && (
+                      <TextInput
+                        label="Portal Password *"
+                        type="password"
+                        value={formState.parent?.password || ''}
+                        onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, password: e.target.value } })}
+                        required
+                      />
+                    )}
                   </div>
                 )}
               </div>
-
-              <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 font-medium">
-                Register Student
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ==================== EDIT MODAL ==================== */}
-      {showEditModal && selectedStudent && canEdit && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
-          <div className="bg-white p-6 rounded-xl shadow-sm max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold">Edit Student</h3>
-              <button onClick={() => { setShowEditModal(false); setSelectedStudent(null); setSubmitError(''); }} className="text-gray-500 hover:text-gray-700">
-                <i className="fas fa-times"></i>
-              </button>
-            </div>
-
-            {submitError && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
-                <i className="fas fa-exclamation-circle mr-2"></i>
-                {submitError}
-              </div>
             )}
 
-            <form onSubmit={handleUpdateSubmit} className="space-y-4">
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="font-medium text-indigo-600 mb-3">Personal Details</h4>
-                <div className="grid grid-cols-2 gap-4">
-                  <InputField label="First Name *" value={form.firstName || ''} onChange={(e) => setForm({...form, firstName: e.target.value})} required />
-                  <InputField label="Middle Name" value={form.middleName || ''} onChange={(e) => setForm({...form, middleName: e.target.value})} />
-                  <InputField label="Last Name *" value={form.lastName || ''} onChange={(e) => setForm({...form, lastName: e.target.value})} required />
-                  <InputField label="Date of Birth *" type="date" value={form.dateOfBirth?.split('T')[0] || ''} onChange={(e) => setForm({...form, dateOfBirth: e.target.value})} required />
-                  <SelectField label="Gender *" value={form.gender || 'MALE'} onChange={(e) => setForm({...form, gender: e.target.value})} options={['MALE', 'FEMALE']} />
-                  <InputField label="Email" type="email" value={form.email || ''} onChange={(e) => setForm({...form, email: e.target.value})} />
-                  <InputField label="Phone" value={form.phone || ''} onChange={(e) => setForm({...form, phone: e.target.value})} />
-                  <InputField label="Address" value={form.address || ''} onChange={(e) => setForm({...form, address: e.target.value})} />
-                </div>
-              </div>
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <h4 className="font-medium text-indigo-600 mb-3">Academic Information</h4>
-                <div className="grid grid-cols-2 gap-4">
-                  {isUniversity && (<>
-                    <SearchableSelect label="Faculty" value={form.facultyId || ''} onChange={(e) => setForm({...form, facultyId: e.target.value})} options={facultyOptions} placeholder="Search faculty..." emptyMessage="No faculties available" />
-                    <SearchableSelect label="Department" value={form.departmentId || ''} onChange={(e) => setForm({...form, departmentId: e.target.value})} options={departmentOptions} placeholder="Search department..." emptyMessage="No departments available" />
-                    <SearchableSelect label="Course" value={form.courseId || ''} onChange={(e) => setForm({...form, courseId: e.target.value})} options={courseOptions} placeholder="Search course..." emptyMessage="No courses available" />
-                    <InputField label="Year of Study" type="number" value={form.currentYear || 1} onChange={(e) => setForm({...form, currentYear: parseInt(e.target.value)})} min="1" max="6" />
-                  </>)}
-                  {isTVET && (<>
-                    <SearchableSelect label="Department" value={form.departmentId || ''} onChange={(e) => setForm({...form, departmentId: e.target.value})} options={departmentOptions} placeholder="Search department..." emptyMessage="No departments available" />
-                    <SearchableSelect label="Program" value={form.programId || ''} onChange={(e) => setForm({...form, programId: e.target.value})} options={programOptions} placeholder="Search program..." emptyMessage="No programs available" />
-                    <SearchableSelect label="Module Level" value={form.currentModule || ''} onChange={(e) => setForm({...form, currentModule: e.target.value})}
-                      options={[
-                        { value: 'Module 1', label: 'Module 1' },
-                        { value: 'Module 2', label: 'Module 2' },
-                        { value: 'Module 3', label: 'Module 3' },
-                        { value: 'Module 4', label: 'Module 4' }
-                      ]} placeholder="Select module..." emptyMessage="No modules available" />
-                  </>)}
-                  {!isUniversity && !isTVET && (
-                    <SearchableSelect label="Class" value={form.classId || ''} onChange={(e) => setForm({...form, classId: e.target.value})} options={classOptions} placeholder="Search class..." emptyMessage="No classes available" />
-                  )}
-                  <SelectField label="Boarding Status" value={form.boardingStatus || 'DAY'} onChange={(e) => setForm({...form, boardingStatus: e.target.value})} options={['DAY', 'BOARDING', 'WEEKLY']} />
-                  <SelectField label="Status" value={form.isActive !== false ? 'active' : 'inactive'} onChange={(e) => setForm({...form, isActive: e.target.value === 'active'})}
-                    options={[{ value: 'active', label: 'Active' }, { value: 'inactive', label: 'Inactive' }]} />
-                </div>
-              </div>
-              <button type="submit" disabled={loading} className="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 font-medium disabled:opacity-50">
-                {loading ? 'Updating...' : 'Update Student'}
+            <div className="flex gap-3 pt-2 border-t">
+              <button
+                type="submit"
+                disabled={loading}
+                className="flex-1 bg-indigo-600 text-white py-2.5 px-4 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {loading
+                  ? <><i className="fas fa-spinner fa-spin" />Saving…</>
+                  : <><i className={`fas fa-${editingId ? 'save' : 'plus-circle'}`} />{editingId ? 'Update Student' : 'Register Student'}</>}
               </button>
-            </form>
-          </div>
+              <button type="button" onClick={closeForm} disabled={loading}
+                      className="bg-gray-500 text-white py-2.5 px-6 rounded-lg hover:bg-gray-600">
+                Cancel
+              </button>
+            </div>
+          </form>
         </div>
       )}
 
-      {/* ==================== STUDENT LIST ==================== */}
+      {/* List */}
       {viewMode === 'grid' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredStudents.length === 0 ? (
-            <div className="col-span-3 text-center py-12 text-gray-500">
-              <i className="fas fa-users text-4xl text-gray-300 mb-2"></i>
-              <p>No students found</p>
+            <div className="col-span-full text-center py-12 text-gray-500">
+              <i className="fas fa-users text-5xl text-gray-300 mb-3 block" />
+              <p className="text-lg font-medium">No students found</p>
+              <p className="text-sm text-gray-400 mt-1">
+                {searchTerm || classFilter || statusFilter !== 'all'
+                  ? 'Try adjusting your filters'
+                  : 'Click "Add Student" to get started'}
+              </p>
             </div>
           ) : filteredStudents.map(student => {
             const studentClass = classes.find(c => c.id === student.classId);
             const studentCourse = courses.find(c => c.id === student.courseId);
-            const studentProgram = programs?.find(p => p.id === student.programId);
+            const studentProgram = programs.find(p => p.id === student.programId);
             return (
               <div key={student.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow bg-white">
                 <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center">
+                  <div className="flex items-center space-x-3 min-w-0">
+                    <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0">
                       <span className="text-indigo-600 font-bold text-lg">
                         {student.firstName?.[0]}{student.lastName?.[0]}
                       </span>
                     </div>
-                    <div>
-                      <h3 className="font-semibold text-lg">{student.firstName} {student.lastName}</h3>
-                      <p className="text-sm text-gray-600">{student.admissionNumber}</p>
+                    <div className="min-w-0">
+                      <h3 className="font-semibold truncate">{student.firstName} {student.lastName}</h3>
+                      <p className="text-sm text-gray-600 truncate">{student.admissionNumber || '—'}</p>
                     </div>
                   </div>
-                  <div className="flex space-x-1">
-                    <button onClick={() => loadStudentDetails(student)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="View Details">
-                      <i className="fas fa-eye"></i>
+                  <div className="flex space-x-1 flex-shrink-0">
+                    <button onClick={() => loadStudentDetails(student)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="View">
+                      <i className="fas fa-eye" />
                     </button>
                     {canEdit && (
-                      <button onClick={() => handleEditClick(student)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg" title="Edit">
-                        <i className="fas fa-edit"></i>
+                      <button onClick={() => openEdit(student)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg" title="Edit">
+                        <i className="fas fa-edit" />
                       </button>
                     )}
                     {canDelete && (
-                      <button onClick={() => handleDeleteClick(student)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
-                        <i className="fas fa-trash"></i>
+                      <button onClick={() => { setSelectedStudent(student); setShowDeleteConfirm(true); }} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
+                        <i className="fas fa-trash" />
                       </button>
                     )}
                   </div>
                 </div>
-                <div className="space-y-2 text-sm">
-                  <p className="text-gray-600"><i className="fas fa-graduation-cap w-5 text-gray-400"></i>
-                    {isUniversity ? (studentCourse?.name || 'No Course') : isTVET ? (studentProgram?.name || 'No Program') : (studentClass?.name || 'No Class')}
+                <div className="space-y-1 text-sm">
+                  <p className="text-gray-600">
+                    <i className="fas fa-graduation-cap w-5 text-gray-400" />
+                    {isUniversity ? (studentCourse?.name || 'No Course')
+                      : isTVET ? (studentProgram?.name || 'No Program')
+                      : (studentClass?.name || 'No Class')}
                   </p>
-                  {isUniversity && student.currentYear && (
-                    <p className="text-gray-600"><i className="fas fa-calendar w-5 text-gray-400"></i>Year {student.currentYear}, Sem {student.currentSemester || 1}</p>
-                  )}
-                  {isTVET && student.currentModule && (
-                    <p className="text-gray-600"><i className="fas fa-layer-group w-5 text-gray-400"></i>{student.currentModule}</p>
-                  )}
-                  {student.email && <p className="text-gray-600"><i className="fas fa-envelope w-5 text-gray-400"></i>{student.email}</p>}
-                  {student.phone && <p className="text-gray-600"><i className="fas fa-phone w-5 text-gray-400"></i>{student.phone}</p>}
-                  {student.idNumber && <p className="text-gray-600"><i className="fas fa-id-card w-5 text-gray-400"></i>{student.idType}: {student.idNumber}</p>}
-                  <p className="text-gray-600"><i className="fas fa-home w-5 text-gray-400"></i>{student.boardingStatus}</p>
+                  {student.email && <p className="text-gray-600"><i className="fas fa-envelope w-5 text-gray-400" />{student.email}</p>}
+                  {student.phone && <p className="text-gray-600"><i className="fas fa-phone w-5 text-gray-400" />{student.phone}</p>}
+                  <p className="text-gray-600"><i className="fas fa-calendar w-5 text-gray-400" />DOB: {formatDate(student.dateOfBirth)}</p>
                 </div>
                 <div className="mt-3 pt-3 border-t flex justify-between items-center">
                   <span className={`px-2 py-1 rounded-full text-xs ${student.isActive !== false ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                     {student.isActive !== false ? 'Active' : 'Inactive'}
                   </span>
-                  <span className="text-xs text-gray-400">ID: {student.id.substring(0, 8)}...</span>
                 </div>
               </div>
             );
@@ -5631,49 +5813,47 @@ const StudentModule = ({
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                     {isUniversity ? 'Course' : isTVET ? 'Program' : 'Class'}
                   </th>
-                  {isUniversity && <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Year/Sem</th>}
-                  {isTVET && <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Module</th>}
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID Number</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">DOB</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody className="divide-y">
                 {filteredStudents.length === 0 ? (
-                  <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-500">No students found</td></tr>
+                  <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-500">No students found</td></tr>
                 ) : filteredStudents.map(student => {
                   const studentClass = classes.find(c => c.id === student.classId);
                   const studentCourse = courses.find(c => c.id === student.courseId);
-                  const studentProgram = programs?.find(p => p.id === student.programId);
+                  const studentProgram = programs.find(p => p.id === student.programId);
                   return (
                     <tr key={student.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-mono text-sm">{student.admissionNumber}</td>
+                      <td className="px-4 py-3 font-mono text-sm">{student.admissionNumber || '—'}</td>
                       <td className="px-4 py-3 font-medium">{student.firstName} {student.lastName}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">{student.email || '—'}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">{student.phone || '—'}</td>
                       <td className="px-4 py-3">
-                        {isUniversity ? (studentCourse?.name || 'N/A') : isTVET ? (studentProgram?.name || 'N/A') : (studentClass?.name || 'N/A')}
+                        {isUniversity ? (studentCourse?.name || 'N/A')
+                          : isTVET ? (studentProgram?.name || 'N/A')
+                          : (studentClass?.name || 'N/A')}
                       </td>
-                      {isUniversity && <td className="px-4 py-3">Year {student.currentYear || 1}, Sem {student.currentSemester || 1}</td>}
-                      {isTVET && <td className="px-4 py-3">{student.currentModule || 'N/A'}</td>}
-                      <td className="px-4 py-3 text-sm text-gray-600">{student.idNumber || 'N/A'}</td>
+                      <td className="px-4 py-3 text-sm">{formatDate(student.dateOfBirth)}</td>
                       <td className="px-4 py-3">
                         <span className={`px-2 py-1 rounded-full text-xs ${student.isActive !== false ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                           {student.isActive !== false ? 'Active' : 'Inactive'}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-right space-x-2">
-                        <button onClick={() => loadStudentDetails(student)} className="text-blue-600 hover:text-blue-800 p-1 hover:bg-blue-50 rounded" title="View Details">
-                          <i className="fas fa-eye"></i>
+                      <td className="px-4 py-3 text-right space-x-1">
+                        <button onClick={() => loadStudentDetails(student)} className="text-blue-600 hover:text-blue-800 p-1" title="View">
+                          <i className="fas fa-eye" />
                         </button>
                         {canEdit && (
-                          <button onClick={() => handleEditClick(student)} className="text-indigo-600 hover:text-indigo-800 p-1 hover:bg-indigo-50 rounded" title="Edit">
-                            <i className="fas fa-edit"></i>
+                          <button onClick={() => openEdit(student)} className="text-indigo-600 hover:text-indigo-800 p-1" title="Edit">
+                            <i className="fas fa-edit" />
                           </button>
                         )}
                         {canDelete && (
-                          <button onClick={() => handleDeleteClick(student)} className="text-red-600 hover:text-red-800 p-1 hover:bg-red-50 rounded" title="Delete">
-                            <i className="fas fa-trash"></i>
+                          <button onClick={() => { setSelectedStudent(student); setShowDeleteConfirm(true); }} className="text-red-600 hover:text-red-800 p-1" title="Delete">
+                            <i className="fas fa-trash" />
                           </button>
                         )}
                       </td>
@@ -5686,21 +5866,22 @@ const StudentModule = ({
         </div>
       )}
 
-      {/* ==================== DETAILS MODAL ==================== */}
+      {/* Details modal */}
       {showDetailsModal && selectedStudent && studentDetails && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl p-6 max-h-[90vh] overflow-auto">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl p-6 max-h-[90vh] overflow-auto">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-2xl font-bold">Student Details</h2>
               <button onClick={() => setShowDetailsModal(false)} className="text-gray-500 hover:text-gray-700">
-                <i className="fas fa-times"></i>
+                <i className="fas fa-times" />
               </button>
             </div>
+
             <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-lg mb-6">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div><p className="text-sm text-gray-600">Student Name</p><p className="text-xl font-bold">{studentDetails.firstName} {studentDetails.lastName}</p></div>
-                <div><p className="text-sm text-gray-600">Admission No.</p><p className="text-xl font-bold">{studentDetails.admissionNumber}</p></div>
-                <div><p className="text-sm text-gray-600">ID Number</p><p className="text-xl font-bold">{studentDetails.idNumber || 'N/A'}</p></div>
+                <div><p className="text-sm text-gray-600">Name</p><p className="text-xl font-bold">{studentDetails.firstName} {studentDetails.lastName}</p></div>
+                <div><p className="text-sm text-gray-600">Admission</p><p className="text-xl font-bold">{studentDetails.admissionNumber || '—'}</p></div>
+                <div><p className="text-sm text-gray-600">DOB</p><p className="text-xl font-bold">{formatDate(studentDetails.dateOfBirth)}</p></div>
                 <div>
                   <p className="text-sm text-gray-600">Status</p>
                   <span className={`px-3 py-1 rounded-full text-sm font-medium ${studentDetails.isActive !== false ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
@@ -5709,327 +5890,186 @@ const StudentModule = ({
                 </div>
               </div>
             </div>
-            <div className="border-b mb-6">
-              <div className="flex space-x-4 overflow-x-auto">
-                {[
-                  { id: 'overview', label: 'Overview' },
-                  { id: 'academic', label: `Academic (${studentResults.length})` },
-                  { id: 'fees', label: `Fees & Payments (${studentPayments.length})` },
-                  { id: 'parents', label: `Parents (${studentParents.length})` },
-                  { id: 'attendance', label: `Attendance (${studentAttendance.length})` }
-                ].map(tab => (
-                  <button key={tab.id} onClick={() => setActiveDetailTab(tab.id)}
-                    className={`px-4 py-2 font-medium whitespace-nowrap transition-colors ${
-                      activeDetailTab === tab.id ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
-                    }`}>
-                    {tab.label}
-                  </button>
-                ))}
+
+            <div className="border-b mb-6 flex gap-4 overflow-x-auto">
+              {[
+                { id: 'overview', label: 'Overview' },
+                { id: 'academic', label: `Academic (${studentResults.length})` },
+                { id: 'fees', label: `Fees (${studentPayments.length})` },
+                { id: 'parents', label: `Parents (${studentParents.length})` },
+                { id: 'attendance', label: `Attendance (${studentAttendance.length})` }
+              ].map(tab => (
+                <button key={tab.id} onClick={() => setActiveDetailTab(tab.id)}
+                  className={`px-4 py-2 font-medium whitespace-nowrap ${
+                    activeDetailTab === tab.id ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
+                  }`}>
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {activeDetailTab === 'overview' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <h3 className="font-semibold mb-2">Personal</h3>
+                  <p><span className="text-gray-500">Gender:</span> {studentDetails.gender}</p>
+                  <p><span className="text-gray-500">Nationality:</span> {studentDetails.nationality || '—'}</p>
+                  <p><span className="text-gray-500">Religion:</span> {studentDetails.religion || '—'}</p>
+                  <p><span className="text-gray-500">Email:</span> {studentDetails.email || '—'}</p>
+                  <p><span className="text-gray-500">Phone:</span> {studentDetails.phone || '—'}</p>
+                </div>
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <h3 className="font-semibold mb-2">Academic</h3>
+                  <p><span className="text-gray-500">Class:</span> {classes.find(c => c.id === studentDetails.classId)?.name || '—'}</p>
+                  <p><span className="text-gray-500">Course:</span> {courses.find(c => c.id === studentDetails.courseId)?.name || '—'}</p>
+                  <p><span className="text-gray-500">Program:</span> {programs.find(p => p.id === studentDetails.programId)?.name || '—'}</p>
+                  <p><span className="text-gray-500">Boarding:</span> {studentDetails.boardingStatus || '—'}</p>
+                </div>
               </div>
-            </div>
+            )}
 
-            <div className="space-y-6">
-              {activeDetailTab === 'overview' && (
-                <div className="grid grid-cols-2 gap-6">
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <h3 className="font-semibold text-lg mb-3">Personal Information</h3>
-                    <div className="space-y-2">
-                      <div className="flex justify-between"><span className="text-gray-600">Full Name:</span><span className="font-medium">{studentDetails.firstName} {studentDetails.middleName || ''} {studentDetails.lastName}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-600">Date of Birth:</span><span className="font-medium">{studentDetails.dateOfBirth ? new Date(studentDetails.dateOfBirth).toLocaleDateString() : 'N/A'}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-600">Gender:</span><span className="font-medium">{studentDetails.gender}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-600">Nationality:</span><span className="font-medium">{studentDetails.nationality || 'Kenyan'}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-600">Religion:</span><span className="font-medium">{studentDetails.religion || 'N/A'}</span></div>
-                    </div>
-                  </div>
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <h3 className="font-semibold text-lg mb-3">Contact & Identification</h3>
-                    <div className="space-y-2">
-                      <div className="flex justify-between"><span className="text-gray-600">Email:</span><span className="font-medium">{studentDetails.email || 'N/A'}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-600">Phone:</span><span className="font-medium">{studentDetails.phone || 'N/A'}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-600">Address:</span><span className="font-medium">{studentDetails.address || 'N/A'}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-600">ID Type:</span><span className="font-medium">{studentDetails.idType}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-600">ID Number:</span><span className="font-medium">{studentDetails.idNumber || 'N/A'}</span></div>
-                    </div>
-                  </div>
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <h3 className="font-semibold text-lg mb-3">Academic Information</h3>
-                    <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">{isUniversity ? 'Course:' : isTVET ? 'Program:' : 'Class:'}</span>
-                        <span className="font-medium">
-                          {isUniversity
-                            ? (studentDetails.course?.name || courses?.find(c => c.id === studentDetails.courseId)?.name || 'N/A')
-                            : isTVET
-                            ? (studentDetails.program?.name || programs?.find(p => p.id === studentDetails.programId)?.name || 'N/A')
-                            : (studentDetails.class?.name || classes?.find(c => c.id === studentDetails.classId)?.name || 'N/A')}
-                        </span>
-                      </div>
-                      {isUniversity && (<>
-                        <div className="flex justify-between"><span className="text-gray-600">Year of Study:</span><span className="font-medium">Year {studentDetails.currentYear || 1}</span></div>
-                        <div className="flex justify-between"><span className="text-gray-600">Current Semester:</span><span className="font-medium">Semester {studentDetails.currentSemester || 1}</span></div>
-                      </>)}
-                      {isTVET && (
-                        <div className="flex justify-between"><span className="text-gray-600">Current Module:</span><span className="font-medium">{studentDetails.currentModule || 'N/A'}</span></div>
-                      )}
-                      <div className="flex justify-between"><span className="text-gray-600">Boarding Status:</span><span className="font-medium">{studentDetails.boardingStatus}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-600">Transport Route:</span><span className="font-medium">{routes?.find(r => r.id === studentDetails.transportRouteId)?.name || 'N/A'}</span></div>
-                    </div>
-                  </div>
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <h3 className="font-semibold text-lg mb-3">Medical Information</h3>
-                    <div className="space-y-2">
-                      <div className="flex justify-between"><span className="text-gray-600">Blood Group:</span><span className="font-medium">{studentDetails.medicalInfo?.bloodGroup || 'N/A'}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-600">Allergies:</span><span className="font-medium">{studentDetails.medicalInfo?.allergies || 'None'}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-600">Disabilities:</span><span className="font-medium">{studentDetails.medicalInfo?.disabilities || 'None'}</span></div>
-                    </div>
-                  </div>
-                </div>
-              )}
+            {activeDetailTab === 'academic' && (
+              studentResults.length === 0 ? (
+                <p className="text-center py-8 text-gray-500">No academic records.</p>
+              ) : (
+                <table className="w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left">Exam</th>
+                      <th className="px-4 py-2 text-left">Subject / Unit</th>
+                      <th className="px-4 py-2 text-left">Marks</th>
+                      <th className="px-4 py-2 text-left">Grade</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {studentResults.map(r => {
+                      const exam = exams.find(e => e.id === r.examId);
+                      const item = isUniversity || isTVET
+                        ? (units.find(u => u.id === r.unitId)?.name || '—')
+                        : (subjects.find(s => s.id === r.subjectId)?.name || '—');
+                      const g = getGrade(r.marks);
+                      return (
+                        <tr key={r.id}>
+                          <td className="px-4 py-2">{exam?.name || '—'}</td>
+                          <td className="px-4 py-2">{item}</td>
+                          <td className="px-4 py-2 font-bold">{r.marks ?? '—'}</td>
+                          <td className="px-4 py-2">
+                            <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(r.grade || g.grade)}`}>{r.grade || g.grade}</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )
+            )}
 
-              {activeDetailTab === 'academic' && (
-                <div>
-                  {studentResults.length > 0 ? (
-                    <div className="overflow-x-auto border rounded-lg">
-                      <table className="w-full">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-4 py-3 text-left">Exam</th>
-                            <th className="px-4 py-3 text-left">Subject/Unit</th>
-                            <th className="px-4 py-3 text-left">Date</th>
-                            <th className="px-4 py-3 text-left">Marks</th>
-                            <th className="px-4 py-3 text-left">Grade</th>
-                            <th className="px-4 py-3 text-left">Points</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                          {studentResults.map(result => {
-                            const exam = exams?.find(e => e.id === result.examId);
-                            let itemName = 'Unknown';
-                            if (isUniversity || isTVET) itemName = units?.find(u => u.id === result.unitId)?.name || 'Unknown Unit';
-                            else itemName = subjects?.find(s => s.id === result.subjectId)?.name || 'Unknown Subject';
-                            return (
-                              <tr key={result.id} className="hover:bg-gray-50">
-                                <td className="px-4 py-2">{exam?.name || 'Unknown Exam'}</td>
-                                <td className="px-4 py-2">{itemName}</td>
-                                <td className="px-4 py-2">{exam?.date ? new Date(exam.date).toLocaleDateString() : 'N/A'}</td>
-                                <td className="px-4 py-2 font-bold">{result.marks}</td>
-                                <td className="px-4 py-2"><span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(result.grade)}`}>{result.grade}</span></td>
-                                <td className="px-4 py-2">{result.points}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div className="text-center py-12 bg-gray-50 rounded-lg">
-                      <i className="fas fa-file-alt text-5xl text-gray-400 mb-4"></i>
-                      <p className="text-gray-600">No academic records found</p>
-                    </div>
-                  )}
-                </div>
-              )}
+            {activeDetailTab === 'fees' && (
+              studentPayments.length === 0 ? (
+                <p className="text-center py-8 text-gray-500">No payment records.</p>
+              ) : (
+                <table className="w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left">Date</th>
+                      <th className="px-4 py-2 text-left">Receipt</th>
+                      <th className="px-4 py-2 text-left">Amount</th>
+                      <th className="px-4 py-2 text-left">Method</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {studentPayments.map(p => (
+                      <tr key={p.id}>
+                        <td className="px-4 py-2">{formatDate(p.date)}</td>
+                        <td className="px-4 py-2 font-mono">{p.receiptNo || '—'}</td>
+                        <td className="px-4 py-2 font-bold text-green-600">{Number(p.amount || 0).toLocaleString()}</td>
+                        <td className="px-4 py-2">{p.paymentMethod || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )
+            )}
 
-              {activeDetailTab === 'fees' && (
-                <div className="space-y-6">
-                  {studentFeeSummary && (
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="bg-blue-50 p-4 rounded-lg text-center">
-                        <p className="text-sm text-blue-600">Total Fees</p>
-                        <p className="text-2xl font-bold text-blue-700">{formatCurrency(studentFeeSummary.totalFees)}</p>
-                      </div>
-                      <div className="bg-green-50 p-4 rounded-lg text-center">
-                        <p className="text-sm text-green-600">Paid</p>
-                        <p className="text-2xl font-bold text-green-700">{formatCurrency(studentFeeSummary.totalPaid)}</p>
-                      </div>
-                      <div className={`p-4 rounded-lg text-center ${studentFeeSummary.balance > 0 ? 'bg-red-50' : 'bg-green-50'}`}>
-                        <p className="text-sm text-gray-600">Balance</p>
-                        <p className={`text-2xl font-bold ${studentFeeSummary.balance > 0 ? 'text-red-700' : 'text-green-700'}`}>
-                          {formatCurrency(studentFeeSummary.balance)}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                  {studentPayments.length > 0 ? (
-                    <div className="border rounded-lg overflow-hidden">
-                      <h3 className="font-semibold p-4 bg-gray-50 border-b">Payment History</h3>
-                      <div className="overflow-x-auto">
-                        <table className="w-full">
-                          <thead className="bg-gray-50">
-                            <tr>
-                              <th className="px-4 py-2 text-left">Date</th>
-                              <th className="px-4 py-2 text-left">Receipt No.</th>
-                              <th className="px-4 py-2 text-left">Description</th>
-                              <th className="px-4 py-2 text-left">Amount</th>
-                              <th className="px-4 py-2 text-left">Method</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y">
-                            {studentPayments.map(payment => (
-                              <tr key={payment.id}>
-                                <td className="px-4 py-2">{new Date(payment.date).toLocaleDateString()}</td>
-                                <td className="px-4 py-2 font-mono">{payment.receiptNo}</td>
-                                <td className="px-4 py-2">{payment.description || payment.Fee?.name || 'Fee Payment'}</td>
-                                <td className="px-4 py-2 font-bold text-green-600">{formatCurrency(payment.amount)}</td>
-                                <td className="px-4 py-2">{payment.paymentMethod}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 bg-gray-50 rounded-lg">
-                      <i className="fas fa-money-bill-wave text-4xl text-gray-400 mb-2"></i>
-                      <p className="text-gray-500">No payment records found</p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {activeDetailTab === 'parents' && (
-                <div>
-                  {studentParents.length > 0 ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {studentParents.map(parent => {
-                        const u = parent.User || {};
-                        const name = `${u.firstName || parent.firstName || ''} ${u.lastName || parent.lastName || ''}`.trim() || 'Guardian';
-                        return (
-                          <div key={parent.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
-                            <div className="flex items-start space-x-3">
-                              <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
-                                <span className="text-purple-600 font-bold">
-                                  {(u.firstName || parent.firstName || '?')[0]}{(u.lastName || parent.lastName || '?')[0]}
-                                </span>
-                              </div>
-                              <div className="flex-1">
-                                <h4 className="font-semibold">{name}</h4>
-                                <p className="text-sm text-gray-600">{parent.relationship}</p>
-                                <div className="mt-1 flex flex-wrap gap-1">
-                                  {parent.isPrimary && <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs">Primary</span>}
-                                  {parent.emergencyContact && <span className="px-2 py-0.5 bg-red-100 text-red-800 rounded-full text-xs">Emergency</span>}
-                                  {parent.userId ? (
-                                    <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs">
-                                      <i className="fas fa-sign-in-alt mr-1"></i>Portal
-                                    </span>
-                                  ) : (
-                                    <span className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded-full text-xs">
-                                      No portal
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="mt-2 text-sm space-y-1">
-                                  {(u.email || parent.email) && <p><i className="fas fa-envelope mr-2 text-gray-400"></i>{u.email || parent.email}</p>}
-                                  {(u.phone || parent.phone) && <p><i className="fas fa-phone mr-2 text-gray-400"></i>{u.phone || parent.phone}</p>}
-                                  {parent.occupation && <p><i className="fas fa-briefcase mr-2 text-gray-400"></i>{parent.occupation}</p>}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="text-center py-12 bg-gray-50 rounded-lg">
-                      <i className="fas fa-users text-5xl text-gray-400 mb-4"></i>
-                      <p className="text-gray-600">No parent/guardian linked to this student</p>
-                      {canEdit && (
-                        <button onClick={() => handleAddParentClick(selectedStudent)} className="mt-4 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
-                          Add Parent / Guardian
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  {canEdit && studentParents.length > 0 && (
-                    <div className="mt-4 flex justify-end">
-                      <button onClick={() => handleAddParentClick(selectedStudent)} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
-                        <i className="fas fa-plus mr-2"></i>Add Another Guardian
+            {activeDetailTab === 'parents' && (
+              <div>
+                {studentParents.length === 0 ? (
+                  <div className="text-center py-8">
+                    <p className="text-gray-500 mb-3">No parent/guardian linked.</p>
+                    {canEdit && (
+                      <button onClick={() => { setShowDetailsModal(false); handleAddParentClick(selectedStudent); }}
+                              className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
+                        Add Guardian
                       </button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {activeDetailTab === 'attendance' && (
-                <div>
-                  {studentAttendance.length > 0 ? (
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-4 gap-4">
-                        <div className="bg-blue-50 p-4 rounded-lg text-center">
-                          <p className="text-sm text-blue-600">Total Days</p>
-                          <p className="text-2xl font-bold text-blue-700">{studentAttendance.length}</p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {studentParents.map(p => {
+                      const u = p.User || {};
+                      const name = `${u.firstName || p.firstName || ''} ${u.lastName || p.lastName || ''}`.trim() || 'Guardian';
+                      return (
+                        <div key={p.id} className="border rounded-lg p-4">
+                          <h4 className="font-semibold">{name}</h4>
+                          <p className="text-sm text-gray-600">{p.relationship}</p>
+                          <p className="text-sm"><i className="fas fa-envelope mr-2 text-gray-400" />{u.email || p.email || '—'}</p>
+                          <p className="text-sm"><i className="fas fa-phone mr-2 text-gray-400" />{u.phone || p.phone || '—'}</p>
+                          <div className="mt-2 flex gap-1 flex-wrap">
+                            {p.isPrimary && <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs">Primary</span>}
+                            {p.emergencyContact && <span className="px-2 py-0.5 bg-red-100 text-red-800 rounded-full text-xs">Emergency</span>}
+                          </div>
                         </div>
-                        <div className="bg-green-50 p-4 rounded-lg text-center">
-                          <p className="text-sm text-green-600">Present</p>
-                          <p className="text-2xl font-bold text-green-700">{studentAttendance.filter(a => a.status === 'PRESENT').length}</p>
-                        </div>
-                        <div className="bg-red-50 p-4 rounded-lg text-center">
-                          <p className="text-sm text-red-600">Absent</p>
-                          <p className="text-2xl font-bold text-red-700">{studentAttendance.filter(a => a.status === 'ABSENT').length}</p>
-                        </div>
-                        <div className="bg-yellow-50 p-4 rounded-lg text-center">
-                          <p className="text-sm text-yellow-600">Late</p>
-                          <p className="text-2xl font-bold text-yellow-700">{studentAttendance.filter(a => a.status === 'LATE').length}</p>
-                        </div>
-                      </div>
-                      <div className="border rounded-lg overflow-hidden">
-                        <table className="w-full">
-                          <thead className="bg-gray-50">
-                            <tr>
-                              <th className="px-4 py-2 text-left">Date</th>
-                              <th className="px-4 py-2 text-left">Status</th>
-                              <th className="px-4 py-2 text-left">Time In</th>
-                              <th className="px-4 py-2 text-left">Time Out</th>
-                              <th className="px-4 py-2 text-left">Remarks</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y">
-                            {studentAttendance.map(record => (
-                              <tr key={record.id}>
-                                <td className="px-4 py-2">{new Date(record.date).toLocaleDateString()}</td>
-                                <td className="px-4 py-2">
-                                  <span className={`px-2 py-1 rounded-full text-xs ${
-                                    record.status === 'PRESENT' ? 'bg-green-100 text-green-800' :
-                                    record.status === 'ABSENT' ? 'bg-red-100 text-red-800' :
-                                    record.status === 'LATE' ? 'bg-yellow-100 text-yellow-800' :
-                                    'bg-blue-100 text-blue-800'
-                                  }`}>{record.status}</span>
-                                </td>
-                                <td className="px-4 py-2">{record.timeIn?.substring(0,5) || '—'}</td>
-                                <td className="px-4 py-2">{record.timeOut?.substring(0,5) || '—'}</td>
-                                <td className="px-4 py-2">{record.remarks || '—'}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-center py-12 bg-gray-50 rounded-lg">
-                      <i className="fas fa-calendar-check text-5xl text-gray-400 mb-4"></i>
-                      <p className="text-gray-600">No attendance records found</p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="flex justify-end space-x-2 mt-6 pt-4 border-t">
-              {!isStudent && !isParent && (
-                <>
-                  {canEdit && (
-                    <button onClick={() => { setShowDetailsModal(false); handleEditClick(selectedStudent); }} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center">
-                      <i className="fas fa-edit mr-2"></i>Edit Student
+                      );
+                    })}
+                  </div>
+                )}
+                {canEdit && studentParents.length > 0 && (
+                  <div className="mt-4 flex justify-end">
+                    <button onClick={() => { setShowDetailsModal(false); handleAddParentClick(selectedStudent); }}
+                            className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
+                      <i className="fas fa-plus mr-2" />Add Another
                     </button>
-                  )}
-                  {canDelete && (
-                    <button onClick={() => { setShowDetailsModal(false); handleDeleteClick(selectedStudent); }} className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 flex items-center">
-                      <i className="fas fa-trash mr-2"></i>Delete Student
-                    </button>
-                  )}
-                </>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeDetailTab === 'attendance' && (
+              studentAttendance.length === 0 ? (
+                <p className="text-center py-8 text-gray-500">No attendance records.</p>
+              ) : (
+                <table className="w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left">Date</th>
+                      <th className="px-4 py-2 text-left">Status</th>
+                      <th className="px-4 py-2 text-left">Time In</th>
+                      <th className="px-4 py-2 text-left">Time Out</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {studentAttendance.map(a => (
+                      <tr key={a.id}>
+                        <td className="px-4 py-2">{formatDate(a.date)}</td>
+                        <td className="px-4 py-2">{a.status || '—'}</td>
+                        <td className="px-4 py-2">{(a.timeIn || '').substring(0, 5) || '—'}</td>
+                        <td className="px-4 py-2">{(a.timeOut || '').substring(0, 5) || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )
+            )}
+
+            <div className="flex justify-end gap-2 mt-6 pt-4 border-t">
+              {canEdit && (
+                <button onClick={() => { setShowDetailsModal(false); openEdit(selectedStudent); }}
+                        className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
+                  <i className="fas fa-edit mr-2" />Edit
+                </button>
               )}
-              <button onClick={() => setShowDetailsModal(false)} className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600">
+              <button onClick={() => setShowDetailsModal(false)}
+                      className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600">
                 Close
               </button>
             </div>
@@ -6037,160 +6077,122 @@ const StudentModule = ({
         </div>
       )}
 
-      {/* ==================== ADD PARENT MODAL ==================== */}
+      {/* Add Parent modal */}
       {showAddParentModal && selectedStudentForParent && canEdit && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold">
-                Add Parent / Guardian for {selectedStudentForParent.firstName} {selectedStudentForParent.lastName}
-              </h3>
+              <h3 className="text-xl font-bold">Add Guardian for {selectedStudentForParent.firstName}</h3>
               <button onClick={() => setShowAddParentModal(false)} className="text-gray-500 hover:text-gray-700">
-                <i className="fas fa-times"></i>
+                <i className="fas fa-times" />
               </button>
             </div>
 
-            <div className="space-y-4">
-              {enableParentPortal && parentUsers.length > 0 && (
-                <div className="flex space-x-4 mb-2">
-                  <label className="flex items-center">
-                    <input type="radio" checked={!createNewParent}
-                      onChange={() => { setCreateNewParent(false); setSelectedExistingParent(null); }} className="mr-2" />
-                    Use Existing Parent
-                  </label>
-                  <label className="flex items-center">
-                    <input type="radio" checked={createNewParent}
-                      onChange={() => { setCreateNewParent(true); setSelectedExistingParent(null); setSearchParent(''); }} className="mr-2" />
-                    Add New Guardian
-                  </label>
-                </div>
-              )}
+            {enableParentPortal && parentUserOptions.length > 0 && (
+              <div className="flex gap-4 mb-4">
+                <label className="flex items-center">
+                  <input type="radio" className="mr-2" checked={createNewParent} onChange={() => setCreateNewParent(true)} />
+                  New Guardian
+                </label>
+                <label className="flex items-center">
+                  <input type="radio" className="mr-2" checked={!createNewParent} onChange={() => setCreateNewParent(false)} />
+                  Use Existing
+                </label>
+              </div>
+            )}
 
-              {!createNewParent ? (
-                <div className="space-y-3">
-                  <SearchableSelect label="Select Existing Parent/Guardian *"
-                    value={selectedExistingParent?.userId || ''}
-                    onChange={(e) => {
-                      const p = parentUsers.find(x => x.userId === e.target.value);
-                      setSelectedExistingParent(p || null);
-                    }}
-                    options={parentUserOptions}
-                    placeholder="Search by name or email..."
-                    emptyMessage="No parents available"
-                    required />
-                  {selectedExistingParent && (
-                    <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
-                      <p className="text-sm font-medium text-blue-800">{selectedExistingParent.firstName} {selectedExistingParent.lastName}</p>
-                      <p className="text-xs text-blue-600">{selectedExistingParent.email}</p>
-                    </div>
-                  )}
+            {!createNewParent ? (
+              <SearchableSelect
+                label="Select Existing Parent/Guardian *"
+                value={selectedExistingParent?.userId || ''}
+                onChange={(e) => {
+                  const p = parentUserOptions.find(x => x.value === e.target.value);
+                  setSelectedExistingParent(p || null);
+                }}
+                options={parentUserOptions}
+                placeholder="Search…"
+                required
+              />
+            ) : (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <TextInput label="First Name *" value={parentForm.firstName} onChange={(e) => setParentForm({ ...parentForm, firstName: e.target.value })} required />
+                  <TextInput label="Last Name *" value={parentForm.lastName} onChange={(e) => setParentForm({ ...parentForm, lastName: e.target.value })} required />
+                  <TextInput label="Phone" value={parentForm.phone} onChange={(e) => setParentForm({ ...parentForm, phone: e.target.value })} />
+                  <TextInput label="Email" type="email" value={parentForm.email} onChange={(e) => setParentForm({ ...parentForm, email: e.target.value })} />
                 </div>
-              ) : (
-                <>
-                  <div className="grid grid-cols-2 gap-4">
-                    <InputField label="First Name *" value={parentForm.firstName}
-                      onChange={(e) => setParentForm({...parentForm, firstName: e.target.value})} required />
-                    <InputField label="Last Name *" value={parentForm.lastName}
-                      onChange={(e) => setParentForm({...parentForm, lastName: e.target.value})} required />
-                    <InputField label="Phone Number" value={parentForm.phone}
-                      onChange={(e) => setParentForm({...parentForm, phone: e.target.value})}
-                      placeholder="Provide phone or email" />
-                    <InputField label="Email Address" type="email" value={parentForm.email}
-                      onChange={(e) => setParentForm({...parentForm, email: e.target.value})}
-                      placeholder="Provide phone or email" />
-                  </div>
-                  <p className="text-xs text-gray-500 -mt-2">Provide at least a phone number or email.</p>
-                </>
-              )}
 
-              <div className="border-t pt-4">
-                <h4 className="font-semibold mb-3">Relationship & Flags</h4>
-                <div className="grid grid-cols-2 gap-4">
-                  <SelectField label="Relationship *" value={parentForm.relationship}
-                    onChange={(e) => setParentForm({...parentForm, relationship: e.target.value})}
-                    options={RELATIONSHIP_OPTIONS} />
-                  <div className="flex items-center space-x-4 pt-6">
-                    <label className="flex items-center">
-                      <input type="checkbox" checked={parentForm.isPrimary}
-                        onChange={(e) => setParentForm({...parentForm, isPrimary: e.target.checked})} className="mr-2 rounded" />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <SelectField label="Relationship *" value={parentForm.relationship} onChange={(e) => setParentForm({ ...parentForm, relationship: e.target.value })} options={relationshipOptions} />
+                  <div className="flex items-center gap-4 pt-5">
+                    <label className="flex items-center text-sm">
+                      <input type="checkbox" className="mr-2"
+                             checked={parentForm.isPrimary}
+                             onChange={(e) => setParentForm({ ...parentForm, isPrimary: e.target.checked })} />
                       Primary
                     </label>
-                    <label className="flex items-center">
-                      <input type="checkbox" checked={parentForm.emergencyContact}
-                        onChange={(e) => setParentForm({...parentForm, emergencyContact: e.target.checked})} className="mr-2 rounded" />
+                    <label className="flex items-center text-sm">
+                      <input type="checkbox" className="mr-2"
+                             checked={parentForm.emergencyContact}
+                             onChange={(e) => setParentForm({ ...parentForm, emergencyContact: e.target.checked })} />
                       Emergency
                     </label>
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-4 mt-4">
-                  <InputField label="Occupation" value={parentForm.occupation}
-                    onChange={(e) => setParentForm({...parentForm, occupation: e.target.value})} />
-                  <InputField label="Employer" value={parentForm.employer}
-                    onChange={(e) => setParentForm({...parentForm, employer: e.target.value})} />
-                  <InputField label="Monthly Income (KES)" type="number" value={parentForm.monthlyIncome}
-                    onChange={(e) => setParentForm({...parentForm, monthlyIncome: e.target.value})} />
-                </div>
-              </div>
 
-              {createNewParent && (
-                <div className="border-t pt-4">
-                  <label className="flex items-start cursor-pointer">
-                    <input type="checkbox" checked={parentForm.grantPortalAccess}
-                      onChange={(e) => setParentForm({...parentForm, grantPortalAccess: e.target.checked, password: e.target.checked ? parentForm.password : ''})}
-                      className="mt-1 mr-2 rounded" />
-                    <span className="text-sm">
-                      <span className="font-medium text-gray-800">Grant portal access</span>
-                      <span className="block text-xs text-gray-500 mt-0.5">
-                        Optional. Requires the email above and a password.
-                      </span>
-                    </span>
-                  </label>
-                  {parentForm.grantPortalAccess && (
-                    <div className="mt-3">
-                      <InputField label="Portal Password *" type="password" value={parentForm.password}
-                        onChange={(e) => setParentForm({...parentForm, password: e.target.value})} required />
-                    </div>
-                  )}
-                </div>
-              )}
+                <label className="flex items-start cursor-pointer">
+                  <input type="checkbox" className="mt-1 mr-2"
+                         checked={parentForm.grantPortalAccess}
+                         onChange={(e) => setParentForm({ ...parentForm, grantPortalAccess: e.target.checked, password: e.target.checked ? parentForm.password : '' })} />
+                  <span className="text-sm">
+                    <span className="font-medium">Grant portal access</span>
+                    <span className="block text-xs text-gray-500 mt-0.5">Requires email and password.</span>
+                  </span>
+                </label>
 
-              <div className="flex space-x-2 pt-4">
-                <button onClick={handleAddParent}
-                  disabled={loading || (!createNewParent && !selectedExistingParent)}
-                  className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-                  {loading ? 'Adding...' : 'Add Guardian'}
-                </button>
-                <button onClick={() => setShowAddParentModal(false)}
-                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
-                  Cancel
-                </button>
+                {parentForm.grantPortalAccess && (
+                  <TextInput label="Portal Password *" type="password" value={parentForm.password}
+                             onChange={(e) => setParentForm({ ...parentForm, password: e.target.value })} required />
+                )}
               </div>
+            )}
+
+            <div className="flex gap-2 mt-6 pt-4 border-t">
+              <button onClick={handleAddParent}
+                      disabled={loading || (!createNewParent && !selectedExistingParent)}
+                      className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                {loading ? 'Adding…' : 'Add Guardian'}
+              </button>
+              <button onClick={() => setShowAddParentModal(false)}
+                      className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
+                Cancel
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ==================== DELETE CONFIRM ==================== */}
+      {/* Delete confirm */}
       {showDeleteConfirm && selectedStudent && canDelete && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
             <div className="text-center mb-6">
               <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <i className="fas fa-exclamation-triangle text-red-600 text-2xl"></i>
+                <i className="fas fa-exclamation-triangle text-red-600 text-2xl" />
               </div>
-              <h3 className="text-xl font-bold text-gray-800">Delete Student?</h3>
+              <h3 className="text-xl font-bold">Delete Student?</h3>
               <p className="text-gray-600 mt-2">
-                Are you sure you want to delete <span className="font-semibold">{selectedStudent.firstName} {selectedStudent.lastName}</span>?
+                Delete <span className="font-semibold">{selectedStudent.firstName} {selectedStudent.lastName}</span>?
               </p>
-              <p className="text-sm text-red-600 mt-2">This action cannot be undone.</p>
+              <p className="text-sm text-red-600 mt-2">This cannot be undone.</p>
             </div>
-            <div className="flex space-x-2">
+            <div className="flex gap-2">
               <button onClick={confirmDelete} disabled={loading}
-                className="flex-1 bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 disabled:opacity-50">
-                {loading ? 'Deleting...' : 'Yes, Delete'}
+                      className="flex-1 bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 disabled:opacity-50">
+                {loading ? 'Deleting…' : 'Yes, Delete'}
               </button>
               <button onClick={() => setShowDeleteConfirm(false)}
-                className="flex-1 bg-gray-500 text-white py-2 rounded-lg hover:bg-gray-600">
+                      className="flex-1 bg-gray-500 text-white py-2 rounded-lg hover:bg-gray-600">
                 Cancel
               </button>
             </div>
@@ -6200,6 +6202,7 @@ const StudentModule = ({
     </div>
   );
 };
+
 
 // ==================== SUBJECT MODULE WITH MULTI-CLASS SUPPORT ====================
 const SubjectModule = ({ 
@@ -12923,10 +12926,11 @@ const TimetableModule = ({
   const [studentConflicts, setStudentConflicts] = useState([]);
   const [loadingConflicts, setLoadingConflicts] = useState(false);
 
-  // NEW: Break-related state
+  // Break-related state
   const [showBreakForm, setShowBreakForm] = useState(false);
   const [breakForm, setBreakForm] = useState({
-    name: 'Break',
+    name: 'Short Break',
+    customName: '',
     day: 'MONDAY',
     period: '',
     startTime: '10:20',
@@ -12957,8 +12961,6 @@ const TimetableModule = ({
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
   const isUniversity = schoolCategory === 'UNIVERSITY';
   const isTVET = schoolCategory === 'COLLEGE_TVET';
-
-  // NEW: Breaks only apply to Primary / Secondary / TVET. University skips them.
   const supportsBreaks = !isUniversity;
 
   const days = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
@@ -13181,7 +13183,7 @@ const TimetableModule = ({
   const dayOptions = days.map(d => ({ value: d, label: d }));
   const periodOptions = periods.map(p => ({ value: p, label: `Period ${p}` }));
 
-  // NEW: Break presets
+  // Break presets
   const breakNameOptions = [
     { value: 'Short Break',  label: 'Short Break'  },
     { value: 'Long Break',   label: 'Long Break'   },
@@ -13196,7 +13198,7 @@ const TimetableModule = ({
   // ==================== CONFLICT DETECTION ====================
   const checkTeacherConflicts = (teacherId, day, startTime, endTime, excludeId = null) => {
     return timetable.filter(entry => {
-      if (entry.isBreak) return false;              // breaks have no teacher
+      if (entry.isBreak) return false;
       if (excludeId && entry.id === excludeId) return false;
       if (entry.teacherId !== teacherId) return false;
       if (entry.day !== day) return false;
@@ -13376,6 +13378,14 @@ const TimetableModule = ({
     return 'Unknown';
   };
 
+  // Normalize "HH:MM" string to minutes for comparison (handles "9:05" and "09:05")
+  const timeToMinutes = (t) => {
+    if (!t) return NaN;
+    const [h, m] = t.split(':').map(Number);
+    if (Number.isNaN(h) || Number.isNaN(m)) return NaN;
+    return h * 60 + m;
+  };
+
   // ==================== SUBMIT — CLASS ====================
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -13387,9 +13397,13 @@ const TimetableModule = ({
       const selectedStaff = staff.find(s => s.userId === formData.teacherId);
       if (!selectedStaff) { alert('Teacher not found in staff records'); setLoading(false); return; }
 
+      if (timeToMinutes(formData.endTime) <= timeToMinutes(formData.startTime)) {
+        alert('End time must be after start time'); setLoading(false); return;
+      }
+
       const submitData = {
         day: formData.day,
-        period: parseInt(formData.period),
+        period: parseInt(formData.period, 10),
         startTime: formData.startTime,
         endTime: formData.endTime,
         teacherId: selectedStaff.id,
@@ -13403,15 +13417,15 @@ const TimetableModule = ({
         if (!formData.unitId) { alert('Please select a module/unit'); setLoading(false); return; }
         submitData.programId = formData.programId;
         submitData.unitId = formData.unitId;
-        submitData.year = formData.year ? parseInt(formData.year) : null;
-        submitData.module = formData.module ? parseInt(formData.module) : null;
+        submitData.year = formData.year ? parseInt(formData.year, 10) : null;
+        submitData.module = formData.module ? parseInt(formData.module, 10) : null;
       } else if (isUniversity) {
         if (!formData.courseId) { alert('Please select a course'); setLoading(false); return; }
         if (!formData.unitId) { alert('Please select a unit'); setLoading(false); return; }
         submitData.courseId = formData.courseId;
         submitData.unitId = formData.unitId;
-        submitData.year = formData.year ? parseInt(formData.year) : null;
-        submitData.semester = formData.semester ? parseInt(formData.semester) : null;
+        submitData.year = formData.year ? parseInt(formData.year, 10) : null;
+        submitData.semester = formData.semester ? parseInt(formData.semester, 10) : null;
       } else {
         if (!formData.classId) { alert('Please select a class'); setLoading(false); return; }
         if (!formData.subjectId) { alert('Please select a subject'); setLoading(false); return; }
@@ -13429,7 +13443,9 @@ const TimetableModule = ({
         if (!window.confirm(msg)) { setLoading(false); return; }
       }
 
+      console.log('📤 POST /timetable (class):', submitData);
       await handleCreate('/timetable', submitData, setTimetable, timetable);
+
       setShowForm(false);
       setFormData({
         classId: '', courseId: '', programId: '', year: '', semester: '', module: '',
@@ -13448,8 +13464,6 @@ const TimetableModule = ({
   };
 
   // ==================== SUBMIT — BREAK ====================
-  // Breaks are stored as timetable rows but with isBreak=true, no teacher/unit/subject,
-  // and only day + period + times + a name. They still occupy the slot.
   const handleBreakSubmit = async (e) => {
     e.preventDefault();
     if (!canAdd) { alert('You do not have permission'); return; }
@@ -13457,41 +13471,65 @@ const TimetableModule = ({
     try {
       if (!breakForm.period) { alert('Please select a period'); setLoading(false); return; }
       if (!breakForm.startTime || !breakForm.endTime) { alert('Please set start and end time'); setLoading(false); return; }
-      if (breakForm.startTime >= breakForm.endTime) { alert('End time must be after start time'); setLoading(false); return; }
 
-      // Check for slot occupancy (across all entries, including other breaks)
+      const startM = timeToMinutes(breakForm.startTime);
+      const endM   = timeToMinutes(breakForm.endTime);
+      if (!Number.isFinite(startM) || !Number.isFinite(endM) || endM <= startM) {
+        alert('End time must be after start time'); setLoading(false); return;
+      }
+
+      // Resolve break name (handle "Other" free-text)
+      const resolvedBreakName =
+        (breakForm.name === 'Other'
+          ? (breakForm.customName || '').trim() || 'Break'
+          : breakForm.name) || 'Break';
+
+      // Check for slot occupancy
+      const periodNum = parseInt(breakForm.period, 10);
       const existingSlot = timetable.find(t =>
-        t.day === breakForm.day && t.period === parseInt(breakForm.period)
+        t.day === breakForm.day && Number(t.period) === periodNum
       );
+
       if (existingSlot) {
-        if (!window.confirm(`Period ${breakForm.period} on ${breakForm.day} already has an entry (${existingSlot.isBreak ? existingSlot.breakName : getUnitName(existingSlot)}). Overwrite?`)) {
+        const label = existingSlot.isBreak
+          ? (existingSlot.breakName || 'Break')
+          : getUnitName(existingSlot);
+        if (!window.confirm(`Period ${periodNum} on ${breakForm.day} already has an entry (${label}). Overwrite?`)) {
           setLoading(false); return;
+        }
+        // If overwriting, delete the existing entry first
+        try {
+          await handleDelete(existingSlot.id);
+        } catch (delErr) {
+          console.warn('Could not delete existing slot before overwrite:', delErr);
         }
       }
 
       const submitData = {
         day: breakForm.day,
-        period: parseInt(breakForm.period),
+        period: periodNum,
         startTime: breakForm.startTime,
         endTime: breakForm.endTime,
         room: '',
         teacherId: null,
         isBreak: true,
-        breakName: breakForm.name || 'Break',
+        breakName: resolvedBreakName,
         schoolId: currentSchool?.id,
-        // Attach scope identifiers so the break shows up under the right filter
+        // Scope identifiers so break shows under the right filter
         ...(isTVET && selectedProgram ? { programId: selectedProgram } : {}),
-        ...(isTVET && selectedYear ? { year: parseInt(selectedYear) } : {}),
-        ...(isTVET && selectedModule ? { module: parseInt(selectedModule) } : {}),
+        ...(isTVET && selectedYear ? { year: parseInt(selectedYear, 10) } : {}),
+        ...(isTVET && selectedModule ? { module: parseInt(selectedModule, 10) } : {}),
         ...(isUniversity && selectedCourse ? { courseId: selectedCourse } : {}),
-        ...(isUniversity && selectedYear ? { year: parseInt(selectedYear) } : {}),
-        ...(isUniversity && selectedSemester ? { semester: parseInt(selectedSemester) } : {}),
+        ...(isUniversity && selectedYear ? { year: parseInt(selectedYear, 10) } : {}),
+        ...(isUniversity && selectedSemester ? { semester: parseInt(selectedSemester, 10) } : {}),
         ...(!isUniversity && !isTVET && selectedClass ? { classId: selectedClass } : {})
       };
 
+      console.log('📤 POST /timetable (break):', submitData);
       await handleCreate('/timetable', submitData, setTimetable, timetable);
+
       setShowBreakForm(false);
-      setBreakForm({ name: 'Break', day: 'MONDAY', period: '', startTime: '10:20', endTime: '10:50' });
+      setBreakForm({ name: 'Short Break', customName: '', day: 'MONDAY', period: '', startTime: '10:20', endTime: '10:50' });
       await refreshTimetable();
       alert('✅ Break added successfully!');
     } catch (err) {
@@ -13555,12 +13593,12 @@ const TimetableModule = ({
     let filtered = [...timetable];
     if (isTVET) {
       if (selectedProgram) filtered = filtered.filter(e => e.programId === selectedProgram);
-      if (selectedYear)    filtered = filtered.filter(e => e.year === parseInt(selectedYear));
-      if (selectedModule)  filtered = filtered.filter(e => e.module === parseInt(selectedModule));
+      if (selectedYear)    filtered = filtered.filter(e => e.year === parseInt(selectedYear, 10));
+      if (selectedModule)  filtered = filtered.filter(e => e.module === parseInt(selectedModule, 10));
     } else if (isUniversity) {
       if (selectedCourse)   filtered = filtered.filter(e => e.courseId === selectedCourse);
-      if (selectedYear)     filtered = filtered.filter(e => e.year === parseInt(selectedYear));
-      if (selectedSemester) filtered = filtered.filter(e => e.semester === parseInt(selectedSemester));
+      if (selectedYear)     filtered = filtered.filter(e => e.year === parseInt(selectedYear, 10));
+      if (selectedSemester) filtered = filtered.filter(e => e.semester === parseInt(selectedSemester, 10));
     } else {
       if (selectedClass) filtered = filtered.filter(e => e.classId === selectedClass);
     }
@@ -13615,9 +13653,8 @@ const TimetableModule = ({
     periods.forEach(period => {
       rowsHtml += `<tr><th class="period-cell">Period ${period}</th>`;
       days.forEach(day => {
-        const entry = filteredTimetable.find(t => t.day === day && t.period === period);
+        const entry = filteredTimetable.find(t => t.day === day && Number(t.period) === period);
         if (entry && entry.isBreak) {
-          // ============== BREAK CELL ==============
           rowsHtml += `
             <td class="break-cell">
               <div class="break-name">${entry.breakName || 'Break'}</div>
@@ -13626,7 +13663,6 @@ const TimetableModule = ({
                 : ''}
             </td>`;
         } else if (entry) {
-          // ============== CLASS CELL ==============
           const unitName = getUnitName(entry);
           const teacherName = getTeacherName(entry);
           const times = entry.startTime && entry.endTime
@@ -13697,33 +13733,13 @@ const TimetableModule = ({
             .entry-badge { display: inline-block; background: #e0e7ff; color: #4338ca; font-size: 9px; padding: 1px 5px; border-radius: 4px; margin-top: 3px; }
             .entry-year { font-size: 9.5px; color: #6b7280; margin-top: 2px; }
             .empty-cell { text-align: center; color: #d1d5db; background: #fbfbfd; }
-
-            /* ============ BREAK STYLING ============ */
             .break-cell {
-              background: repeating-linear-gradient(
-                45deg,
-                #fef3c7,
-                #fef3c7 6px,
-                #fde68a 6px,
-                #fde68a 12px
-              );
+              background: repeating-linear-gradient(45deg, #fef3c7, #fef3c7 6px, #fde68a 6px, #fde68a 12px);
               text-align: center;
               vertical-align: middle;
             }
-            .break-name {
-              font-weight: 800;
-              color: #92400e;
-              font-size: 11px;
-              text-transform: uppercase;
-              letter-spacing: 0.6px;
-            }
-            .break-time {
-              color: #78350f;
-              font-size: 10px;
-              margin-top: 3px;
-              font-weight: 600;
-            }
-
+            .break-name { font-weight: 800; color: #92400e; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; }
+            .break-time { color: #78350f; font-size: 10px; margin-top: 3px; font-weight: 600; }
             .print-footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; gap: 32px; font-size: 11px; color: #4b5563; }
             .signature-line { flex: 1; padding-top: 24px; }
             @media print { body { padding: 0; } .no-print { display: none !important; } }
@@ -13764,7 +13780,6 @@ const TimetableModule = ({
               <i className="fas fa-plus mr-2"></i>Add Entry
             </button>
           )}
-          {/* NEW: Add Break button — hidden for University */}
           {canAdd && supportsBreaks && (
             <button onClick={() => setShowBreakForm(true)} className="bg-amber-500 text-white px-4 py-2 rounded-lg flex items-center hover:bg-amber-600">
               <i className="fas fa-mug-hot mr-2"></i>Add Break
@@ -13865,7 +13880,7 @@ const TimetableModule = ({
         </div>
       )}
 
-      {/* NEW: Add Break Form */}
+      {/* Add Break Form */}
       {showBreakForm && canAdd && supportsBreaks && (
         <div className="bg-white p-6 rounded-xl shadow-sm border-2 border-amber-200 no-print">
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -13885,6 +13900,19 @@ const TimetableModule = ({
                 required
                 placeholder=""
               />
+              {breakForm.name === 'Other' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Custom Name *</label>
+                  <input
+                    type="text"
+                    value={breakForm.customName}
+                    onChange={(e) => setBreakForm({ ...breakForm, customName: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    placeholder="e.g., Morning Devotion"
+                    required
+                  />
+                </div>
+              )}
               <SearchableSelect
                 label="Day *"
                 value={breakForm.day}
@@ -13947,11 +13975,10 @@ const TimetableModule = ({
                 <tr key={period}>
                   <td className="px-4 py-3 border font-medium bg-gray-50">Period {period}</td>
                   {days.map(day => {
-                    const entry = filteredTimetable.find(t => t.day === day && t.period === period);
+                    const entry = filteredTimetable.find(t => t.day === day && Number(t.period) === period);
                     return (
                       <td key={`${period}-${day}`} className="px-4 py-3 border align-top">
                         {entry && entry.isBreak ? (
-                          // ============== BREAK CELL ==============
                           <div className="bg-gradient-to-br from-amber-100 to-amber-200 border border-amber-300 p-3 rounded-lg relative group">
                             <div className="flex items-center gap-2">
                               <i className="fas fa-mug-hot text-amber-700"></i>
@@ -13972,7 +13999,6 @@ const TimetableModule = ({
                             )}
                           </div>
                         ) : entry ? (
-                          // ============== CLASS CELL ==============
                           <div className="bg-indigo-50 p-3 rounded-lg relative group">
                             <div className="font-bold text-indigo-700 text-base">{getUnitName(entry)}</div>
                             {isTVET && entry.module && (
@@ -14020,7 +14046,6 @@ const TimetableModule = ({
     </div>
   );
 };
-
 
 
 import {
@@ -17564,7 +17589,7 @@ const StaffAttendanceReportsModule = ({ staff, currentSchool, user }) => {
   );
 };
 
-// ==================== STAFF MODULE — FIXED INPUTS & SEARCHABLE SELECTS ====================
+// ==================== STAFF MODULE — FIXED SEARCHABLE SELECT & MONEY INPUTS ====================
 const StaffModule = ({
   staff = [],
   setStaff,
@@ -17649,6 +17674,13 @@ const StaffModule = ({
     }).format(amount || 0);
   };
 
+  // Money helpers — keep the raw string while typing, parse only at submit
+  const parseMoney = (v) => {
+    if (v === '' || v === null || v === undefined) return 0;
+    const n = parseFloat(String(v).replace(/,/g, ''));
+    return Number.isFinite(n) ? n : 0;
+  };
+
   // ==================== STAFF ROLE OPTIONS ====================
   const staffRoleOptions = useMemo(() => {
     if (isUniversity) {
@@ -17707,7 +17739,6 @@ const StaffModule = ({
         { value: 'NURSE',                label: 'Nurse' },
       ];
     }
-    // Primary / ECDE / JSS
     return [
       { value: 'HEAD_TEACHER',         label: 'Head Teacher' },
       { value: 'DEPUTY_HEAD_TEACHER',  label: 'Deputy Head Teacher' },
@@ -17788,14 +17819,16 @@ const StaffModule = ({
     return uniqueDepartments.map(dept => ({ value: dept.id, label: dept.name }));
   }, [uniqueDepartments]);
 
-  // ==================== FIXED SEARCHABLE SELECT ====================
-  // Key fixes vs. the broken version:
-  //  1. `options` cannot be undefined — always an array
-  //  2. When the user clicks the input, we *copy* the current label into search
-  //  3. On blur, we do NOT wipe search — we simply close the dropdown
-  //  4. When the user types free text, the value stays unchanged UNLESS they
-  //     explicitly pick an option — so typing can't be interrupted
-  //  5. The input is fully editable even if the value isn't in the options
+  // ==================================================================
+  //  SEARCHABLE SELECT — non-blocking, keyboard-friendly
+  // ==================================================================
+  //  Critical rules that keep it from blocking fields below:
+  //   • The dropdown is absolutely positioned INSIDE a `relative` wrapper
+  //     that wraps ONLY the input (not the whole form row).
+  //   • It has a very high z-index (z-[9999]) and is only rendered when open.
+  //   • When it closes, the node is removed — no invisible overlay remains.
+  //   • The wrapper doesn't use `overflow-hidden` anywhere upstream.
+  // ==================================================================
   const SearchableSelect = ({
     label,
     value,
@@ -17811,8 +17844,10 @@ const StaffModule = ({
     const [search, setSearch] = useState('');
     const [isOpen, setIsOpen] = useState(false);
     const [isFocused, setIsFocused] = useState(false);
+    const [highlightedIndex, setHighlightedIndex] = useState(-1);
     const dropdownRef = useRef(null);
     const inputRef = useRef(null);
+    const listRef = useRef(null);
 
     const safeOptions = Array.isArray(options) ? options : [];
 
@@ -17824,83 +17859,129 @@ const StaffModule = ({
         if (!opt) return false;
         return (opt.label || '').toLowerCase().includes(s)
             || (opt.subLabel || '').toLowerCase().includes(s)
-            || String(opt.value || '').toLowerCase().includes(s);
+            || String(opt.value ?? '').toLowerCase().includes(s);
       });
     }, [safeOptions, search]);
 
     const selectedOption = useMemo(() => {
-      if (!value && value !== 0) return null;
-      return safeOptions.find(opt => opt.value === value) || null;
+      if (value === undefined || value === null || value === '') return null;
+      return safeOptions.find(opt => String(opt.value) === String(value)) || null;
     }, [safeOptions, value]);
 
-    // Close dropdown when clicking outside
+    // Close on outside click — but only on real pointerdown, and only when
+    // the target is truly outside BOTH the input and the dropdown.
     useEffect(() => {
-      const handleClickOutside = (event) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-          setIsOpen(false);
-          setIsFocused(false);
-        }
+      if (!isOpen) return;
+      const handlePointerDown = (event) => {
+        const node = dropdownRef.current;
+        if (!node) return;
+        if (node.contains(event.target)) return;
+        setIsOpen(false);
+        setIsFocused(false);
+        setHighlightedIndex(-1);
       };
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
+      document.addEventListener('mousedown', handlePointerDown);
+      document.addEventListener('touchstart', handlePointerDown, { passive: true });
+      return () => {
+        document.removeEventListener('mousedown', handlePointerDown);
+        document.removeEventListener('touchstart', handlePointerDown);
+      };
+    }, [isOpen]);
 
-    const handleSelect = (selectedValue) => {
-      onChange({ target: { value: selectedValue } });
-      const opt = safeOptions.find(o => o.value === selectedValue);
-      setSearch(opt ? opt.label : '');
+    const openMenu = () => {
+      if (disabled) return;
+      setIsFocused(true);
+      setIsOpen(true);
+      // Preload search with the current label so the list filters sensibly
+      if (selectedOption && !search) setSearch(selectedOption.label);
+    };
+
+    const closeMenu = (restoreLabel = true) => {
       setIsOpen(false);
       setIsFocused(false);
-      // Return focus to the input so Tab/Shift+Tab still work
-      if (inputRef.current) inputRef.current.focus();
+      setHighlightedIndex(-1);
+      if (restoreLabel) {
+        setSearch(selectedOption ? selectedOption.label : '');
+      }
+    };
+
+    const handleSelect = (opt) => {
+      if (!opt || opt.disabled) return;
+      onChange({ target: { value: opt.value } });
+      setSearch(opt.label);
+      setIsOpen(false);
+      setIsFocused(false);
+      setHighlightedIndex(-1);
+      // Return focus so the user can Tab onward
+      requestAnimationFrame(() => inputRef.current?.focus());
     };
 
     const handleInputChange = (e) => {
       const val = e.target.value;
       setSearch(val);
-      setIsFocused(true);
       setIsOpen(true);
+      setIsFocused(true);
+      setHighlightedIndex(-1);
+      // Only clear the upstream value when the field is fully emptied
+      if (val === '') onChange({ target: { value: '' } });
+    };
 
-      // Only clear the value if the user deletes everything
-      if (val === '') {
-        onChange({ target: { value: '' } });
+    const handleKeyDown = (e) => {
+      if (disabled) return;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (!isOpen) { openMenu(); return; }
+        setHighlightedIndex(i =>
+          filteredOptions.length === 0 ? -1 : (i + 1) % filteredOptions.length
+        );
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (!isOpen) { openMenu(); return; }
+        setHighlightedIndex(i =>
+          filteredOptions.length === 0
+            ? -1
+            : (i - 1 + filteredOptions.length) % filteredOptions.length
+        );
+      } else if (e.key === 'Enter') {
+        if (isOpen && highlightedIndex >= 0 && filteredOptions[highlightedIndex]) {
+          e.preventDefault();
+          handleSelect(filteredOptions[highlightedIndex]);
+        }
+      } else if (e.key === 'Escape') {
+        if (isOpen) {
+          e.preventDefault();
+          closeMenu(true);
+        }
+      } else if (e.key === 'Tab') {
+        // Let the natural focus move happen, but close the menu first
+        closeMenu(true);
       }
     };
 
-    const handleFocus = () => {
-      if (disabled) return;
-      setIsFocused(true);
-      setIsOpen(true);
-      // Populate search with current label so the dropdown filters on it
-      if (selectedOption && !search) setSearch(selectedOption.label);
-    };
-
-    const handleBlur = () => {
-      // Delay so a click on a dropdown option registers first
-      setTimeout(() => {
-        // Only close if focus has actually left this component
-        if (dropdownRef.current?.contains(document.activeElement)) return;
-        setIsOpen(false);
-        setIsFocused(false);
-        // Reset search to the selected label (or empty if nothing selected)
-        setSearch(selectedOption ? selectedOption.label : '');
-      }, 150);
-    };
+    // Keep the highlighted item scrolled into view
+    useEffect(() => {
+      if (!isOpen || highlightedIndex < 0 || !listRef.current) return;
+      const el = listRef.current.children[highlightedIndex];
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+    }, [highlightedIndex, isOpen]);
 
     const handleClear = (e) => {
+      e.preventDefault();
       e.stopPropagation();
       onChange({ target: { value: '' } });
       setSearch('');
       setIsOpen(false);
       setIsFocused(false);
-      if (inputRef.current) inputRef.current.focus();
+      setHighlightedIndex(-1);
+      requestAnimationFrame(() => inputRef.current?.focus());
     };
 
-    // What the input shows: when focused, show raw search; otherwise show label
+    // Display: when focused, show whatever the user is typing.
+    // Otherwise, show the selected label (or nothing).
     const displayValue = isFocused ? search : (selectedOption ? selectedOption.label : '');
 
     return (
-      <div className="relative" ref={dropdownRef}>
+      <div className="w-full">
         {label && (
           <label className="block text-sm font-medium text-gray-700 mb-1">
             {label}
@@ -17908,7 +17989,9 @@ const StaffModule = ({
           </label>
         )}
 
-        <div className="relative">
+        {/* The `relative` wrapper ONLY wraps the input. The dropdown is
+            absolutely positioned within it and given a very high z-index. */}
+        <div className="relative" ref={dropdownRef}>
           <input
             ref={inputRef}
             type="text"
@@ -17917,20 +18000,33 @@ const StaffModule = ({
             } ${className || ''}`}
             value={displayValue}
             onChange={handleInputChange}
-            onFocus={handleFocus}
-            onBlur={handleBlur}
+            onFocus={openMenu}
+            onBlur={() => {
+              // Do NOT immediately close — let clicks on dropdown items register.
+              // Use a micro-delay and then check whether focus went outside.
+              setTimeout(() => {
+                if (!dropdownRef.current) return;
+                if (dropdownRef.current.contains(document.activeElement)) return;
+                closeMenu(true);
+              }, 120);
+            }}
+            onKeyDown={handleKeyDown}
             placeholder={placeholder}
             disabled={disabled}
             autoComplete="off"
+            role="combobox"
+            aria-expanded={isOpen}
+            aria-haspopup="listbox"
           />
 
-          {value && !disabled && (
+          {selectedOption && !disabled && (
             <button
               type="button"
               onMouseDown={(e) => e.preventDefault()}
               onClick={handleClear}
               className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
               tabIndex={-1}
+              aria-label="Clear selection"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -17946,43 +18042,55 @@ const StaffModule = ({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </div>
-        </div>
 
-        {isOpen && !disabled && (
-          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-            {safeOptions.length === 0 ? (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {emptyMessage}
-              </div>
-            ) : filteredOptions.length > 0 ? (
-              filteredOptions.map(opt => (
-                <div
-                  key={String(opt.value || opt.key || opt.id || Math.random())}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
-                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
-                  } ${opt.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => { if (!opt.disabled) handleSelect(opt.value); }}
-                >
-                  <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+          {/* Dropdown — rendered ONLY when open. No invisible overlay remains. */}
+          {isOpen && !disabled && (
+            <div
+              ref={listRef}
+              role="listbox"
+              className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-auto"
+              style={{ zIndex: 9999 }}
+            >
+              {safeOptions.length === 0 ? (
+                <div className="px-3 py-4 text-center text-gray-500 text-sm">
+                  {emptyMessage}
                 </div>
-              ))
-            ) : (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {search.trim() ? `No results for "${search}"` : noOptionsMessage}
-              </div>
-            )}
-          </div>
-        )}
+              ) : filteredOptions.length > 0 ? (
+                filteredOptions.map((opt, idx) => (
+                  <div
+                    key={String(opt.value ?? opt.key ?? opt.id ?? idx)}
+                    role="option"
+                    aria-selected={String(opt.value) === String(value)}
+                    className={`px-3 py-2 cursor-pointer border-b last:border-b-0 transition-colors ${
+                      String(opt.value) === String(value)
+                        ? 'bg-indigo-50 text-indigo-700'
+                        : idx === highlightedIndex
+                          ? 'bg-gray-100'
+                          : 'text-gray-900 hover:bg-indigo-50'
+                    } ${opt.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onMouseEnter={() => setHighlightedIndex(idx)}
+                    onClick={() => handleSelect(opt)}
+                  >
+                    <div className="font-medium">{opt.label}</div>
+                    {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+                  </div>
+                ))
+              ) : (
+                <div className="px-3 py-4 text-center text-gray-500 text-sm">
+                  {search.trim() ? `No results for "${search}"` : noOptionsMessage}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     );
   };
 
   // ==================== PLAIN TEXT INPUT ====================
-  // Used for Job Title, Employee ID, etc. — always editable, never overlaid
   const TextInput = ({ label, value, onChange, placeholder, required, disabled, type = 'text' }) => (
-    <div>
+    <div className="w-full">
       {label && (
         <label className="block text-sm font-medium text-gray-700 mb-1">
           {label}
@@ -18002,18 +18110,27 @@ const StaffModule = ({
   );
 
   // ==================== MONEY INPUT ====================
-  // Uses type="text" + inputMode="numeric" so the user can actually type freely.
-  // Browser number inputs hide the caret, clamp values oddly, and make clearing
-  // the field painful. We store the raw string in state and parse on submit.
-  const MoneyInput = ({ label, value, onChange, placeholder, disabled, min = 0 }) => {
-    // Displayed value: show '' when the value is 0 AND the user hasn't touched it,
-    // so placeholder appears. Otherwise show the raw number as typed.
-    const display = (value === 0 || value === '0' || value === undefined || value === null)
+  // Stores the raw string the user typed. Never coerces to 0 mid-typing.
+  // At submit time we call parseMoney() to convert to a number.
+  const MoneyInput = ({ label, value, onChange, placeholder, disabled }) => {
+    // Convert whatever's in state into the string we show.
+    // - '' / null / undefined → '' (placeholder shows)
+    // - number → String(number)
+    // - string → as-is
+    const display = (value === '' || value === null || value === undefined)
       ? ''
       : String(value);
 
+    const handleChange = (e) => {
+      const raw = e.target.value;
+      // Accept: empty, digits, one optional dot, at most 2 decimals
+      if (raw === '' || /^\d*\.?\d{0,2}$/.test(raw)) {
+        onChange(raw);           // store the raw string
+      }
+    };
+
     return (
-      <div>
+      <div className="w-full">
         {label && (
           <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
         )}
@@ -18021,13 +18138,7 @@ const StaffModule = ({
           type="text"
           inputMode="decimal"
           value={display}
-          onChange={(e) => {
-            const raw = e.target.value;
-            // Allow digits, one dot, one leading minus
-            if (raw === '' || /^\d*\.?\d*$/.test(raw)) {
-              onChange(raw);       // pass raw string up
-            }
-          }}
+          onChange={handleChange}
           placeholder={placeholder || '0'}
           disabled={disabled}
           className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:bg-gray-100"
@@ -18112,9 +18223,9 @@ const StaffModule = ({
         employmentDate: formattedDate,
         schoolId: currentSchool?.id || user?.schoolId,
         salary: {
-          basic:     parseFloat(form.salary?.basic)     || 0,
-          house:     parseFloat(form.salary?.house)     || 0,
-          transport: parseFloat(form.salary?.transport) || 0
+          basic:     parseMoney(form.salary?.basic),
+          house:     parseMoney(form.salary?.house),
+          transport: parseMoney(form.salary?.transport)
         }
       };
 
@@ -18165,7 +18276,8 @@ const StaffModule = ({
       staffType: 'TEACHING',
       staffRole: '',
       bankDetails: { bank: '', branch: '', account: '' },
-      salary: { basic: 0, house: 0, transport: 0 }
+      // Store salary as strings so MoneyInput behaves
+      salary: { basic: '', house: '', transport: '' }
     });
   };
 
@@ -18231,12 +18343,18 @@ const StaffModule = ({
       setTimeout(() => setErrorMessage(''), 3000);
       return;
     }
+    const salary = member.salary || {};
     setForm({
       ...member,
       employmentDate: member.employmentDate
         ? new Date(member.employmentDate).toISOString().split('T')[0]
         : new Date().toISOString().split('T')[0],
-      salary: member.salary || { basic: 0, house: 0, transport: 0 },
+      // Preserve raw values as strings so MoneyInput shows them nicely
+      salary: {
+        basic:     salary.basic     !== undefined && salary.basic     !== null ? String(salary.basic)     : '',
+        house:     salary.house     !== undefined && salary.house     !== null ? String(salary.house)     : '',
+        transport: salary.transport !== undefined && salary.transport !== null ? String(salary.transport) : ''
+      },
       departmentId: member.departmentId || '',
       department: member.department || '',
       staffRole: member.staffRole || ''
@@ -18518,7 +18636,7 @@ const StaffModule = ({
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <MoneyInput
                   label="Basic Salary"
-                  value={form.salary?.basic || ''}
+                  value={form.salary?.basic ?? ''}
                   onChange={(raw) => setForm({
                     ...form,
                     salary: { ...form.salary, basic: raw }
@@ -18528,7 +18646,7 @@ const StaffModule = ({
                 />
                 <MoneyInput
                   label="House Allowance"
-                  value={form.salary?.house || ''}
+                  value={form.salary?.house ?? ''}
                   onChange={(raw) => setForm({
                     ...form,
                     salary: { ...form.salary, house: raw }
@@ -18538,7 +18656,7 @@ const StaffModule = ({
                 />
                 <MoneyInput
                   label="Transport Allowance"
-                  value={form.salary?.transport || ''}
+                  value={form.salary?.transport ?? ''}
                   onChange={(raw) => setForm({
                     ...form,
                     salary: { ...form.salary, transport: raw }
@@ -18552,9 +18670,9 @@ const StaffModule = ({
                   <span className="text-sm font-medium text-gray-600">Total Monthly Salary:</span>
                   <span className="text-lg font-bold text-green-600">
                     {formatCurrency(
-                      (parseFloat(form.salary?.basic)     || 0) +
-                      (parseFloat(form.salary?.house)     || 0) +
-                      (parseFloat(form.salary?.transport) || 0)
+                      parseMoney(form.salary?.basic) +
+                      parseMoney(form.salary?.house) +
+                      parseMoney(form.salary?.transport)
                     )}
                   </span>
                 </div>
@@ -18737,7 +18855,7 @@ const StaffModule = ({
                 <SearchableSelect
                   label="Month"
                   value={payrollForm.month}
-                  onChange={(e) => setPayrollForm({ ...payrollForm, month: parseInt(e.target.value) })}
+                  onChange={(e) => setPayrollForm({ ...payrollForm, month: parseInt(e.target.value, 10) })}
                   options={monthOptions}
                   placeholder="Select month..."
                   emptyMessage="No months available"
@@ -18747,7 +18865,7 @@ const StaffModule = ({
                   label="Year"
                   type="number"
                   value={payrollForm.year}
-                  onChange={(e) => setPayrollForm({ ...payrollForm, year: parseInt(e.target.value) })}
+                  onChange={(e) => setPayrollForm({ ...payrollForm, year: parseInt(e.target.value, 10) || '' })}
                   disabled={loading}
                 />
               </div>
@@ -18786,7 +18904,6 @@ const StaffModule = ({
     </div>
   );
 };
-
 // ==================== FIXED LIBRARY MODULE WITH SCHOOLID ====================
 const LibraryModule = ({ 
   books, setBooks, borrows, setBorrows, students, 
