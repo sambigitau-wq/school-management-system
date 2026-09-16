@@ -14248,44 +14248,22 @@ const TimetableModule = ({
     </div>
   );
 };
-// ==================== COMPLETE REPORTS MODULE ====================
-import { 
-  BarChart, Bar, PieChart, Pie, LineChart, Line, 
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
-  ResponsiveContainer, Cell, ComposedChart
+
+// ==================== REWRITTEN REPORTS MODULE — DETAILED MULTI-TAB REPORTS ====================
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import {
+  LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
+  ComposedChart, AreaChart, Area, RadarChart, Radar, PolarGrid,
+  PolarAngleAxis, PolarRadiusAxis,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 
-// ==================== REPORTS MODULE WITH EMPTY SEARCHABLE SELECTS ====================
-const ReportsModule = ({ 
-  students, classes, results, exams, subjects, units,
-  payments, expenses, dateRange, setDateRange, 
-  currentSchool, courses, programs, user 
+const ReportsModule = ({
+  students = [], classes = [], results = [], exams = [], subjects = [], units = [],
+  payments = [], expenses = [], dateRange, setDateRange,
+  currentSchool, courses = [], programs = [], user
 }) => {
-  console.log('📊 ReportsModule initialized');
-  console.log('📚 Programs received:', programs?.length);
-  console.log('📚 Courses received:', courses?.length);
-
-  // ==================== STATE ====================
-  const [selectedStudent, setSelectedStudent] = useState('');
-  const [selectedClass, setSelectedClass] = useState('');
-  const [selectedCourse, setSelectedCourse] = useState('');
-  const [selectedProgram, setSelectedProgram] = useState('');
-  const [selectedYear, setSelectedYear] = useState('');
-  const [selectedModule, setSelectedModule] = useState('');
-  const [selectedExam, setSelectedExam] = useState('');
-  const [selectedTerm, setSelectedTerm] = useState('');
-  const [reportData, setReportData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState('student');
-  const [showCharts, setShowCharts] = useState(true);
-
-  // ==================== COLORS ====================
-  const CHART_COLORS = [
-    '#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', 
-    '#ec4899', '#06b6d4', '#14b8a6', '#6366f1', '#f97316'
-  ];
-
-  // ==================== SCHOOL TYPE DETECTION ====================
+  // ==================== SCHOOL TYPE ====================
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
   const isUniversity = schoolCategory === 'UNIVERSITY';
   const isTVET = schoolCategory === 'COLLEGE_TVET';
@@ -14297,193 +14275,96 @@ const ReportsModule = ({
   const canViewStudentReports = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER', 'PARENT', 'STUDENT'].includes(user?.role);
   const canViewClassReports = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'CLASS_TEACHER'].includes(user?.role);
   const canViewFinancialReports = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
+  const canViewAdmissionReports = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
+  const canViewStaffReports = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'HR_MANAGER', 'HR'].includes(user?.role);
 
-  // ==================== FIXED SEARCHABLE SELECT COMPONENT - EMPTY BY DEFAULT ====================
-  const SearchableSelect = ({ 
-    label, 
-    value, 
-    onChange, 
-    options = [], 
-    placeholder = "Search...", 
-    disabled, 
-    required, 
-    className,
-    noOptionsMessage = "No results found",
-    emptyMessage = "No options available"
-  }) => {
-    const [search, setSearch] = useState('');
-    const [isOpen, setIsOpen] = useState(false);
-    const [isFocused, setIsFocused] = useState(false);
-    const dropdownRef = useRef(null);
+  // ==================== TABS ====================
+  const ALL_TABS = [
+    { key: 'student',     label: 'Student Report',       icon: 'fa-user-graduate',  allowed: canViewStudentReports },
+    { key: 'class',       label: isUniversity ? 'Course Report' : isTVET ? 'Program Report' : 'Class Report', icon: 'fa-users', allowed: canViewClassReports },
+    { key: 'fee',         label: 'Fee Collection',       icon: 'fa-money-bill-wave', allowed: canViewFinancialReports },
+    { key: 'outstanding', label: 'Outstanding Balances', icon: 'fa-exclamation-circle', allowed: canViewFinancialReports },
+    { key: 'admission',   label: 'Admissions',           icon: 'fa-user-plus',      allowed: canViewAdmissionReports },
+    { key: 'financial',   label: 'Financial Summary',    icon: 'fa-chart-line',     allowed: canViewFinancialReports },
+    { key: 'attendance',  label: 'Attendance',           icon: 'fa-calendar-check', allowed: canViewClassReports },
+    { key: 'staff',       label: 'Staff Report',         icon: 'fa-user-tie',       allowed: canViewStaffReports },
+    { key: 'discount',    label: 'Discounts',            icon: 'fa-percent',        allowed: canViewFinancialReports },
+    { key: 'allocation',  label: 'Fee Allocation',       icon: 'fa-tasks',          allowed: canViewFinancialReports },
+  ].filter(t => t.allowed);
 
-    const filteredOptions = useMemo(() => {
-      if (!options || options.length === 0) {
-        return [];
-      }
-      if (!search.trim()) {
-        return options;
-      }
-      const searchLower = search.toLowerCase();
-      return options.filter(opt => {
-        if (!opt) return false;
-        const label = opt.label?.toLowerCase() || '';
-        const subLabel = opt.subLabel?.toLowerCase() || '';
-        const valueStr = opt.value?.toString().toLowerCase() || '';
-        return label.includes(searchLower) || 
-               subLabel.includes(searchLower) || 
-               valueStr.includes(searchLower);
-      });
-    }, [options, search]);
+  // ==================== STATE ====================
+  const [activeTab, setActiveTab] = useState(ALL_TABS[0]?.key || 'student');
+  const [loading, setLoading] = useState(false);
+  const [showCharts, setShowCharts] = useState(true);
+  const [reportData, setReportData] = useState(null);
 
-    const selectedOption = useMemo(() => {
-      if (!options || options.length === 0) return null;
-      if (!value && value !== 0) return null;
-      return options.find(opt => opt.value === value) || null;
-    }, [options, value]);
+  // Cached self-fetched data
+  const [fees, setFees] = useState([]);
+  const [attendance, setAttendance] = useState([]);
+  const [staff, setStaff] = useState([]);
+  const [discounts, setDiscounts] = useState([]);
+  const [allocations, setAllocations] = useState([]);
+  const [fetchedOnce, setFetchedOnce] = useState({ fees: false, attendance: false, staff: false, discounts: false, allocations: false });
 
-    useEffect(() => {
-      const handleClickOutside = (event) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-          setIsOpen(false);
-          setIsFocused(false);
-        }
-      };
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
+  // Student report state
+  const [selectedStudent, setSelectedStudent] = useState('');
+  const [selectedExam, setSelectedExam] = useState('');
 
-    useEffect(() => {
-      if (!isOpen) {
-        setSearch('');
-      }
-    }, [isOpen]);
+  // Class report state
+  const [selectedClass, setSelectedClass] = useState('');
+  const [selectedCourse, setSelectedCourse] = useState('');
+  const [selectedProgram, setSelectedProgram] = useState('');
+  const [selectedYear, setSelectedYear] = useState('');
+  const [selectedModule, setSelectedModule] = useState('');
 
-    const handleSelect = (selectedValue) => {
-      onChange({ target: { value: selectedValue } });
-      setSearch('');
-      setIsOpen(false);
-      setIsFocused(false);
-    };
+  // Fee report state
+  const [feeDateRange, setFeeDateRange] = useState(dateRange || { start: '', end: '' });
+  const [feeClassId, setFeeClassId] = useState('');
+  const [feeCourseId, setFeeCourseId] = useState('');
+  const [feeProgramId, setFeeProgramId] = useState('');
 
-    const handleInputChange = (e) => {
-      const value = e.target.value;
-      setSearch(value);
-      setIsOpen(true);
-      setIsFocused(true);
-      if (value === '') {
-        onChange({ target: { value: '' } });
-      }
-    };
+  // Outstanding state
+  const [outstandingMinBalance, setOutstandingMinBalance] = useState(0);
+  const [outstandingClassId, setOutstandingClassId] = useState('');
+  const [outstandingCourseId, setOutstandingCourseId] = useState('');
+  const [outstandingProgramId, setOutstandingProgramId] = useState('');
 
-    const handleFocus = () => {
-      if (disabled) return;
-      setIsFocused(true);
-      setIsOpen(true);
-      if (selectedOption) {
-        setSearch(selectedOption.label);
-      }
-    };
+  // Admission state
+  const [admissionYear, setAdmissionYear] = useState(new Date().getFullYear().toString());
+  const [admissionClassId, setAdmissionClassId] = useState('');
+  const [admissionCourseId, setAdmissionCourseId] = useState('');
+  const [admissionProgramId, setAdmissionProgramId] = useState('');
+  const [admissionGender, setAdmissionGender] = useState('');
+  const [admissionBoarding, setAdmissionBoarding] = useState('');
 
-    const handleBlur = () => {
-      setTimeout(() => {
-        if (!dropdownRef.current?.contains(document.activeElement)) {
-          setIsOpen(false);
-          setIsFocused(false);
-          if (!selectedOption) {
-            setSearch('');
-          }
-        }
-      }, 200);
-    };
+  // Financial state (reuses feeDateRange)
 
-    const handleClear = (e) => {
-      e.stopPropagation();
-      onChange({ target: { value: '' } });
-      setSearch('');
-      setIsOpen(false);
-      setIsFocused(false);
-    };
+  // Attendance state
+  const [attendanceDateRange, setAttendanceDateRange] = useState(dateRange || { start: '', end: '' });
+  const [attendanceClassId, setAttendanceClassId] = useState('');
+  const [attendanceCourseId, setAttendanceCourseId] = useState('');
+  const [attendanceProgramId, setAttendanceProgramId] = useState('');
 
-    let displayValue = '';
-    if (isFocused) {
-      displayValue = search;
-    } else if (selectedOption) {
-      displayValue = selectedOption.label;
-    }
+  // Staff state
+  const [staffDepartment, setStaffDepartment] = useState('');
+  const [staffType, setStaffType] = useState('');
 
-    return (
-      <div className="relative" ref={dropdownRef}>
-        {label && (
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-        )}
-        <div className="relative">
-          <input
-            type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
-            } ${className || ''}`}
-            value={displayValue}
-            onChange={handleInputChange}
-            onFocus={handleFocus}
-            onBlur={handleBlur}
-            placeholder={placeholder}
-            disabled={disabled}
-            autoComplete="off"
-          />
-          {value && !disabled && (
-            <button
-              type="button"
-              onClick={handleClear}
-              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-        </div>
-        {isOpen && !disabled && (
-          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-            {options && options.length === 0 ? (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {emptyMessage}
-              </div>
-            ) : filteredOptions.length > 0 ? (
-              filteredOptions.map((opt) => (
-                <div
-                  key={opt.value || Math.random().toString()}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
-                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
-                  } ${opt.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    if (!opt.disabled) {
-                      handleSelect(opt.value);
-                    }
-                  }}
-                >
-                  <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
-                </div>
-              ))
-            ) : (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {search.trim() ? `No results for "${search}"` : noOptionsMessage}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
+  // Discount state
+  const [discountSearch, setDiscountSearch] = useState('');
+
+  // Allocation state
+  const [allocationFeeId, setAllocationFeeId] = useState('');
+
+  // ==================== COLORS ====================
+  const CHART_COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#14b8a6', '#6366f1', '#f97316'];
+
+  // ==================== HELPERS ====================
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 }).format(amount || 0);
   };
+
+  const todayStr = () => new Date().toISOString().split('T')[0];
+  const firstOfMonthStr = () => new Date(new Date().setDate(1)).toISOString().split('T')[0];
 
   // ==================== PRINT STYLES ====================
   useEffect(() => {
@@ -14504,1332 +14385,1659 @@ const ReportsModule = ({
     return () => document.head.removeChild(style);
   }, []);
 
-  // ==================== FIXED GRADE HELPER ====================
-  const getGradeDisplay = (grade, points, exam) => {
+  // ==================== SELF-FETCH DATA ON DEMAND ====================
+  const fetchOnce = async (key) => {
+    if (fetchedOnce[key]) return;
+    try {
+      let res;
+      if (key === 'fees')         { res = await api.get('/fees');                    setFees(res.data.fees || []); }
+      if (key === 'attendance')   { res = await api.get('/attendance', { params: { limit: 5000 } }); setAttendance(res.data.attendance || []); }
+      if (key === 'staff')        { res = await api.get('/staff');                   setStaff(res.data.staff || []); }
+      if (key === 'discounts')    { res = await api.get('/discounts');               setDiscounts(res.data.discounts || []); }
+      if (key === 'allocations')  { res = await api.get('/fee-allocations');         setAllocations(res.data.allocations || []); }
+      setFetchedOnce(prev => ({ ...prev, [key]: true }));
+    } catch (err) {
+      console.warn(`Optional data fetch failed (${key}):`, err?.response?.data || err.message);
+      setFetchedOnce(prev => ({ ...prev, [key]: true })); // mark done to avoid loops
+    }
+  };
+
+  // ==================== SEARCHABLE SELECT ====================
+  const SearchableSelect = ({
+    label, value, onChange, options = [], placeholder = "Search...",
+    disabled, required, className, emptyMessage = "No options available"
+  }) => {
+    const [search, setSearch] = useState('');
+    const [isOpen, setIsOpen] = useState(false);
+    const [isFocused, setIsFocused] = useState(false);
+    const dropdownRef = useRef(null);
+
+    const filteredOptions = useMemo(() => {
+      if (!options?.length) return [];
+      if (!search.trim()) return options;
+      const s = search.toLowerCase();
+      return options.filter(o => o && (
+        o.label?.toLowerCase().includes(s) ||
+        o.subLabel?.toLowerCase().includes(s) ||
+        o.value?.toString().toLowerCase().includes(s)
+      ));
+    }, [options, search]);
+
+    const selected = useMemo(() => {
+      if (!value && value !== 0) return null;
+      return options.find(o => o.value === value) || null;
+    }, [options, value]);
+
+    useEffect(() => {
+      const h = (e) => { if (dropdownRef.current && !dropdownRef.current.contains(e.target)) { setIsOpen(false); setIsFocused(false); } };
+      document.addEventListener('mousedown', h);
+      return () => document.removeEventListener('mousedown', h);
+    }, []);
+
+    useEffect(() => { if (!isOpen) setSearch(''); }, [isOpen]);
+
+    const display = isFocused ? search : (selected ? selected.label : '');
+
+    return (
+      <div className="relative" ref={dropdownRef}>
+        {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}{required && <span className="text-red-500 ml-1">*</span>}</label>}
+        <div className="relative">
+          <input
+            type="text"
+            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 transition-all ${disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'} ${className || ''}`}
+            value={display}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setIsOpen(true);
+              setIsFocused(true);
+              if (e.target.value === '') onChange({ target: { value: '' } });
+            }}
+            onFocus={() => { if (!disabled) { setIsFocused(true); setIsOpen(true); if (selected) setSearch(selected.label); } }}
+            onBlur={() => setTimeout(() => { if (!dropdownRef.current?.contains(document.activeElement)) { setIsOpen(false); setIsFocused(false); } }, 200)}
+            placeholder={placeholder}
+            disabled={disabled}
+            autoComplete="off"
+          />
+          {value && !disabled && (
+            <button type="button" onClick={(e) => { e.stopPropagation(); onChange({ target: { value: '' } }); setSearch(''); }} className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          )}
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+          </div>
+        </div>
+        {isOpen && !disabled && (
+          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
+            {!options?.length ? (
+              <div className="px-3 py-4 text-center text-gray-500 text-sm">{emptyMessage}</div>
+            ) : filteredOptions.length > 0 ? (
+              filteredOptions.map((opt, i) => (
+                <div
+                  key={opt.value || i}
+                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 ${opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'}`}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => { onChange({ target: { value: opt.value } }); setSearch(''); setIsOpen(false); setIsFocused(false); }}
+                >
+                  <div className="font-medium">{opt.label}</div>
+                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+                </div>
+              ))
+            ) : (
+              <div className="px-3 py-4 text-center text-gray-500 text-sm">No results for "{search}"</div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ==================== EXPORT CSV ====================
+  const exportCSV = (rows, filename) => {
+    if (!rows || rows.length === 0) { alert('No data to export'); return; }
+    const headers = Object.keys(rows[0]);
+    const csv = [
+      headers.join(','),
+      ...rows.map(r => headers.map(h => {
+        const v = r[h];
+        if (v === null || v === undefined) return '';
+        const str = typeof v === 'object' ? JSON.stringify(v) : String(v);
+        return `"${str.replace(/"/g, '""')}"`;
+      }).join(','))
+    ].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // ==================== OPTION BUILDERS ====================
+  const studentOptions = useMemo(() => students.map(s => ({
+    value: s.id,
+    label: `${s.firstName || ''} ${s.lastName || ''}`.trim() || 'Unnamed',
+    subLabel: `${s.admissionNumber || ''} • ${s.class?.name || s.course?.name || s.program?.name || ''}`
+  })), [students]);
+
+  const classOptions = useMemo(() => classes.map(c => ({ value: c.id, label: c.name, subLabel: c.academicYear || '' })), [classes]);
+  const courseOptions = useMemo(() => courses.map(c => ({ value: c.id, label: c.name, subLabel: c.code || '' })), [courses]);
+  const programOptions = useMemo(() => programs.map(p => ({ value: p.id, label: p.name, subLabel: p.code || '' })), [programs]);
+  const yearOptions = useMemo(() => ['1','2','3','4','5','6'].map(y => ({ value: y, label: `Year ${y}` })), []);
+  const moduleOptions = useMemo(() => ['1','2','3','4'].map(m => ({ value: m, label: `Module ${m}` })), []);
+  const examOptionsForStudent = useMemo(() => {
+    if (!selectedStudent) return [];
+    const s = students.find(x => x.id === selectedStudent);
+    if (!s) return [];
+    let filtered = exams;
+    if (isUniversity) filtered = exams.filter(e => e.courseId === s.courseId);
+    else if (isTVET) filtered = exams.filter(e => e.programId === s.programId);
+    else filtered = exams.filter(e => e.classId === s.classId);
+    return filtered.map(e => ({ value: e.id, label: e.name, subLabel: `${e.type || ''} • ${e.date ? new Date(e.date).toLocaleDateString() : ''}` }));
+  }, [selectedStudent, students, exams, isUniversity, isTVET]);
+
+  // ==================== GRADE HELPER ====================
+  const getGradeDisplay = (grade, points) => {
     if (!grade) return { grade: '-', points: '-', color: 'gray' };
-    
     if (isUniversity) {
-      const uniGradeMap = {
-        'Exceeding Expectations': 'A',
-        'Meeting Expectations': 'B',
-        'Approaching Expectations': 'C',
-        'Below Expectations': 'D',
-        'Needs Improvement': 'E'
-      };
-      
-      if (grade in uniGradeMap) {
-        const uniGrade = uniGradeMap[grade];
-        const pointValue = uniGrade === 'A' ? '5.0' : 
-                          uniGrade === 'B' ? '4.0' :
-                          uniGrade === 'C' ? '3.0' :
-                          uniGrade === 'D' ? '2.0' : '1.0';
-        return {
-          grade: uniGrade,
-          points: pointValue,
-          color: uniGrade === 'A' ? 'green' :
-                 uniGrade === 'B' ? 'blue' :
-                 uniGrade === 'C' ? 'yellow' :
-                 uniGrade === 'D' ? 'orange' : 'red'
-        };
-      }
-      
-      if (['A', 'B', 'C', 'D', 'E'].includes(grade)) {
-        const pointValue = grade === 'A' ? '5.0' : 
-                          grade === 'B' ? '4.0' :
-                          grade === 'C' ? '3.0' :
-                          grade === 'D' ? '2.0' : '1.0';
-        return {
-          grade: grade,
-          points: pointValue,
-          color: grade === 'A' ? 'green' :
-                 grade === 'B' ? 'blue' :
-                 grade === 'C' ? 'yellow' :
-                 grade === 'D' ? 'orange' : 'red'
-        };
-      }
+      const map = { 'A': ['5.0','green'], 'B': ['4.0','blue'], 'C': ['3.0','yellow'], 'D': ['2.0','orange'], 'E': ['1.0','red'] };
+      const [p, c] = map[grade] || ['-','gray'];
+      return { grade, points: p, color: c };
     }
-    
     if (isTVET) {
-      const tvetGradeMap = {
-        'DISTINCTION': { grade: 'DISTINCTION', points: '5', color: 'green' },
-        'CREDIT': { grade: 'CREDIT', points: '4', color: 'blue' },
-        'MERIT': { grade: 'MERIT', points: '3', color: 'yellow' },
-        'PASS': { grade: 'PASS', points: '2', color: 'orange' },
-        'FAIL': { grade: 'FAIL', points: '1', color: 'red' }
-      };
-      return tvetGradeMap[grade] || { grade, points: points || '-', color: 'gray' };
+      const map = { DISTINCTION: ['5','green'], CREDIT: ['4','blue'], MERIT: ['3','yellow'], PASS: ['2','orange'], FAIL: ['1','red'] };
+      const [p, c] = map[grade] || ['-','gray'];
+      return { grade, points: p, color: c };
     }
-    
-    if (points && !isNaN(parseFloat(points)) && parseFloat(points) > 0) {
-      return {
-        grade: grade,
-        points: parseFloat(points).toFixed(1),
-        color: 'blue'
-      };
-    }
-    
     if (isSecondary) {
-      const gradeMap = {
-        'A': { grade: 'A', points: '12', color: 'green' },
-        'A-': { grade: 'A-', points: '11', color: 'green' },
-        'B+': { grade: 'B+', points: '10', color: 'blue' },
-        'B': { grade: 'B', points: '9', color: 'blue' },
-        'B-': { grade: 'B-', points: '8', color: 'blue' },
-        'C+': { grade: 'C+', points: '7', color: 'yellow' },
-        'C': { grade: 'C', points: '6', color: 'yellow' },
-        'C-': { grade: 'C-', points: '5', color: 'yellow' },
-        'D+': { grade: 'D+', points: '4', color: 'orange' },
-        'D': { grade: 'D', points: '3', color: 'orange' },
-        'D-': { grade: 'D-', points: '2', color: 'orange' },
-        'E': { grade: 'E', points: '1', color: 'red' }
-      };
-      return gradeMap[grade] || { grade, points: points || '-', color: 'gray' };
+      const map = { 'A':12,'A-':11,'B+':10,'B':9,'B-':8,'C+':7,'C':6,'C-':5,'D+':4,'D':3,'D-':2,'E':1 };
+      const p = map[grade];
+      if (p !== undefined) return { grade, points: p, color: p >= 8 ? 'green' : p >= 5 ? 'blue' : 'orange' };
     }
-    
     if (isPrimary) {
-      const gradeMap = {
-        'Exceeding Expectations': { grade: 'EE', points: '4', color: 'green' },
-        'Meeting Expectations': { grade: 'ME', points: '3', color: 'blue' },
-        'Approaching Expectations': { grade: 'AE', points: '2', color: 'yellow' },
-        'Below Expectations': { grade: 'BE', points: '1', color: 'orange' },
-        'Needs Improvement': { grade: 'NI', points: '0', color: 'red' }
-      };
-      return gradeMap[grade] || { grade, points: points || '-', color: 'gray' };
+      const map = { 'Exceeding Expectations':4, 'Meeting Expectations':3, 'Approaching Expectations':2, 'Below Expectations':1, 'Needs Improvement':0 };
+      const p = map[grade];
+      if (p !== undefined) return { grade, points: p, color: p >= 3 ? 'green' : p >= 1 ? 'yellow' : 'red' };
     }
-    
     return { grade, points: points || '-', color: 'gray' };
   };
 
-  const getStudentCourseClass = (student) => {
-    if (isUniversity) {
-      return student.course?.name || 
-             courses?.find(c => c.id === student.courseId)?.name || 
-             'Not Assigned';
-    } else if (isTVET) {
-      return student.program?.name || 
-             programs?.find(p => p.id === student.programId)?.name || 
-             'Not Assigned';
-    } else {
-      return student.class?.name || 
-             classes?.find(c => c.id === student.classId)?.name || 
-             'Not Assigned';
-    }
+  const getStudentEntityName = (s) => {
+    if (isUniversity) return s.course?.name || courses.find(c => c.id === s.courseId)?.name || 'N/A';
+    if (isTVET) return s.program?.name || programs.find(p => p.id === s.programId)?.name || 'N/A';
+    return s.class?.name || classes.find(c => c.id === s.classId)?.name || 'N/A';
   };
 
-  const getProgramName = (programId) => {
-    if (!programId) return 'N/A';
-    const program = programs?.find(p => p.id === programId);
-    return program ? program.name : 'N/A';
-  };
-
-  const getCourseName = (courseId) => {
-    if (!courseId) return 'N/A';
-    const course = courses?.find(c => c.id === courseId);
-    return course ? course.name : 'N/A';
-  };
-
-  const getClassName = (classId) => {
-    if (!classId) return 'N/A';
-    const classObj = classes?.find(c => c.id === classId);
-    return classObj ? classObj.name : 'N/A';
-  };
-
-  const getItemName = (result, exam) => {
-    if (isUniversity || isTVET) {
-      if (result.unitId) {
-        const unit = units?.find(u => u.id === result.unitId);
-        if (unit?.name) return unit.name;
-      }
-      if (exam?.unitId) {
-        const unit = units?.find(u => u.id === exam.unitId);
-        if (unit?.name) return unit.name;
-      }
-    } else {
-      if (result.subjectId) {
-        const subject = subjects?.find(s => s.id === result.subjectId);
-        if (subject?.name) return subject.name;
-      }
-      if (exam?.subjectId) {
-        const subject = subjects?.find(s => s.id === exam.subjectId);
-        if (subject?.name) return subject.name;
-      }
-    }
-    
-    if (exam?.name) return exam.name;
-    return 'Unknown';
-  };
-
-  // ==================== GET OPTIONS - EMPTY BY DEFAULT ====================
-  const getStudentOptions = () => {
-    if (!students || students.length === 0) return [];
-    return students.map(s => ({
-      value: s.id,
-      label: `${s.firstName} ${s.lastName}`,
-      subLabel: `${s.admissionNumber} - ${getStudentCourseClass(s)}`
-    }));
-  };
-
-  const getProgramOptions = () => {
-    if (!programs || programs.length === 0) return [];
-    return programs.map(p => ({ 
-      value: p.id, 
-      label: p.name,
-      subLabel: p.code || ''
-    }));
-  };
-
-  const getCourseOptions = () => {
-    if (!courses || courses.length === 0) return [];
-    return courses.map(c => ({ 
-      value: c.id, 
-      label: c.name,
-      subLabel: c.code || ''
-    }));
-  };
-
-  const getClassOptions = () => {
-    if (!classes || classes.length === 0) return [];
-    return classes.map(c => ({ 
-      value: c.id, 
-      label: c.name,
-      subLabel: `Capacity: ${c.capacity || 'N/A'}`
-    }));
-  };
-
-  const getExamOptionsForStudent = (studentId) => {
-    if (!studentId) return [];
-    
-    const student = students.find(s => s.id === studentId);
-    if (!student) return [];
-    
-    let filteredExams = [];
-    if (isUniversity) {
-      filteredExams = exams.filter(e => e.courseId === student.courseId);
-    } else if (isTVET) {
-      filteredExams = exams.filter(e => e.programId === student.programId);
-    } else {
-      filteredExams = exams.filter(e => e.classId === student.classId);
-    }
-    
-    return filteredExams.map(e => ({
-      value: e.id,
-      label: e.name,
-      subLabel: `${e.type} • ${new Date(e.date).toLocaleDateString()}`
-    }));
-  };
-
-  const getYearOptions = () => {
-    return [
-      { value: '1', label: 'Year 1' },
-      { value: '2', label: 'Year 2' },
-      { value: '3', label: 'Year 3' },
-      { value: '4', label: 'Year 4' }
-    ];
-  };
-
-  const getModuleOptions = () => {
-    return [
-      { value: '1', label: 'Module 1' },
-      { value: '2', label: 'Module 2' },
-      { value: '3', label: 'Module 3' },
-      { value: '4', label: 'Module 4' }
-    ];
-  };
-
-  // ==================== GENERATE STUDENT REPORT ====================
+  // ==================== TAB: STUDENT REPORT ====================
   const generateStudentReport = () => {
-    if (!selectedStudent) {
-      alert('Please select a student');
-      return;
-    }
-    
+    if (!selectedStudent) { alert('Please select a student'); return; }
     setLoading(true);
     try {
       const student = students.find(s => s.id === selectedStudent);
-      if (!student) {
-        alert('Student not found');
-        return;
-      }
-
+      if (!student) { alert('Student not found'); return; }
       let studentResults = results.filter(r => r.studentId === selectedStudent);
-      
-      if (selectedExam) {
-        studentResults = studentResults.filter(r => r.examId === selectedExam);
-      }
-      
-      console.log(`📊 Found ${studentResults.length} results for student`);
+      if (selectedExam) studentResults = studentResults.filter(r => r.examId === selectedExam);
 
-      const enrichedResults = studentResults.map(result => {
-        const exam = exams?.find(e => e.id === result.examId);
-        const itemName = getItemName(result, exam);
-        
+      const enriched = studentResults.map(r => {
+        const exam = exams.find(e => e.id === r.examId);
+        let itemName = 'Unknown';
         let itemCode = '';
         if (isUniversity || isTVET) {
-          if (result.unitId) {
-            const unit = units?.find(u => u.id === result.unitId);
-            if (unit) itemCode = unit.code;
-          } else if (exam?.unitId) {
-            const unit = units?.find(u => u.id === exam.unitId);
-            if (unit) itemCode = unit.code;
-          }
+          const unitId = r.unitId || exam?.unitId;
+          const unit = units.find(u => u.id === unitId);
+          if (unit) { itemName = unit.name; itemCode = unit.code; }
         } else {
-          if (result.subjectId) {
-            const subject = subjects?.find(s => s.id === result.subjectId);
-            if (subject) itemCode = subject.code;
-          } else if (exam?.subjectId) {
-            const subject = subjects?.find(s => s.id === exam.subjectId);
-            if (subject) itemCode = subject.code;
-          }
+          const subjectId = r.subjectId || exam?.subjectId;
+          const subject = subjects.find(s => s.id === subjectId);
+          if (subject) { itemName = subject.name; itemCode = subject.code; }
         }
-
-        const gradeInfo = getGradeDisplay(result.grade, result.points, exam);
-
+        if (itemName === 'Unknown' && exam?.name) itemName = exam.name;
+        const gradeInfo = getGradeDisplay(r.grade, r.points);
         return {
-          id: result.id,
-          examId: result.examId,
+          id: r.id,
           examName: exam?.name || 'Unknown Exam',
           examDate: exam?.date,
           examType: exam?.type,
-          itemName: itemName,
-          itemCode: itemCode,
-          marks: result.marks || 0,
-          grade: result.grade,
-          points: result.points || 0,
-          displayGrade: gradeInfo.grade,
-          displayPoints: gradeInfo.points,
+          itemName, itemCode,
+          marks: r.marks || 0,
+          grade: gradeInfo.grade,
+          points: gradeInfo.points,
           gradeColor: gradeInfo.color,
-          isAbsent: result.isAbsent || false,
-          remarks: result.remarks
+          isAbsent: r.isAbsent || false,
+          remarks: r.remarks
         };
-      });
+      }).sort((a, b) => new Date(b.examDate) - new Date(a.examDate));
 
-      enrichedResults.sort((a, b) => new Date(b.examDate) - new Date(a.examDate));
+      const totalMarks = enriched.reduce((s, r) => s + r.marks, 0);
+      const marks = enriched.map(r => r.marks);
+      const summary = {
+        totalExams: enriched.length,
+        totalMarks,
+        average: enriched.length ? (totalMarks / enriched.length).toFixed(2) : 0,
+        highest: marks.length ? Math.max(...marks) : 0,
+        lowest: marks.length ? Math.min(...marks) : 0
+      };
 
-      const totalExams = enrichedResults.length;
-      const totalMarks = enrichedResults.reduce((sum, r) => sum + (r.marks || 0), 0);
-      const average = totalExams > 0 ? (totalMarks / totalExams).toFixed(2) : 0;
-      
-      const marks = enrichedResults.map(r => r.marks || 0);
-      const highest = marks.length > 0 ? Math.max(...marks) : 0;
-      const lowest = marks.length > 0 ? Math.min(...marks) : 0;
-
-      const performanceTrendData = enrichedResults.map(r => ({
-        name: r.examName,
+      const trend = [...enriched].reverse().map(r => ({
+        name: r.examName.length > 15 ? r.examName.substring(0, 12) + '…' : r.examName,
         marks: r.marks,
         date: r.examDate ? new Date(r.examDate).toLocaleDateString() : 'N/A'
-      })).reverse();
-
-      const subjectPerformanceData = {};
-      enrichedResults.forEach(r => {
-        const subject = r.itemName;
-        if (!subjectPerformanceData[subject]) {
-          subjectPerformanceData[subject] = { total: 0, count: 0 };
-        }
-        subjectPerformanceData[subject].total += r.marks;
-        subjectPerformanceData[subject].count += 1;
-      });
-
-      const subjectChartData = Object.keys(subjectPerformanceData).map(subject => ({
-        name: subject.length > 15 ? subject.substring(0, 12) + '...' : subject,
-        average: Math.round(subjectPerformanceData[subject].total / subjectPerformanceData[subject].count)
       }));
 
-      const gradeDistributionData = {};
-      enrichedResults.forEach(r => {
-        const grade = r.displayGrade;
-        gradeDistributionData[grade] = (gradeDistributionData[grade] || 0) + 1;
+      const bySubject = {};
+      enriched.forEach(r => {
+        if (!bySubject[r.itemName]) bySubject[r.itemName] = { total: 0, count: 0 };
+        bySubject[r.itemName].total += r.marks;
+        bySubject[r.itemName].count += 1;
       });
-
-      const gradeChartData = Object.keys(gradeDistributionData).map(grade => ({
-        name: grade,
-        value: gradeDistributionData[grade]
+      const subjectPerf = Object.keys(bySubject).map(name => ({
+        name: name.length > 15 ? name.substring(0, 12) + '…' : name,
+        average: Math.round(bySubject[name].total / bySubject[name].count)
       }));
+
+      const gradeDist = {};
+      enriched.forEach(r => { gradeDist[r.grade] = (gradeDist[r.grade] || 0) + 1; });
+      const gradeChart = Object.keys(gradeDist).map(g => ({ name: g, value: gradeDist[g] }));
 
       setReportData({
         type: 'student',
         student,
-        results: enrichedResults,
-        charts: {
-          performanceTrend: performanceTrendData,
-          subjectPerformance: subjectChartData,
-          gradeDistribution: gradeChartData
-        },
-        summary: {
-          totalExams,
-          totalMarks,
-          average,
-          highest,
-          lowest
-        }
+        results: enriched,
+        summary,
+        charts: { trend, subjectPerf, gradeChart }
       });
-
-    } catch (error) {
-      console.error('Student report error:', error);
-      alert('Failed to generate student report');
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) {
+      console.error(err); alert('Failed to generate student report');
+    } finally { setLoading(false); }
   };
 
-  // ==================== GENERATE CLASS REPORT ====================
+  // ==================== TAB: CLASS / COURSE / PROGRAM ====================
   const generateClassReport = () => {
-    if (!canViewClassReports) {
-      alert('You do not have permission to view class reports');
-      return;
-    }
-    
-    if (isUniversity && !selectedCourse) {
-      alert('Please select a course');
-      return;
-    }
-    if (isTVET && !selectedProgram) {
-      alert('Please select a program');
-      return;
-    }
-    if (isRegularSchool && !selectedClass) {
-      alert('Please select a class');
-      return;
-    }
-    
+    if (isUniversity && !selectedCourse) return alert('Select a course');
+    if (isTVET && !selectedProgram) return alert('Select a program');
+    if (isRegularSchool && !selectedClass) return alert('Select a class');
+
     setLoading(true);
     try {
-      let studentList = [];
-      let entityName = '';
-      let examList = [];
-      
+      let studentList = [], entityName = '', examList = [];
+
       if (isUniversity) {
         studentList = students.filter(s => s.courseId === selectedCourse);
-        const course = courses?.find(c => c.id === selectedCourse);
-        entityName = course?.name || 'Selected Course';
+        if (selectedYear) studentList = studentList.filter(s => s.currentYear === parseInt(selectedYear));
+        entityName = courses.find(c => c.id === selectedCourse)?.name || 'Course';
         examList = exams.filter(e => e.courseId === selectedCourse);
-        if (selectedYear) {
-          studentList = studentList.filter(s => s.currentYear === parseInt(selectedYear));
-        }
       } else if (isTVET) {
         studentList = students.filter(s => s.programId === selectedProgram);
-        const program = programs?.find(p => p.id === selectedProgram);
-        entityName = program?.name || 'Selected Program';
+        if (selectedModule) studentList = studentList.filter(s => s.currentModule === `Module ${selectedModule}`);
+        if (selectedYear) studentList = studentList.filter(s => s.currentYear === parseInt(selectedYear));
+        entityName = programs.find(p => p.id === selectedProgram)?.name || 'Program';
         examList = exams.filter(e => e.programId === selectedProgram);
-        if (selectedModule) {
-          studentList = studentList.filter(s => s.currentModule === `Module ${selectedModule}`);
-        }
-        if (selectedYear) {
-          studentList = studentList.filter(s => s.currentYear === parseInt(selectedYear));
-        }
       } else {
         studentList = students.filter(s => s.classId === selectedClass);
-        const classObj = classes?.find(c => c.id === selectedClass);
-        entityName = classObj?.name || 'Selected Class';
+        entityName = classes.find(c => c.id === selectedClass)?.name || 'Class';
         examList = exams.filter(e => e.classId === selectedClass);
       }
 
-      const studentPerformance = studentList.map(student => {
-        const studentResults = results.filter(r => r.studentId === student.id);
-        
-        const totalMarks = studentResults.reduce((sum, r) => sum + (r.marks || 0), 0);
-        const avg = studentResults.length > 0 ? (totalMarks / studentResults.length).toFixed(2) : '0.00';
-        
-        return {
-          student,
-          examCount: studentResults.length,
-          totalMarks,
-          average: parseFloat(avg)
-        };
+      const perf = studentList.map(student => {
+        const rs = results.filter(r => r.studentId === student.id);
+        const total = rs.reduce((sum, r) => sum + (r.marks || 0), 0);
+        const avg = rs.length ? parseFloat((total / rs.length).toFixed(2)) : 0;
+        return { student, examCount: rs.length, totalMarks: total, average: avg };
       });
 
-      const studentsWithResults = studentPerformance.filter(s => s.examCount > 0);
-      const classAverage = studentsWithResults.length > 0
-        ? (studentsWithResults.reduce((sum, s) => sum + s.average, 0) / studentsWithResults.length).toFixed(2)
-        : '0.00';
+      const withResults = perf.filter(p => p.examCount > 0);
+      const classAverage = withResults.length ? (withResults.reduce((s, p) => s + p.average, 0) / withResults.length).toFixed(2) : '0.00';
 
-      const topStudentsData = [...studentPerformance]
-        .filter(s => s.examCount > 0)
-        .sort((a, b) => b.average - a.average)
-        .slice(0, 10)
-        .map(s => ({
-          name: `${s.student.firstName} ${s.student.lastName}`.substring(0, 12) + '...',
-          average: s.average
-        }));
+      const topStudents = [...withResults].sort((a, b) => b.average - a.average).slice(0, 10)
+        .map(s => ({ name: `${s.student.firstName} ${s.student.lastName}`.substring(0, 15), average: s.average }));
 
-      const performanceRanges = {
-        '90-100%': 0,
-        '80-89%': 0,
-        '70-79%': 0,
-        '60-69%': 0,
-        '50-59%': 0,
-        'Below 50%': 0
-      };
-
-      studentPerformance.forEach(s => {
-        if (s.average >= 90) performanceRanges['90-100%']++;
-        else if (s.average >= 80) performanceRanges['80-89%']++;
-        else if (s.average >= 70) performanceRanges['70-79%']++;
-        else if (s.average >= 60) performanceRanges['60-69%']++;
-        else if (s.average >= 50) performanceRanges['50-59%']++;
-        else performanceRanges['Below 50%']++;
+      const ranges = { '90-100': 0, '80-89': 0, '70-79': 0, '60-69': 0, '50-59': 0, '<50': 0 };
+      perf.forEach(p => {
+        if (p.average >= 90) ranges['90-100']++;
+        else if (p.average >= 80) ranges['80-89']++;
+        else if (p.average >= 70) ranges['70-79']++;
+        else if (p.average >= 60) ranges['60-69']++;
+        else if (p.average >= 50) ranges['50-59']++;
+        else ranges['<50']++;
       });
-
-      const rangeChartData = Object.keys(performanceRanges).map(range => ({
-        name: range,
-        count: performanceRanges[range]
-      })).filter(item => item.count > 0);
+      const rangeChart = Object.keys(ranges).map(r => ({ name: `${r}%`, count: ranges[r] })).filter(x => x.count > 0);
 
       setReportData({
-        type: 'class',
-        entityName,
-        studentPerformance,
-        charts: {
-          topStudents: topStudentsData,
-          performanceRanges: rangeChartData
-        },
-        summary: {
-          totalStudents: studentList.length,
-          studentsWithResults: studentsWithResults.length,
-          totalExams: examList.length,
-          classAverage
-        }
+        type: 'class', entityName, studentPerformance: perf,
+        charts: { topStudents, rangeChart },
+        summary: { totalStudents: studentList.length, studentsWithResults: withResults.length, totalExams: examList.length, classAverage }
       });
-
-    } catch (error) {
-      console.error('Class report error:', error);
-      alert('Failed to generate class report');
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) {
+      console.error(err); alert('Failed to generate class report');
+    } finally { setLoading(false); }
   };
 
-  // ==================== GENERATE FINANCIAL REPORT ====================
+  // ==================== TAB: FEE COLLECTION ====================
+  const generateFeeReport = async () => {
+    setLoading(true);
+    try {
+      await fetchOnce('fees');
+
+      const start = feeDateRange.start || firstOfMonthStr();
+      const end = feeDateRange.end || todayStr();
+
+      const filteredPayments = payments.filter(p => {
+        const d = new Date(p.date || p.paymentDate).toISOString().split('T')[0];
+        return d >= start && d <= end;
+      });
+
+      // Student filter
+      let targetStudents = students;
+      if (isUniversity && feeCourseId) targetStudents = students.filter(s => s.courseId === feeCourseId);
+      if (isTVET && feeProgramId) targetStudents = students.filter(s => s.programId === feeProgramId);
+      if (isRegularSchool && feeClassId) targetStudents = students.filter(s => s.classId === feeClassId);
+
+      const studentIds = new Set(targetStudents.map(s => s.id));
+      const paymentsForStudents = filteredPayments.filter(p => studentIds.has(p.studentId));
+
+      const totalCollected = paymentsForStudents.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+
+      // Fee structure for target students
+      const applicableFees = fees.filter(f => {
+        if (isUniversity && feeCourseId) return f.courseId === feeCourseId;
+        if (isTVET && feeProgramId) return f.programId === feeProgramId;
+        if (isRegularSchool && feeClassId) return f.classId === feeClassId;
+        return true;
+      });
+      const totalBilled = applicableFees.reduce((s, f) => s + parseFloat(f.amount || 0), 0) * (targetStudents.length || 1);
+      const totalOutstanding = Math.max(0, totalBilled - totalCollected);
+
+      // Monthly collection trend
+      const monthly = {};
+      paymentsForStudents.forEach(p => {
+        const m = new Date(p.date || p.paymentDate).toLocaleString('default', { month: 'short', year: 'numeric' });
+        monthly[m] = (monthly[m] || 0) + parseFloat(p.amount || 0);
+      });
+      const monthlyChart = Object.keys(monthly).map(m => ({ month: m, collected: monthly[m] }));
+
+      // By payment method
+      const byMethod = {};
+      paymentsForStudents.forEach(p => {
+        const m = p.paymentMethod || 'Other';
+        byMethod[m] = (byMethod[m] || 0) + parseFloat(p.amount || 0);
+      });
+      const methodChart = Object.keys(byMethod).map(m => ({ name: m, value: byMethod[m] }));
+
+      // By fee (if we can match payment.feeId)
+      const byFee = {};
+      paymentsForStudents.forEach(p => {
+        const f = fees.find(x => x.id === p.feeId);
+        const name = f?.name || p.feeName || 'Unspecified';
+        byFee[name] = (byFee[name] || 0) + parseFloat(p.amount || 0);
+      });
+      const feeChart = Object.keys(byFee).map(n => ({ name: n, amount: byFee[n] }));
+
+      // Per-student table
+      const perStudent = targetStudents.map(s => {
+        const paid = paymentsForStudents.filter(p => p.studentId === s.id).reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+        // Approximate billed as sum of applicable fees
+        const billed = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
+        const balance = Math.max(0, billed - paid);
+        return {
+          admissionNumber: s.admissionNumber,
+          name: `${s.firstName || ''} ${s.lastName || ''}`.trim(),
+          entity: getStudentEntityName(s),
+          billed, paid, balance,
+          status: balance <= 0 ? 'Cleared' : 'Outstanding'
+        };
+      }).sort((a, b) => b.balance - a.balance);
+
+      setReportData({
+        type: 'fee',
+        summary: {
+          totalCollected, totalBilled, totalOutstanding,
+          collectionRate: totalBilled > 0 ? ((totalCollected / totalBilled) * 100).toFixed(2) : '0.00',
+          paymentCount: paymentsForStudents.length,
+          studentCount: targetStudents.length
+        },
+        charts: { monthlyChart, methodChart, feeChart },
+        rows: perStudent,
+        period: { start, end }
+      });
+    } catch (err) {
+      console.error(err); alert('Failed to generate fee report');
+    } finally { setLoading(false); }
+  };
+
+  // ==================== TAB: OUTSTANDING BALANCES ====================
+  const generateOutstandingReport = async () => {
+    setLoading(true);
+    try {
+      await fetchOnce('fees');
+
+      let target = students;
+      if (isUniversity && outstandingCourseId) target = target.filter(s => s.courseId === outstandingCourseId);
+      if (isTVET && outstandingProgramId) target = target.filter(s => s.programId === outstandingProgramId);
+      if (isRegularSchool && outstandingClassId) target = target.filter(s => s.classId === outstandingClassId);
+
+      const rows = target.map(s => {
+        const applicableFees = fees.filter(f => {
+          if (isUniversity) return f.courseId === s.courseId;
+          if (isTVET) return f.programId === s.programId;
+          return f.classId === s.classId;
+        });
+        const billed = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
+        const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+        const balance = Math.max(0, billed - paid);
+
+        const lastPayment = payments.filter(p => p.studentId === s.id).sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+
+        return {
+          studentId: s.id,
+          admissionNumber: s.admissionNumber,
+          name: `${s.firstName || ''} ${s.lastName || ''}`.trim(),
+          entity: getStudentEntityName(s),
+          billed, paid, balance,
+          lastPaymentDate: lastPayment?.date ? new Date(lastPayment.date).toLocaleDateString() : 'Never',
+          daysSinceLastPayment: lastPayment?.date ? Math.floor((new Date() - new Date(lastPayment.date)) / (1000 * 60 * 60 * 24)) : 999
+        };
+      })
+        .filter(r => r.balance >= outstandingMinBalance)
+        .sort((a, b) => b.balance - a.balance);
+
+      const buckets = { '0-30 days': 0, '31-60 days': 0, '61-90 days': 0, '90+ days': 0 };
+      rows.forEach(r => {
+        if (r.daysSinceLastPayment <= 30) buckets['0-30 days'] += r.balance;
+        else if (r.daysSinceLastPayment <= 60) buckets['31-60 days'] += r.balance;
+        else if (r.daysSinceLastPayment <= 90) buckets['61-90 days'] += r.balance;
+        else buckets['90+ days'] += r.balance;
+      });
+      const agingChart = Object.keys(buckets).map(b => ({ name: b, amount: buckets[b] }));
+
+      const totalOutstanding = rows.reduce((s, r) => s + r.balance, 0);
+      const avgBalance = rows.length ? totalOutstanding / rows.length : 0;
+      const highest = rows[0]?.balance || 0;
+
+      setReportData({
+        type: 'outstanding',
+        summary: { totalOutstanding, studentsWithBalance: rows.length, averageBalance: avgBalance, highestBalance: highest },
+        charts: { agingChart },
+        rows
+      });
+    } catch (err) {
+      console.error(err); alert('Failed to generate outstanding report');
+    } finally { setLoading(false); }
+  };
+
+  // ==================== TAB: ADMISSIONS ====================
+  const generateAdmissionReport = () => {
+    setLoading(true);
+    try {
+      let target = students;
+      if (isUniversity && admissionCourseId) target = target.filter(s => s.courseId === admissionCourseId);
+      if (isTVET && admissionProgramId) target = target.filter(s => s.programId === admissionProgramId);
+      if (isRegularSchool && admissionClassId) target = target.filter(s => s.classId === admissionClassId);
+      if (admissionGender) target = target.filter(s => s.gender === admissionGender);
+      if (admissionBoarding) target = target.filter(s => s.boardingStatus === admissionBoarding);
+
+      const yearFiltered = target.filter(s => {
+        const d = s.admissionDate || s.enrollmentDate || s.createdAt;
+        if (!d) return false;
+        return new Date(d).getFullYear().toString() === admissionYear;
+      });
+
+      const total = yearFiltered.length;
+      const thisMonth = yearFiltered.filter(s => {
+        const d = s.admissionDate || s.enrollmentDate || s.createdAt;
+        const dt = new Date(d);
+        const now = new Date();
+        return dt.getMonth() === now.getMonth() && dt.getFullYear() === now.getFullYear();
+      }).length;
+
+      const males = yearFiltered.filter(s => s.gender === 'MALE').length;
+      const females = yearFiltered.filter(s => s.gender === 'FEMALE').length;
+      const other = yearFiltered.filter(s => s.gender && s.gender !== 'MALE' && s.gender !== 'FEMALE').length;
+
+      const boarding = yearFiltered.filter(s => s.boardingStatus === 'BOARDING').length;
+      const day = yearFiltered.filter(s => s.boardingStatus === 'DAY').length;
+
+      // Monthly admission trend for the year
+      const monthly = Array.from({ length: 12 }, (_, i) => ({ month: new Date(0, i).toLocaleString('default', { month: 'short' }), count: 0 }));
+      yearFiltered.forEach(s => {
+        const d = new Date(s.admissionDate || s.enrollmentDate || s.createdAt);
+        if (!isNaN(d)) monthly[d.getMonth()].count += 1;
+      });
+
+      // By class/course/program
+      const byEntity = {};
+      yearFiltered.forEach(s => {
+        const name = getStudentEntityName(s);
+        byEntity[name] = (byEntity[name] || 0) + 1;
+      });
+      const entityChart = Object.keys(byEntity).map(n => ({ name: n, count: byEntity[n] }));
+
+      const genderChart = [
+        { name: 'Male', value: males },
+        { name: 'Female', value: females },
+        { name: 'Other', value: other }
+      ].filter(x => x.value > 0);
+
+      const rows = yearFiltered.map(s => ({
+        admissionNumber: s.admissionNumber,
+        name: `${s.firstName || ''} ${s.lastName || ''}`.trim(),
+        gender: s.gender || '—',
+        entity: getStudentEntityName(s),
+        boardingStatus: s.boardingStatus || '—',
+        admissionDate: s.admissionDate ? new Date(s.admissionDate).toLocaleDateString() : '—',
+        phone: s.phone || '—'
+      })).sort((a, b) => new Date(b.admissionDate) - new Date(a.admissionDate));
+
+      setReportData({
+        type: 'admission',
+        summary: { total, thisMonth, males, females, other, boarding, day },
+        charts: { monthly, entityChart, genderChart },
+        rows
+      });
+    } catch (err) {
+      console.error(err); alert('Failed to generate admission report');
+    } finally { setLoading(false); }
+  };
+
+  // ==================== TAB: FINANCIAL SUMMARY ====================
   const generateFinancialReport = () => {
-    if (!canViewFinancialReports) {
-      alert('You do not have permission to view financial reports');
-      return;
-    }
-    if (!dateRange.start || !dateRange.end) {
-      alert('Please select start and end dates');
-      return;
-    }
-    
+    if (!feeDateRange.start || !feeDateRange.end) { alert('Select date range'); return; }
     setLoading(true);
     try {
       const filteredPayments = payments.filter(p => {
-        const paymentDate = new Date(p.date).toISOString().split('T')[0];
-        return paymentDate >= dateRange.start && paymentDate <= dateRange.end;
+        const d = new Date(p.date || p.paymentDate).toISOString().split('T')[0];
+        return d >= feeDateRange.start && d <= feeDateRange.end;
       });
-      
       const filteredExpenses = expenses.filter(e => {
-        const expenseDate = new Date(e.date).toISOString().split('T')[0];
-        return expenseDate >= dateRange.start && expenseDate <= dateRange.end;
+        const d = new Date(e.date).toISOString().split('T')[0];
+        return d >= feeDateRange.start && d <= feeDateRange.end;
       });
-      
-      const totalIncome = filteredPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-      const totalExpenses = filteredExpenses.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0);
 
-      const monthlyData = {};
-      
+      const totalIncome = filteredPayments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+      const totalExpenses = filteredExpenses.reduce((s, e) => s + parseFloat(e.amount || 0), 0);
+      const netIncome = totalIncome - totalExpenses;
+
+      const monthly = {};
       filteredPayments.forEach(p => {
-        const month = new Date(p.date).toLocaleString('default', { month: 'short', year: 'numeric' });
-        if (!monthlyData[month]) {
-          monthlyData[month] = { month, income: 0, expenses: 0, profit: 0 };
-        }
-        monthlyData[month].income += parseFloat(p.amount || 0);
+        const m = new Date(p.date || p.paymentDate).toLocaleString('default', { month: 'short', year: 'numeric' });
+        if (!monthly[m]) monthly[m] = { month: m, income: 0, expenses: 0, profit: 0 };
+        monthly[m].income += parseFloat(p.amount || 0);
       });
-
       filteredExpenses.forEach(e => {
-        const month = new Date(e.date).toLocaleString('default', { month: 'short', year: 'numeric' });
-        if (!monthlyData[month]) {
-          monthlyData[month] = { month, income: 0, expenses: 0, profit: 0 };
-        }
-        monthlyData[month].expenses += parseFloat(e.amount || 0);
+        const m = new Date(e.date).toLocaleString('default', { month: 'short', year: 'numeric' });
+        if (!monthly[m]) monthly[m] = { month: m, income: 0, expenses: 0, profit: 0 };
+        monthly[m].expenses += parseFloat(e.amount || 0);
       });
-
-      Object.keys(monthlyData).forEach(month => {
-        monthlyData[month].profit = monthlyData[month].income - monthlyData[month].expenses;
-      });
-
-      const financialChartData = Object.values(monthlyData).sort((a, b) => {
-        return new Date(a.month) - new Date(b.month);
-      });
+      Object.values(monthly).forEach(m => { m.profit = m.income - m.expenses; });
+      const monthlyChart = Object.values(monthly);
 
       const incomeByMethod = {};
-      filteredPayments.forEach(p => {
-        const method = p.paymentMethod || 'Other';
-        incomeByMethod[method] = (incomeByMethod[method] || 0) + parseFloat(p.amount || 0);
-      });
-
-      const methodChartData = Object.keys(incomeByMethod).map(method => ({
-        name: method,
-        value: incomeByMethod[method]
-      }));
+      filteredPayments.forEach(p => { const k = p.paymentMethod || 'Other'; incomeByMethod[k] = (incomeByMethod[k] || 0) + parseFloat(p.amount || 0); });
+      const methodChart = Object.keys(incomeByMethod).map(k => ({ name: k, value: incomeByMethod[k] }));
 
       const expensesByCategory = {};
-      filteredExpenses.forEach(e => {
-        const category = e.category || 'Other';
-        expensesByCategory[category] = (expensesByCategory[category] || 0) + parseFloat(e.amount || 0);
-      });
-
-      const categoryChartData = Object.keys(expensesByCategory).map(category => ({
-        name: category,
-        value: expensesByCategory[category]
-      }));
+      filteredExpenses.forEach(e => { const k = e.category || 'Other'; expensesByCategory[k] = (expensesByCategory[k] || 0) + parseFloat(e.amount || 0); });
+      const categoryChart = Object.keys(expensesByCategory).map(k => ({ name: k, value: expensesByCategory[k] }));
 
       setReportData({
         type: 'financial',
-        dateRange,
-        charts: {
-          monthly: financialChartData,
-          incomeByMethod: methodChartData,
-          expensesByCategory: categoryChartData
-        },
-        summary: {
-          totalIncome,
-          totalExpenses,
-          netIncome: totalIncome - totalExpenses
-        },
-        payments: filteredPayments,
-        expenses: filteredExpenses
+        period: { ...feeDateRange },
+        summary: { totalIncome, totalExpenses, netIncome },
+        charts: { monthlyChart, methodChart, categoryChart },
+        recentPayments: filteredPayments.slice(0, 20),
+        recentExpenses: filteredExpenses.slice(0, 20)
+      });
+    } catch (err) {
+      console.error(err); alert('Failed to generate financial report');
+    } finally { setLoading(false); }
+  };
+
+  // ==================== TAB: ATTENDANCE ====================
+  const generateAttendanceReport = async () => {
+    setLoading(true);
+    try {
+      await fetchOnce('attendance');
+
+      const start = attendanceDateRange.start || firstOfMonthStr();
+      const end = attendanceDateRange.end || todayStr();
+
+      let target = attendance.filter(a => a.date >= start && a.date <= end);
+
+      if (isUniversity && attendanceCourseId) target = target.filter(a => a.courseId === attendanceCourseId);
+      if (isTVET && attendanceProgramId) target = target.filter(a => a.programId === attendanceProgramId);
+      if (isRegularSchool && attendanceClassId) target = target.filter(a => a.classId === attendanceClassId);
+
+      const present = target.filter(a => a.status === 'PRESENT').length;
+      const absent = target.filter(a => a.status === 'ABSENT').length;
+      const late = target.filter(a => a.status === 'LATE').length;
+      const leave = target.filter(a => a.status === 'PERMISSION' || a.status === 'SICK').length;
+      const total = target.length;
+
+      const daily = {};
+      target.forEach(a => {
+        if (!daily[a.date]) daily[a.date] = { date: a.date, present: 0, absent: 0, late: 0 };
+        if (a.status === 'PRESENT') daily[a.date].present += 1;
+        else if (a.status === 'ABSENT') daily[a.date].absent += 1;
+        else if (a.status === 'LATE') daily[a.date].late += 1;
+      });
+      const dailyChart = Object.values(daily).sort((a, b) => a.date.localeCompare(b.date)).map(d => ({ ...d, day: new Date(d.date).toLocaleDateString('en', { day: 'numeric', month: 'short' }) }));
+
+      // Per-student attendance
+      const byStudent = {};
+      target.forEach(a => {
+        if (!byStudent[a.studentId]) byStudent[a.studentId] = { present: 0, absent: 0, late: 0, leave: 0, total: 0 };
+        const b = byStudent[a.studentId];
+        b.total += 1;
+        if (a.status === 'PRESENT') b.present += 1;
+        else if (a.status === 'ABSENT') b.absent += 1;
+        else if (a.status === 'LATE') b.late += 1;
+        else b.leave += 1;
       });
 
-    } catch (error) {
-      console.error('Financial report error:', error);
-      alert('Failed to generate financial report');
-    } finally {
-      setLoading(false);
-    }
+      const rows = Object.keys(byStudent).map(sid => {
+        const s = students.find(x => x.id === sid);
+        const b = byStudent[sid];
+        return {
+          admissionNumber: s?.admissionNumber || '—',
+          name: s ? `${s.firstName} ${s.lastName}` : 'Unknown',
+          entity: s ? getStudentEntityName(s) : '—',
+          present: b.present, absent: b.absent, late: b.late, leave: b.leave, total: b.total,
+          rate: b.total > 0 ? ((b.present / b.total) * 100).toFixed(1) : '0.0'
+        };
+      }).sort((a, b) => parseFloat(b.rate) - parseFloat(a.rate));
+
+      setReportData({
+        type: 'attendance',
+        summary: {
+          total, present, absent, late, leave,
+          presentRate: total > 0 ? ((present / total) * 100).toFixed(2) : '0.00',
+          absentRate: total > 0 ? ((absent / total) * 100).toFixed(2) : '0.00'
+        },
+        charts: { dailyChart },
+        rows,
+        period: { start, end }
+      });
+    } catch (err) {
+      console.error(err); alert('Failed to generate attendance report');
+    } finally { setLoading(false); }
   };
 
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-KE', {
-      style: 'currency',
-      currency: 'KES',
-      minimumFractionDigits: 0
-    }).format(amount || 0);
+  // ==================== TAB: STAFF ====================
+  const generateStaffReport = async () => {
+    setLoading(true);
+    try {
+      await fetchOnce('staff');
+      let target = staff;
+      if (staffDepartment) target = target.filter(s => s.department === staffDepartment);
+      if (staffType) target = target.filter(s => s.staffType === staffType);
+
+      const total = target.length;
+      const teaching = target.filter(s => s.staffType === 'TEACHING').length;
+      const nonTeaching = target.filter(s => s.staffType === 'NON_TEACHING').length;
+      const permanent = target.filter(s => s.employmentType === 'PERMANENT').length;
+      const contract = target.filter(s => s.employmentType === 'CONTRACT').length;
+
+      const byDept = {};
+      target.forEach(s => { const d = s.department || 'Unassigned'; byDept[d] = (byDept[d] || 0) + 1; });
+      const deptChart = Object.keys(byDept).map(d => ({ name: d, count: byDept[d] }));
+
+      const byType = {};
+      target.forEach(s => { const t = s.staffType || 'Unspecified'; byType[t] = (byType[t] || 0) + 1; });
+      const typeChart = Object.keys(byType).map(t => ({ name: t, value: byType[t] }));
+
+      const rows = target.map(s => ({
+        employeeId: s.employeeId || '—',
+        name: s.User ? `${s.User.firstName || ''} ${s.User.lastName || ''}`.trim() : 'Staff',
+        email: s.User?.email || '—',
+        phone: s.User?.phone || '—',
+        department: s.department || '—',
+        jobTitle: s.jobTitle || '—',
+        staffType: s.staffType || '—',
+        employmentType: s.employmentType || '—',
+        employmentDate: s.employmentDate ? new Date(s.employmentDate).toLocaleDateString() : '—'
+      }));
+
+      setReportData({
+        type: 'staff',
+        summary: { total, teaching, nonTeaching, permanent, contract },
+        charts: { deptChart, typeChart },
+        rows
+      });
+    } catch (err) {
+      console.error(err); alert('Failed to generate staff report');
+    } finally { setLoading(false); }
   };
+
+  // ==================== TAB: DISCOUNTS ====================
+  const generateDiscountReport = async () => {
+    setLoading(true);
+    try {
+      await fetchOnce('discounts');
+      let target = discounts;
+      if (discountSearch) {
+        const q = discountSearch.toLowerCase();
+        target = target.filter(d => {
+          const s = students.find(x => x.id === d.studentId);
+          return (s && `${s.firstName} ${s.lastName}`.toLowerCase().includes(q)) ||
+                 (d.reason || '').toLowerCase().includes(q);
+        });
+      }
+
+      const totalValue = target.reduce((sum, d) => sum + parseFloat(d.value || 0), 0);
+      const count = target.length;
+      const avg = count ? totalValue / count : 0;
+
+      const byType = {};
+      target.forEach(d => { byType[d.type] = (byType[d.type] || 0) + 1; });
+      const typeChart = Object.keys(byType).map(t => ({ name: t, value: byType[t] }));
+
+      const rows = target.map(d => {
+        const s = students.find(x => x.id === d.studentId);
+        const f = fees.find(x => x.id === d.feeId);
+        return {
+          student: s ? `${s.firstName} ${s.lastName}` : '—',
+          admissionNumber: s?.admissionNumber || '—',
+          fee: f?.name || 'All Fees',
+          type: d.type,
+          value: d.value,
+          reason: d.reason || '—',
+          isActive: d.isActive ? 'Active' : 'Inactive'
+        };
+      });
+
+      setReportData({
+        type: 'discount',
+        summary: { count, totalValue, avg },
+        charts: { typeChart },
+        rows
+      });
+    } catch (err) {
+      console.error(err); alert('Failed to generate discount report');
+    } finally { setLoading(false); }
+  };
+
+  // ==================== TAB: FEE ALLOCATION ====================
+  const generateAllocationReport = async () => {
+    setLoading(true);
+    try {
+      await fetchOnce('fees');
+      await fetchOnce('allocations');
+
+      const feeFiltered = allocationFeeId
+        ? allocations.filter(a => a.feeId === allocationFeeId)
+        : allocations;
+
+      const allocatedCount = feeFiltered.length;
+      const totalAllocated = feeFiltered.reduce((s, a) => s + parseFloat(a.amount || 0), 0);
+      const paidAmounts = feeFiltered.map(a => {
+        const p = payments.filter(x => x.studentId === a.studentId && x.feeId === a.feeId);
+        return p.reduce((sum, x) => sum + parseFloat(x.amount || 0), 0);
+      });
+      const totalPaid = paidAmounts.reduce((s, x) => s + x, 0);
+      const totalOutstanding = Math.max(0, totalAllocated - totalPaid);
+
+      const byFee = {};
+      feeFiltered.forEach(a => {
+        const f = fees.find(x => x.id === a.feeId);
+        const key = f?.name || 'Unspecified';
+        if (!byFee[key]) byFee[key] = { name: key, allocated: 0, count: 0 };
+        byFee[key].allocated += parseFloat(a.amount || 0);
+        byFee[key].count += 1;
+      });
+      const feeChart = Object.values(byFee);
+
+      const rows = feeFiltered.map(a => {
+        const s = students.find(x => x.id === a.studentId);
+        const f = fees.find(x => x.id === a.feeId);
+        const paid = payments.filter(x => x.studentId === a.studentId && x.feeId === a.feeId).reduce((sum, x) => sum + parseFloat(x.amount || 0), 0);
+        const balance = Math.max(0, parseFloat(a.amount || 0) - paid);
+        return {
+          student: s ? `${s.firstName} ${s.lastName}` : '—',
+          admissionNumber: s?.admissionNumber || '—',
+          fee: f?.name || '—',
+          allocated: parseFloat(a.amount || 0),
+          paid,
+          balance,
+          status: balance <= 0 ? 'Cleared' : 'Outstanding'
+        };
+      });
+
+      setReportData({
+        type: 'allocation',
+        summary: {
+          allocatedCount, totalAllocated, totalPaid, totalOutstanding,
+          collectionRate: totalAllocated > 0 ? ((totalPaid / totalAllocated) * 100).toFixed(2) : '0.00'
+        },
+        charts: { feeChart },
+        rows
+      });
+    } catch (err) {
+      console.error(err); alert('Failed to generate allocation report');
+    } finally { setLoading(false); }
+  };
+
+  // ==================== TAB CHANGE: RESET & AUTO-GENERATE ====================
+  useEffect(() => {
+    setReportData(null);
+    if (activeTab === 'fee')         generateFeeReport();
+    if (activeTab === 'outstanding') generateOutstandingReport();
+    if (activeTab === 'admission')   generateAdmissionReport();
+    if (activeTab === 'financial')   generateFinancialReport();
+    if (activeTab === 'attendance')  generateAttendanceReport();
+    if (activeTab === 'staff')       generateStaffReport();
+    if (activeTab === 'discount')    generateDiscountReport();
+    if (activeTab === 'allocation')  generateAllocationReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  // ==================== SMALL UI COMPONENTS ====================
+  const StatCard = ({ label, value, sub, color = 'indigo' }) => (
+    <div className={`bg-gradient-to-br from-${color}-500 to-${color}-600 rounded-xl p-5 text-white`}>
+      <p className="text-xs opacity-90 uppercase tracking-wide">{label}</p>
+      <p className="text-2xl font-bold mt-1">{value}</p>
+      {sub && <p className="text-xs opacity-75 mt-1">{sub}</p>}
+    </div>
+  );
+
+  const Card = ({ children, className = '' }) => (
+    <div className={`bg-white rounded-xl shadow-sm p-6 ${className}`}>{children}</div>
+  );
+
+  const TableWrap = ({ headers, children }) => (
+    <div className="overflow-x-auto border rounded-lg">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-50">
+          <tr>{headers.map((h, i) => <th key={i} className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">{h}</th>)}</tr>
+        </thead>
+        <tbody className="divide-y">{children}</tbody>
+      </table>
+    </div>
+  );
+
+  const ExportBtn = ({ onClick, disabled }) => (
+    <button onClick={onClick} disabled={disabled} className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-green-700 disabled:opacity-50 no-print">
+      <i className="fas fa-file-csv mr-2"></i>Export CSV
+    </button>
+  );
+
+  const PrintBtn = () => (
+    <button onClick={() => window.print()} className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-indigo-700 no-print">
+      <i className="fas fa-print mr-2"></i>Print
+    </button>
+  );
+
+  const ChartCard = ({ title, children, span }) => (
+    <div className={`bg-white p-4 rounded-xl shadow-sm ${span ? 'lg:col-span-2' : ''}`}>
+      <h4 className="text-base font-semibold mb-3">{title}</h4>
+      <ResponsiveContainer width="100%" height={280}>{children}</ResponsiveContainer>
+    </div>
+  );
 
   // ==================== RENDER ====================
   return (
     <div className="space-y-6">
-      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
-      
-      <div className="flex justify-between items-center">
+      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50" />}
+
+      {/* Header */}
+      <div className="flex flex-wrap justify-between items-center gap-3">
         <h2 className="text-2xl font-bold">
-          {isUniversity ? '🎓 University Reports' : 
-           isTVET ? '🔧 TVET Reports' : 
-           '📊 School Reports'}
+          {isUniversity ? '🎓 University Reports' : isTVET ? '🔧 TVET Reports' : '📊 School Reports'}
         </h2>
-        <button
-          onClick={() => window.print()}
-          className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center no-print"
-        >
-          <i className="fas fa-print mr-2"></i>Print Report
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowCharts(v => !v)}
+            className="bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg text-sm hover:bg-gray-300 no-print"
+          >
+            <i className={`fas fa-${showCharts ? 'eye-slash' : 'eye'} mr-2`}></i>{showCharts ? 'Hide' : 'Show'} Charts
+          </button>
+          <PrintBtn />
+        </div>
       </div>
 
-      {/* Report Type Tabs */}
-      <div className="bg-white rounded-xl shadow-sm p-1 flex space-x-1 no-print overflow-x-auto">
-        {canViewStudentReports && (
+      {/* Tabs */}
+      <div className="bg-white rounded-xl shadow-sm p-1 flex flex-wrap gap-1 no-print">
+        {ALL_TABS.map(t => (
           <button
-            onClick={() => {
-              setActiveTab('student');
-              setReportData(null);
-              setSelectedStudent('');
-              setSelectedExam('');
-            }}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${
-              activeTab === 'student' ? 'bg-indigo-600 text-white' : 'hover:bg-gray-100'
-            }`}
+            key={t.key}
+            onClick={() => setActiveTab(t.key)}
+            className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${activeTab === t.key ? 'bg-indigo-600 text-white' : 'hover:bg-gray-100 text-gray-700'}`}
           >
-            <i className="fas fa-user-graduate mr-2"></i>Student Report
+            <i className={`fas ${t.icon} mr-2`}></i>{t.label}
           </button>
-        )}
-        {canViewClassReports && (
-          <button
-            onClick={() => {
-              setActiveTab('class');
-              setReportData(null);
-              setSelectedClass('');
-              setSelectedCourse('');
-              setSelectedProgram('');
-            }}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${
-              activeTab === 'class' ? 'bg-indigo-600 text-white' : 'hover:bg-gray-100'
-            }`}
-          >
-            <i className="fas fa-users mr-2"></i>
-            {isUniversity ? 'Course Report' : isTVET ? 'Program Report' : 'Class Report'}
-          </button>
-        )}
-        {canViewFinancialReports && (
-          <button
-            onClick={() => {
-              setActiveTab('financial');
-              setReportData(null);
-            }}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap ${
-              activeTab === 'financial' ? 'bg-indigo-600 text-white' : 'hover:bg-gray-100'
-            }`}
-          >
-            <i className="fas fa-chart-line mr-2"></i>Financial Report
-          </button>
-        )}
+        ))}
       </div>
 
-      {/* ==================== STUDENT REPORT TAB ==================== */}
-      {activeTab === 'student' && canViewStudentReports && (
+      {/* ==================== TAB: STUDENT ==================== */}
+      {activeTab === 'student' && (
         <div className="space-y-6">
-          <div className="bg-white p-6 rounded-xl shadow-sm no-print">
+          <Card className="no-print">
             <h3 className="text-lg font-semibold mb-4">Student Performance Report</h3>
-            
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <SearchableSelect
-                  label="Select Student"
-                  value={selectedStudent}
-                  onChange={(e) => {
-                    setSelectedStudent(e.target.value);
-                    setSelectedExam('');
-                  }}
-                  options={getStudentOptions()}
-                  placeholder="Search by name or admission..."
-                  emptyMessage="No students available"
-                />
-                
-                {selectedStudent && (
-                  <SearchableSelect
-                    label="Filter by Exam (Optional)"
-                    value={selectedExam}
-                    onChange={(e) => setSelectedExam(e.target.value)}
-                    options={getExamOptionsForStudent(selectedStudent)}
-                    placeholder="Search exam to filter..."
-                    emptyMessage="No exams available"
-                  />
-                )}
-              </div>
-              
-              <button
-                onClick={generateStudentReport}
-                disabled={!selectedStudent || loading}
-                className="mt-2 bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-              >
-                {loading ? 'Generating...' : 'Generate Student Report'}
-              </button>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <SearchableSelect label="Select Student" value={selectedStudent} onChange={(e) => { setSelectedStudent(e.target.value); setSelectedExam(''); }} options={studentOptions} placeholder="Search student..." emptyMessage="No students" />
+              {selectedStudent && (
+                <SearchableSelect label="Filter by Exam (optional)" value={selectedExam} onChange={(e) => setSelectedExam(e.target.value)} options={examOptionsForStudent} placeholder="Any exam" emptyMessage="No exams" />
+              )}
             </div>
-          </div>
+            <button onClick={generateStudentReport} disabled={!selectedStudent || loading} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+              Generate Report
+            </button>
+          </Card>
 
           {reportData?.type === 'student' && (
-            <div className="space-y-6">
-              {/* Student Info Card */}
-              <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-lg">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div>
-                    <p className="text-sm text-gray-600">Student Name</p>
-                    <p className="text-xl font-bold">{reportData.student.firstName} {reportData.student.lastName}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-600">Admission No.</p>
-                    <p className="text-xl font-bold">{reportData.student.admissionNumber}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-600">
-                      {isUniversity ? 'Course' : isTVET ? 'Program' : 'Class'}
-                    </p>
-                    <p className="text-xl font-bold">{getStudentCourseClass(reportData.student)}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-600">
-                      {isTVET ? 'Module' : isUniversity ? 'Year/Sem' : 'Year'}
-                    </p>
-                    <p className="text-xl font-bold">
-                      {isTVET ? (reportData.student.currentModule || 'N/A') : 
-                       isUniversity ? `Year ${reportData.student.currentYear || '?'}, Sem ${reportData.student.currentSemester || '?'}` :
-                       reportData.student.currentYear ? `Year ${reportData.student.currentYear}` : 'N/A'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Summary Stats */}
+            <>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                <div className="bg-blue-50 p-4 rounded-lg text-center">
-                  <p className="text-sm text-blue-600">Exams Taken</p>
-                  <p className="text-2xl font-bold text-blue-700">{reportData.summary.totalExams}</p>
-                </div>
-                <div className="bg-green-50 p-4 rounded-lg text-center">
-                  <p className="text-sm text-green-600">Average</p>
-                  <p className="text-2xl font-bold text-green-700">{reportData.summary.average}%</p>
-                </div>
-                <div className="bg-yellow-50 p-4 rounded-lg text-center">
-                  <p className="text-sm text-yellow-600">Highest</p>
-                  <p className="text-2xl font-bold text-yellow-700">{reportData.summary.highest}%</p>
-                </div>
-                <div className="bg-orange-50 p-4 rounded-lg text-center">
-                  <p className="text-sm text-orange-600">Lowest</p>
-                  <p className="text-2xl font-bold text-orange-700">{reportData.summary.lowest}%</p>
-                </div>
-                <div className="bg-purple-50 p-4 rounded-lg text-center">
-                  <p className="text-sm text-purple-600">Total Marks</p>
-                  <p className="text-2xl font-bold text-purple-700">{reportData.summary.totalMarks}</p>
-                </div>
+                <StatCard label="Exams Taken" value={reportData.summary.totalExams} color="blue" />
+                <StatCard label="Average" value={`${reportData.summary.average}%`} color="green" />
+                <StatCard label="Highest" value={`${reportData.summary.highest}%`} color="yellow" />
+                <StatCard label="Lowest" value={`${reportData.summary.lowest}%`} color="orange" />
+                <StatCard label="Total Marks" value={reportData.summary.totalMarks} color="purple" />
               </div>
 
-              {/* Charts Section */}
               {showCharts && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {reportData.charts.performanceTrend.length > 0 && (
-                    <div className="bg-white p-4 rounded-xl shadow-sm">
-                      <h3 className="text-lg font-semibold mb-4">Performance Trend</h3>
-                      <ResponsiveContainer width="100%" height={300}>
-                        <LineChart data={reportData.charts.performanceTrend}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="name" angle={-45} textAnchor="end" height={60} interval={0} />
-                          <YAxis domain={[0, 100]} />
-                          <Tooltip />
-                          <Legend />
-                          <Line type="monotone" dataKey="marks" stroke="#4f46e5" strokeWidth={2} name="Marks" />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
+                  {reportData.charts.trend.length > 0 && (
+                    <ChartCard title="Performance Trend" span>
+                      <LineChart data={reportData.charts.trend}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" angle={-45} textAnchor="end" height={60} interval={0} />
+                        <YAxis domain={[0, 100]} />
+                        <Tooltip /><Legend />
+                        <Line type="monotone" dataKey="marks" stroke="#4f46e5" strokeWidth={2} name="Marks" />
+                      </LineChart>
+                    </ChartCard>
                   )}
-
-                  {reportData.charts.subjectPerformance.length > 0 && (
-                    <div className="bg-white p-4 rounded-xl shadow-sm">
-                      <h3 className="text-lg font-semibold mb-4">
-                        {isTVET ? 'Module Performance' : 'Subject Performance'}
-                      </h3>
-                      <ResponsiveContainer width="100%" height={300}>
-                        <BarChart data={reportData.charts.subjectPerformance}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="name" angle={-45} textAnchor="end" height={60} interval={0} />
-                          <YAxis domain={[0, 100]} />
-                          <Tooltip />
-                          <Legend />
-                          <Bar dataKey="average" fill="#4f46e5" radius={[4, 4, 0, 0]} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
+                  {reportData.charts.subjectPerf.length > 0 && (
+                    <ChartCard title={isTVET ? 'Module Performance' : 'Subject Performance'}>
+                      <BarChart data={reportData.charts.subjectPerf}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" angle={-45} textAnchor="end" height={60} interval={0} />
+                        <YAxis domain={[0, 100]} />
+                        <Tooltip /><Bar dataKey="average" fill="#4f46e5" radius={[4,4,0,0]} />
+                      </BarChart>
+                    </ChartCard>
                   )}
-
-                  {reportData.charts.gradeDistribution.length > 0 && (
-                    <div className="bg-white p-4 rounded-xl shadow-sm lg:col-span-2">
-                      <h3 className="text-lg font-semibold mb-4">Grade Distribution</h3>
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        <ResponsiveContainer width="100%" height={300}>
-                          <PieChart>
-                            <Pie
-                              data={reportData.charts.gradeDistribution}
-                              cx="50%"
-                              cy="50%"
-                              labelLine={true}
-                              label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                              outerRadius={100}
-                              dataKey="value"
-                            >
-                              {reportData.charts.gradeDistribution.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                              ))}
-                            </Pie>
-                            <Tooltip />
-                          </PieChart>
-                        </ResponsiveContainer>
-                        <div className="flex flex-col justify-center">
-                          <h4 className="font-medium mb-2">Grade Summary</h4>
-                          <div className="space-y-2">
-                            {reportData.charts.gradeDistribution.map((item, index) => (
-                              <div key={index} className="flex justify-between items-center">
-                                <span className="flex items-center">
-                                  <span className="w-3 h-3 rounded-full mr-2" style={{ backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }}></span>
-                                  <span>{item.name}:</span>
-                                </span>
-                                <span className="font-medium">{item.value} exam(s)</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+                  {reportData.charts.gradeChart.length > 0 && (
+                    <ChartCard title="Grade Distribution">
+                      <PieChart>
+                        <Pie data={reportData.charts.gradeChart} cx="50%" cy="50%" label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} dataKey="value">
+                          {reportData.charts.gradeChart.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ChartCard>
                   )}
                 </div>
               )}
 
-              {/* Results Table */}
               {reportData.results.length > 0 ? (
-                <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-                  <div className="px-6 py-4 bg-gray-50 border-b">
-                    <h3 className="font-semibold text-lg">Detailed Results</h3>
+                <Card>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold">Detailed Results ({reportData.results.length})</h3>
+                    <ExportBtn onClick={() => exportCSV(reportData.results, 'student_report.csv')} />
                   </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Exam</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            {isTVET ? 'Module' : 'Subject/Unit'}
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Marks</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Grade</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Points</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200">
-                        {reportData.results.map((result, index) => {
-                          const gradeInfo = getGradeDisplay(result.grade, result.points, exams?.find(e => e.id === result.examId));
-                          return (
-                            <tr key={index} className="hover:bg-gray-50">
-                              <td className="px-4 py-3">
-                                {result.examDate ? new Date(result.examDate).toLocaleDateString() : 'N/A'}
-                              </td>
-                              <td className="px-4 py-3 font-medium">{result.examName}</td>
-                              <td className="px-4 py-3">
-                                {result.itemName === 'Unknown' ? (
-                                  <span className="text-gray-400 italic">
-                                    {result.examName || 'No Module'}
-                                  </span>
-                                ) : (
-                                  <span>
-                                    {result.itemName}
-                                    {result.itemCode && <span className="text-xs text-gray-500 ml-1">({result.itemCode})</span>}
-                                  </span>
-                                )}
-                              </td>
-                              <td className="px-4 py-3 font-bold">{result.marks}</td>
-                              <td className="px-4 py-3">
-                                <span className={`px-2 py-1 rounded-full text-xs font-medium bg-${gradeInfo.color}-100 text-${gradeInfo.color}-800`}>
-                                  {gradeInfo.grade}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3">{gradeInfo.points}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                  <TableWrap headers={['Date','Exam','Subject/Unit','Marks','Grade','Points']}>
+                    {reportData.results.map((r, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-3 py-2">{r.examDate ? new Date(r.examDate).toLocaleDateString() : '—'}</td>
+                        <td className="px-3 py-2 font-medium">{r.examName}</td>
+                        <td className="px-3 py-2">{r.itemName}{r.itemCode && <span className="text-xs text-gray-500 ml-1">({r.itemCode})</span>}</td>
+                        <td className="px-3 py-2 font-bold">{r.marks}</td>
+                        <td className="px-3 py-2"><span className="px-2 py-0.5 rounded-full text-xs bg-gray-100">{r.grade}</span></td>
+                        <td className="px-3 py-2">{r.points}</td>
+                      </tr>
+                    ))}
+                  </TableWrap>
+                </Card>
               ) : (
-                <div className="text-center py-12 bg-gray-50 rounded-lg">
-                  <i className="fas fa-file-alt text-5xl text-gray-400 mb-4"></i>
-                  <p className="text-lg text-gray-600">No exam results found for this student</p>
-                </div>
+                <Card><p className="text-center text-gray-500 py-6">No results found</p></Card>
               )}
-            </div>
+            </>
           )}
         </div>
       )}
 
-      {/* ==================== CLASS REPORT TAB ==================== */}
-      {activeTab === 'class' && canViewClassReports && (
+      {/* ==================== TAB: CLASS ==================== */}
+      {activeTab === 'class' && (
         <div className="space-y-6">
-          <div className="bg-white p-6 rounded-xl shadow-sm no-print">
+          <Card className="no-print">
             <h3 className="text-lg font-semibold mb-4">
-              {isUniversity ? 'Course Performance Report' : 
-               isTVET ? 'Program Performance Report' : 
-               'Class Performance Report'}
+              {isUniversity ? 'Course Performance' : isTVET ? 'Program Performance' : 'Class Performance'}
             </h3>
-            
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                
-                {isUniversity && (
-                  <>
-                    <SearchableSelect
-                      label="Select Course"
-                      value={selectedCourse}
-                      onChange={(e) => {
-                        setSelectedCourse(e.target.value);
-                        setSelectedYear('');
-                      }}
-                      options={getCourseOptions()}
-                      placeholder="Search course by name or code..."
-                      emptyMessage="No courses available"
-                    />
-                    <SearchableSelect
-                      label="Year"
-                      value={selectedYear}
-                      onChange={(e) => setSelectedYear(e.target.value)}
-                      options={getYearOptions()}
-                      placeholder="All Years"
-                      emptyMessage="No years available"
-                    />
-                  </>
-                )}
-                
-                {isTVET && (
-                  <>
-                    <SearchableSelect
-                      label="Select Program"
-                      value={selectedProgram}
-                      onChange={(e) => {
-                        setSelectedProgram(e.target.value);
-                        setSelectedModule('');
-                        setSelectedYear('');
-                      }}
-                      options={getProgramOptions()}
-                      placeholder="Search program by name or code..."
-                      emptyMessage="No programs available"
-                    />
-                    <SearchableSelect
-                      label="Module"
-                      value={selectedModule}
-                      onChange={(e) => setSelectedModule(e.target.value)}
-                      options={getModuleOptions()}
-                      placeholder="All Modules"
-                      emptyMessage="No modules available"
-                    />
-                    <SearchableSelect
-                      label="Year"
-                      value={selectedYear}
-                      onChange={(e) => setSelectedYear(e.target.value)}
-                      options={getYearOptions()}
-                      placeholder="All Years"
-                      emptyMessage="No years available"
-                    />
-                  </>
-                )}
-                
-                {isRegularSchool && (
-                  <SearchableSelect
-                    label="Select Class"
-                    value={selectedClass}
-                    onChange={(e) => setSelectedClass(e.target.value)}
-                    options={getClassOptions()}
-                    placeholder="Search class..."
-                    emptyMessage="No classes available"
-                  />
-                )}
-              </div>
-              
-              <button
-                onClick={generateClassReport}
-                disabled={
-                  (isUniversity && !selectedCourse) || 
-                  (isTVET && !selectedProgram) || 
-                  (isRegularSchool && !selectedClass) || 
-                  loading
-                }
-                className="mt-2 bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-              >
-                Generate {isUniversity ? 'Course' : isTVET ? 'Program' : 'Class'} Report
-              </button>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {isUniversity && (<>
+                <SearchableSelect label="Course" value={selectedCourse} onChange={(e) => { setSelectedCourse(e.target.value); setSelectedYear(''); }} options={courseOptions} placeholder="Select course..." emptyMessage="No courses" />
+                <SearchableSelect label="Year (optional)" value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} options={yearOptions} placeholder="All years" />
+              </>)}
+              {isTVET && (<>
+                <SearchableSelect label="Program" value={selectedProgram} onChange={(e) => { setSelectedProgram(e.target.value); setSelectedModule(''); setSelectedYear(''); }} options={programOptions} placeholder="Select program..." emptyMessage="No programs" />
+                <SearchableSelect label="Module (optional)" value={selectedModule} onChange={(e) => setSelectedModule(e.target.value)} options={moduleOptions} placeholder="All modules" />
+                <SearchableSelect label="Year (optional)" value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} options={yearOptions} placeholder="All years" />
+              </>)}
+              {isRegularSchool && (
+                <SearchableSelect label="Class" value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)} options={classOptions} placeholder="Select class..." emptyMessage="No classes" />
+              )}
             </div>
-          </div>
+            <button onClick={generateClassReport} className="mt-4 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
+          </Card>
 
           {reportData?.type === 'class' && (
-            <div className="space-y-6">
-              {/* Summary Stats */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="bg-blue-50 p-4 rounded-lg">
-                  <p className="text-sm text-blue-600">Total Students</p>
-                  <p className="text-2xl font-bold text-blue-700">{reportData.summary.totalStudents}</p>
-                </div>
-                <div className="bg-green-50 p-4 rounded-lg">
-                  <p className="text-sm text-green-600">With Results</p>
-                  <p className="text-2xl font-bold text-green-700">{reportData.summary.studentsWithResults}</p>
-                </div>
-                <div className="bg-purple-50 p-4 rounded-lg">
-                  <p className="text-sm text-purple-600">
-                    {isTVET ? 'Program Average' : 'Class Average'}
-                  </p>
-                  <p className="text-2xl font-bold text-purple-700">{reportData.summary.classAverage}%</p>
-                </div>
-                <div className="bg-yellow-50 p-4 rounded-lg">
-                  <p className="text-sm text-yellow-600">Total Exams</p>
-                  <p className="text-2xl font-bold text-yellow-700">{reportData.summary.totalExams}</p>
-                </div>
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <StatCard label="Total Students" value={reportData.summary.totalStudents} color="blue" />
+                <StatCard label="With Results" value={reportData.summary.studentsWithResults} color="green" />
+                <StatCard label="Average" value={`${reportData.summary.classAverage}%`} color="purple" />
+                <StatCard label="Exams" value={reportData.summary.totalExams} color="yellow" />
               </div>
 
-              {/* Charts Section */}
               {showCharts && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {reportData.charts.topStudents.length > 0 && (
-                    <div className="bg-white p-4 rounded-xl shadow-sm">
-                      <h3 className="text-lg font-semibold mb-4">Top 10 Students</h3>
-                      <ResponsiveContainer width="100%" height={300}>
-                        <BarChart data={reportData.charts.topStudents} layout="vertical">
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis type="number" domain={[0, 100]} />
-                          <YAxis type="category" dataKey="name" width={120} />
-                          <Tooltip />
-                          <Bar dataKey="average" fill="#4f46e5" radius={[0, 4, 4, 0]} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
+                    <ChartCard title="Top 10 Students">
+                      <BarChart data={reportData.charts.topStudents} layout="vertical">
+                        <CartesianGrid strokeDasharray="3 3" /><XAxis type="number" domain={[0, 100]} />
+                        <YAxis type="category" dataKey="name" width={120} />
+                        <Tooltip /><Bar dataKey="average" fill="#4f46e5" radius={[0,4,4,0]} />
+                      </BarChart>
+                    </ChartCard>
                   )}
-
-                  {reportData.charts.performanceRanges.length > 0 && (
-                    <div className="bg-white p-4 rounded-xl shadow-sm">
-                      <h3 className="text-lg font-semibold mb-4">Performance Distribution</h3>
-                      <ResponsiveContainer width="100%" height={300}>
-                        <PieChart>
-                          <Pie
-                            data={reportData.charts.performanceRanges}
-                            cx="50%"
-                            cy="50%"
-                            labelLine={true}
-                            label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                            outerRadius={100}
-                            dataKey="count"
-                          >
-                            {reportData.charts.performanceRanges.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
+                  {reportData.charts.rangeChart.length > 0 && (
+                    <ChartCard title="Performance Distribution">
+                      <PieChart>
+                        <Pie data={reportData.charts.rangeChart} cx="50%" cy="50%" label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} dataKey="count">
+                          {reportData.charts.rangeChart.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ChartCard>
                   )}
                 </div>
               )}
 
-              {/* Student Performance Table */}
-              <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-                <div className="px-6 py-4 bg-gray-50 border-b">
-                  <h3 className="font-semibold text-lg">Student Performance Summary</h3>
+              <Card>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-semibold">Student Performance ({reportData.studentPerformance.length})</h3>
+                  <ExportBtn onClick={() => exportCSV(reportData.studentPerformance.map(p => ({
+                    admissionNumber: p.student?.admissionNumber,
+                    name: `${p.student?.firstName || ''} ${p.student?.lastName || ''}`.trim(),
+                    exams: p.examCount,
+                    total: p.totalMarks,
+                    average: p.average
+                  })), 'class_report.csv')} />
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-2 text-left">Admission</th>
-                        <th className="px-4 py-2 text-left">Student Name</th>
-                        {isTVET && <th className="px-4 py-2 text-left">Program</th>}
-                        {isTVET && <th className="px-4 py-2 text-left">Module</th>}
-                        <th className="px-4 py-2 text-center">Exams Taken</th>
-                        <th className="px-4 py-2 text-center">Average</th>
-                        <th className="px-4 py-2 text-center">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {reportData.studentPerformance
-                        .filter(s => s.examCount > 0)
-                        .sort((a, b) => b.average - a.average)
-                        .map((item, idx) => {
-                          const statusColor = item.average >= 70 ? 'text-green-600' :
-                                             item.average >= 50 ? 'text-yellow-600' :
-                                             'text-red-600';
-                          return (
-                            <tr key={idx} className="hover:bg-gray-50">
-                              <td className="px-4 py-2 font-mono">{item.student?.admissionNumber}</td>
-                              <td className="px-4 py-2">{item.student?.firstName} {item.student?.lastName}</td>
-                              {isTVET && (
-                                <>
-                                  <td className="px-4 py-2">{getProgramName(item.student?.programId)}</td>
-                                  <td className="px-4 py-2">{item.student?.currentModule || 'N/A'}</td>
-                                </>
-                              )}
-                              <td className="px-4 py-2 text-center">{item.examCount}</td>
-                              <td className={`px-4 py-2 text-center font-bold ${statusColor}`}>
-                                {item.average.toFixed(2)}%
-                              </td>
-                              <td className="px-4 py-2 text-center">
-                                <span className={`px-2 py-1 rounded-full text-xs ${
-                                  item.average >= 70 ? 'bg-green-100 text-green-800' :
-                                  item.average >= 50 ? 'bg-yellow-100 text-yellow-800' :
-                                  'bg-red-100 text-red-800'
-                                }`}>
-                                  {item.average >= 70 ? 'Excellent' :
-                                   item.average >= 50 ? 'Average' :
-                                   'Needs Improvement'}
-                                </span>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
+                <TableWrap headers={['Admission','Student','Exams','Total Marks','Average']}>
+                  {reportData.studentPerformance.sort((a,b)=>b.average-a.average).map((p, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 font-mono text-xs">{p.student?.admissionNumber || '—'}</td>
+                      <td className="px-3 py-2">{p.student?.firstName} {p.student?.lastName}</td>
+                      <td className="px-3 py-2">{p.examCount}</td>
+                      <td className="px-3 py-2">{p.totalMarks}</td>
+                      <td className="px-3 py-2 font-bold">{p.average.toFixed(2)}%</td>
+                    </tr>
+                  ))}
+                </TableWrap>
+              </Card>
+            </>
           )}
         </div>
       )}
 
-      {/* ==================== FINANCIAL REPORT TAB ==================== */}
-      {activeTab === 'financial' && canViewFinancialReports && (
+      {/* ==================== TAB: FEE COLLECTION ==================== */}
+      {activeTab === 'fee' && (
         <div className="space-y-6">
-          <div className="bg-white p-6 rounded-xl shadow-sm no-print">
-            <h3 className="text-lg font-semibold mb-4">Financial Report</h3>
-            
-            <div className="grid grid-cols-2 gap-4 mb-4 max-w-md">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
-                <input
-                  type="date"
-                  value={dateRange.start}
-                  onChange={(e) => setDateRange({...dateRange, start: e.target.value})}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
-                <input
-                  type="date"
-                  value={dateRange.end}
-                  onChange={(e) => setDateRange({...dateRange, end: e.target.value})}
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
+          <Card className="no-print">
+            <h3 className="text-lg font-semibold mb-4">Fee Collection Report</h3>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+              <div><label className="block text-sm font-medium mb-1">Start</label><input type="date" value={feeDateRange.start} onChange={(e) => setFeeDateRange({ ...feeDateRange, start: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
+              <div><label className="block text-sm font-medium mb-1">End</label><input type="date" value={feeDateRange.end} onChange={(e) => setFeeDateRange({ ...feeDateRange, end: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
+              {isRegularSchool && <SearchableSelect label="Class" value={feeClassId} onChange={(e) => setFeeClassId(e.target.value)} options={classOptions} placeholder="All classes" />}
+              {isUniversity && <SearchableSelect label="Course" value={feeCourseId} onChange={(e) => setFeeCourseId(e.target.value)} options={courseOptions} placeholder="All courses" />}
+              {isTVET && <SearchableSelect label="Program" value={feeProgramId} onChange={(e) => setFeeProgramId(e.target.value)} options={programOptions} placeholder="All programs" />}
             </div>
-            
-            <button
-              onClick={generateFinancialReport}
-              disabled={!dateRange.start || !dateRange.end}
-              className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-            >
-              Generate Financial Report
-            </button>
-          </div>
+            <button onClick={generateFeeReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
+          </Card>
 
-          {reportData?.type === 'financial' && (
-            <div className="space-y-6">
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <p className="text-center">
-                  <span className="font-semibold">Period:</span>{' '}
-                  {new Date(reportData.dateRange.start).toLocaleDateString()} - {new Date(reportData.dateRange.end).toLocaleDateString()}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl p-6 text-white">
-                  <p className="text-sm opacity-90">Total Income</p>
-                  <p className="text-3xl font-bold">{formatCurrency(reportData.summary.totalIncome)}</p>
-                </div>
-                <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-xl p-6 text-white">
-                  <p className="text-sm opacity-90">Total Expenses</p>
-                  <p className="text-3xl font-bold">{formatCurrency(reportData.summary.totalExpenses)}</p>
-                </div>
-                <div className={`bg-gradient-to-br rounded-xl p-6 text-white ${
-                  reportData.summary.netIncome >= 0 ? 'from-blue-500 to-blue-600' : 'from-orange-500 to-orange-600'
-                }`}>
-                  <p className="text-sm opacity-90">Net Income</p>
-                  <p className="text-3xl font-bold">{formatCurrency(reportData.summary.netIncome)}</p>
-                </div>
+          {reportData?.type === 'fee' && (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <StatCard label="Billed" value={formatCurrency(reportData.summary.totalBilled)} color="blue" />
+                <StatCard label="Collected" value={formatCurrency(reportData.summary.totalCollected)} color="green" />
+                <StatCard label="Outstanding" value={formatCurrency(reportData.summary.totalOutstanding)} color="red" />
+                <StatCard label="Collection Rate" value={`${reportData.summary.collectionRate}%`} color="purple" />
+                <StatCard label="Payments" value={reportData.summary.paymentCount} color="yellow" />
               </div>
 
               {showCharts && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {reportData.charts.monthly.length > 0 && (
-                    <div className="bg-white p-4 rounded-xl shadow-sm lg:col-span-2">
-                      <h3 className="text-lg font-semibold mb-4">Monthly Financial Trend</h3>
-                      <ResponsiveContainer width="100%" height={300}>
-                        <ComposedChart data={reportData.charts.monthly}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="month" />
-                          <YAxis />
-                          <Tooltip formatter={(value) => formatCurrency(value)} />
-                          <Legend />
-                          <Bar dataKey="income" fill="#10b981" name="Income" />
-                          <Bar dataKey="expenses" fill="#ef4444" name="Expenses" />
-                          <Line type="monotone" dataKey="profit" stroke="#4f46e5" strokeWidth={2} name="Profit" />
-                        </ComposedChart>
-                      </ResponsiveContainer>
-                    </div>
+                  {reportData.charts.monthlyChart.length > 0 && (
+                    <ChartCard title="Monthly Collection" span>
+                      <AreaChart data={reportData.charts.monthlyChart}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="month" /><YAxis /><Tooltip formatter={formatCurrency} />
+                        <Area type="monotone" dataKey="collected" stroke="#10b981" fill="#10b981" fillOpacity={0.4} />
+                      </AreaChart>
+                    </ChartCard>
                   )}
-
-                  {reportData.charts.incomeByMethod.length > 0 && (
-                    <div className="bg-white p-4 rounded-xl shadow-sm">
-                      <h3 className="text-lg font-semibold mb-4">Income by Payment Method</h3>
-                      <ResponsiveContainer width="100%" height={250}>
-                        <PieChart>
-                          <Pie
-                            data={reportData.charts.incomeByMethod}
-                            cx="50%"
-                            cy="50%"
-                            labelLine={true}
-                            label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                            outerRadius={80}
-                            dataKey="value"
-                          >
-                            {reportData.charts.incomeByMethod.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip formatter={(value) => formatCurrency(value)} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
+                  {reportData.charts.methodChart.length > 0 && (
+                    <ChartCard title="By Payment Method">
+                      <PieChart>
+                        <Pie data={reportData.charts.methodChart} cx="50%" cy="50%" label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} dataKey="value">
+                          {reportData.charts.methodChart.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                        </Pie>
+                        <Tooltip formatter={formatCurrency} />
+                      </PieChart>
+                    </ChartCard>
                   )}
-
-                  {reportData.charts.expensesByCategory.length > 0 && (
-                    <div className="bg-white p-4 rounded-xl shadow-sm">
-                      <h3 className="text-lg font-semibold mb-4">Expenses by Category</h3>
-                      <ResponsiveContainer width="100%" height={250}>
-                        <PieChart>
-                          <Pie
-                            data={reportData.charts.expensesByCategory}
-                            cx="50%"
-                            cy="50%"
-                            labelLine={true}
-                            label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                            outerRadius={80}
-                            dataKey="value"
-                          >
-                            {reportData.charts.expensesByCategory.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip formatter={(value) => formatCurrency(value)} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
+                  {reportData.charts.feeChart.length > 0 && (
+                    <ChartCard title="By Fee">
+                      <BarChart data={reportData.charts.feeChart}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" angle={-30} textAnchor="end" height={60} interval={0} />
+                        <YAxis /><Tooltip formatter={formatCurrency} />
+                        <Bar dataKey="amount" fill="#4f46e5" />
+                      </BarChart>
+                    </ChartCard>
                   )}
                 </div>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-                  <div className="px-4 py-3 bg-gray-50 border-b">
-                    <h4 className="font-semibold">Recent Payments</h4>
-                  </div>
-                  <div className="overflow-x-auto max-h-60">
-                    <table className="w-full">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-2 py-1 text-left text-xs">Date</th>
-                          <th className="px-2 py-1 text-left text-xs">Student</th>
-                          <th className="px-2 py-1 text-right text-xs">Amount</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {reportData.payments.slice(0, 5).map(p => (
-                          <tr key={p.id}>
-                            <td className="px-2 py-1 text-xs">{new Date(p.date).toLocaleDateString()}</td>
-                            <td className="px-2 py-1 text-xs">{p.Student?.firstName} {p.Student?.lastName}</td>
-                            <td className="px-2 py-1 text-xs text-right text-green-600">{formatCurrency(p.amount)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+              <Card>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-semibold">Per-Student Fee Status ({reportData.rows.length})</h3>
+                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'fee_report.csv')} />
                 </div>
+                <TableWrap headers={['Admission','Student','Class/Course','Billed','Paid','Balance','Status']}>
+                  {reportData.rows.map((r, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
+                      <td className="px-3 py-2">{r.name}</td>
+                      <td className="px-3 py-2 text-xs">{r.entity}</td>
+                      <td className="px-3 py-2">{formatCurrency(r.billed)}</td>
+                      <td className="px-3 py-2 text-green-700">{formatCurrency(r.paid)}</td>
+                      <td className="px-3 py-2 text-red-700 font-medium">{formatCurrency(r.balance)}</td>
+                      <td className="px-3 py-2">
+                        <span className={`px-2 py-0.5 rounded-full text-xs ${r.status === 'Cleared' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{r.status}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </TableWrap>
+              </Card>
+            </>
+          )}
+        </div>
+      )}
 
-                <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-                  <div className="px-4 py-3 bg-gray-50 border-b">
-                    <h4 className="font-semibold">Recent Expenses</h4>
-                  </div>
-                  <div className="overflow-x-auto max-h-60">
-                    <table className="w-full">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-2 py-1 text-left text-xs">Date</th>
-                          <th className="px-2 py-1 text-left text-xs">Category</th>
-                          <th className="px-2 py-1 text-right text-xs">Amount</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {reportData.expenses.slice(0, 5).map(e => (
-                          <tr key={e.id}>
-                            <td className="px-2 py-1 text-xs">{new Date(e.date).toLocaleDateString()}</td>
-                            <td className="px-2 py-1 text-xs">{e.category}</td>
-                            <td className="px-2 py-1 text-xs text-right text-red-600">{formatCurrency(e.amount)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+      {/* ==================== TAB: OUTSTANDING ==================== */}
+      {activeTab === 'outstanding' && (
+        <div className="space-y-6">
+          <Card className="no-print">
+            <h3 className="text-lg font-semibold mb-4">Outstanding Balances</h3>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Min Balance (KES)</label>
+                <input type="number" min="0" value={outstandingMinBalance} onChange={(e) => setOutstandingMinBalance(parseFloat(e.target.value) || 0)} className="w-full px-3 py-2 border rounded-lg" />
+              </div>
+              {isRegularSchool && <SearchableSelect label="Class" value={outstandingClassId} onChange={(e) => setOutstandingClassId(e.target.value)} options={classOptions} placeholder="All classes" />}
+              {isUniversity && <SearchableSelect label="Course" value={outstandingCourseId} onChange={(e) => setOutstandingCourseId(e.target.value)} options={courseOptions} placeholder="All courses" />}
+              {isTVET && <SearchableSelect label="Program" value={outstandingProgramId} onChange={(e) => setOutstandingProgramId(e.target.value)} options={programOptions} placeholder="All programs" />}
+            </div>
+            <button onClick={generateOutstandingReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
+          </Card>
+
+          {reportData?.type === 'outstanding' && (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <StatCard label="Total Outstanding" value={formatCurrency(reportData.summary.totalOutstanding)} color="red" />
+                <StatCard label="Students" value={reportData.summary.studentsWithBalance} color="blue" />
+                <StatCard label="Average Balance" value={formatCurrency(reportData.summary.averageBalance)} color="yellow" />
+                <StatCard label="Highest Balance" value={formatCurrency(reportData.summary.highestBalance)} color="purple" />
+              </div>
+
+              {showCharts && reportData.charts.agingChart.length > 0 && (
+                <ChartCard title="Aging Buckets">
+                  <BarChart data={reportData.charts.agingChart}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" /><YAxis /><Tooltip formatter={formatCurrency} />
+                    <Bar dataKey="amount" fill="#ef4444" />
+                  </BarChart>
+                </ChartCard>
+              )}
+
+              <Card>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-semibold">Students with Balances ({reportData.rows.length})</h3>
+                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'outstanding.csv')} />
                 </div>
+                <TableWrap headers={['Admission','Student','Class/Course','Billed','Paid','Balance','Last Payment']}>
+                  {reportData.rows.map((r, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
+                      <td className="px-3 py-2">{r.name}</td>
+                      <td className="px-3 py-2 text-xs">{r.entity}</td>
+                      <td className="px-3 py-2">{formatCurrency(r.billed)}</td>
+                      <td className="px-3 py-2 text-green-700">{formatCurrency(r.paid)}</td>
+                      <td className="px-3 py-2 text-red-700 font-bold">{formatCurrency(r.balance)}</td>
+                      <td className="px-3 py-2 text-xs">{r.lastPaymentDate}</td>
+                    </tr>
+                  ))}
+                </TableWrap>
+              </Card>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ==================== TAB: ADMISSION ==================== */}
+      {activeTab === 'admission' && (
+        <div className="space-y-6">
+          <Card className="no-print">
+            <h3 className="text-lg font-semibold mb-4">Admission Report</h3>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Year</label>
+                <input type="number" min="2000" max="2100" value={admissionYear} onChange={(e) => setAdmissionYear(e.target.value)} className="w-full px-3 py-2 border rounded-lg" />
+              </div>
+              {isRegularSchool && <SearchableSelect label="Class" value={admissionClassId} onChange={(e) => setAdmissionClassId(e.target.value)} options={classOptions} placeholder="All classes" />}
+              {isUniversity && <SearchableSelect label="Course" value={admissionCourseId} onChange={(e) => setAdmissionCourseId(e.target.value)} options={courseOptions} placeholder="All courses" />}
+              {isTVET && <SearchableSelect label="Program" value={admissionProgramId} onChange={(e) => setAdmissionProgramId(e.target.value)} options={programOptions} placeholder="All programs" />}
+              <SearchableSelect label="Gender" value={admissionGender} onChange={(e) => setAdmissionGender(e.target.value)} options={[{value:'MALE',label:'Male'},{value:'FEMALE',label:'Female'},{value:'OTHER',label:'Other'}]} placeholder="Any" />
+              <SearchableSelect label="Boarding" value={admissionBoarding} onChange={(e) => setAdmissionBoarding(e.target.value)} options={[{value:'BOARDING',label:'Boarding'},{value:'DAY',label:'Day'},{value:'WEEKLY',label:'Weekly'}]} placeholder="Any" />
+            </div>
+            <button onClick={generateAdmissionReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
+          </Card>
+
+          {reportData?.type === 'admission' && (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+                <StatCard label="Total" value={reportData.summary.total} color="blue" />
+                <StatCard label="This Month" value={reportData.summary.thisMonth} color="green" />
+                <StatCard label="Male" value={reportData.summary.males} color="indigo" />
+                <StatCard label="Female" value={reportData.summary.females} color="pink" />
+                <StatCard label="Boarding" value={reportData.summary.boarding} color="purple" />
+                <StatCard label="Day" value={reportData.summary.day} color="yellow" />
+              </div>
+
+              {showCharts && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <ChartCard title="Monthly Admissions" span>
+                    <BarChart data={reportData.charts.monthly}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="month" /><YAxis /><Tooltip />
+                      <Bar dataKey="count" fill="#4f46e5" />
+                    </BarChart>
+                  </ChartCard>
+                  {reportData.charts.entityChart.length > 0 && (
+                    <ChartCard title="By Class / Course / Program">
+                      <BarChart data={reportData.charts.entityChart} layout="vertical">
+                        <CartesianGrid strokeDasharray="3 3" /><XAxis type="number" />
+                        <YAxis type="category" dataKey="name" width={130} />
+                        <Tooltip /><Bar dataKey="count" fill="#10b981" />
+                      </BarChart>
+                    </ChartCard>
+                  )}
+                  {reportData.charts.genderChart.length > 0 && (
+                    <ChartCard title="Gender Distribution">
+                      <PieChart>
+                        <Pie data={reportData.charts.genderChart} cx="50%" cy="50%" label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} dataKey="value">
+                          {reportData.charts.genderChart.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ChartCard>
+                  )}
+                </div>
+              )}
+
+              <Card>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-semibold">Admitted Students ({reportData.rows.length})</h3>
+                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'admissions.csv')} />
+                </div>
+                <TableWrap headers={['Admission','Name','Gender','Class/Course','Boarding','Admission Date','Phone']}>
+                  {reportData.rows.map((r, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
+                      <td className="px-3 py-2">{r.name}</td>
+                      <td className="px-3 py-2">{r.gender}</td>
+                      <td className="px-3 py-2 text-xs">{r.entity}</td>
+                      <td className="px-3 py-2">{r.boardingStatus}</td>
+                      <td className="px-3 py-2">{r.admissionDate}</td>
+                      <td className="px-3 py-2 text-xs">{r.phone}</td>
+                    </tr>
+                  ))}
+                </TableWrap>
+              </Card>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ==================== TAB: FINANCIAL ==================== */}
+      {activeTab === 'financial' && (
+        <div className="space-y-6">
+          <Card className="no-print">
+            <h3 className="text-lg font-semibold mb-4">Financial Summary</h3>
+            <div className="grid grid-cols-2 gap-4 mb-4 max-w-lg">
+              <div><label className="block text-sm font-medium mb-1">Start</label><input type="date" value={feeDateRange.start} onChange={(e) => setFeeDateRange({ ...feeDateRange, start: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
+              <div><label className="block text-sm font-medium mb-1">End</label><input type="date" value={feeDateRange.end} onChange={(e) => setFeeDateRange({ ...feeDateRange, end: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
+            </div>
+            <button onClick={generateFinancialReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
+          </Card>
+
+          {reportData?.type === 'financial' && (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <StatCard label="Income" value={formatCurrency(reportData.summary.totalIncome)} color="green" />
+                <StatCard label="Expenses" value={formatCurrency(reportData.summary.totalExpenses)} color="red" />
+                <StatCard label="Net" value={formatCurrency(reportData.summary.netIncome)} color={reportData.summary.netIncome >= 0 ? 'blue' : 'orange'} />
+              </div>
+
+              {showCharts && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {reportData.charts.monthlyChart.length > 0 && (
+                    <ChartCard title="Monthly Trend" span>
+                      <ComposedChart data={reportData.charts.monthlyChart}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="month" /><YAxis /><Tooltip formatter={formatCurrency} /><Legend />
+                        <Bar dataKey="income" fill="#10b981" name="Income" />
+                        <Bar dataKey="expenses" fill="#ef4444" name="Expenses" />
+                        <Line type="monotone" dataKey="profit" stroke="#4f46e5" name="Profit" strokeWidth={2} />
+                      </ComposedChart>
+                    </ChartCard>
+                  )}
+                  {reportData.charts.methodChart.length > 0 && (
+                    <ChartCard title="Income by Method">
+                      <PieChart>
+                        <Pie data={reportData.charts.methodChart} cx="50%" cy="50%" label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} dataKey="value">
+                          {reportData.charts.methodChart.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                        </Pie>
+                        <Tooltip formatter={formatCurrency} />
+                      </PieChart>
+                    </ChartCard>
+                  )}
+                  {reportData.charts.categoryChart.length > 0 && (
+                    <ChartCard title="Expenses by Category">
+                      <PieChart>
+                        <Pie data={reportData.charts.categoryChart} cx="50%" cy="50%" label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} dataKey="value">
+                          {reportData.charts.categoryChart.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                        </Pie>
+                        <Tooltip formatter={formatCurrency} />
+                      </PieChart>
+                    </ChartCard>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ==================== TAB: ATTENDANCE ==================== */}
+      {activeTab === 'attendance' && (
+        <div className="space-y-6">
+          <Card className="no-print">
+            <h3 className="text-lg font-semibold mb-4">Attendance Report</h3>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+              <div><label className="block text-sm font-medium mb-1">Start</label><input type="date" value={attendanceDateRange.start} onChange={(e) => setAttendanceDateRange({ ...attendanceDateRange, start: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
+              <div><label className="block text-sm font-medium mb-1">End</label><input type="date" value={attendanceDateRange.end} onChange={(e) => setAttendanceDateRange({ ...attendanceDateRange, end: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
+              {isRegularSchool && <SearchableSelect label="Class" value={attendanceClassId} onChange={(e) => setAttendanceClassId(e.target.value)} options={classOptions} placeholder="All classes" />}
+              {isUniversity && <SearchableSelect label="Course" value={attendanceCourseId} onChange={(e) => setAttendanceCourseId(e.target.value)} options={courseOptions} placeholder="All courses" />}
+              {isTVET && <SearchableSelect label="Program" value={attendanceProgramId} onChange={(e) => setAttendanceProgramId(e.target.value)} options={programOptions} placeholder="All programs" />}
+            </div>
+            <button onClick={generateAttendanceReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
+          </Card>
+
+          {reportData?.type === 'attendance' && (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <StatCard label="Total Records" value={reportData.summary.total} color="blue" />
+                <StatCard label="Present" value={reportData.summary.present} sub={`${reportData.summary.presentRate}%`} color="green" />
+                <StatCard label="Absent" value={reportData.summary.absent} sub={`${reportData.summary.absentRate}%`} color="red" />
+                <StatCard label="Late" value={reportData.summary.late} color="yellow" />
+                <StatCard label="Leave/Sick" value={reportData.summary.leave} color="purple" />
+              </div>
+
+              {showCharts && reportData.charts.dailyChart.length > 0 && (
+                <ChartCard title="Daily Attendance Trend" span>
+                  <LineChart data={reportData.charts.dailyChart}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="day" angle={-30} textAnchor="end" height={60} interval={0} />
+                    <YAxis /><Tooltip /><Legend />
+                    <Line type="monotone" dataKey="present" stroke="#10b981" name="Present" />
+                    <Line type="monotone" dataKey="absent" stroke="#ef4444" name="Absent" />
+                    <Line type="monotone" dataKey="late" stroke="#f59e0b" name="Late" />
+                  </LineChart>
+                </ChartCard>
+              )}
+
+              <Card>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-semibold">Per-Student Attendance ({reportData.rows.length})</h3>
+                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'attendance_report.csv')} />
+                </div>
+                <TableWrap headers={['Admission','Student','Class/Course','Present','Absent','Late','Leave','Total','Rate']}>
+                  {reportData.rows.map((r, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
+                      <td className="px-3 py-2">{r.name}</td>
+                      <td className="px-3 py-2 text-xs">{r.entity}</td>
+                      <td className="px-3 py-2 text-green-700">{r.present}</td>
+                      <td className="px-3 py-2 text-red-700">{r.absent}</td>
+                      <td className="px-3 py-2 text-yellow-700">{r.late}</td>
+                      <td className="px-3 py-2 text-blue-700">{r.leave}</td>
+                      <td className="px-3 py-2">{r.total}</td>
+                      <td className="px-3 py-2 font-bold">{r.rate}%</td>
+                    </tr>
+                  ))}
+                </TableWrap>
+              </Card>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ==================== TAB: STAFF ==================== */}
+      {activeTab === 'staff' && (
+        <div className="space-y-6">
+          <Card className="no-print">
+            <h3 className="text-lg font-semibold mb-4">Staff Report</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <SearchableSelect
+                label="Department"
+                value={staffDepartment}
+                onChange={(e) => setStaffDepartment(e.target.value)}
+                options={[...new Set((staff || []).map(s => s.department).filter(Boolean))].map(d => ({ value: d, label: d }))}
+                placeholder="All departments"
+              />
+              <SearchableSelect
+                label="Staff Type"
+                value={staffType}
+                onChange={(e) => setStaffType(e.target.value)}
+                options={['TEACHING','NON_TEACHING','ACADEMIC','ADMINISTRATIVE','TECHNICAL','RESEARCH'].map(t => ({ value: t, label: t.replace('_',' ') }))}
+                placeholder="All types"
+              />
+            </div>
+            <button onClick={generateStaffReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
+          </Card>
+
+          {reportData?.type === 'staff' && (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <StatCard label="Total Staff" value={reportData.summary.total} color="blue" />
+                <StatCard label="Teaching" value={reportData.summary.teaching} color="green" />
+                <StatCard label="Non-Teaching" value={reportData.summary.nonTeaching} color="yellow" />
+                <StatCard label="Permanent" value={reportData.summary.permanent} color="purple" />
+                <StatCard label="Contract" value={reportData.summary.contract} color="orange" />
+              </div>
+
+              {showCharts && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {reportData.charts.deptChart.length > 0 && (
+                    <ChartCard title="By Department">
+                      <BarChart data={reportData.charts.deptChart} layout="vertical">
+                        <CartesianGrid strokeDasharray="3 3" /><XAxis type="number" />
+                        <YAxis type="category" dataKey="name" width={130} />
+                        <Tooltip /><Bar dataKey="count" fill="#4f46e5" />
+                      </BarChart>
+                    </ChartCard>
+                  )}
+                  {reportData.charts.typeChart.length > 0 && (
+                    <ChartCard title="By Staff Type">
+                      <PieChart>
+                        <Pie data={reportData.charts.typeChart} cx="50%" cy="50%" label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} dataKey="value">
+                          {reportData.charts.typeChart.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ChartCard>
+                  )}
+                </div>
+              )}
+
+              <Card>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-semibold">Staff List ({reportData.rows.length})</h3>
+                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'staff_report.csv')} />
+                </div>
+                <TableWrap headers={['Employee ID','Name','Email','Phone','Department','Job Title','Staff Type','Employment','Joined']}>
+                  {reportData.rows.map((r, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 font-mono text-xs">{r.employeeId}</td>
+                      <td className="px-3 py-2">{r.name}</td>
+                      <td className="px-3 py-2 text-xs">{r.email}</td>
+                      <td className="px-3 py-2 text-xs">{r.phone}</td>
+                      <td className="px-3 py-2">{r.department}</td>
+                      <td className="px-3 py-2">{r.jobTitle}</td>
+                      <td className="px-3 py-2 text-xs">{r.staffType}</td>
+                      <td className="px-3 py-2 text-xs">{r.employmentType}</td>
+                      <td className="px-3 py-2 text-xs">{r.employmentDate}</td>
+                    </tr>
+                  ))}
+                </TableWrap>
+              </Card>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ==================== TAB: DISCOUNTS ==================== */}
+      {activeTab === 'discount' && (
+        <div className="space-y-6">
+          <Card className="no-print">
+            <h3 className="text-lg font-semibold mb-4">Discounts Report</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Search student or reason</label>
+                <input value={discountSearch} onChange={(e) => setDiscountSearch(e.target.value)} placeholder="Type to filter..." className="w-full px-3 py-2 border rounded-lg" />
               </div>
             </div>
+            <button onClick={generateDiscountReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
+          </Card>
+
+          {reportData?.type === 'discount' && (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <StatCard label="Total Discounts" value={reportData.summary.count} color="blue" />
+                <StatCard label="Total Value" value={formatCurrency(reportData.summary.totalValue)} color="green" />
+                <StatCard label="Average" value={formatCurrency(reportData.summary.avg)} color="purple" />
+              </div>
+
+              {showCharts && reportData.charts.typeChart.length > 0 && (
+                <ChartCard title="By Type (Amount vs Percent)">
+                  <PieChart>
+                    <Pie data={reportData.charts.typeChart} cx="50%" cy="50%" label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} dataKey="value">
+                      {reportData.charts.typeChart.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ChartCard>
+              )}
+
+              <Card>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-semibold">Discount Records ({reportData.rows.length})</h3>
+                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'discounts.csv')} />
+                </div>
+                <TableWrap headers={['Student','Admission','Fee','Type','Value','Reason','Status']}>
+                  {reportData.rows.map((r, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-3 py-2">{r.student}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
+                      <td className="px-3 py-2 text-xs">{r.fee}</td>
+                      <td className="px-3 py-2">{r.type}</td>
+                      <td className="px-3 py-2 font-bold">{r.value}</td>
+                      <td className="px-3 py-2 text-xs">{r.reason}</td>
+                      <td className="px-3 py-2">
+                        <span className={`px-2 py-0.5 rounded-full text-xs ${r.isActive === 'Active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700'}`}>{r.isActive}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </TableWrap>
+              </Card>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ==================== TAB: ALLOCATION ==================== */}
+      {activeTab === 'allocation' && (
+        <div className="space-y-6">
+          <Card className="no-print">
+            <h3 className="text-lg font-semibold mb-4">Fee Allocation Report</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <SearchableSelect
+                label="Fee"
+                value={allocationFeeId}
+                onChange={(e) => setAllocationFeeId(e.target.value)}
+                options={fees.map(f => ({ value: f.id, label: f.name, subLabel: formatCurrency(f.amount) }))}
+                placeholder="All fees"
+              />
+            </div>
+            <button onClick={generateAllocationReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
+          </Card>
+
+          {reportData?.type === 'allocation' && (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <StatCard label="Allocations" value={reportData.summary.allocatedCount} color="blue" />
+                <StatCard label="Allocated" value={formatCurrency(reportData.summary.totalAllocated)} color="purple" />
+                <StatCard label="Paid" value={formatCurrency(reportData.summary.totalPaid)} color="green" />
+                <StatCard label="Outstanding" value={formatCurrency(reportData.summary.totalOutstanding)} color="red" />
+                <StatCard label="Collection Rate" value={`${reportData.summary.collectionRate}%`} color="yellow" />
+              </div>
+
+              {showCharts && reportData.charts.feeChart.length > 0 && (
+                <ChartCard title="Allocated by Fee">
+                  <BarChart data={reportData.charts.feeChart}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" angle={-30} textAnchor="end" height={60} interval={0} />
+                    <YAxis /><Tooltip formatter={formatCurrency} />
+                    <Bar dataKey="allocated" fill="#4f46e5" />
+                  </BarChart>
+                </ChartCard>
+              )}
+
+              <Card>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-semibold">Allocation Records ({reportData.rows.length})</h3>
+                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'fee_allocations.csv')} />
+                </div>
+                <TableWrap headers={['Student','Admission','Fee','Allocated','Paid','Balance','Status']}>
+                  {reportData.rows.map((r, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-3 py-2">{r.student}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
+                      <td className="px-3 py-2 text-xs">{r.fee}</td>
+                      <td className="px-3 py-2">{formatCurrency(r.allocated)}</td>
+                      <td className="px-3 py-2 text-green-700">{formatCurrency(r.paid)}</td>
+                      <td className="px-3 py-2 text-red-700 font-medium">{formatCurrency(r.balance)}</td>
+                      <td className="px-3 py-2">
+                        <span className={`px-2 py-0.5 rounded-full text-xs ${r.status === 'Cleared' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{r.status}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </TableWrap>
+              </Card>
+            </>
           )}
         </div>
       )}
