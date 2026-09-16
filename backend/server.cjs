@@ -998,7 +998,7 @@ const Student = sequelize.define('Student', {
   admissionNumber: {
     type: DataTypes.STRING,
     allowNull: false,
-    unique: true,
+   
   },
 
   // ---- Identification ----
@@ -1115,6 +1115,13 @@ const Student = sequelize.define('Student', {
 }, {
   timestamps: true,
   tableName: 'Students',
+  indexes: [
+    {
+      unique: true,
+      fields: ['schoolId', 'admissionNumber'],
+      name: 'students_school_admission_unique'
+    }
+  ]
 });
 // ==================== PARENT MODEL ====================
 const Parent = sequelize.define('Parent', {
@@ -1700,24 +1707,77 @@ const InventoryUsage = sequelize.define('InventoryUsage', {
 
 const Timetable = sequelize.define('Timetable', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+
   schoolId: { type: DataTypes.UUID, allowNull: false },
-  classId: { type: DataTypes.UUID, allowNull: true }, 
-  courseId: { type: DataTypes.UUID, allowNull: true },
-  programId: { type: DataTypes.UUID, allowNull: true }, // ADD THIS FOR TVET
-  unitId: { type: DataTypes.UUID, allowNull: true },
-  subjectId: { type: DataTypes.UUID, allowNull: true },
-  year: { type: DataTypes.INTEGER, allowNull: true },
-  semester: { type: DataTypes.INTEGER, allowNull: true },
-  module: { type: DataTypes.INTEGER, allowNull: true }, // ADD THIS FOR TVET
-  day: { 
+
+  // ---- Scope ----
+  classId:   { type: DataTypes.UUID, allowNull: true },   // Primary / Secondary
+  courseId:  { type: DataTypes.UUID, allowNull: true },   // University
+  programId: { type: DataTypes.UUID, allowNull: true },   // TVET
+  unitId:    { type: DataTypes.UUID, allowNull: true },   // University / TVET
+  subjectId: { type: DataTypes.UUID, allowNull: true },   // Primary / Secondary
+
+  // ---- Academic period ----
+  year:     { type: DataTypes.INTEGER, allowNull: true },
+  semester: { type: DataTypes.INTEGER, allowNull: true }, // University only
+  module:   { type: DataTypes.INTEGER, allowNull: true }, // TVET only
+
+  // ---- Schedule ----
+  day: {
     type: DataTypes.ENUM('MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'),
-    allowNull: false 
+    allowNull: false
   },
-  period: { type: DataTypes.INTEGER, allowNull: false },
+  period:    { type: DataTypes.INTEGER, allowNull: false },
   startTime: { type: DataTypes.TIME, allowNull: false },
-  endTime: { type: DataTypes.TIME, allowNull: false },
-  teacherId: { type: DataTypes.UUID, allowNull: false },
-  room: { type: DataTypes.STRING, allowNull: true }
+  endTime:   { type: DataTypes.TIME, allowNull: false },
+
+  // ---- Teaching ----
+  teacherId: { type: DataTypes.UUID, allowNull: true },
+  room:      { type: DataTypes.STRING, allowNull: true },
+
+  // ==================== BREAK SUPPORT ====================
+  // A break occupies a timetable slot but has no teacher, subject, or unit.
+  // Recognised by `isBreak: true` — conflict detection skips these rows.
+  isBreak: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false
+  },
+  // Display name for the break — e.g. "Lunch Break", "Short Break", "Assembly".
+  // Only meaningful when `isBreak` is true; ignored for regular class rows.
+  breakName: {
+    type: DataTypes.STRING,
+    allowNull: true
+  }
+}, {
+  timestamps: true,
+  tableName: 'Timetables',
+  indexes: [
+    { fields: ['schoolId'] },
+    { fields: ['schoolId', 'classId'] },
+    { fields: ['schoolId', 'courseId'] },
+    { fields: ['schoolId', 'programId'] },
+    { fields: ['schoolId', 'day', 'period'] }
+  ],
+  hooks: {
+    // Sanity checks that guard against inconsistent rows.
+    beforeValidate: (row) => {
+      if (row.isBreak) {
+        // Breaks have no teacher, subject, unit, or room
+        row.teacherId = null;
+        row.subjectId = null;
+        row.unitId = null;
+        row.room = null;
+        // Give unnamed breaks a sensible default so the UI always has something to show
+        if (!row.breakName || String(row.breakName).trim() === '') {
+          row.breakName = 'Break';
+        }
+      } else {
+        // Regular class rows must not carry a break name
+        row.breakName = null;
+      }
+    }
+  }
 });
 const Message = sequelize.define('Message', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
