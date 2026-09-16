@@ -14248,8 +14248,6 @@ const TimetableModule = ({
     </div>
   );
 };
-// ==================== REPORTS MODULE — DETAILED MULTI-TAB REPORTS WITH PRINT FIX ====================
-import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   ComposedChart, AreaChart, Area,
