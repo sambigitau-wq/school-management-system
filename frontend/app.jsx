@@ -42557,7 +42557,7 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
         </div>
 
         {/* Dropdown rendered in a portal so it escapes any overflow:hidden ancestor */}
-        {isOpen && !disabled && dropdownRect && ReactDOM.createPortal(
+    {isOpen && !disabled && dropdownRect && createPortal(
           <div
             ref={portalRef}
             style={{
