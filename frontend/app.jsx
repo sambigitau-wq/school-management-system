@@ -14248,11 +14248,11 @@ const TimetableModule = ({
     </div>
   );
 };
-
+// ==================== REPORTS MODULE — DETAILED MULTI-TAB REPORTS WITH PRINT FIX ====================
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
-  ComposedChart, AreaChart, Area, RadarChart, Radar, PolarGrid,
-  PolarAngleAxis, PolarRadiusAxis,
+  ComposedChart, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 
@@ -14270,24 +14270,24 @@ const ReportsModule = ({
   const isRegularSchool = !isUniversity && !isTVET;
 
   // ==================== PERMISSIONS ====================
-  const canViewStudentReports = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER', 'PARENT', 'STUDENT'].includes(user?.role);
-  const canViewClassReports = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'CLASS_TEACHER'].includes(user?.role);
+  const canViewStudentReports   = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER', 'PARENT', 'STUDENT'].includes(user?.role);
+  const canViewClassReports     = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'CLASS_TEACHER'].includes(user?.role);
   const canViewFinancialReports = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
   const canViewAdmissionReports = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
-  const canViewStaffReports = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'HR_MANAGER', 'HR'].includes(user?.role);
+  const canViewStaffReports     = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'HR_MANAGER', 'HR'].includes(user?.role);
 
   // ==================== TABS ====================
   const ALL_TABS = [
-    { key: 'student',     label: 'Student Report',       icon: 'fa-user-graduate',  allowed: canViewStudentReports },
+    { key: 'student',     label: 'Student Report',       icon: 'fa-user-graduate',     allowed: canViewStudentReports },
     { key: 'class',       label: isUniversity ? 'Course Report' : isTVET ? 'Program Report' : 'Class Report', icon: 'fa-users', allowed: canViewClassReports },
-    { key: 'fee',         label: 'Fee Collection',       icon: 'fa-money-bill-wave', allowed: canViewFinancialReports },
-    { key: 'outstanding', label: 'Outstanding Balances', icon: 'fa-exclamation-circle', allowed: canViewFinancialReports },
-    { key: 'admission',   label: 'Admissions',           icon: 'fa-user-plus',      allowed: canViewAdmissionReports },
-    { key: 'financial',   label: 'Financial Summary',    icon: 'fa-chart-line',     allowed: canViewFinancialReports },
-    { key: 'attendance',  label: 'Attendance',           icon: 'fa-calendar-check', allowed: canViewClassReports },
-    { key: 'staff',       label: 'Staff Report',         icon: 'fa-user-tie',       allowed: canViewStaffReports },
-    { key: 'discount',    label: 'Discounts',            icon: 'fa-percent',        allowed: canViewFinancialReports },
-    { key: 'allocation',  label: 'Fee Allocation',       icon: 'fa-tasks',          allowed: canViewFinancialReports },
+    { key: 'fee',         label: 'Fee Collection',       icon: 'fa-money-bill-wave',   allowed: canViewFinancialReports },
+    { key: 'outstanding', label: 'Outstanding Balances', icon: 'fa-exclamation-circle',allowed: canViewFinancialReports },
+    { key: 'admission',   label: 'Admissions',           icon: 'fa-user-plus',         allowed: canViewAdmissionReports },
+    { key: 'financial',   label: 'Financial Summary',    icon: 'fa-chart-line',        allowed: canViewFinancialReports },
+    { key: 'attendance',  label: 'Attendance',           icon: 'fa-calendar-check',    allowed: canViewClassReports },
+    { key: 'staff',       label: 'Staff Report',         icon: 'fa-user-tie',          allowed: canViewStaffReports },
+    { key: 'discount',    label: 'Discounts',            icon: 'fa-tags',              allowed: canViewFinancialReports },
+    { key: 'allocation',  label: 'Fee Allocation',       icon: 'fa-tasks',             allowed: canViewFinancialReports },
   ].filter(t => t.allowed);
 
   // ==================== STATE ====================
@@ -14296,7 +14296,6 @@ const ReportsModule = ({
   const [showCharts, setShowCharts] = useState(true);
   const [reportData, setReportData] = useState(null);
 
-  // Cached self-fetched data
   const [fees, setFees] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [staff, setStaff] = useState([]);
@@ -14304,30 +14303,30 @@ const ReportsModule = ({
   const [allocations, setAllocations] = useState([]);
   const [fetchedOnce, setFetchedOnce] = useState({ fees: false, attendance: false, staff: false, discounts: false, allocations: false });
 
-  // Student report state
+  // Student
   const [selectedStudent, setSelectedStudent] = useState('');
   const [selectedExam, setSelectedExam] = useState('');
 
-  // Class report state
+  // Class
   const [selectedClass, setSelectedClass] = useState('');
   const [selectedCourse, setSelectedCourse] = useState('');
   const [selectedProgram, setSelectedProgram] = useState('');
   const [selectedYear, setSelectedYear] = useState('');
   const [selectedModule, setSelectedModule] = useState('');
 
-  // Fee report state
+  // Fee / Financial
   const [feeDateRange, setFeeDateRange] = useState(dateRange || { start: '', end: '' });
   const [feeClassId, setFeeClassId] = useState('');
   const [feeCourseId, setFeeCourseId] = useState('');
   const [feeProgramId, setFeeProgramId] = useState('');
 
-  // Outstanding state
+  // Outstanding
   const [outstandingMinBalance, setOutstandingMinBalance] = useState(0);
   const [outstandingClassId, setOutstandingClassId] = useState('');
   const [outstandingCourseId, setOutstandingCourseId] = useState('');
   const [outstandingProgramId, setOutstandingProgramId] = useState('');
 
-  // Admission state
+  // Admission
   const [admissionYear, setAdmissionYear] = useState(new Date().getFullYear().toString());
   const [admissionClassId, setAdmissionClassId] = useState('');
   const [admissionCourseId, setAdmissionCourseId] = useState('');
@@ -14335,68 +14334,97 @@ const ReportsModule = ({
   const [admissionGender, setAdmissionGender] = useState('');
   const [admissionBoarding, setAdmissionBoarding] = useState('');
 
-  // Financial state (reuses feeDateRange)
-
-  // Attendance state
+  // Attendance
   const [attendanceDateRange, setAttendanceDateRange] = useState(dateRange || { start: '', end: '' });
   const [attendanceClassId, setAttendanceClassId] = useState('');
   const [attendanceCourseId, setAttendanceCourseId] = useState('');
   const [attendanceProgramId, setAttendanceProgramId] = useState('');
 
-  // Staff state
+  // Staff
   const [staffDepartment, setStaffDepartment] = useState('');
   const [staffType, setStaffType] = useState('');
 
-  // Discount state
+  // Discounts
   const [discountSearch, setDiscountSearch] = useState('');
 
-  // Allocation state
+  // Allocation
   const [allocationFeeId, setAllocationFeeId] = useState('');
 
   // ==================== COLORS ====================
   const CHART_COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#14b8a6', '#6366f1', '#f97316'];
 
   // ==================== HELPERS ====================
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 }).format(amount || 0);
-  };
-
+  const formatCurrency = (amount) => new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 }).format(amount || 0);
   const todayStr = () => new Date().toISOString().split('T')[0];
   const firstOfMonthStr = () => new Date(new Date().setDate(1)).toISOString().split('T')[0];
 
-  // ==================== PRINT STYLES ====================
+  // ==================== PRINT STYLES (FIXED) ====================
   useEffect(() => {
     const style = document.createElement('style');
     style.innerHTML = `
       @media print {
-        .no-print { display: none !important; }
-        .print-only { display: block !important; }
-        body { background: white; }
+        /* 1. Hide EVERYTHING on the page */
+        body * { visibility: hidden !important; }
+
+        /* 2. Re-show only the reports module and its children */
+        .reports-module, .reports-module * { visibility: visible !important; }
+
+        /* 3. Pull the reports module up to the top-left of the page */
+        .reports-module {
+          position: absolute !important;
+          left: 0 !important;
+          top: 0 !important;
+          width: 100% !important;
+          padding: 0 !important;
+          margin: 0 !important;
+          background: white !important;
+        }
+
+        /* 4. Hide interactive elements */
+        .no-print, button, .reports-module button { display: none !important; }
+
+        /* 5. Force colors to print */
         .bg-gray-50 { background-color: #f9fafb !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         .bg-indigo-600 { background-color: #4f46e5 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         .text-indigo-600 { color: #4f46e5 !important; }
-        button { display: none !important; }
-        .recharts-wrapper { width: 100% !important; height: auto !important; }
+
+        /* 6. Chart scaling */
+        .recharts-wrapper, .recharts-responsive-container { width: 100% !important; height: auto !important; }
+
+        /* 7. Table styling for print */
+        table { border-collapse: collapse !important; width: 100% !important; page-break-inside: auto; }
+        tr    { page-break-inside: avoid; page-break-after: auto; }
+        th, td { border: 1px solid #e5e7eb !important; padding: 5px !important; font-size: 10px !important; }
+        thead { display: table-header-group; }
+
+        /* 8. Card shadows disappear in print */
+        .rounded-xl, .shadow-sm { box-shadow: none !important; border: 1px solid #e5e7eb; }
+
+        /* 9. Avoid page breaks inside cards */
+        .reports-module > div { page-break-inside: avoid; }
+
+        /* 10. Force white background */
+        html, body { background: white !important; }
       }
     `;
     document.head.appendChild(style);
     return () => document.head.removeChild(style);
   }, []);
 
-  // ==================== SELF-FETCH DATA ON DEMAND ====================
+  // ==================== SELF-FETCH ====================
   const fetchOnce = async (key) => {
     if (fetchedOnce[key]) return;
     try {
       let res;
-      if (key === 'fees')         { res = await api.get('/fees');                    setFees(res.data.fees || []); }
-      if (key === 'attendance')   { res = await api.get('/attendance', { params: { limit: 5000 } }); setAttendance(res.data.attendance || []); }
-      if (key === 'staff')        { res = await api.get('/staff');                   setStaff(res.data.staff || []); }
-      if (key === 'discounts')    { res = await api.get('/discounts');               setDiscounts(res.data.discounts || []); }
-      if (key === 'allocations')  { res = await api.get('/fee-allocations');         setAllocations(res.data.allocations || []); }
+      if (key === 'fees')        { res = await api.get('/fees');                                       setFees(res.data.fees || []); }
+      if (key === 'attendance')  { res = await api.get('/attendance', { params: { limit: 5000 } });    setAttendance(res.data.attendance || []); }
+      if (key === 'staff')       { res = await api.get('/staff');                                      setStaff(res.data.staff || []); }
+      if (key === 'discounts')   { res = await api.get('/discounts');                                  setDiscounts(res.data.discounts || []); }
+      if (key === 'allocations') { res = await api.get('/fee-allocations');                            setAllocations(res.data.allocations || []); }
       setFetchedOnce(prev => ({ ...prev, [key]: true }));
     } catch (err) {
       console.warn(`Optional data fetch failed (${key}):`, err?.response?.data || err.message);
-      setFetchedOnce(prev => ({ ...prev, [key]: true })); // mark done to avoid loops
+      setFetchedOnce(prev => ({ ...prev, [key]: true }));
     }
   };
 
@@ -14512,7 +14540,7 @@ const ReportsModule = ({
     URL.revokeObjectURL(url);
   };
 
-  // ==================== OPTION BUILDERS ====================
+  // ==================== OPTIONS ====================
   const studentOptions = useMemo(() => students.map(s => ({
     value: s.id,
     label: `${s.firstName || ''} ${s.lastName || ''}`.trim() || 'Unnamed',
@@ -14524,6 +14552,7 @@ const ReportsModule = ({
   const programOptions = useMemo(() => programs.map(p => ({ value: p.id, label: p.name, subLabel: p.code || '' })), [programs]);
   const yearOptions = useMemo(() => ['1','2','3','4','5','6'].map(y => ({ value: y, label: `Year ${y}` })), []);
   const moduleOptions = useMemo(() => ['1','2','3','4'].map(m => ({ value: m, label: `Module ${m}` })), []);
+
   const examOptionsForStudent = useMemo(() => {
     if (!selectedStudent) return [];
     const s = students.find(x => x.id === selectedStudent);
@@ -14567,7 +14596,7 @@ const ReportsModule = ({
     return s.class?.name || classes.find(c => c.id === s.classId)?.name || 'N/A';
   };
 
-  // ==================== TAB: STUDENT REPORT ====================
+  // ==================== STUDENT REPORT ====================
   const generateStudentReport = () => {
     if (!selectedStudent) { alert('Please select a student'); return; }
     setLoading(true);
@@ -14638,19 +14667,13 @@ const ReportsModule = ({
       enriched.forEach(r => { gradeDist[r.grade] = (gradeDist[r.grade] || 0) + 1; });
       const gradeChart = Object.keys(gradeDist).map(g => ({ name: g, value: gradeDist[g] }));
 
-      setReportData({
-        type: 'student',
-        student,
-        results: enriched,
-        summary,
-        charts: { trend, subjectPerf, gradeChart }
-      });
+      setReportData({ type: 'student', student, results: enriched, summary, charts: { trend, subjectPerf, gradeChart } });
     } catch (err) {
       console.error(err); alert('Failed to generate student report');
     } finally { setLoading(false); }
   };
 
-  // ==================== TAB: CLASS / COURSE / PROGRAM ====================
+  // ==================== CLASS REPORT ====================
   const generateClassReport = () => {
     if (isUniversity && !selectedCourse) return alert('Select a course');
     if (isTVET && !selectedProgram) return alert('Select a program');
@@ -14711,12 +14734,11 @@ const ReportsModule = ({
     } finally { setLoading(false); }
   };
 
-  // ==================== TAB: FEE COLLECTION ====================
+  // ==================== FEE REPORT ====================
   const generateFeeReport = async () => {
     setLoading(true);
     try {
       await fetchOnce('fees');
-
       const start = feeDateRange.start || firstOfMonthStr();
       const end = feeDateRange.end || todayStr();
 
@@ -14725,7 +14747,6 @@ const ReportsModule = ({
         return d >= start && d <= end;
       });
 
-      // Student filter
       let targetStudents = students;
       if (isUniversity && feeCourseId) targetStudents = students.filter(s => s.courseId === feeCourseId);
       if (isTVET && feeProgramId) targetStudents = students.filter(s => s.programId === feeProgramId);
@@ -14733,10 +14754,8 @@ const ReportsModule = ({
 
       const studentIds = new Set(targetStudents.map(s => s.id));
       const paymentsForStudents = filteredPayments.filter(p => studentIds.has(p.studentId));
-
       const totalCollected = paymentsForStudents.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
 
-      // Fee structure for target students
       const applicableFees = fees.filter(f => {
         if (isUniversity && feeCourseId) return f.courseId === feeCourseId;
         if (isTVET && feeProgramId) return f.programId === feeProgramId;
@@ -14746,7 +14765,6 @@ const ReportsModule = ({
       const totalBilled = applicableFees.reduce((s, f) => s + parseFloat(f.amount || 0), 0) * (targetStudents.length || 1);
       const totalOutstanding = Math.max(0, totalBilled - totalCollected);
 
-      // Monthly collection trend
       const monthly = {};
       paymentsForStudents.forEach(p => {
         const m = new Date(p.date || p.paymentDate).toLocaleString('default', { month: 'short', year: 'numeric' });
@@ -14754,7 +14772,6 @@ const ReportsModule = ({
       });
       const monthlyChart = Object.keys(monthly).map(m => ({ month: m, collected: monthly[m] }));
 
-      // By payment method
       const byMethod = {};
       paymentsForStudents.forEach(p => {
         const m = p.paymentMethod || 'Other';
@@ -14762,7 +14779,6 @@ const ReportsModule = ({
       });
       const methodChart = Object.keys(byMethod).map(m => ({ name: m, value: byMethod[m] }));
 
-      // By fee (if we can match payment.feeId)
       const byFee = {};
       paymentsForStudents.forEach(p => {
         const f = fees.find(x => x.id === p.feeId);
@@ -14771,10 +14787,8 @@ const ReportsModule = ({
       });
       const feeChart = Object.keys(byFee).map(n => ({ name: n, amount: byFee[n] }));
 
-      // Per-student table
       const perStudent = targetStudents.map(s => {
         const paid = paymentsForStudents.filter(p => p.studentId === s.id).reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-        // Approximate billed as sum of applicable fees
         const billed = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
         const balance = Math.max(0, billed - paid);
         return {
@@ -14803,12 +14817,11 @@ const ReportsModule = ({
     } finally { setLoading(false); }
   };
 
-  // ==================== TAB: OUTSTANDING BALANCES ====================
+  // ==================== OUTSTANDING ====================
   const generateOutstandingReport = async () => {
     setLoading(true);
     try {
       await fetchOnce('fees');
-
       let target = students;
       if (isUniversity && outstandingCourseId) target = target.filter(s => s.courseId === outstandingCourseId);
       if (isTVET && outstandingProgramId) target = target.filter(s => s.programId === outstandingProgramId);
@@ -14823,9 +14836,7 @@ const ReportsModule = ({
         const billed = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
         const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
         const balance = Math.max(0, billed - paid);
-
         const lastPayment = payments.filter(p => p.studentId === s.id).sort((a, b) => new Date(b.date) - new Date(a.date))[0];
-
         return {
           studentId: s.id,
           admissionNumber: s.admissionNumber,
@@ -14863,7 +14874,7 @@ const ReportsModule = ({
     } finally { setLoading(false); }
   };
 
-  // ==================== TAB: ADMISSIONS ====================
+  // ==================== ADMISSIONS ====================
   const generateAdmissionReport = () => {
     setLoading(true);
     try {
@@ -14891,18 +14902,15 @@ const ReportsModule = ({
       const males = yearFiltered.filter(s => s.gender === 'MALE').length;
       const females = yearFiltered.filter(s => s.gender === 'FEMALE').length;
       const other = yearFiltered.filter(s => s.gender && s.gender !== 'MALE' && s.gender !== 'FEMALE').length;
-
       const boarding = yearFiltered.filter(s => s.boardingStatus === 'BOARDING').length;
       const day = yearFiltered.filter(s => s.boardingStatus === 'DAY').length;
 
-      // Monthly admission trend for the year
       const monthly = Array.from({ length: 12 }, (_, i) => ({ month: new Date(0, i).toLocaleString('default', { month: 'short' }), count: 0 }));
       yearFiltered.forEach(s => {
         const d = new Date(s.admissionDate || s.enrollmentDate || s.createdAt);
         if (!isNaN(d)) monthly[d.getMonth()].count += 1;
       });
 
-      // By class/course/program
       const byEntity = {};
       yearFiltered.forEach(s => {
         const name = getStudentEntityName(s);
@@ -14937,7 +14945,7 @@ const ReportsModule = ({
     } finally { setLoading(false); }
   };
 
-  // ==================== TAB: FINANCIAL SUMMARY ====================
+  // ==================== FINANCIAL ====================
   const generateFinancialReport = () => {
     if (!feeDateRange.start || !feeDateRange.end) { alert('Select date range'); return; }
     setLoading(true);
@@ -14990,17 +14998,15 @@ const ReportsModule = ({
     } finally { setLoading(false); }
   };
 
-  // ==================== TAB: ATTENDANCE ====================
+  // ==================== ATTENDANCE ====================
   const generateAttendanceReport = async () => {
     setLoading(true);
     try {
       await fetchOnce('attendance');
-
       const start = attendanceDateRange.start || firstOfMonthStr();
       const end = attendanceDateRange.end || todayStr();
 
       let target = attendance.filter(a => a.date >= start && a.date <= end);
-
       if (isUniversity && attendanceCourseId) target = target.filter(a => a.courseId === attendanceCourseId);
       if (isTVET && attendanceProgramId) target = target.filter(a => a.programId === attendanceProgramId);
       if (isRegularSchool && attendanceClassId) target = target.filter(a => a.classId === attendanceClassId);
@@ -15020,7 +15026,6 @@ const ReportsModule = ({
       });
       const dailyChart = Object.values(daily).sort((a, b) => a.date.localeCompare(b.date)).map(d => ({ ...d, day: new Date(d.date).toLocaleDateString('en', { day: 'numeric', month: 'short' }) }));
 
-      // Per-student attendance
       const byStudent = {};
       target.forEach(a => {
         if (!byStudent[a.studentId]) byStudent[a.studentId] = { present: 0, absent: 0, late: 0, leave: 0, total: 0 };
@@ -15060,7 +15065,7 @@ const ReportsModule = ({
     } finally { setLoading(false); }
   };
 
-  // ==================== TAB: STAFF ====================
+  // ==================== STAFF ====================
   const generateStaffReport = async () => {
     setLoading(true);
     try {
@@ -15106,7 +15111,7 @@ const ReportsModule = ({
     } finally { setLoading(false); }
   };
 
-  // ==================== TAB: DISCOUNTS ====================
+  // ==================== DISCOUNTS ====================
   const generateDiscountReport = async () => {
     setLoading(true);
     try {
@@ -15154,7 +15159,7 @@ const ReportsModule = ({
     } finally { setLoading(false); }
   };
 
-  // ==================== TAB: FEE ALLOCATION ====================
+  // ==================== ALLOCATION ====================
   const generateAllocationReport = async () => {
     setLoading(true);
     try {
@@ -15214,7 +15219,7 @@ const ReportsModule = ({
     } finally { setLoading(false); }
   };
 
-  // ==================== TAB CHANGE: RESET & AUTO-GENERATE ====================
+  // ==================== TAB AUTO-GENERATE ====================
   useEffect(() => {
     setReportData(null);
     if (activeTab === 'fee')         generateFeeReport();
@@ -15228,7 +15233,7 @@ const ReportsModule = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
-  // ==================== SMALL UI COMPONENTS ====================
+  // ==================== SMALL UI ====================
   const StatCard = ({ label, value, sub, color = 'indigo' }) => (
     <div className={`bg-gradient-to-br from-${color}-500 to-${color}-600 rounded-xl p-5 text-white`}>
       <p className="text-xs opacity-90 uppercase tracking-wide">{label}</p>
@@ -15273,8 +15278,8 @@ const ReportsModule = ({
 
   // ==================== RENDER ====================
   return (
-    <div className="space-y-6">
-      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50" />}
+    <div className="reports-module space-y-6">
+      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50 no-print" />}
 
       {/* Header */}
       <div className="flex flex-wrap justify-between items-center gap-3">
@@ -15463,7 +15468,7 @@ const ReportsModule = ({
                   })), 'class_report.csv')} />
                 </div>
                 <TableWrap headers={['Admission','Student','Exams','Total Marks','Average']}>
-                  {reportData.studentPerformance.sort((a,b)=>b.average-a.average).map((p, i) => (
+                  {[...reportData.studentPerformance].sort((a,b)=>b.average-a.average).map((p, i) => (
                     <tr key={i} className="hover:bg-gray-50">
                       <td className="px-3 py-2 font-mono text-xs">{p.student?.admissionNumber || '—'}</td>
                       <td className="px-3 py-2">{p.student?.firstName} {p.student?.lastName}</td>
