@@ -14248,9 +14248,12 @@ const TimetableModule = ({
     </div>
   );
 };
+
+
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
-  ComposedChart, AreaChart, Area,
+  ComposedChart, AreaChart, Area, RadarChart, Radar,
+  PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 
@@ -14273,19 +14276,25 @@ const ReportsModule = ({
   const canViewFinancialReports = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
   const canViewAdmissionReports = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
   const canViewStaffReports     = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'HR_MANAGER', 'HR'].includes(user?.role);
+  const canViewResourceReports  = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'LIBRARIAN', 'TRANSPORT_MANAGER', 'MATRON', 'ACCOUNTANT'].includes(user?.role);
 
   // ==================== TABS ====================
   const ALL_TABS = [
-    { key: 'student',     label: 'Student Report',       icon: 'fa-user-graduate',     allowed: canViewStudentReports },
+    { key: 'student',     label: 'Student Report',        icon: 'fa-user-graduate',      allowed: canViewStudentReports },
     { key: 'class',       label: isUniversity ? 'Course Report' : isTVET ? 'Program Report' : 'Class Report', icon: 'fa-users', allowed: canViewClassReports },
-    { key: 'fee',         label: 'Fee Collection',       icon: 'fa-money-bill-wave',   allowed: canViewFinancialReports },
-    { key: 'outstanding', label: 'Outstanding Balances', icon: 'fa-exclamation-circle',allowed: canViewFinancialReports },
-    { key: 'admission',   label: 'Admissions',           icon: 'fa-user-plus',         allowed: canViewAdmissionReports },
-    { key: 'financial',   label: 'Financial Summary',    icon: 'fa-chart-line',        allowed: canViewFinancialReports },
-    { key: 'attendance',  label: 'Attendance',           icon: 'fa-calendar-check',    allowed: canViewClassReports },
-    { key: 'staff',       label: 'Staff Report',         icon: 'fa-user-tie',          allowed: canViewStaffReports },
-    { key: 'discount',    label: 'Discounts',            icon: 'fa-tags',              allowed: canViewFinancialReports },
-    { key: 'allocation',  label: 'Fee Allocation',       icon: 'fa-tasks',             allowed: canViewFinancialReports },
+    { key: 'academic',    label: 'Detailed Academic',     icon: 'fa-award',              allowed: canViewStudentReports },
+    { key: 'fee',         label: 'Fee Collection',        icon: 'fa-money-bill-wave',    allowed: canViewFinancialReports },
+    { key: 'outstanding', label: 'Outstanding Balances',  icon: 'fa-exclamation-circle', allowed: canViewFinancialReports },
+    { key: 'admission',   label: 'Admissions',            icon: 'fa-user-plus',          allowed: canViewAdmissionReports },
+    { key: 'financial',   label: 'Financial Summary',     icon: 'fa-chart-line',         allowed: canViewFinancialReports },
+    { key: 'attendance',  label: 'Attendance',            icon: 'fa-calendar-check',     allowed: canViewClassReports },
+    { key: 'staff',       label: 'Staff Report',          icon: 'fa-user-tie',           allowed: canViewStaffReports },
+    { key: 'discount',    label: 'Discounts',             icon: 'fa-tags',               allowed: canViewFinancialReports },
+    { key: 'allocation',  label: 'Fee Allocation',        icon: 'fa-tasks',              allowed: canViewFinancialReports },
+    { key: 'inventory',   label: 'Inventory',             icon: 'fa-boxes',              allowed: canViewResourceReports },
+    { key: 'transport',   label: 'Transport',             icon: 'fa-bus',                allowed: canViewResourceReports },
+    { key: 'hostel',      label: 'Hostel',                icon: 'fa-hotel',              allowed: canViewResourceReports },
+    { key: 'library',     label: 'Library',               icon: 'fa-book',               allowed: canViewResourceReports },
   ].filter(t => t.allowed);
 
   // ==================== STATE ====================
@@ -14294,16 +14303,25 @@ const ReportsModule = ({
   const [showCharts, setShowCharts] = useState(true);
   const [reportData, setReportData] = useState(null);
 
+  // Cached fetches
   const [fees, setFees] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [staff, setStaff] = useState([]);
   const [discounts, setDiscounts] = useState([]);
   const [allocations, setAllocations] = useState([]);
-  const [fetchedOnce, setFetchedOnce] = useState({ fees: false, attendance: false, staff: false, discounts: false, allocations: false });
+  const [inventory, setInventory] = useState([]);
+  const [transportRoutes, setTransportRoutes] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
+  const [hostels, setHostels] = useState([]);
+  const [books, setBooks] = useState([]);
+  const [borrows, setBorrows] = useState([]);
+  const [fetchedOnce, setFetchedOnce] = useState({});
 
   // Student
   const [selectedStudent, setSelectedStudent] = useState('');
   const [selectedExam, setSelectedExam] = useState('');
+  const [academicStudent, setAcademicStudent] = useState('');
+  const [academicTerm, setAcademicTerm] = useState('');
 
   // Class
   const [selectedClass, setSelectedClass] = useState('');
@@ -14312,7 +14330,7 @@ const ReportsModule = ({
   const [selectedYear, setSelectedYear] = useState('');
   const [selectedModule, setSelectedModule] = useState('');
 
-  // Fee / Financial
+  // Fee
   const [feeDateRange, setFeeDateRange] = useState(dateRange || { start: '', end: '' });
   const [feeClassId, setFeeClassId] = useState('');
   const [feeCourseId, setFeeCourseId] = useState('');
@@ -14348,6 +14366,20 @@ const ReportsModule = ({
   // Allocation
   const [allocationFeeId, setAllocationFeeId] = useState('');
 
+  // Inventory
+  const [inventoryCategory, setInventoryCategory] = useState('');
+  const [inventoryLowStockOnly, setInventoryLowStockOnly] = useState(false);
+
+  // Transport
+  const [transportSearch, setTransportSearch] = useState('');
+
+  // Hostel
+  const [hostelGenderFilter, setHostelGenderFilter] = useState('');
+
+  // Library
+  const [libraryCategory, setLibraryCategory] = useState('');
+  const [libraryStatusFilter, setLibraryStatusFilter] = useState('');
+
   // ==================== COLORS ====================
   const CHART_COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#14b8a6', '#6366f1', '#f97316'];
 
@@ -14356,18 +14388,13 @@ const ReportsModule = ({
   const todayStr = () => new Date().toISOString().split('T')[0];
   const firstOfMonthStr = () => new Date(new Date().setDate(1)).toISOString().split('T')[0];
 
-  // ==================== PRINT STYLES (FIXED) ====================
+  // ==================== PRINT STYLES ====================
   useEffect(() => {
     const style = document.createElement('style');
     style.innerHTML = `
       @media print {
-        /* 1. Hide EVERYTHING on the page */
         body * { visibility: hidden !important; }
-
-        /* 2. Re-show only the reports module and its children */
         .reports-module, .reports-module * { visibility: visible !important; }
-
-        /* 3. Pull the reports module up to the top-left of the page */
         .reports-module {
           position: absolute !important;
           left: 0 !important;
@@ -14377,31 +14404,16 @@ const ReportsModule = ({
           margin: 0 !important;
           background: white !important;
         }
-
-        /* 4. Hide interactive elements */
         .no-print, button, .reports-module button { display: none !important; }
-
-        /* 5. Force colors to print */
         .bg-gray-50 { background-color: #f9fafb !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         .bg-indigo-600 { background-color: #4f46e5 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         .text-indigo-600 { color: #4f46e5 !important; }
-
-        /* 6. Chart scaling */
         .recharts-wrapper, .recharts-responsive-container { width: 100% !important; height: auto !important; }
-
-        /* 7. Table styling for print */
-        table { border-collapse: collapse !important; width: 100% !important; page-break-inside: auto; }
-        tr    { page-break-inside: avoid; page-break-after: auto; }
+        table { border-collapse: collapse !important; width: 100% !important; }
+        tr { page-break-inside: avoid; }
         th, td { border: 1px solid #e5e7eb !important; padding: 5px !important; font-size: 10px !important; }
         thead { display: table-header-group; }
-
-        /* 8. Card shadows disappear in print */
         .rounded-xl, .shadow-sm { box-shadow: none !important; border: 1px solid #e5e7eb; }
-
-        /* 9. Avoid page breaks inside cards */
-        .reports-module > div { page-break-inside: avoid; }
-
-        /* 10. Force white background */
         html, body { background: white !important; }
       }
     `;
@@ -14414,11 +14426,17 @@ const ReportsModule = ({
     if (fetchedOnce[key]) return;
     try {
       let res;
-      if (key === 'fees')        { res = await api.get('/fees');                                       setFees(res.data.fees || []); }
-      if (key === 'attendance')  { res = await api.get('/attendance', { params: { limit: 5000 } });    setAttendance(res.data.attendance || []); }
-      if (key === 'staff')       { res = await api.get('/staff');                                      setStaff(res.data.staff || []); }
-      if (key === 'discounts')   { res = await api.get('/discounts');                                  setDiscounts(res.data.discounts || []); }
-      if (key === 'allocations') { res = await api.get('/fee-allocations');                            setAllocations(res.data.allocations || []); }
+      if (key === 'fees')            { res = await api.get('/fees');                                       setFees(res.data.fees || []); }
+      if (key === 'attendance')      { res = await api.get('/attendance', { params: { limit: 5000 } });    setAttendance(res.data.attendance || []); }
+      if (key === 'staff')           { res = await api.get('/staff');                                      setStaff(res.data.staff || []); }
+      if (key === 'discounts')       { res = await api.get('/discounts');                                  setDiscounts(res.data.discounts || []); }
+      if (key === 'allocations')     { res = await api.get('/fee-allocations');                            setAllocations(res.data.allocations || []); }
+      if (key === 'inventory')       { res = await api.get('/inventory');                                  setInventory(res.data.items || []); }
+      if (key === 'transportRoutes') { res = await api.get('/transport-routes');                           setTransportRoutes(res.data.routes || []); }
+      if (key === 'vehicles')        { res = await api.get('/vehicles');                                   setVehicles(res.data.vehicles || []); }
+      if (key === 'hostels')         { res = await api.get('/hostels');                                    setHostels(res.data.hostels || []); }
+      if (key === 'books')           { res = await api.get('/books');                                      setBooks(res.data.books || []); }
+      if (key === 'borrows')         { res = await api.get('/borrows');                                    setBorrows(res.data.borrows || []); }
       setFetchedOnce(prev => ({ ...prev, [key]: true }));
     } catch (err) {
       console.warn(`Optional data fetch failed (${key}):`, err?.response?.data || err.message);
@@ -14606,8 +14624,7 @@ const ReportsModule = ({
 
       const enriched = studentResults.map(r => {
         const exam = exams.find(e => e.id === r.examId);
-        let itemName = 'Unknown';
-        let itemCode = '';
+        let itemName = 'Unknown', itemCode = '';
         if (isUniversity || isTVET) {
           const unitId = r.unitId || exam?.unitId;
           const unit = units.find(u => u.id === unitId);
@@ -14676,11 +14693,9 @@ const ReportsModule = ({
     if (isUniversity && !selectedCourse) return alert('Select a course');
     if (isTVET && !selectedProgram) return alert('Select a program');
     if (isRegularSchool && !selectedClass) return alert('Select a class');
-
     setLoading(true);
     try {
       let studentList = [], entityName = '', examList = [];
-
       if (isUniversity) {
         studentList = students.filter(s => s.courseId === selectedCourse);
         if (selectedYear) studentList = studentList.filter(s => s.currentYear === parseInt(selectedYear));
@@ -14697,20 +14712,16 @@ const ReportsModule = ({
         entityName = classes.find(c => c.id === selectedClass)?.name || 'Class';
         examList = exams.filter(e => e.classId === selectedClass);
       }
-
       const perf = studentList.map(student => {
         const rs = results.filter(r => r.studentId === student.id);
         const total = rs.reduce((sum, r) => sum + (r.marks || 0), 0);
         const avg = rs.length ? parseFloat((total / rs.length).toFixed(2)) : 0;
         return { student, examCount: rs.length, totalMarks: total, average: avg };
       });
-
       const withResults = perf.filter(p => p.examCount > 0);
       const classAverage = withResults.length ? (withResults.reduce((s, p) => s + p.average, 0) / withResults.length).toFixed(2) : '0.00';
-
       const topStudents = [...withResults].sort((a, b) => b.average - a.average).slice(0, 10)
         .map(s => ({ name: `${s.student.firstName} ${s.student.lastName}`.substring(0, 15), average: s.average }));
-
       const ranges = { '90-100': 0, '80-89': 0, '70-79': 0, '60-69': 0, '50-59': 0, '<50': 0 };
       perf.forEach(p => {
         if (p.average >= 90) ranges['90-100']++;
@@ -14721,7 +14732,6 @@ const ReportsModule = ({
         else ranges['<50']++;
       });
       const rangeChart = Object.keys(ranges).map(r => ({ name: `${r}%`, count: ranges[r] })).filter(x => x.count > 0);
-
       setReportData({
         type: 'class', entityName, studentPerformance: perf,
         charts: { topStudents, rangeChart },
@@ -14732,6 +14742,111 @@ const ReportsModule = ({
     } finally { setLoading(false); }
   };
 
+  // ==================== DETAILED ACADEMIC REPORT ====================
+  const generateAcademicReport = () => {
+    if (!academicStudent) return alert('Select a student');
+    setLoading(true);
+    try {
+      const student = students.find(s => s.id === academicStudent);
+      if (!student) { alert('Student not found'); return; }
+
+      const studentResults = results.filter(r => r.studentId === academicStudent);
+
+      // Subject → exam breakdown
+      const bySubject = {};
+      studentResults.forEach(r => {
+        const exam = exams.find(e => e.id === r.examId);
+        let itemName = 'Unknown';
+        if (isUniversity || isTVET) {
+          const unitId = r.unitId || exam?.unitId;
+          const unit = units.find(u => u.id === unitId);
+          if (unit) itemName = unit.name;
+        } else {
+          const subjectId = r.subjectId || exam?.subjectId;
+          const subject = subjects.find(s => s.id === subjectId);
+          if (subject) itemName = subject.name;
+        }
+        if (itemName === 'Unknown' && exam?.name) itemName = exam.name;
+
+        if (!bySubject[itemName]) bySubject[itemName] = { name: itemName, exams: [], total: 0, count: 0 };
+        bySubject[itemName].exams.push({
+          exam: exam?.name || 'Unknown',
+          date: exam?.date,
+          marks: r.marks || 0,
+          grade: r.grade,
+          points: r.points
+        });
+        bySubject[itemName].total += r.marks || 0;
+        bySubject[itemName].count += 1;
+      });
+
+      const subjectRows = Object.values(bySubject).map(s => ({
+        subject: s.name,
+        examCount: s.count,
+        totalMarks: s.total,
+        average: s.count ? (s.total / s.count).toFixed(2) : '0.00',
+        bestExam: s.exams.reduce((best, e) => e.marks > (best?.marks || 0) ? e : best, null)?.exam || '—',
+        worstExam: s.exams.reduce((worst, e) => e.marks < (worst?.marks || Infinity) ? e : worst, null)?.exam || '—',
+        exams: s.exams
+      })).sort((a, b) => parseFloat(b.average) - parseFloat(a.average));
+
+      // Class ranks
+      const classMates = isRegularSchool
+        ? students.filter(s => s.classId === student.classId)
+        : isUniversity
+          ? students.filter(s => s.courseId === student.courseId)
+          : students.filter(s => s.programId === student.programId);
+
+      const peerAverages = classMates.map(m => {
+        const rs = results.filter(r => r.studentId === m.id);
+        const total = rs.reduce((sum, r) => sum + (r.marks || 0), 0);
+        return { studentId: m.id, avg: rs.length ? total / rs.length : 0 };
+      }).sort((a, b) => b.avg - a.avg);
+
+      const myRank = peerAverages.findIndex(p => p.studentId === academicStudent) + 1;
+      const overallAvg = studentResults.length
+        ? (studentResults.reduce((sum, r) => sum + (r.marks || 0), 0) / studentResults.length).toFixed(2)
+        : '0.00';
+
+      const bestSubject = subjectRows[0]?.subject || '—';
+      const weakestSubject = subjectRows[subjectRows.length - 1]?.subject || '—';
+
+      // Radar chart data (subjects with normalized 0-100)
+      const radarData = subjectRows.map(s => ({
+        subject: s.subject.length > 12 ? s.subject.substring(0, 10) + '…' : s.subject,
+        average: parseFloat(s.average)
+      }));
+
+      // Per-exam progression
+      const progression = [...studentResults].map(r => {
+        const exam = exams.find(e => e.id === r.examId);
+        return {
+          name: exam?.name?.substring(0, 12) || 'Exam',
+          marks: r.marks || 0,
+          date: exam?.date
+        };
+      }).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+      setReportData({
+        type: 'academic',
+        student,
+        subjectRows,
+        summary: {
+          overallAvg,
+          totalSubjects: subjectRows.length,
+          totalExams: studentResults.length,
+          rank: myRank,
+          totalPeers: peerAverages.length,
+          bestSubject,
+          weakestSubject
+        },
+        charts: { radarData, progression }
+      });
+    } catch (err) {
+      console.error(err); alert('Failed to generate academic report');
+    } finally { setLoading(false); }
+  };
+
   // ==================== FEE REPORT ====================
   const generateFeeReport = async () => {
     setLoading(true);
@@ -14739,21 +14854,17 @@ const ReportsModule = ({
       await fetchOnce('fees');
       const start = feeDateRange.start || firstOfMonthStr();
       const end = feeDateRange.end || todayStr();
-
       const filteredPayments = payments.filter(p => {
         const d = new Date(p.date || p.paymentDate).toISOString().split('T')[0];
         return d >= start && d <= end;
       });
-
       let targetStudents = students;
       if (isUniversity && feeCourseId) targetStudents = students.filter(s => s.courseId === feeCourseId);
       if (isTVET && feeProgramId) targetStudents = students.filter(s => s.programId === feeProgramId);
       if (isRegularSchool && feeClassId) targetStudents = students.filter(s => s.classId === feeClassId);
-
       const studentIds = new Set(targetStudents.map(s => s.id));
       const paymentsForStudents = filteredPayments.filter(p => studentIds.has(p.studentId));
       const totalCollected = paymentsForStudents.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
-
       const applicableFees = fees.filter(f => {
         if (isUniversity && feeCourseId) return f.courseId === feeCourseId;
         if (isTVET && feeProgramId) return f.programId === feeProgramId;
@@ -14762,21 +14873,15 @@ const ReportsModule = ({
       });
       const totalBilled = applicableFees.reduce((s, f) => s + parseFloat(f.amount || 0), 0) * (targetStudents.length || 1);
       const totalOutstanding = Math.max(0, totalBilled - totalCollected);
-
       const monthly = {};
       paymentsForStudents.forEach(p => {
         const m = new Date(p.date || p.paymentDate).toLocaleString('default', { month: 'short', year: 'numeric' });
         monthly[m] = (monthly[m] || 0) + parseFloat(p.amount || 0);
       });
       const monthlyChart = Object.keys(monthly).map(m => ({ month: m, collected: monthly[m] }));
-
       const byMethod = {};
-      paymentsForStudents.forEach(p => {
-        const m = p.paymentMethod || 'Other';
-        byMethod[m] = (byMethod[m] || 0) + parseFloat(p.amount || 0);
-      });
+      paymentsForStudents.forEach(p => { const m = p.paymentMethod || 'Other'; byMethod[m] = (byMethod[m] || 0) + parseFloat(p.amount || 0); });
       const methodChart = Object.keys(byMethod).map(m => ({ name: m, value: byMethod[m] }));
-
       const byFee = {};
       paymentsForStudents.forEach(p => {
         const f = fees.find(x => x.id === p.feeId);
@@ -14784,7 +14889,6 @@ const ReportsModule = ({
         byFee[name] = (byFee[name] || 0) + parseFloat(p.amount || 0);
       });
       const feeChart = Object.keys(byFee).map(n => ({ name: n, amount: byFee[n] }));
-
       const perStudent = targetStudents.map(s => {
         const paid = paymentsForStudents.filter(p => p.studentId === s.id).reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
         const billed = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
@@ -14797,7 +14901,6 @@ const ReportsModule = ({
           status: balance <= 0 ? 'Cleared' : 'Outstanding'
         };
       }).sort((a, b) => b.balance - a.balance);
-
       setReportData({
         type: 'fee',
         summary: {
@@ -14810,9 +14913,8 @@ const ReportsModule = ({
         rows: perStudent,
         period: { start, end }
       });
-    } catch (err) {
-      console.error(err); alert('Failed to generate fee report');
-    } finally { setLoading(false); }
+    } catch (err) { console.error(err); alert('Failed to generate fee report'); }
+    finally { setLoading(false); }
   };
 
   // ==================== OUTSTANDING ====================
@@ -14824,7 +14926,6 @@ const ReportsModule = ({
       if (isUniversity && outstandingCourseId) target = target.filter(s => s.courseId === outstandingCourseId);
       if (isTVET && outstandingProgramId) target = target.filter(s => s.programId === outstandingProgramId);
       if (isRegularSchool && outstandingClassId) target = target.filter(s => s.classId === outstandingClassId);
-
       const rows = target.map(s => {
         const applicableFees = fees.filter(f => {
           if (isUniversity) return f.courseId === s.courseId;
@@ -14836,18 +14937,14 @@ const ReportsModule = ({
         const balance = Math.max(0, billed - paid);
         const lastPayment = payments.filter(p => p.studentId === s.id).sort((a, b) => new Date(b.date) - new Date(a.date))[0];
         return {
-          studentId: s.id,
-          admissionNumber: s.admissionNumber,
+          studentId: s.id, admissionNumber: s.admissionNumber,
           name: `${s.firstName || ''} ${s.lastName || ''}`.trim(),
           entity: getStudentEntityName(s),
           billed, paid, balance,
           lastPaymentDate: lastPayment?.date ? new Date(lastPayment.date).toLocaleDateString() : 'Never',
           daysSinceLastPayment: lastPayment?.date ? Math.floor((new Date() - new Date(lastPayment.date)) / (1000 * 60 * 60 * 24)) : 999
         };
-      })
-        .filter(r => r.balance >= outstandingMinBalance)
-        .sort((a, b) => b.balance - a.balance);
-
+      }).filter(r => r.balance >= outstandingMinBalance).sort((a, b) => b.balance - a.balance);
       const buckets = { '0-30 days': 0, '31-60 days': 0, '61-90 days': 0, '90+ days': 0 };
       rows.forEach(r => {
         if (r.daysSinceLastPayment <= 30) buckets['0-30 days'] += r.balance;
@@ -14856,20 +14953,16 @@ const ReportsModule = ({
         else buckets['90+ days'] += r.balance;
       });
       const agingChart = Object.keys(buckets).map(b => ({ name: b, amount: buckets[b] }));
-
       const totalOutstanding = rows.reduce((s, r) => s + r.balance, 0);
       const avgBalance = rows.length ? totalOutstanding / rows.length : 0;
       const highest = rows[0]?.balance || 0;
-
       setReportData({
         type: 'outstanding',
         summary: { totalOutstanding, studentsWithBalance: rows.length, averageBalance: avgBalance, highestBalance: highest },
-        charts: { agingChart },
-        rows
+        charts: { agingChart }, rows
       });
-    } catch (err) {
-      console.error(err); alert('Failed to generate outstanding report');
-    } finally { setLoading(false); }
+    } catch (err) { console.error(err); alert('Failed to generate outstanding report'); }
+    finally { setLoading(false); }
   };
 
   // ==================== ADMISSIONS ====================
@@ -14882,46 +14975,35 @@ const ReportsModule = ({
       if (isRegularSchool && admissionClassId) target = target.filter(s => s.classId === admissionClassId);
       if (admissionGender) target = target.filter(s => s.gender === admissionGender);
       if (admissionBoarding) target = target.filter(s => s.boardingStatus === admissionBoarding);
-
       const yearFiltered = target.filter(s => {
         const d = s.admissionDate || s.enrollmentDate || s.createdAt;
         if (!d) return false;
         return new Date(d).getFullYear().toString() === admissionYear;
       });
-
       const total = yearFiltered.length;
       const thisMonth = yearFiltered.filter(s => {
-        const d = s.admissionDate || s.enrollmentDate || s.createdAt;
-        const dt = new Date(d);
+        const d = new Date(s.admissionDate || s.enrollmentDate || s.createdAt);
         const now = new Date();
-        return dt.getMonth() === now.getMonth() && dt.getFullYear() === now.getFullYear();
+        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
       }).length;
-
       const males = yearFiltered.filter(s => s.gender === 'MALE').length;
       const females = yearFiltered.filter(s => s.gender === 'FEMALE').length;
       const other = yearFiltered.filter(s => s.gender && s.gender !== 'MALE' && s.gender !== 'FEMALE').length;
       const boarding = yearFiltered.filter(s => s.boardingStatus === 'BOARDING').length;
       const day = yearFiltered.filter(s => s.boardingStatus === 'DAY').length;
-
       const monthly = Array.from({ length: 12 }, (_, i) => ({ month: new Date(0, i).toLocaleString('default', { month: 'short' }), count: 0 }));
       yearFiltered.forEach(s => {
         const d = new Date(s.admissionDate || s.enrollmentDate || s.createdAt);
         if (!isNaN(d)) monthly[d.getMonth()].count += 1;
       });
-
       const byEntity = {};
-      yearFiltered.forEach(s => {
-        const name = getStudentEntityName(s);
-        byEntity[name] = (byEntity[name] || 0) + 1;
-      });
+      yearFiltered.forEach(s => { const name = getStudentEntityName(s); byEntity[name] = (byEntity[name] || 0) + 1; });
       const entityChart = Object.keys(byEntity).map(n => ({ name: n, count: byEntity[n] }));
-
       const genderChart = [
         { name: 'Male', value: males },
         { name: 'Female', value: females },
         { name: 'Other', value: other }
       ].filter(x => x.value > 0);
-
       const rows = yearFiltered.map(s => ({
         admissionNumber: s.admissionNumber,
         name: `${s.firstName || ''} ${s.lastName || ''}`.trim(),
@@ -14931,16 +15013,13 @@ const ReportsModule = ({
         admissionDate: s.admissionDate ? new Date(s.admissionDate).toLocaleDateString() : '—',
         phone: s.phone || '—'
       })).sort((a, b) => new Date(b.admissionDate) - new Date(a.admissionDate));
-
       setReportData({
         type: 'admission',
         summary: { total, thisMonth, males, females, other, boarding, day },
-        charts: { monthly, entityChart, genderChart },
-        rows
+        charts: { monthly, entityChart, genderChart }, rows
       });
-    } catch (err) {
-      console.error(err); alert('Failed to generate admission report');
-    } finally { setLoading(false); }
+    } catch (err) { console.error(err); alert('Failed to generate admission report'); }
+    finally { setLoading(false); }
   };
 
   // ==================== FINANCIAL ====================
@@ -14956,11 +15035,9 @@ const ReportsModule = ({
         const d = new Date(e.date).toISOString().split('T')[0];
         return d >= feeDateRange.start && d <= feeDateRange.end;
       });
-
       const totalIncome = filteredPayments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
       const totalExpenses = filteredExpenses.reduce((s, e) => s + parseFloat(e.amount || 0), 0);
       const netIncome = totalIncome - totalExpenses;
-
       const monthly = {};
       filteredPayments.forEach(p => {
         const m = new Date(p.date || p.paymentDate).toLocaleString('default', { month: 'short', year: 'numeric' });
@@ -14974,15 +15051,12 @@ const ReportsModule = ({
       });
       Object.values(monthly).forEach(m => { m.profit = m.income - m.expenses; });
       const monthlyChart = Object.values(monthly);
-
       const incomeByMethod = {};
       filteredPayments.forEach(p => { const k = p.paymentMethod || 'Other'; incomeByMethod[k] = (incomeByMethod[k] || 0) + parseFloat(p.amount || 0); });
       const methodChart = Object.keys(incomeByMethod).map(k => ({ name: k, value: incomeByMethod[k] }));
-
       const expensesByCategory = {};
       filteredExpenses.forEach(e => { const k = e.category || 'Other'; expensesByCategory[k] = (expensesByCategory[k] || 0) + parseFloat(e.amount || 0); });
       const categoryChart = Object.keys(expensesByCategory).map(k => ({ name: k, value: expensesByCategory[k] }));
-
       setReportData({
         type: 'financial',
         period: { ...feeDateRange },
@@ -14991,9 +15065,8 @@ const ReportsModule = ({
         recentPayments: filteredPayments.slice(0, 20),
         recentExpenses: filteredExpenses.slice(0, 20)
       });
-    } catch (err) {
-      console.error(err); alert('Failed to generate financial report');
-    } finally { setLoading(false); }
+    } catch (err) { console.error(err); alert('Failed to generate financial report'); }
+    finally { setLoading(false); }
   };
 
   // ==================== ATTENDANCE ====================
@@ -15003,18 +15076,15 @@ const ReportsModule = ({
       await fetchOnce('attendance');
       const start = attendanceDateRange.start || firstOfMonthStr();
       const end = attendanceDateRange.end || todayStr();
-
       let target = attendance.filter(a => a.date >= start && a.date <= end);
       if (isUniversity && attendanceCourseId) target = target.filter(a => a.courseId === attendanceCourseId);
       if (isTVET && attendanceProgramId) target = target.filter(a => a.programId === attendanceProgramId);
       if (isRegularSchool && attendanceClassId) target = target.filter(a => a.classId === attendanceClassId);
-
       const present = target.filter(a => a.status === 'PRESENT').length;
       const absent = target.filter(a => a.status === 'ABSENT').length;
       const late = target.filter(a => a.status === 'LATE').length;
       const leave = target.filter(a => a.status === 'PERMISSION' || a.status === 'SICK').length;
       const total = target.length;
-
       const daily = {};
       target.forEach(a => {
         if (!daily[a.date]) daily[a.date] = { date: a.date, present: 0, absent: 0, late: 0 };
@@ -15023,7 +15093,6 @@ const ReportsModule = ({
         else if (a.status === 'LATE') daily[a.date].late += 1;
       });
       const dailyChart = Object.values(daily).sort((a, b) => a.date.localeCompare(b.date)).map(d => ({ ...d, day: new Date(d.date).toLocaleDateString('en', { day: 'numeric', month: 'short' }) }));
-
       const byStudent = {};
       target.forEach(a => {
         if (!byStudent[a.studentId]) byStudent[a.studentId] = { present: 0, absent: 0, late: 0, leave: 0, total: 0 };
@@ -15034,7 +15103,6 @@ const ReportsModule = ({
         else if (a.status === 'LATE') b.late += 1;
         else b.leave += 1;
       });
-
       const rows = Object.keys(byStudent).map(sid => {
         const s = students.find(x => x.id === sid);
         const b = byStudent[sid];
@@ -15046,7 +15114,6 @@ const ReportsModule = ({
           rate: b.total > 0 ? ((b.present / b.total) * 100).toFixed(1) : '0.0'
         };
       }).sort((a, b) => parseFloat(b.rate) - parseFloat(a.rate));
-
       setReportData({
         type: 'attendance',
         summary: {
@@ -15054,13 +15121,10 @@ const ReportsModule = ({
           presentRate: total > 0 ? ((present / total) * 100).toFixed(2) : '0.00',
           absentRate: total > 0 ? ((absent / total) * 100).toFixed(2) : '0.00'
         },
-        charts: { dailyChart },
-        rows,
-        period: { start, end }
+        charts: { dailyChart }, rows, period: { start, end }
       });
-    } catch (err) {
-      console.error(err); alert('Failed to generate attendance report');
-    } finally { setLoading(false); }
+    } catch (err) { console.error(err); alert('Failed to generate attendance report'); }
+    finally { setLoading(false); }
   };
 
   // ==================== STAFF ====================
@@ -15071,21 +15135,17 @@ const ReportsModule = ({
       let target = staff;
       if (staffDepartment) target = target.filter(s => s.department === staffDepartment);
       if (staffType) target = target.filter(s => s.staffType === staffType);
-
       const total = target.length;
       const teaching = target.filter(s => s.staffType === 'TEACHING').length;
       const nonTeaching = target.filter(s => s.staffType === 'NON_TEACHING').length;
       const permanent = target.filter(s => s.employmentType === 'PERMANENT').length;
       const contract = target.filter(s => s.employmentType === 'CONTRACT').length;
-
       const byDept = {};
       target.forEach(s => { const d = s.department || 'Unassigned'; byDept[d] = (byDept[d] || 0) + 1; });
       const deptChart = Object.keys(byDept).map(d => ({ name: d, count: byDept[d] }));
-
       const byType = {};
       target.forEach(s => { const t = s.staffType || 'Unspecified'; byType[t] = (byType[t] || 0) + 1; });
       const typeChart = Object.keys(byType).map(t => ({ name: t, value: byType[t] }));
-
       const rows = target.map(s => ({
         employeeId: s.employeeId || '—',
         name: s.User ? `${s.User.firstName || ''} ${s.User.lastName || ''}`.trim() : 'Staff',
@@ -15097,16 +15157,9 @@ const ReportsModule = ({
         employmentType: s.employmentType || '—',
         employmentDate: s.employmentDate ? new Date(s.employmentDate).toLocaleDateString() : '—'
       }));
-
-      setReportData({
-        type: 'staff',
-        summary: { total, teaching, nonTeaching, permanent, contract },
-        charts: { deptChart, typeChart },
-        rows
-      });
-    } catch (err) {
-      console.error(err); alert('Failed to generate staff report');
-    } finally { setLoading(false); }
+      setReportData({ type: 'staff', summary: { total, teaching, nonTeaching, permanent, contract }, charts: { deptChart, typeChart }, rows });
+    } catch (err) { console.error(err); alert('Failed to generate staff report'); }
+    finally { setLoading(false); }
   };
 
   // ==================== DISCOUNTS ====================
@@ -15123,15 +15176,12 @@ const ReportsModule = ({
                  (d.reason || '').toLowerCase().includes(q);
         });
       }
-
       const totalValue = target.reduce((sum, d) => sum + parseFloat(d.value || 0), 0);
       const count = target.length;
       const avg = count ? totalValue / count : 0;
-
       const byType = {};
       target.forEach(d => { byType[d.type] = (byType[d.type] || 0) + 1; });
       const typeChart = Object.keys(byType).map(t => ({ name: t, value: byType[t] }));
-
       const rows = target.map(d => {
         const s = students.find(x => x.id === d.studentId);
         const f = fees.find(x => x.id === d.feeId);
@@ -15145,16 +15195,9 @@ const ReportsModule = ({
           isActive: d.isActive ? 'Active' : 'Inactive'
         };
       });
-
-      setReportData({
-        type: 'discount',
-        summary: { count, totalValue, avg },
-        charts: { typeChart },
-        rows
-      });
-    } catch (err) {
-      console.error(err); alert('Failed to generate discount report');
-    } finally { setLoading(false); }
+      setReportData({ type: 'discount', summary: { count, totalValue, avg }, charts: { typeChart }, rows });
+    } catch (err) { console.error(err); alert('Failed to generate discount report'); }
+    finally { setLoading(false); }
   };
 
   // ==================== ALLOCATION ====================
@@ -15163,11 +15206,7 @@ const ReportsModule = ({
     try {
       await fetchOnce('fees');
       await fetchOnce('allocations');
-
-      const feeFiltered = allocationFeeId
-        ? allocations.filter(a => a.feeId === allocationFeeId)
-        : allocations;
-
+      const feeFiltered = allocationFeeId ? allocations.filter(a => a.feeId === allocationFeeId) : allocations;
       const allocatedCount = feeFiltered.length;
       const totalAllocated = feeFiltered.reduce((s, a) => s + parseFloat(a.amount || 0), 0);
       const paidAmounts = feeFiltered.map(a => {
@@ -15176,7 +15215,6 @@ const ReportsModule = ({
       });
       const totalPaid = paidAmounts.reduce((s, x) => s + x, 0);
       const totalOutstanding = Math.max(0, totalAllocated - totalPaid);
-
       const byFee = {};
       feeFiltered.forEach(a => {
         const f = fees.find(x => x.id === a.feeId);
@@ -15186,7 +15224,6 @@ const ReportsModule = ({
         byFee[key].count += 1;
       });
       const feeChart = Object.values(byFee);
-
       const rows = feeFiltered.map(a => {
         const s = students.find(x => x.id === a.studentId);
         const f = fees.find(x => x.id === a.feeId);
@@ -15197,24 +15234,256 @@ const ReportsModule = ({
           admissionNumber: s?.admissionNumber || '—',
           fee: f?.name || '—',
           allocated: parseFloat(a.amount || 0),
-          paid,
-          balance,
+          paid, balance,
           status: balance <= 0 ? 'Cleared' : 'Outstanding'
         };
       });
-
       setReportData({
         type: 'allocation',
         summary: {
           allocatedCount, totalAllocated, totalPaid, totalOutstanding,
           collectionRate: totalAllocated > 0 ? ((totalPaid / totalAllocated) * 100).toFixed(2) : '0.00'
         },
-        charts: { feeChart },
+        charts: { feeChart }, rows
+      });
+    } catch (err) { console.error(err); alert('Failed to generate allocation report'); }
+    finally { setLoading(false); }
+  };
+
+  // ==================== INVENTORY ====================
+  const generateInventoryReport = async () => {
+    setLoading(true);
+    try {
+      await fetchOnce('inventory');
+      let target = inventory;
+      if (inventoryCategory) target = target.filter(i => i.category === inventoryCategory);
+      if (inventoryLowStockOnly) target = target.filter(i => (i.quantity || 0) <= (i.reorderLevel || 0));
+
+      const totalItems = target.length;
+      const totalQuantity = target.reduce((s, i) => s + (i.quantity || 0), 0);
+      const totalValue = target.reduce((s, i) => s + (parseFloat(i.quantity || 0) * parseFloat(i.unitPrice || 0)), 0);
+      const lowStock = target.filter(i => (i.quantity || 0) <= (i.reorderLevel || 0)).length;
+      const outOfStock = target.filter(i => (i.quantity || 0) === 0).length;
+
+      const byCategory = {};
+      target.forEach(i => {
+        const k = i.category || 'Uncategorized';
+        if (!byCategory[k]) byCategory[k] = { name: k, count: 0, value: 0 };
+        byCategory[k].count += 1;
+        byCategory[k].value += parseFloat(i.quantity || 0) * parseFloat(i.unitPrice || 0);
+      });
+      const categoryChart = Object.values(byCategory);
+      const lowStockList = target.filter(i => (i.quantity || 0) <= (i.reorderLevel || 0))
+        .map(i => ({ name: i.name, quantity: i.quantity, reorderLevel: i.reorderLevel }))
+        .sort((a, b) => (a.quantity - a.reorderLevel) - (b.quantity - b.reorderLevel));
+
+      const rows = target.map(i => ({
+        name: i.name,
+        category: i.category || '—',
+        quantity: i.quantity || 0,
+        unit: i.unit || '—',
+        unitPrice: parseFloat(i.unitPrice || 0),
+        totalValue: parseFloat(i.quantity || 0) * parseFloat(i.unitPrice || 0),
+        reorderLevel: i.reorderLevel || 0,
+        status: (i.quantity || 0) === 0 ? 'Out of Stock'
+              : (i.quantity || 0) <= (i.reorderLevel || 0) ? 'Low Stock'
+              : 'In Stock'
+      })).sort((a, b) => b.totalValue - a.totalValue);
+
+      setReportData({
+        type: 'inventory',
+        summary: { totalItems, totalQuantity, totalValue, lowStock, outOfStock },
+        charts: { categoryChart, lowStockList },
         rows
       });
-    } catch (err) {
-      console.error(err); alert('Failed to generate allocation report');
-    } finally { setLoading(false); }
+    } catch (err) { console.error(err); alert('Failed to generate inventory report'); }
+    finally { setLoading(false); }
+  };
+
+  // ==================== TRANSPORT ====================
+  const generateTransportReport = async () => {
+    setLoading(true);
+    try {
+      await fetchOnce('transportRoutes');
+      await fetchOnce('vehicles');
+
+      let routes = transportRoutes;
+      if (transportSearch) {
+        const q = transportSearch.toLowerCase();
+        routes = routes.filter(r => (r.name || '').toLowerCase().includes(q));
+      }
+
+      const totalRoutes = routes.length;
+      const totalVehicles = vehicles.length;
+      const totalStudents = routes.reduce((s, r) => s + (Array.isArray(r.students) ? r.students.length : 0), 0);
+      const monthlyRevenue = routes.reduce((s, r) => {
+        const students = Array.isArray(r.students) ? r.students.length : 0;
+        return s + (students * parseFloat(r.fee || 0));
+      }, 0);
+
+      const routeChart = routes.map(r => ({
+        name: (r.name || '').substring(0, 15),
+        students: Array.isArray(r.students) ? r.students.length : 0
+      }));
+
+      const capacityChart = routes.map(r => {
+        const v = vehicles.find(x => x.id === r.vehicleId);
+        const cap = v?.capacity || 0;
+        const used = Array.isArray(r.students) ? r.students.length : 0;
+        return {
+          name: (r.name || '').substring(0, 15),
+          capacity: cap,
+          used,
+          utilization: cap > 0 ? Math.round((used / cap) * 100) : 0
+        };
+      });
+
+      const rows = routes.map(r => {
+        const v = vehicles.find(x => x.id === r.vehicleId);
+        const students = Array.isArray(r.students) ? r.students.length : 0;
+        return {
+          route: r.name || '—',
+          vehicle: v?.registration || '—',
+          driver: v?.driver || '—',
+          driverPhone: v?.driverPhone || '—',
+          capacity: v?.capacity || 0,
+          students,
+          utilization: v?.capacity ? Math.round((students / v.capacity) * 100) + '%' : '—',
+          feePerStudent: parseFloat(r.fee || 0),
+          monthlyRevenue: students * parseFloat(r.fee || 0)
+        };
+      }).sort((a, b) => b.monthlyRevenue - a.monthlyRevenue);
+
+      setReportData({
+        type: 'transport',
+        summary: { totalRoutes, totalVehicles, totalStudents, monthlyRevenue },
+        charts: { routeChart, capacityChart },
+        rows
+      });
+    } catch (err) { console.error(err); alert('Failed to generate transport report'); }
+    finally { setLoading(false); }
+  };
+
+  // ==================== HOSTEL ====================
+  const generateHostelReport = async () => {
+    setLoading(true);
+    try {
+      await fetchOnce('hostels');
+      let target = hostels;
+      if (hostelGenderFilter) target = target.filter(h => h.gender === hostelGenderFilter);
+
+      const totalHostels = target.length;
+      let totalBeds = 0, totalOccupied = 0;
+      target.forEach(h => {
+        (h.rooms || []).forEach(r => {
+          totalBeds += r.beds || 0;
+          totalOccupied += (r.students || []).length;
+        });
+      });
+      const occupancyRate = totalBeds > 0 ? ((totalOccupied / totalBeds) * 100).toFixed(1) : '0.0';
+      const emptyBeds = totalBeds - totalOccupied;
+
+      const hostelChart = target.map(h => {
+        const beds = (h.rooms || []).reduce((s, r) => s + (r.beds || 0), 0);
+        const occ = (h.rooms || []).reduce((s, r) => s + ((r.students || []).length), 0);
+        return { name: h.name || '—', beds, occupied: occ, empty: beds - occ };
+      });
+
+      const genderChart = [
+        { name: 'Boys', value: target.filter(h => h.gender === 'BOYS').length },
+        { name: 'Girls', value: target.filter(h => h.gender === 'GIRLS').length },
+        { name: 'Mixed', value: target.filter(h => h.gender === 'MIXED').length }
+      ].filter(x => x.value > 0);
+
+      const rows = target.map(h => {
+        const beds = (h.rooms || []).reduce((s, r) => s + (r.beds || 0), 0);
+        const occ = (h.rooms || []).reduce((s, r) => s + ((r.students || []).length), 0);
+        return {
+          hostel: h.name || '—',
+          gender: h.gender || '—',
+          warden: h.warden || '—',
+          wardenPhone: h.wardenPhone || '—',
+          capacity: h.capacity || 0,
+          beds,
+          occupied: occ,
+          empty: beds - occ,
+          occupancyRate: beds > 0 ? ((occ / beds) * 100).toFixed(1) + '%' : '0%'
+        };
+      }).sort((a, b) => parseFloat(b.occupancyRate) - parseFloat(a.occupancyRate));
+
+      setReportData({
+        type: 'hostel',
+        summary: { totalHostels, totalBeds, totalOccupied, emptyBeds, occupancyRate },
+        charts: { hostelChart, genderChart },
+        rows
+      });
+    } catch (err) { console.error(err); alert('Failed to generate hostel report'); }
+    finally { setLoading(false); }
+  };
+
+  // ==================== LIBRARY ====================
+  const generateLibraryReport = async () => {
+    setLoading(true);
+    try {
+      await fetchOnce('books');
+      await fetchOnce('borrows');
+
+      let target = books;
+      if (libraryCategory) target = target.filter(b => b.category === libraryCategory);
+
+      const totalTitles = target.length;
+      const totalCopies = target.reduce((s, b) => s + (b.quantity || 0), 0);
+      const availableCopies = target.reduce((s, b) => s + (b.available || 0), 0);
+      const borrowedCopies = totalCopies - availableCopies;
+
+      const overdueBorrows = borrows.filter(b => b.status === 'BORROWED' && b.dueDate && new Date(b.dueDate) < new Date());
+      const totalFines = borrows.reduce((s, b) => s + parseFloat(b.fine || 0), 0);
+
+      const byCategory = {};
+      target.forEach(b => {
+        const k = b.category || 'Uncategorized';
+        if (!byCategory[k]) byCategory[k] = { name: k, titles: 0, copies: 0 };
+        byCategory[k].titles += 1;
+        byCategory[k].copies += b.quantity || 0;
+      });
+      const categoryChart = Object.values(byCategory);
+
+      // Top borrowed books
+      const borrowCountByBook = {};
+      borrows.forEach(br => {
+        borrowCountByBook[br.bookId] = (borrowCountByBook[br.bookId] || 0) + 1;
+      });
+      const topBorrowed = Object.keys(borrowCountByBook)
+        .map(bookId => {
+          const b = books.find(x => x.id === bookId);
+          return { name: b?.title?.substring(0, 20) || 'Unknown', count: borrowCountByBook[bookId] };
+        })
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+
+      const rows = target.map(b => {
+        const timesBorrowed = borrows.filter(br => br.bookId === b.id).length;
+        return {
+          title: b.title || '—',
+          author: b.author || '—',
+          isbn: b.isbn || '—',
+          category: b.category || '—',
+          quantity: b.quantity || 0,
+          available: b.available || 0,
+          borrowed: (b.quantity || 0) - (b.available || 0),
+          timesBorrowed,
+          location: b.location || '—'
+        };
+      }).sort((a, b) => b.timesBorrowed - a.timesBorrowed);
+
+      setReportData({
+        type: 'library',
+        summary: { totalTitles, totalCopies, availableCopies, borrowedCopies, overdueCount: overdueBorrows.length, totalFines },
+        charts: { categoryChart, topBorrowed },
+        rows
+      });
+    } catch (err) { console.error(err); alert('Failed to generate library report'); }
+    finally { setLoading(false); }
   };
 
   // ==================== TAB AUTO-GENERATE ====================
@@ -15228,6 +15497,10 @@ const ReportsModule = ({
     if (activeTab === 'staff')       generateStaffReport();
     if (activeTab === 'discount')    generateDiscountReport();
     if (activeTab === 'allocation')  generateAllocationReport();
+    if (activeTab === 'inventory')   generateInventoryReport();
+    if (activeTab === 'transport')   generateTransportReport();
+    if (activeTab === 'hostel')      generateHostelReport();
+    if (activeTab === 'library')     generateLibraryReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
@@ -15274,13 +15547,19 @@ const ReportsModule = ({
     </div>
   );
 
+  const FilterBar = ({ children }) => (
+    <Card className="no-print">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">{children}</div>
+    </Card>
+  );
+
   // ==================== RENDER ====================
   return (
     <div className="reports-module space-y-6">
       {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50 no-print" />}
 
-      {/* Header */}
-      <div className="flex flex-wrap justify-between items-center gap-3">
+      {/* Header - hidden in print */}
+      <div className="flex flex-wrap justify-between items-center gap-3 no-print">
         <h2 className="text-2xl font-bold">
           {isUniversity ? '🎓 University Reports' : isTVET ? '🔧 TVET Reports' : '📊 School Reports'}
         </h2>
@@ -15295,7 +15574,7 @@ const ReportsModule = ({
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Tabs - hidden in print */}
       <div className="bg-white rounded-xl shadow-sm p-1 flex flex-wrap gap-1 no-print">
         {ALL_TABS.map(t => (
           <button
@@ -15319,9 +15598,7 @@ const ReportsModule = ({
                 <SearchableSelect label="Filter by Exam (optional)" value={selectedExam} onChange={(e) => setSelectedExam(e.target.value)} options={examOptionsForStudent} placeholder="Any exam" emptyMessage="No exams" />
               )}
             </div>
-            <button onClick={generateStudentReport} disabled={!selectedStudent || loading} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-              Generate Report
-            </button>
+            <button onClick={generateStudentReport} disabled={!selectedStudent || loading} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">Generate Report</button>
           </Card>
 
           {reportData?.type === 'student' && (
@@ -15341,8 +15618,7 @@ const ReportsModule = ({
                       <LineChart data={reportData.charts.trend}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="name" angle={-45} textAnchor="end" height={60} interval={0} />
-                        <YAxis domain={[0, 100]} />
-                        <Tooltip /><Legend />
+                        <YAxis domain={[0, 100]} /><Tooltip /><Legend />
                         <Line type="monotone" dataKey="marks" stroke="#4f46e5" strokeWidth={2} name="Marks" />
                       </LineChart>
                     </ChartCard>
@@ -15352,8 +15628,8 @@ const ReportsModule = ({
                       <BarChart data={reportData.charts.subjectPerf}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="name" angle={-45} textAnchor="end" height={60} interval={0} />
-                        <YAxis domain={[0, 100]} />
-                        <Tooltip /><Bar dataKey="average" fill="#4f46e5" radius={[4,4,0,0]} />
+                        <YAxis domain={[0, 100]} /><Tooltip />
+                        <Bar dataKey="average" fill="#4f46e5" radius={[4,4,0,0]} />
                       </BarChart>
                     </ChartCard>
                   )}
@@ -15370,7 +15646,7 @@ const ReportsModule = ({
                 </div>
               )}
 
-              {reportData.results.length > 0 ? (
+              {reportData.results.length > 0 && (
                 <Card>
                   <div className="flex justify-between items-center mb-3">
                     <h3 className="font-semibold">Detailed Results ({reportData.results.length})</h3>
@@ -15389,8 +15665,6 @@ const ReportsModule = ({
                     ))}
                   </TableWrap>
                 </Card>
-              ) : (
-                <Card><p className="text-center text-gray-500 py-6">No results found</p></Card>
               )}
             </>
           )}
@@ -15460,9 +15734,7 @@ const ReportsModule = ({
                   <ExportBtn onClick={() => exportCSV(reportData.studentPerformance.map(p => ({
                     admissionNumber: p.student?.admissionNumber,
                     name: `${p.student?.firstName || ''} ${p.student?.lastName || ''}`.trim(),
-                    exams: p.examCount,
-                    total: p.totalMarks,
-                    average: p.average
+                    exams: p.examCount, total: p.totalMarks, average: p.average
                   })), 'class_report.csv')} />
                 </div>
                 <TableWrap headers={['Admission','Student','Exams','Total Marks','Average']}>
@@ -15482,7 +15754,103 @@ const ReportsModule = ({
         </div>
       )}
 
-      {/* ==================== TAB: FEE COLLECTION ==================== */}
+      {/* ==================== TAB: DETAILED ACADEMIC ==================== */}
+      {activeTab === 'academic' && (
+        <div className="space-y-6">
+          <Card className="no-print">
+            <h3 className="text-lg font-semibold mb-4">Detailed Academic Report</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <SearchableSelect label="Select Student" value={academicStudent} onChange={(e) => setAcademicStudent(e.target.value)} options={studentOptions} placeholder="Search student..." emptyMessage="No students" />
+            </div>
+            <button onClick={generateAcademicReport} disabled={!academicStudent || loading} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">Generate Report</button>
+          </Card>
+
+          {reportData?.type === 'academic' && (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+                <StatCard label="Overall Avg" value={`${reportData.summary.overallAvg}%`} color="blue" />
+                <StatCard label="Subjects" value={reportData.summary.totalSubjects} color="green" />
+                <StatCard label="Exams" value={reportData.summary.totalExams} color="yellow" />
+                <StatCard label="Class Rank" value={`${reportData.summary.rank} / ${reportData.summary.totalPeers}`} color="purple" />
+                <StatCard label="Best Subject" value={reportData.summary.bestSubject?.substring(0, 12) || '—'} color="green" />
+                <StatCard label="Weakest" value={reportData.summary.weakestSubject?.substring(0, 12) || '—'} color="red" />
+              </div>
+
+              {showCharts && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {reportData.charts.radarData.length > 0 && (
+                    <ChartCard title="Subject Performance Radar">
+                      <RadarChart data={reportData.charts.radarData}>
+                        <PolarGrid /><PolarAngleAxis dataKey="subject" />
+                        <PolarRadiusAxis domain={[0, 100]} />
+                        <Radar dataKey="average" stroke="#4f46e5" fill="#4f46e5" fillOpacity={0.4} />
+                        <Tooltip />
+                      </RadarChart>
+                    </ChartCard>
+                  )}
+                  {reportData.charts.progression.length > 0 && (
+                    <ChartCard title="Per-Exam Progression">
+                      <LineChart data={reportData.charts.progression}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" angle={-30} textAnchor="end" height={60} interval={0} />
+                        <YAxis domain={[0, 100]} /><Tooltip />
+                        <Line type="monotone" dataKey="marks" stroke="#10b981" strokeWidth={2} />
+                      </LineChart>
+                    </ChartCard>
+                  )}
+                </div>
+              )}
+
+              <Card>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-semibold">Subject Breakdown ({reportData.subjectRows.length})</h3>
+                  <ExportBtn onClick={() => exportCSV(reportData.subjectRows.map(s => ({
+                    subject: s.subject, exams: s.examCount, total: s.totalMarks, average: s.average,
+                    bestExam: s.bestExam, worstExam: s.worstExam
+                  })), 'academic_detailed.csv')} />
+                </div>
+                <TableWrap headers={['Subject/Unit','Exams','Total Marks','Average','Best Exam','Weakest Exam']}>
+                  {reportData.subjectRows.map((s, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 font-medium">{s.subject}</td>
+                      <td className="px-3 py-2">{s.examCount}</td>
+                      <td className="px-3 py-2">{s.totalMarks}</td>
+                      <td className="px-3 py-2 font-bold">{s.average}%</td>
+                      <td className="px-3 py-2 text-xs">{s.bestExam}</td>
+                      <td className="px-3 py-2 text-xs">{s.worstExam}</td>
+                    </tr>
+                  ))}
+                </TableWrap>
+              </Card>
+
+              {reportData.subjectRows.some(s => s.exams.length > 0) && (
+                <Card>
+                  <h3 className="font-semibold mb-3">Exam-by-Exam Detail</h3>
+                  <div className="space-y-4">
+                    {reportData.subjectRows.map((s, i) => (
+                      <div key={i} className="border rounded-lg p-3">
+                        <h4 className="font-medium text-sm mb-2">{s.subject}</h4>
+                        <TableWrap headers={['Exam','Date','Marks','Grade']}>
+                          {s.exams.map((e, j) => (
+                            <tr key={j} className="hover:bg-gray-50">
+                              <td className="px-3 py-1.5 text-xs">{e.exam}</td>
+                              <td className="px-3 py-1.5 text-xs">{e.date ? new Date(e.date).toLocaleDateString() : '—'}</td>
+                              <td className="px-3 py-1.5 font-bold">{e.marks}</td>
+                              <td className="px-3 py-1.5 text-xs">{e.grade || '—'}</td>
+                            </tr>
+                          ))}
+                        </TableWrap>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ==================== TAB: FEE ==================== */}
       {activeTab === 'fee' && (
         <div className="space-y-6">
           <Card className="no-print">
@@ -15633,10 +16001,7 @@ const ReportsModule = ({
           <Card className="no-print">
             <h3 className="text-lg font-semibold mb-4">Admission Report</h3>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">Year</label>
-                <input type="number" min="2000" max="2100" value={admissionYear} onChange={(e) => setAdmissionYear(e.target.value)} className="w-full px-3 py-2 border rounded-lg" />
-              </div>
+              <div><label className="block text-sm font-medium mb-1">Year</label><input type="number" min="2000" max="2100" value={admissionYear} onChange={(e) => setAdmissionYear(e.target.value)} className="w-full px-3 py-2 border rounded-lg" /></div>
               {isRegularSchool && <SearchableSelect label="Class" value={admissionClassId} onChange={(e) => setAdmissionClassId(e.target.value)} options={classOptions} placeholder="All classes" />}
               {isUniversity && <SearchableSelect label="Course" value={admissionCourseId} onChange={(e) => setAdmissionCourseId(e.target.value)} options={courseOptions} placeholder="All courses" />}
               {isTVET && <SearchableSelect label="Program" value={admissionProgramId} onChange={(e) => setAdmissionProgramId(e.target.value)} options={programOptions} placeholder="All programs" />}
@@ -15659,13 +16024,15 @@ const ReportsModule = ({
 
               {showCharts && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  <ChartCard title="Monthly Admissions" span>
-                    <BarChart data={reportData.charts.monthly}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="month" /><YAxis /><Tooltip />
-                      <Bar dataKey="count" fill="#4f46e5" />
-                    </BarChart>
-                  </ChartCard>
+                  {reportData.charts.monthly.length > 0 && (
+                    <ChartCard title="Monthly Admissions" span>
+                      <BarChart data={reportData.charts.monthly}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="month" /><YAxis /><Tooltip />
+                        <Bar dataKey="count" fill="#4f46e5" />
+                      </BarChart>
+                    </ChartCard>
+                  )}
                   {reportData.charts.entityChart.length > 0 && (
                     <ChartCard title="By Class / Course / Program">
                       <BarChart data={reportData.charts.entityChart} layout="vertical">
@@ -15842,20 +16209,8 @@ const ReportsModule = ({
           <Card className="no-print">
             <h3 className="text-lg font-semibold mb-4">Staff Report</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <SearchableSelect
-                label="Department"
-                value={staffDepartment}
-                onChange={(e) => setStaffDepartment(e.target.value)}
-                options={[...new Set((staff || []).map(s => s.department).filter(Boolean))].map(d => ({ value: d, label: d }))}
-                placeholder="All departments"
-              />
-              <SearchableSelect
-                label="Staff Type"
-                value={staffType}
-                onChange={(e) => setStaffType(e.target.value)}
-                options={['TEACHING','NON_TEACHING','ACADEMIC','ADMINISTRATIVE','TECHNICAL','RESEARCH'].map(t => ({ value: t, label: t.replace('_',' ') }))}
-                placeholder="All types"
-              />
+              <SearchableSelect label="Department" value={staffDepartment} onChange={(e) => setStaffDepartment(e.target.value)} options={[...new Set((staff || []).map(s => s.department).filter(Boolean))].map(d => ({ value: d, label: d }))} placeholder="All departments" />
+              <SearchableSelect label="Staff Type" value={staffType} onChange={(e) => setStaffType(e.target.value)} options={['TEACHING','NON_TEACHING','ACADEMIC','ADMINISTRATIVE','TECHNICAL','RESEARCH'].map(t => ({ value: t, label: t.replace('_',' ') }))} placeholder="All types" />
             </div>
             <button onClick={generateStaffReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
           </Card>
@@ -15985,13 +16340,7 @@ const ReportsModule = ({
           <Card className="no-print">
             <h3 className="text-lg font-semibold mb-4">Fee Allocation Report</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <SearchableSelect
-                label="Fee"
-                value={allocationFeeId}
-                onChange={(e) => setAllocationFeeId(e.target.value)}
-                options={fees.map(f => ({ value: f.id, label: f.name, subLabel: formatCurrency(f.amount) }))}
-                placeholder="All fees"
-              />
+              <SearchableSelect label="Fee" value={allocationFeeId} onChange={(e) => setAllocationFeeId(e.target.value)} options={fees.map(f => ({ value: f.id, label: f.name, subLabel: formatCurrency(f.amount) }))} placeholder="All fees" />
             </div>
             <button onClick={generateAllocationReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
           </Card>
@@ -16042,9 +16391,312 @@ const ReportsModule = ({
           )}
         </div>
       )}
+
+      {/* ==================== TAB: INVENTORY ==================== */}
+      {activeTab === 'inventory' && (
+        <div className="space-y-6">
+          <Card className="no-print">
+            <h3 className="text-lg font-semibold mb-4">Inventory Report</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <SearchableSelect label="Category" value={inventoryCategory} onChange={(e) => setInventoryCategory(e.target.value)} options={[...new Set(inventory.map(i => i.category).filter(Boolean))].map(c => ({ value: c, label: c }))} placeholder="All categories" />
+              <div className="flex items-end">
+                <label className="flex items-center gap-2 cursor-pointer text-sm">
+                  <input type="checkbox" checked={inventoryLowStockOnly} onChange={(e) => setInventoryLowStockOnly(e.target.checked)} />
+                  Show low-stock items only
+                </label>
+              </div>
+            </div>
+            <button onClick={generateInventoryReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
+          </Card>
+
+          {reportData?.type === 'inventory' && (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <StatCard label="Total Items" value={reportData.summary.totalItems} color="blue" />
+                <StatCard label="Total Quantity" value={reportData.summary.totalQuantity} color="purple" />
+                <StatCard label="Total Value" value={formatCurrency(reportData.summary.totalValue)} color="green" />
+                <StatCard label="Low Stock" value={reportData.summary.lowStock} color="yellow" />
+                <StatCard label="Out of Stock" value={reportData.summary.outOfStock} color="red" />
+              </div>
+
+              {showCharts && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {reportData.charts.categoryChart.length > 0 && (
+                    <ChartCard title="Value by Category">
+                      <BarChart data={reportData.charts.categoryChart}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" angle={-30} textAnchor="end" height={60} interval={0} />
+                        <YAxis /><Tooltip formatter={formatCurrency} />
+                        <Bar dataKey="value" fill="#4f46e5" />
+                      </BarChart>
+                    </ChartCard>
+                  )}
+                  {reportData.charts.lowStockList.length > 0 && (
+                    <ChartCard title="Low Stock Items">
+                      <BarChart data={reportData.charts.lowStockList} layout="vertical">
+                        <CartesianGrid strokeDasharray="3 3" /><XAxis type="number" />
+                        <YAxis type="category" dataKey="name" width={140} />
+                        <Tooltip /><Bar dataKey="quantity" fill="#ef4444" />
+                      </BarChart>
+                    </ChartCard>
+                  )}
+                </div>
+              )}
+
+              <Card>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-semibold">Inventory Items ({reportData.rows.length})</h3>
+                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'inventory.csv')} />
+                </div>
+                <TableWrap headers={['Item','Category','Quantity','Unit','Unit Price','Total Value','Reorder Level','Status']}>
+                  {reportData.rows.map((r, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 font-medium">{r.name}</td>
+                      <td className="px-3 py-2">{r.category}</td>
+                      <td className="px-3 py-2">{r.quantity}</td>
+                      <td className="px-3 py-2">{r.unit}</td>
+                      <td className="px-3 py-2">{formatCurrency(r.unitPrice)}</td>
+                      <td className="px-3 py-2 font-bold">{formatCurrency(r.totalValue)}</td>
+                      <td className="px-3 py-2">{r.reorderLevel}</td>
+                      <td className="px-3 py-2">
+                        <span className={`px-2 py-0.5 rounded-full text-xs ${
+                          r.status === 'In Stock' ? 'bg-green-100 text-green-800' :
+                          r.status === 'Low Stock' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-red-100 text-red-800'
+                        }`}>{r.status}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </TableWrap>
+              </Card>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ==================== TAB: TRANSPORT ==================== */}
+      {activeTab === 'transport' && (
+        <div className="space-y-6">
+          <Card className="no-print">
+            <h3 className="text-lg font-semibold mb-4">Transport Report</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Search route</label>
+                <input value={transportSearch} onChange={(e) => setTransportSearch(e.target.value)} placeholder="Type to filter..." className="w-full px-3 py-2 border rounded-lg" />
+              </div>
+            </div>
+            <button onClick={generateTransportReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
+          </Card>
+
+          {reportData?.type === 'transport' && (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <StatCard label="Total Routes" value={reportData.summary.totalRoutes} color="blue" />
+                <StatCard label="Vehicles" value={reportData.summary.totalVehicles} color="purple" />
+                <StatCard label="Students" value={reportData.summary.totalStudents} color="green" />
+                <StatCard label="Monthly Revenue" value={formatCurrency(reportData.summary.monthlyRevenue)} color="yellow" />
+              </div>
+
+              {showCharts && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {reportData.charts.routeChart.length > 0 && (
+                    <ChartCard title="Students per Route">
+                      <BarChart data={reportData.charts.routeChart}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" angle={-30} textAnchor="end" height={60} interval={0} />
+                        <YAxis /><Tooltip />
+                        <Bar dataKey="students" fill="#4f46e5" />
+                      </BarChart>
+                    </ChartCard>
+                  )}
+                  {reportData.charts.capacityChart.length > 0 && (
+                    <ChartCard title="Vehicle Utilization">
+                      <BarChart data={reportData.charts.capacityChart}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" angle={-30} textAnchor="end" height={60} interval={0} />
+                        <YAxis /><Tooltip /><Legend />
+                        <Bar dataKey="capacity" fill="#94a3b8" name="Capacity" />
+                        <Bar dataKey="used" fill="#4f46e5" name="Used" />
+                      </BarChart>
+                    </ChartCard>
+                  )}
+                </div>
+              )}
+
+              <Card>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-semibold">Transport Routes ({reportData.rows.length})</h3>
+                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'transport.csv')} />
+                </div>
+                <TableWrap headers={['Route','Vehicle','Driver','Phone','Capacity','Students','Utilization','Fee/Student','Monthly Revenue']}>
+                  {reportData.rows.map((r, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 font-medium">{r.route}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{r.vehicle}</td>
+                      <td className="px-3 py-2">{r.driver}</td>
+                      <td className="px-3 py-2 text-xs">{r.driverPhone}</td>
+                      <td className="px-3 py-2">{r.capacity}</td>
+                      <td className="px-3 py-2">{r.students}</td>
+                      <td className="px-3 py-2">{r.utilization}</td>
+                      <td className="px-3 py-2">{formatCurrency(r.feePerStudent)}</td>
+                      <td className="px-3 py-2 font-bold text-green-700">{formatCurrency(r.monthlyRevenue)}</td>
+                    </tr>
+                  ))}
+                </TableWrap>
+              </Card>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ==================== TAB: HOSTEL ==================== */}
+      {activeTab === 'hostel' && (
+        <div className="space-y-6">
+          <Card className="no-print">
+            <h3 className="text-lg font-semibold mb-4">Hostel Report</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <SearchableSelect label="Gender" value={hostelGenderFilter} onChange={(e) => setHostelGenderFilter(e.target.value)} options={[{value:'BOYS',label:'Boys'},{value:'GIRLS',label:'Girls'},{value:'MIXED',label:'Mixed'}]} placeholder="All hostels" />
+            </div>
+            <button onClick={generateHostelReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
+          </Card>
+
+          {reportData?.type === 'hostel' && (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <StatCard label="Hostels" value={reportData.summary.totalHostels} color="blue" />
+                <StatCard label="Total Beds" value={reportData.summary.totalBeds} color="purple" />
+                <StatCard label="Occupied" value={reportData.summary.totalOccupied} color="green" />
+                <StatCard label="Empty" value={reportData.summary.emptyBeds} color="yellow" />
+                <StatCard label="Occupancy Rate" value={`${reportData.summary.occupancyRate}%`} color="indigo" />
+              </div>
+
+              {showCharts && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {reportData.charts.hostelChart.length > 0 && (
+                    <ChartCard title="Beds vs Occupied by Hostel" span>
+                      <BarChart data={reportData.charts.hostelChart}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" /><YAxis /><Tooltip /><Legend />
+                        <Bar dataKey="beds" fill="#94a3b8" name="Total Beds" />
+                        <Bar dataKey="occupied" fill="#4f46e5" name="Occupied" />
+                        <Bar dataKey="empty" fill="#10b981" name="Empty" />
+                      </BarChart>
+                    </ChartCard>
+                  )}
+                  {reportData.charts.genderChart.length > 0 && (
+                    <ChartCard title="Hostel Gender Distribution">
+                      <PieChart>
+                        <Pie data={reportData.charts.genderChart} cx="50%" cy="50%" label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} dataKey="value">
+                          {reportData.charts.genderChart.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ChartCard>
+                  )}
+                </div>
+              )}
+
+              <Card>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-semibold">Hostels ({reportData.rows.length})</h3>
+                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'hostels.csv')} />
+                </div>
+                <TableWrap headers={['Hostel','Gender','Warden','Phone','Capacity','Beds','Occupied','Empty','Occupancy']}>
+                  {reportData.rows.map((r, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 font-medium">{r.hostel}</td>
+                      <td className="px-3 py-2">{r.gender}</td>
+                      <td className="px-3 py-2">{r.warden}</td>
+                      <td className="px-3 py-2 text-xs">{r.wardenPhone}</td>
+                      <td className="px-3 py-2">{r.capacity}</td>
+                      <td className="px-3 py-2">{r.beds}</td>
+                      <td className="px-3 py-2 text-green-700">{r.occupied}</td>
+                      <td className="px-3 py-2 text-yellow-700">{r.empty}</td>
+                      <td className="px-3 py-2 font-bold">{r.occupancyRate}</td>
+                    </tr>
+                  ))}
+                </TableWrap>
+              </Card>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ==================== TAB: LIBRARY ==================== */}
+      {activeTab === 'library' && (
+        <div className="space-y-6">
+          <Card className="no-print">
+            <h3 className="text-lg font-semibold mb-4">Library Report</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <SearchableSelect label="Category" value={libraryCategory} onChange={(e) => setLibraryCategory(e.target.value)} options={[...new Set(books.map(b => b.category).filter(Boolean))].map(c => ({ value: c, label: c }))} placeholder="All categories" />
+            </div>
+            <button onClick={generateLibraryReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
+          </Card>
+
+          {reportData?.type === 'library' && (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+                <StatCard label="Total Titles" value={reportData.summary.totalTitles} color="blue" />
+                <StatCard label="Total Copies" value={reportData.summary.totalCopies} color="purple" />
+                <StatCard label="Available" value={reportData.summary.availableCopies} color="green" />
+                <StatCard label="Borrowed" value={reportData.summary.borrowedCopies} color="yellow" />
+                <StatCard label="Overdue" value={reportData.summary.overdueCount} color="red" />
+                <StatCard label="Fines" value={formatCurrency(reportData.summary.totalFines)} color="indigo" />
+              </div>
+
+              {showCharts && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {reportData.charts.categoryChart.length > 0 && (
+                    <ChartCard title="Copies by Category">
+                      <BarChart data={reportData.charts.categoryChart}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" angle={-30} textAnchor="end" height={60} interval={0} />
+                        <YAxis /><Tooltip />
+                        <Bar dataKey="copies" fill="#4f46e5" />
+                      </BarChart>
+                    </ChartCard>
+                  )}
+                  {reportData.charts.topBorrowed.length > 0 && (
+                    <ChartCard title="Top Borrowed Books">
+                      <BarChart data={reportData.charts.topBorrowed} layout="vertical">
+                        <CartesianGrid strokeDasharray="3 3" /><XAxis type="number" />
+                        <YAxis type="category" dataKey="name" width={140} />
+                        <Tooltip /><Bar dataKey="count" fill="#10b981" />
+                      </BarChart>
+                    </ChartCard>
+                  )}
+                </div>
+              )}
+
+              <Card>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-semibold">Books ({reportData.rows.length})</h3>
+                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'library.csv')} />
+                </div>
+                <TableWrap headers={['Title','Author','ISBN','Category','Quantity','Available','Borrowed','Times Borrowed','Location']}>
+                  {reportData.rows.map((r, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 font-medium">{r.title}</td>
+                      <td className="px-3 py-2">{r.author}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{r.isbn}</td>
+                      <td className="px-3 py-2">{r.category}</td>
+                      <td className="px-3 py-2">{r.quantity}</td>
+                      <td className="px-3 py-2 text-green-700">{r.available}</td>
+                      <td className="px-3 py-2 text-red-700">{r.borrowed}</td>
+                      <td className="px-3 py-2 font-bold">{r.timesBorrowed}</td>
+                      <td className="px-3 py-2 text-xs">{r.location}</td>
+                    </tr>
+                  ))}
+                </TableWrap>
+              </Card>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 };
+
 
 // ==================== EXAM CARD PRINT MODAL ====================
 const ExamCardPrintModal = ({ student, units, currentSchool, onClose }) => {
