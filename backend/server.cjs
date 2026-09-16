@@ -1708,19 +1708,19 @@ const InventoryUsage = sequelize.define('InventoryUsage', {
 const Timetable = sequelize.define('Timetable', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
 
-  schoolId: { type: DataTypes.UUID, allowNull: false },
+  schoolId: { type: DataTypes.UUID, allowNull: false },     // required
 
-  // ---- Scope ----
-  classId:   { type: DataTypes.UUID, allowNull: true },   // Primary / Secondary
-  courseId:  { type: DataTypes.UUID, allowNull: true },   // University
-  programId: { type: DataTypes.UUID, allowNull: true },   // TVET
-  unitId:    { type: DataTypes.UUID, allowNull: true },   // University / TVET
-  subjectId: { type: DataTypes.UUID, allowNull: true },   // Primary / Secondary
+  // ---- Scope (all optional — breaks don't have any of these) ----
+  classId:   { type: DataTypes.UUID, allowNull: true },
+  courseId:  { type: DataTypes.UUID, allowNull: true },
+  programId: { type: DataTypes.UUID, allowNull: true },
+  unitId:    { type: DataTypes.UUID, allowNull: true },
+  subjectId: { type: DataTypes.UUID, allowNull: true },
 
   // ---- Academic period ----
   year:     { type: DataTypes.INTEGER, allowNull: true },
-  semester: { type: DataTypes.INTEGER, allowNull: true }, // University only
-  module:   { type: DataTypes.INTEGER, allowNull: true }, // TVET only
+  semester: { type: DataTypes.INTEGER, allowNull: true },
+  module:   { type: DataTypes.INTEGER, allowNull: true },
 
   // ---- Schedule ----
   day: {
@@ -1728,57 +1728,24 @@ const Timetable = sequelize.define('Timetable', {
     allowNull: false
   },
   period:    { type: DataTypes.INTEGER, allowNull: false },
-  startTime: { type: DataTypes.TIME, allowNull: false },
-  endTime:   { type: DataTypes.TIME, allowNull: false },
+  startTime: { type: DataTypes.TIME,    allowNull: false },
+  endTime:   { type: DataTypes.TIME,    allowNull: false },
 
   // ---- Teaching ----
-  teacherId: { type: DataTypes.UUID, allowNull: true },
-  room:      { type: DataTypes.STRING, allowNull: true },
+  teacherId: { type: DataTypes.UUID,    allowNull: true },
+  room:      { type: DataTypes.STRING,  allowNull: true },
 
-  // ==================== BREAK SUPPORT ====================
-  // A break occupies a timetable slot but has no teacher, subject, or unit.
-  // Recognised by `isBreak: true` — conflict detection skips these rows.
-  isBreak: {
-    type: DataTypes.BOOLEAN,
-    allowNull: false,
-    defaultValue: false
-  },
-  // Display name for the break — e.g. "Lunch Break", "Short Break", "Assembly".
-  // Only meaningful when `isBreak` is true; ignored for regular class rows.
-  breakName: {
-    type: DataTypes.STRING,
-    allowNull: true
-  }
+  // ---- Break support ----
+  isBreak:   { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  breakName: { type: DataTypes.STRING,  allowNull: true }
 }, {
   timestamps: true,
-  tableName: 'Timetables',
-  indexes: [
-    { fields: ['schoolId'] },
-    { fields: ['schoolId', 'classId'] },
-    { fields: ['schoolId', 'courseId'] },
-    { fields: ['schoolId', 'programId'] },
-    { fields: ['schoolId', 'day', 'period'] }
-  ],
-  hooks: {
-    // Sanity checks that guard against inconsistent rows.
-    beforeValidate: (row) => {
-      if (row.isBreak) {
-        // Breaks have no teacher, subject, unit, or room
-        row.teacherId = null;
-        row.subjectId = null;
-        row.unitId = null;
-        row.room = null;
-        // Give unnamed breaks a sensible default so the UI always has something to show
-        if (!row.breakName || String(row.breakName).trim() === '') {
-          row.breakName = 'Break';
-        }
-      } else {
-        // Regular class rows must not carry a break name
-        row.breakName = null;
-      }
-    }
-  }
+  tableName: 'Timetables'
+  // (remove the indexes block if you're not managing them)
 });
+
+
+
 const Message = sequelize.define('Message', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
   schoolId: { type: DataTypes.UUID, allowNull: false },
