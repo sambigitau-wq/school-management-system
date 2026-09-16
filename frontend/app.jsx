@@ -14249,8 +14249,6 @@ const TimetableModule = ({
   );
 };
 
-// ==================== REWRITTEN REPORTS MODULE — DETAILED MULTI-TAB REPORTS ====================
-import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   ComposedChart, AreaChart, Area, RadarChart, Radar, PolarGrid,
