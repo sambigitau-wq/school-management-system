@@ -63671,6 +63671,7 @@ function App() {
   const [healthRecords, setHealthRecords] = useState([]);
   const [staffAttendance, setStaffAttendance] = useState([]);
   const [sickBayData, setSickBayData] = useState(null);
+   const [roles, setRoles] = useState([]);
   
   const [dashboardSections, setDashboardSections] = useState([]);
   const [schoolSettings, setSchoolSettings] = useState({
