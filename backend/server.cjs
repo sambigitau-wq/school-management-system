@@ -5328,7 +5328,6 @@ app.delete('/api/schools/:id', authenticate, requireSuperAdmin, async (req, res)
 });
 
 // ==================== USER ROUTES ====================
-
 app.get('/api/users', authenticate, async (req, res) => {
   try {
     const where = {};
@@ -5337,16 +5336,38 @@ app.get('/api/users', authenticate, async (req, res) => {
     const users = await User.findAll({
       where,
       attributes: { exclude: ['password'] },
-      include: [{ model: School }]
+      include: [
+        { model: School, attributes: ['id', 'name', 'category'] }
+      ],
+      order: [['firstName', 'ASC']]
     });
-    
-    res.json({ success: true, users });
+
+    // Also fetch role names for the users' roleIds, so the UI can render them
+    const roleIds = [...new Set(users.map(u => u.roleId).filter(Boolean))];
+    let rolesMap = {};
+    if (roleIds.length > 0) {
+      const roles = await Role.findAll({
+        where: { id: roleIds },
+        attributes: ['id', 'name', 'permissions']
+      });
+      rolesMap = roles.reduce((acc, r) => {
+        acc[r.id] = r.toJSON();
+        return acc;
+      }, {});
+    }
+
+    const usersWithRoles = users.map(u => {
+      const data = u.toJSON();
+      data.Role = data.roleId ? (rolesMap[data.roleId] || null) : null;
+      return data;
+    });
+
+    res.json({ success: true, users: usersWithRoles });
   } catch (error) {
     console.error('Get users error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
-
 app.get('/api/users/:id', authenticate, async (req, res) => {
   try {
     const user = await User.findByPk(req.params.id, {
@@ -20770,68 +20791,57 @@ app.patch('/api/roles/:id/permissions', authenticate, async (req, res) => {
   }
 });
 
-// ASSIGN role to a user - FIXED (NO circular references)
 app.patch('/api/users/:userId/role', authenticate, async (req, res) => {
   try {
     const { roleId } = req.body;
-    
+
     const user = await User.findByPk(req.params.userId);
     if (!user) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'User not found' 
-      });
+      return res.status(404).json({ success: false, message: 'User not found' });
     }
-    
-    // Check if role exists and belongs to this school
+
+    // If assigning, verify role belongs to this school
     if (roleId) {
       const role = await Role.findOne({
-        where: { 
-          id: roleId,
-          schoolId: req.user.schoolId 
-        }
+        where: { id: roleId, schoolId: req.user.schoolId }
       });
-      
       if (!role) {
-        return res.status(404).json({ 
-          success: false, 
-          message: 'Role not found or does not belong to your school' 
+        return res.status(404).json({
+          success: false,
+          message: 'Role not found or does not belong to your school'
         });
       }
     }
-    
+
     const oldUser = { ...user.toJSON() };
     await user.update({ roleId });
-    
-    // ⚠️ AUDIT LOG TEMPORARILY DISABLED
-    // await createAuditLog(req, 'ASSIGN_ROLE', 'USER', user.id, oldUser, user);
-    
-    // ✅ Fetch updated user WITHOUT role association to avoid circular reference
+    await createAuditLog(req, 'ASSIGN_ROLE', 'USER', user.id, oldUser, user);
+
+    // Re-fetch WITHOUT the include to avoid circular refs, then attach role
     const updatedUser = await User.findByPk(user.id, {
       attributes: { exclude: ['password'] }
-      // ✅ NO includes!
     });
-    
-    // ✅ Get role separately if needed
+
     let roleInfo = null;
-    if (user.roleId) {
-      roleInfo = await Role.findByPk(user.roleId, {
+    if (roleId) {
+      roleInfo = await Role.findByPk(roleId, {
         attributes: ['id', 'name', 'permissions']
       });
     }
-    
-    res.json({ 
-      success: true, 
-      user: updatedUser,
-      role: roleInfo,
+
+    // Return BOTH forms so any frontend can pick what it needs
+    const data = updatedUser.toJSON();
+    data.Role = roleInfo ? roleInfo.toJSON() : null;
+
+    res.json({
+      success: true,
+      user: data,
+      role: roleInfo ? roleInfo.toJSON() : null,
       message: roleId ? 'Role assigned successfully' : 'Role removed successfully'
     });
   } catch (error) {
     console.error('Assign role error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 // ==================== STUDENT ARRIVAL ROUTES ====================
