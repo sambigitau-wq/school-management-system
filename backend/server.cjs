@@ -1359,12 +1359,14 @@ const FeeTransfer = sequelize.define('FeeTransfer', {
   amount: { type: DataTypes.DECIMAL(12, 2), allowNull: false },
   reason: { type: DataTypes.TEXT, allowNull: true },
 
-  status: {
-    type: DataTypes.ENUM('PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'),
-    allowNull: false,
-    defaultValue: 'PENDING'
-  },
-
+status: {
+  type: DataTypes.STRING(20),
+  allowNull: false,
+  defaultValue: 'PENDING',
+  validate: {
+    isIn: [['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']]
+  }
+},
   requestedBy:  { type: DataTypes.UUID, allowNull: true },
   requestedAt:  { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
   requestNotes: { type: DataTypes.TEXT, allowNull: true },
@@ -24850,15 +24852,10 @@ const PORT = process.env.PORT || 5000;
     await sequelize.authenticate();
     console.log('✅ Database connection established');
 
-    // Only enable alter:true when BOTH are true. Safe by default in prod.
-    const allowAlter =
-      process.env.NODE_ENV === 'development' &&
-      process.env.ALLOW_DB_ALTER === 'true';
 
-    const syncOptions = allowAlter ? { alter: true } : {};
+const syncOptions = { alter: false, force: false };
 
-    console.log('🔄 Syncing database with options:', syncOptions);
-    await sequelize.sync(syncOptions);
+await sequelize.sync(syncOptions);
     console.log('✅ Database synced successfully');
 
     console.log('📊 Grading Systems Loaded:');
