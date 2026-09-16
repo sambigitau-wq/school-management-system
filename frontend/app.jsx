@@ -12930,8 +12930,7 @@ const AllResultsPrintModal = ({ printData, onClose, currentSchool, isUniversity,
   );
 };
 
-
-// ==================== COMPLETE TIMETABLE MODULE WITH BREAKS ====================
+// ==================== TIMETABLE MODULE — MULTI-TYPE (Class / Tuition / Exam / Extra / Remedial) ====================
 const TimetableModule = ({
   timetable, setTimetable,
   classes, subjects, staff, courses, programs, units,
@@ -12940,6 +12939,22 @@ const TimetableModule = ({
 }) => {
   console.log('📅 TimetableModule initialized');
 
+  // ==================== TIMETABLE TYPES ====================
+  const TIMETABLE_TYPES = [
+    { value: 'CLASS',    label: 'Class Timetable',    short: 'Class',     icon: 'fa-chalkboard-teacher', accent: 'indigo'  },
+    { value: 'TUITION',  label: 'Tuition Timetable',  short: 'Tuition',   icon: 'fa-book-reader',        accent: 'emerald' },
+    { value: 'EXAM',     label: 'Exam Timetable',     short: 'Exam',      icon: 'fa-file-alt',           accent: 'amber'   },
+    { value: 'EXTRA',    label: 'Extra Activities',   short: 'Extra',     icon: 'fa-futbol',             accent: 'rose'    },
+    { value: 'REMEDIAL', label: 'Remedial Timetable', short: 'Remedial',  icon: 'fa-hands-helping',      accent: 'violet'  }
+  ];
+
+  const getTypeMeta = (t) =>
+    TIMETABLE_TYPES.find(x => x.value === t) || TIMETABLE_TYPES[0];
+
+  const [timetableType, setTimetableType] = useState('CLASS');
+  const currentTypeMeta = getTypeMeta(timetableType);
+
+  // ==================== STATE ====================
   const [selectedProgram, setSelectedProgram] = useState('');
   const [selectedCourse, setSelectedCourse] = useState('');
   const [selectedClass, setSelectedClass] = useState('');
@@ -12955,7 +12970,7 @@ const TimetableModule = ({
   const [studentConflicts, setStudentConflicts] = useState([]);
   const [loadingConflicts, setLoadingConflicts] = useState(false);
 
-  // Break-related state
+  // Break form
   const [showBreakForm, setShowBreakForm] = useState(false);
   const [breakForm, setBreakForm] = useState({
     name: 'Short Break',
@@ -12993,157 +13008,161 @@ const TimetableModule = ({
   const supportsBreaks = !isUniversity;
 
   const days = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
-  const periods = [1, 2, 3, 4, 5, 6, 7, 8];
+
+  // ==================== PERIODS — 20 by default ====================
+  const MAX_PERIODS = Number(currentSchool?.maxPeriodsPerDay) || 20;
+  const periods = Array.from({ length: MAX_PERIODS }, (_, i) => i + 1);
+
+  // ==================== ACCENT COLOR MAPS ====================
+  const ACCENT_BG = {
+    indigo:  'bg-indigo-600',
+    emerald: 'bg-emerald-600',
+    amber:   'bg-amber-500',
+    rose:    'bg-rose-600',
+    violet:  'bg-violet-600'
+  };
+  const ACCENT_SOFT = {
+    indigo:  'bg-indigo-50 text-indigo-700 border-indigo-200',
+    emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    amber:   'bg-amber-50 text-amber-700 border-amber-200',
+    rose:    'bg-rose-50 text-rose-700 border-rose-200',
+    violet:  'bg-violet-50 text-violet-700 border-violet-200'
+  };
+  const ACCENT_RING = {
+    indigo:  'ring-indigo-500',
+    emerald: 'ring-emerald-500',
+    amber:   'ring-amber-500',
+    rose:    'ring-rose-500',
+    violet:  'ring-violet-500'
+  };
 
   // ==================== SEARCHABLE SELECT ====================
-  const SearchableSelect = ({ label, value, onChange, options, placeholder, disabled, required, className }) => {
-    const [search, setSearch] = useState('');
-    const [isOpen, setIsOpen] = useState(false);
-    const [isFocused, setIsFocused] = useState(false);
-    const dropdownRef = useRef(null);
-    const inputRef = useRef(null);
+  // Defined once via useMemo so React keeps a stable component identity
+  // (this is the fix for the input-blocking issue we discussed earlier).
+  const SearchableSelect = useMemo(() => {
+    return function SearchableSelectInner({
+      label, value, onChange, options, placeholder, disabled, required, className
+    }) {
+      const [search, setSearch] = useState('');
+      const [isOpen, setIsOpen] = useState(false);
+      const [isFocused, setIsFocused] = useState(false);
+      const wrapRef = useRef(null);
+      const inputRef = useRef(null);
 
-    const safeOptions = Array.isArray(options) ? options : [];
+      const safeOptions = Array.isArray(options) ? options : [];
 
-    const filteredOptions = useMemo(() => {
-      if (!search.trim()) return safeOptions;
-      const s = search.toLowerCase();
-      return safeOptions.filter(opt =>
-        opt.label?.toLowerCase().includes(s) ||
-        opt.subLabel?.toLowerCase().includes(s) ||
-        opt.value?.toString().toLowerCase().includes(s)
+      const filtered = useMemo(() => {
+        if (!search.trim()) return safeOptions;
+        const s = search.toLowerCase();
+        return safeOptions.filter(o =>
+          (o.label || '').toLowerCase().includes(s) ||
+          (o.subLabel || '').toLowerCase().includes(s) ||
+          String(o.value ?? '').toLowerCase().includes(s)
+        );
+      }, [safeOptions, search]);
+
+      const selected = useMemo(
+        () => safeOptions.find(o => String(o.value) === String(value)) || null,
+        [safeOptions, value]
       );
-    }, [safeOptions, search]);
 
-    const selectedOption = safeOptions.find(opt => opt.value === value);
+      useEffect(() => {
+        if (!isOpen) return;
+        const onDown = (e) => {
+          if (!wrapRef.current) return;
+          if (wrapRef.current.contains(e.target)) return;
+          setIsOpen(false); setIsFocused(false);
+        };
+        document.addEventListener('mousedown', onDown);
+        document.addEventListener('touchstart', onDown, { passive: true });
+        return () => {
+          document.removeEventListener('mousedown', onDown);
+          document.removeEventListener('touchstart', onDown);
+        };
+      }, [isOpen]);
 
-    useEffect(() => {
-      const handler = (event) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-          setIsOpen(false);
-          setIsFocused(false);
-        }
+      const open = () => {
+        if (disabled) return;
+        setIsFocused(true); setIsOpen(true);
+        if (selected && !search) setSearch(selected.label);
       };
-      document.addEventListener('mousedown', handler);
-      return () => document.removeEventListener('mousedown', handler);
-    }, []);
+      const close = (restore = true) => {
+        setIsOpen(false); setIsFocused(false);
+        if (restore) setSearch(selected ? selected.label : '');
+      };
+      const pick = (opt) => {
+        if (!opt) return;
+        onChange({ target: { value: opt.value } });
+        setSearch(opt.label);
+        setIsOpen(false); setIsFocused(false);
+        requestAnimationFrame(() => inputRef.current?.focus());
+      };
 
-    const handleSelect = (selectedValue) => {
-      onChange({ target: { value: selectedValue } });
-      const selected = safeOptions.find(opt => opt.value === selectedValue);
-      setSearch(selected ? selected.label : '');
-      setIsOpen(false);
-      setIsFocused(false);
-      if (inputRef.current) inputRef.current.focus();
-    };
+      const display = isFocused ? search : (selected ? selected.label : '');
 
-    const handleInputChange = (e) => {
-      const v = e.target.value;
-      setSearch(v);
-      setIsOpen(true);
-      setIsFocused(true);
-      if (v === '') onChange({ target: { value: '' } });
-    };
-
-    const handleFocus = () => {
-      setIsFocused(true);
-      setIsOpen(true);
-      if (selectedOption && !search) setSearch(selectedOption.label);
-    };
-
-    const handleBlur = () => {
-      setTimeout(() => {
-        if (document.activeElement !== inputRef.current) {
-          setIsOpen(false);
-          setIsFocused(false);
-          if (selectedOption) setSearch(selectedOption.label);
-          else setSearch('');
-        }
-      }, 150);
-    };
-
-    const handleClear = (e) => {
-      e.stopPropagation();
-      onChange({ target: { value: '' } });
-      setSearch('');
-      setIsOpen(false);
-      setIsFocused(false);
-      if (inputRef.current) inputRef.current.focus();
-    };
-
-    const getDisplayValue = () => {
-      if (isFocused) return search;
-      if (selectedOption) return selectedOption.label;
-      return search || '';
-    };
-
-    return (
-      <div className="relative" ref={dropdownRef}>
-        {label && (
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-        )}
-        <div className="relative">
-          <input
-            ref={inputRef}
-            type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
-            } ${className || ''}`}
-            value={getDisplayValue()}
-            onChange={handleInputChange}
-            onFocus={handleFocus}
-            onBlur={handleBlur}
-            placeholder={placeholder || 'Search and select...'}
-            disabled={disabled}
-            autoComplete="off"
-          />
-          {value && !disabled && (
-            <button
-              type="button"
-              onClick={handleClear}
-              className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
-              tabIndex={-1}
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+      return (
+        <div className="w-full">
+          {label && (
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              {label}{required && <span className="text-red-500 ml-1">*</span>}
+            </label>
           )}
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-        </div>
-        {isOpen && !disabled && (
-          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-            {filteredOptions.length > 0 ? (
-              filteredOptions.map((opt, idx) => (
-                <div
-                  key={opt.value || idx}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
-                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
-                  }`}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => handleSelect(opt.value)}
-                >
-                  <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
-                </div>
-              ))
-            ) : (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {search.trim() ? 'No results found' : 'Type to search...'}
+          <div className="relative" ref={wrapRef}>
+            <input
+              ref={inputRef}
+              type="text"
+              className={`w-full px-3 py-2 pr-8 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${disabled ? 'bg-gray-100' : 'bg-white'} ${className || ''}`}
+              value={display}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setIsOpen(true);
+                setIsFocused(true);
+                if (e.target.value === '') onChange({ target: { value: '' } });
+              }}
+              onFocus={open}
+              onBlur={() => setTimeout(() => {
+                if (!wrapRef.current) return;
+                if (wrapRef.current.contains(document.activeElement)) return;
+                close(true);
+              }, 120)}
+              placeholder={placeholder}
+              disabled={disabled}
+              autoComplete="off"
+            />
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+              <svg className={`w-4 h-4 text-gray-400 ${isOpen ? 'rotate-180' : ''}`}
+                   fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+            {isOpen && !disabled && (
+              <div className="absolute left-0 right-0 top-full mt-1 bg-white border rounded-lg shadow-xl max-h-60 overflow-auto z-[9999]">
+                {safeOptions.length === 0 ? (
+                  <div className="px-3 py-4 text-center text-gray-500 text-sm">No options</div>
+                ) : filtered.length === 0 ? (
+                  <div className="px-3 py-4 text-center text-gray-500 text-sm">No results</div>
+                ) : (
+                  filtered.map((opt, i) => (
+                    <div
+                      key={String(opt.value ?? i)}
+                      className={`px-3 py-2 cursor-pointer border-b last:border-b-0 ${
+                        String(opt.value) === String(value) ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-indigo-50'
+                      }`}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => pick(opt)}
+                    >
+                      <div className="font-medium">{opt.label}</div>
+                      {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+                    </div>
+                  ))
+                )}
               </div>
             )}
           </div>
-        )}
-      </div>
-    );
-  };
+        </div>
+      );
+    };
+  }, []);
 
   // ==================== OPTIONS ====================
   const programOptions = useMemo(() => (programs || []).map(p => ({
@@ -13212,7 +13231,6 @@ const TimetableModule = ({
   const dayOptions = days.map(d => ({ value: d, label: d }));
   const periodOptions = periods.map(p => ({ value: p, label: `Period ${p}` }));
 
-  // Break presets
   const breakNameOptions = [
     { value: 'Short Break',  label: 'Short Break'  },
     { value: 'Long Break',   label: 'Long Break'   },
@@ -13228,6 +13246,7 @@ const TimetableModule = ({
   const checkTeacherConflicts = (teacherId, day, startTime, endTime, excludeId = null) => {
     return timetable.filter(entry => {
       if (entry.isBreak) return false;
+      if (entry.timetableType !== timetableType) return false;   // only same type
       if (excludeId && entry.id === excludeId) return false;
       if (entry.teacherId !== teacherId) return false;
       if (entry.day !== day) return false;
@@ -13239,6 +13258,7 @@ const TimetableModule = ({
     if (!room) return [];
     return timetable.filter(entry => {
       if (entry.isBreak) return false;
+      if (entry.timetableType !== timetableType) return false;
       if (excludeId && entry.id === excludeId) return false;
       if (entry.room !== room) return false;
       if (entry.day !== day) return false;
@@ -13272,6 +13292,7 @@ const TimetableModule = ({
           if (isTVET && enrollment.programId) {
             studentTimetable = timetable.filter(t =>
               !t.isBreak &&
+              t.timetableType === timetableType &&
               t.programId === enrollment.programId &&
               (!enrollment.year || t.year === enrollment.year) &&
               (!enrollment.module || t.module === enrollment.module)
@@ -13279,12 +13300,17 @@ const TimetableModule = ({
           } else if (isUniversity && enrollment.courseId) {
             studentTimetable = timetable.filter(t =>
               !t.isBreak &&
+              t.timetableType === timetableType &&
               t.courseId === enrollment.courseId &&
               (!enrollment.year || t.year === enrollment.year) &&
               (!enrollment.semester || t.semester === enrollment.semester)
             );
           } else if (enrollment.classId) {
-            studentTimetable = timetable.filter(t => !t.isBreak && t.classId === enrollment.classId);
+            studentTimetable = timetable.filter(t =>
+              !t.isBreak &&
+              t.timetableType === timetableType &&
+              t.classId === enrollment.classId
+            );
           }
 
           for (const entry of studentTimetable) {
@@ -13338,7 +13364,7 @@ const TimetableModule = ({
   const refreshTimetable = async () => {
     try {
       setLoading(true);
-      const params = {};
+      const params = { timetableType };
       if (isTVET && selectedProgram) params.programId = selectedProgram;
       if (isTVET && selectedYear) params.year = selectedYear;
       if (isTVET && selectedModule) params.module = selectedModule;
@@ -13357,7 +13383,8 @@ const TimetableModule = ({
   };
 
   useEffect(() => { refreshTimetable(); },
-    [selectedProgram, selectedCourse, selectedClass, selectedYear, selectedModule, selectedSemester]);
+    [selectedProgram, selectedCourse, selectedClass, selectedYear,
+     selectedModule, selectedSemester, timetableType]);
 
   // ==================== FILTER UNITS / SUBJECTS ====================
   useEffect(() => {
@@ -13407,12 +13434,24 @@ const TimetableModule = ({
     return 'Unknown';
   };
 
-  // Normalize "HH:MM" string to minutes for comparison (handles "9:05" and "09:05")
   const timeToMinutes = (t) => {
     if (!t) return NaN;
     const [h, m] = t.split(':').map(Number);
     if (Number.isNaN(h) || Number.isNaN(m)) return NaN;
     return h * 60 + m;
+  };
+
+  const getScopeLabel = () => {
+    if (isUniversity) {
+      const c = courses?.find(x => x.id === selectedCourse);
+      return c ? c.name : 'All Courses';
+    }
+    if (isTVET) {
+      const p = programs?.find(x => x.id === selectedProgram);
+      return p ? p.name : 'All Programs';
+    }
+    const c = classes?.find(x => x.id === selectedClass);
+    return c ? c.name : 'All Classes';
   };
 
   // ==================== SUBMIT — CLASS ====================
@@ -13438,7 +13477,9 @@ const TimetableModule = ({
         teacherId: selectedStaff.id,
         room: formData.room || '',
         schoolId: currentSchool?.id,
-        isBreak: false
+        isBreak: false,
+        timetableType,
+        label: `${currentTypeMeta.label} — ${getScopeLabel()}`
       };
 
       if (isTVET) {
@@ -13483,7 +13524,7 @@ const TimetableModule = ({
       });
       setConflicts([]);
       await refreshTimetable();
-      alert('✅ Timetable entry added successfully!');
+      alert(`✅ ${currentTypeMeta.short} entry added successfully!`);
     } catch (err) {
       console.error('❌ Error creating timetable entry:', err);
       alert(err.response?.data?.message || 'Failed to create timetable entry');
@@ -13507,16 +13548,16 @@ const TimetableModule = ({
         alert('End time must be after start time'); setLoading(false); return;
       }
 
-      // Resolve break name (handle "Other" free-text)
       const resolvedBreakName =
         (breakForm.name === 'Other'
           ? (breakForm.customName || '').trim() || 'Break'
           : breakForm.name) || 'Break';
 
-      // Check for slot occupancy
       const periodNum = parseInt(breakForm.period, 10);
       const existingSlot = timetable.find(t =>
-        t.day === breakForm.day && Number(t.period) === periodNum
+        t.timetableType === timetableType &&
+        t.day === breakForm.day &&
+        Number(t.period) === periodNum
       );
 
       if (existingSlot) {
@@ -13526,7 +13567,6 @@ const TimetableModule = ({
         if (!window.confirm(`Period ${periodNum} on ${breakForm.day} already has an entry (${label}). Overwrite?`)) {
           setLoading(false); return;
         }
-        // If overwriting, delete the existing entry first
         try {
           await handleDelete(existingSlot.id);
         } catch (delErr) {
@@ -13544,14 +13584,16 @@ const TimetableModule = ({
         isBreak: true,
         breakName: resolvedBreakName,
         schoolId: currentSchool?.id,
-        // Scope identifiers so break shows under the right filter
+        timetableType,
+        label: `${currentTypeMeta.label} — ${getScopeLabel()}`,
+
         ...(isTVET && selectedProgram ? { programId: selectedProgram } : {}),
         ...(isTVET && selectedYear ? { year: parseInt(selectedYear, 10) } : {}),
         ...(isTVET && selectedModule ? { module: parseInt(selectedModule, 10) } : {}),
         ...(isUniversity && selectedCourse ? { courseId: selectedCourse } : {}),
         ...(isUniversity && selectedYear ? { year: parseInt(selectedYear, 10) } : {}),
         ...(isUniversity && selectedSemester ? { semester: parseInt(selectedSemester, 10) } : {}),
-        ...(!isUniversity && !isTVET && selectedClass ? { classId: selectedClass } : {})
+        ...(!isUniversity && !isTVET ? { classId: selectedClass || classes?.[0]?.id || null } : {})
       };
 
       console.log('📤 POST /timetable (break):', submitData);
@@ -13619,7 +13661,7 @@ const TimetableModule = ({
   // ==================== FILTERED TIMETABLE ====================
   const filteredTimetable = useMemo(() => {
     if (!timetable || timetable.length === 0) return [];
-    let filtered = [...timetable];
+    let filtered = timetable.filter(e => e.timetableType === timetableType);
     if (isTVET) {
       if (selectedProgram) filtered = filtered.filter(e => e.programId === selectedProgram);
       if (selectedYear)    filtered = filtered.filter(e => e.year === parseInt(selectedYear, 10));
@@ -13632,7 +13674,19 @@ const TimetableModule = ({
       if (selectedClass) filtered = filtered.filter(e => e.classId === selectedClass);
     }
     return filtered;
-  }, [timetable, selectedProgram, selectedCourse, selectedYear, selectedModule, selectedSemester, selectedClass, isTVET, isUniversity]);
+  }, [timetable, timetableType, selectedProgram, selectedCourse, selectedYear,
+      selectedModule, selectedSemester, selectedClass, isTVET, isUniversity]);
+
+  const typeCounts = useMemo(() => {
+    const counts = {};
+    TIMETABLE_TYPES.forEach(t => { counts[t.value] = 0; });
+    (timetable || []).forEach(e => {
+      const t = e.timetableType || 'CLASS';
+      if (counts[t] === undefined) counts[t] = 0;
+      counts[t] += 1;
+    });
+    return counts;
+  }, [timetable]);
 
   // ==================== PRINT ====================
   const handlePrint = () => {
@@ -13649,10 +13703,10 @@ const TimetableModule = ({
         ${schoolLogo ? `<img src="${schoolLogo}" alt="Logo" class="print-logo" />` : ''}
         <div class="print-title-block">
           <h1 class="print-school-name">${schoolName}</h1>
-          <h2 class="print-doc-title">
-            ${isTVET ? 'Program Timetable' : isUniversity ? 'Course Timetable' : 'Class Timetable'}
-          </h2>
-          <p class="print-generated">Generated on ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+          <h2 class="print-doc-title">${currentTypeMeta.label}</h2>
+          <p class="print-generated">
+            ${getScopeLabel()} • Generated on ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}
+          </p>
         </div>
       </div>
     `;
@@ -13737,7 +13791,7 @@ const TimetableModule = ({
       <!DOCTYPE html>
       <html>
         <head>
-          <title>${schoolName} — Timetable</title>
+          <title>${schoolName} — ${currentTypeMeta.label}</title>
           <meta charset="UTF-8" />
           <style>
             @page { size: A4 landscape; margin: 12mm; }
@@ -13751,27 +13805,26 @@ const TimetableModule = ({
             .print-generated { font-size: 11px; color: #6b7280; margin: 0; }
             .print-filters { text-align: center; font-size: 12px; color: #4b5563; background: #eef2ff; padding: 6px 10px; border-radius: 6px; margin: 0 0 14px 0; }
             .print-table { width: 100%; border-collapse: collapse; font-size: 11px; }
-            .print-table th { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; padding: 8px 6px; text-align: center; font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
-            .print-table td { border: 1px solid #e5e7eb; padding: 6px; vertical-align: top; }
+            .print-table th { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; padding: 6px 4px; text-align: center; font-weight: 700; text-transform: uppercase; font-size: 10px; }
+            .print-table td { border: 1px solid #e5e7eb; padding: 4px 5px; vertical-align: top; }
             .period-cell, .period-header { background: #f3f4f6; font-weight: 700; color: #374151; white-space: nowrap; width: 70px; text-align: center; }
             .entry-cell { background: #fafaff; }
             .entry-unit { font-weight: 700; color: #4338ca; font-size: 11.5px; margin-bottom: 2px; }
             .entry-teacher { color: #374151; font-size: 10.5px; margin-bottom: 1px; }
-            .entry-room { color: #6b7280; font-size: 10px; margin-bottom: 1px; }
+            .entry-room { color: #6b7280; font-size: 10px; }
             .entry-time { color: #9ca3af; font-size: 10px; border-top: 1px dashed #e5e7eb; margin-top: 3px; padding-top: 3px; }
             .entry-badge { display: inline-block; background: #e0e7ff; color: #4338ca; font-size: 9px; padding: 1px 5px; border-radius: 4px; margin-top: 3px; }
             .entry-year { font-size: 9.5px; color: #6b7280; margin-top: 2px; }
             .empty-cell { text-align: center; color: #d1d5db; background: #fbfbfd; }
             .break-cell {
               background: repeating-linear-gradient(45deg, #fef3c7, #fef3c7 6px, #fde68a 6px, #fde68a 12px);
-              text-align: center;
-              vertical-align: middle;
+              text-align: center; vertical-align: middle;
             }
-            .break-name { font-weight: 800; color: #92400e; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; }
+            .break-name { font-weight: 800; color: #92400e; font-size: 11px; text-transform: uppercase; }
             .break-time { color: #78350f; font-size: 10px; margin-top: 3px; font-weight: 600; }
-            .print-footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; gap: 32px; font-size: 11px; color: #4b5563; }
+            .print-footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; gap: 32px; font-size: 11px; color: #4b5563; }
             .signature-line { flex: 1; padding-top: 24px; }
-            @media print { body { padding: 0; } .no-print { display: none !important; } }
+            @media print { body { padding: 0; } }
           </style>
         </head>
         <body>
@@ -13788,7 +13841,6 @@ const TimetableModule = ({
     printWindow.document.open();
     printWindow.document.write(html);
     printWindow.document.close();
-
     printWindow.onload = () => setTimeout(() => { printWindow.focus(); printWindow.print(); }, 300);
     setTimeout(() => { try { printWindow.focus(); printWindow.print(); } catch (e) {} }, 800);
   };
@@ -13798,24 +13850,68 @@ const TimetableModule = ({
     <div className="space-y-6">
       {(loading || loadingConflicts) && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
 
+      {/* ==================== TYPE TABS ==================== */}
+      <div className="bg-white rounded-xl shadow-sm p-2 flex flex-wrap gap-2 no-print">
+        {TIMETABLE_TYPES.map(t => {
+          const active = t.value === timetableType;
+          const count = typeCounts[t.value] || 0;
+          return (
+            <button
+              key={t.value}
+              onClick={() => setTimetableType(t.value)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                active
+                  ? `${ACCENT_BG[t.accent]} text-white shadow-md`
+                  : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200'
+              }`}
+            >
+              <i className={`fas ${t.icon}`} />
+              <span>{t.label}</span>
+              {count > 0 && (
+                <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${
+                  active ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-700'
+                }`}>{count}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Header */}
       <div className="flex justify-between items-center no-print flex-wrap gap-2">
-        <h2 className="text-2xl font-bold">
-          {isTVET ? '🔧 Program Timetable' : isUniversity ? '📚 Course Timetable' : '📅 Class Timetable'}
-        </h2>
+        <div>
+          <h2 className="text-2xl font-bold flex items-center gap-3">
+            <span className={`inline-flex items-center justify-center w-10 h-10 rounded-lg ${ACCENT_BG[currentTypeMeta.accent]} text-white`}>
+              <i className={`fas ${currentTypeMeta.icon}`} />
+            </span>
+            {currentTypeMeta.label}
+          </h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Scope: <strong>{getScopeLabel()}</strong> • {filteredTimetable.length} entries
+          </p>
+        </div>
         <div className="flex flex-wrap gap-2">
           {canAdd && (
-            <button onClick={() => setShowForm(true)} className="bg-indigo-600 text-white px-4 py-2 rounded-lg flex items-center">
-              <i className="fas fa-plus mr-2"></i>Add Entry
+            <button
+              onClick={() => setShowForm(true)}
+              className={`${ACCENT_BG[currentTypeMeta.accent]} text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:opacity-90`}
+            >
+              <i className="fas fa-plus" />Add {currentTypeMeta.short} Entry
             </button>
           )}
           {canAdd && supportsBreaks && (
-            <button onClick={() => setShowBreakForm(true)} className="bg-amber-500 text-white px-4 py-2 rounded-lg flex items-center hover:bg-amber-600">
-              <i className="fas fa-mug-hot mr-2"></i>Add Break
+            <button
+              onClick={() => setShowBreakForm(true)}
+              className="bg-amber-500 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-amber-600"
+            >
+              <i className="fas fa-mug-hot" />Add Break
             </button>
           )}
-          <button onClick={handlePrint} className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center">
-            <i className="fas fa-print mr-2"></i>Print Timetable
+          <button
+            onClick={handlePrint}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-green-700"
+          >
+            <i className="fas fa-print" />Print
           </button>
         </div>
       </div>
@@ -13855,17 +13951,17 @@ const TimetableModule = ({
           )}
         </div>
         <div className="mt-2 text-sm text-gray-500">
-          Showing {filteredTimetable.length} entries
-          {selectedProgram && programs?.find(p => p.id === selectedProgram) && ` for ${programs.find(p => p.id === selectedProgram).name}`}
+          Showing {filteredTimetable.length} entries for <strong>{currentTypeMeta.label}</strong>
           {selectedYear && ` • Year ${selectedYear}`}
           {selectedModule && ` • Module ${selectedModule}`}
+          {selectedSemester && ` • Semester ${selectedSemester}`}
         </div>
       </div>
 
       {/* Add Class Entry Form */}
       {showForm && canAdd && (
-        <div className="bg-white p-6 rounded-xl shadow-sm border-2 border-indigo-100 no-print">
-          <h3 className="text-lg font-semibold mb-4">Add Timetable Entry</h3>
+        <div className={`bg-white p-6 rounded-xl shadow-sm border-2 no-print ${ACCENT_SOFT[currentTypeMeta.accent]}`}>
+          <h3 className="text-lg font-semibold mb-4">Add {currentTypeMeta.short} Entry</h3>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               {isTVET && (<>
@@ -13898,8 +13994,8 @@ const TimetableModule = ({
               <input type="time" value={formData.endTime} onChange={(e) => setFormData({...formData, endTime: e.target.value})} className="px-3 py-2 border rounded-lg" required />
             </div>
             <div className="flex gap-2">
-              <button type="submit" className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50" disabled={loading}>
-                {loading ? 'Adding...' : 'Add Entry'}
+              <button type="submit" className={`${ACCENT_BG[currentTypeMeta.accent]} text-white px-6 py-2 rounded-lg hover:opacity-90 disabled:opacity-50`} disabled={loading}>
+                {loading ? 'Adding...' : `Add ${currentTypeMeta.short} Entry`}
               </button>
               <button type="button" onClick={() => setShowForm(false)} className="bg-gray-400 text-white px-6 py-2 rounded-lg hover:bg-gray-500">
                 Cancel
@@ -13914,7 +14010,7 @@ const TimetableModule = ({
         <div className="bg-white p-6 rounded-xl shadow-sm border-2 border-amber-200 no-print">
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
             <i className="fas fa-mug-hot text-amber-500"></i>
-            Add Break
+            Add Break to {currentTypeMeta.label}
           </h3>
           <p className="text-sm text-gray-500 mb-4">
             Breaks occupy a slot but don't have a teacher, subject, or unit. They don't participate in conflict checks.
@@ -13985,9 +14081,11 @@ const TimetableModule = ({
       <div className="bg-white rounded-xl shadow-sm overflow-x-auto">
         {filteredTimetable.length === 0 ? (
           <div className="text-center py-12 text-gray-500">
-            <i className="fas fa-calendar-alt text-5xl text-gray-300 mb-4"></i>
-            <p className="text-lg">No timetable entries found</p>
-            <p className="text-sm mt-2">Try adjusting your filters or add new entries</p>
+            <i className={`fas ${currentTypeMeta.icon} text-5xl text-gray-300 mb-4`}></i>
+            <p className="text-lg">No {currentTypeMeta.short.toLowerCase()} entries yet</p>
+            <p className="text-sm mt-2">
+              {canAdd ? `Click "Add ${currentTypeMeta.short} Entry" to get started` : 'Try adjusting your filters'}
+            </p>
           </div>
         ) : (
           <table className="w-full border-collapse">
@@ -14028,13 +14126,13 @@ const TimetableModule = ({
                             )}
                           </div>
                         ) : entry ? (
-                          <div className="bg-indigo-50 p-3 rounded-lg relative group">
-                            <div className="font-bold text-indigo-700 text-base">{getUnitName(entry)}</div>
+                          <div className={`${ACCENT_SOFT[currentTypeMeta.accent]} p-3 rounded-lg relative group border`}>
+                            <div className="font-bold text-base">{getUnitName(entry)}</div>
                             {isTVET && entry.module && (
-                              <div className="text-xs font-medium text-indigo-600 mt-1 bg-indigo-100 px-2 py-1 rounded inline-block">Module {entry.module}</div>
+                              <div className="text-xs font-medium mt-1 bg-white/60 px-2 py-1 rounded inline-block">Module {entry.module}</div>
                             )}
                             {isUniversity && entry.semester && (
-                              <div className="text-xs font-medium text-indigo-600 mt-1 bg-indigo-100 px-2 py-1 rounded inline-block">Sem {entry.semester}</div>
+                              <div className="text-xs font-medium mt-1 bg-white/60 px-2 py-1 rounded inline-block">Sem {entry.semester}</div>
                             )}
                             {entry.year && <div className="text-xs text-gray-500 mt-1">Year {entry.year}</div>}
                             <div className="text-sm text-gray-700 mt-2 font-medium">
@@ -14045,7 +14143,7 @@ const TimetableModule = ({
                                 <i className="fas fa-door-open mr-1 text-gray-400"></i>Room: {entry.room}
                               </div>
                             )}
-                            <div className="text-xs text-gray-400 mt-2 border-t pt-1 border-indigo-200">
+                            <div className="text-xs text-gray-400 mt-2 border-t pt-1">
                               <i className="far fa-clock mr-1"></i>
                               {entry.startTime?.substring(0, 5)} - {entry.endTime?.substring(0, 5)}
                             </div>
@@ -14075,7 +14173,6 @@ const TimetableModule = ({
     </div>
   );
 };
-
 
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
