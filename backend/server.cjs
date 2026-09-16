@@ -3209,6 +3209,8 @@ StaffAttendance.belongsTo(User, {
   foreignKey: 'approvedBy', 
   constraints: false 
 });
+StaffAttendance.belongsTo(Staff, { foreignKey: 'staffId', as: 'Staff' });
+Staff.hasMany(StaffAttendance, { foreignKey: 'staffId', as: 'attendances' });
 
 Sponsor.belongsTo(School, { foreignKey: 'schoolId' });
 
@@ -17539,6 +17541,8 @@ app.post('/api/fee-reminders/send', authenticate, async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 });
+
+
 // ==================== STAFF ATTENDANCE ROUTES (SEQUELIZE VERSION - FIXED) ====================
 
 // ==================== STAFF TIME IN ====================
@@ -17546,54 +17550,42 @@ app.post('/api/staff-attendance/time-in', authenticate, async (req, res) => {
   try {
     const { date, timeIn, remarks } = req.body;
     const userId = req.user.id;
-    
-    console.log('⏰ Time In request:', { userId, date, timeIn });
-    
-    // Find staff member
+
     const staff = await Staff.findOne({
-      where: { userId: userId },
+      where: { userId, schoolId: req.user.schoolId },
       include: [{ model: School }]
     });
-    
+
     if (!staff) {
       return res.status(404).json({ success: false, message: 'Staff record not found. Please contact HR.' });
     }
-    
-    console.log('👤 Staff found:', staff.id, staff.jobTitle);
-    
-    // Check if already marked for today
+
     const today = date || new Date().toISOString().split('T')[0];
     const existing = await StaffAttendance.findOne({
-      where: {
-        staffId: staff.id,
-        date: today
-      }
+      where: { staffId: staff.id, date: today }
     });
-    
+
     if (existing && existing.timeIn) {
       return res.status(400).json({ success: false, message: 'Already clocked in today' });
     }
-    
-    // Get school settings to determine if late
+
     const startTime = staff.School?.startTime || '08:00';
     const lateThreshold = staff.School?.lateThreshold || 30;
-    
-    // Calculate late time
+
     const [startHours, startMinutes] = startTime.split(':').map(Number);
     const lateMinutes = startHours * 60 + startMinutes + lateThreshold;
     const [inHours, inMinutes] = timeIn.split(':').map(Number);
     const timeInMinutes = inHours * 60 + inMinutes;
-    
+
     const isLate = timeInMinutes > lateMinutes;
     const finalStatus = isLate ? 'LATE' : 'PRESENT';
-    
+
     let attendance;
     if (existing) {
       await existing.update({
         timeIn,
         status: finalStatus,
-        remarks: remarks || (isLate ? `Arrived at ${timeIn} (Late by ${timeInMinutes - lateMinutes} mins)` : ''),
-        updatedAt: new Date()
+        remarks: remarks || (isLate ? `Arrived at ${timeIn} (Late by ${timeInMinutes - lateMinutes} mins)` : '')
       });
       attendance = existing;
     } else {
@@ -17603,17 +17595,16 @@ app.post('/api/staff-attendance/time-in', authenticate, async (req, res) => {
         timeIn,
         status: finalStatus,
         remarks: remarks || (isLate ? `Arrived at ${timeIn} (Late by ${timeInMinutes - lateMinutes} mins)` : ''),
-        schoolId: staff.schoolId,
         approved: false,
         approvalStatus: 'PENDING'
       });
     }
-    
-    console.log('✅ Time In recorded:', attendance.id);
-    
+
     res.json({
       success: true,
-      message: isLate ? `Time In recorded (LATE - School starts at ${startTime}, late after ${lateThreshold} minutes)` : 'Time In recorded successfully',
+      message: isLate
+        ? `Time In recorded (LATE - School starts at ${startTime}, late after ${lateThreshold} minutes)`
+        : 'Time In recorded successfully',
       attendance
     });
   } catch (error) {
@@ -17627,40 +17618,37 @@ app.patch('/api/staff-attendance/:id/time-out', authenticate, async (req, res) =
   try {
     const { id } = req.params;
     const { timeOut } = req.body;
-    
-    console.log('⏰ Time Out request:', { id, timeOut });
-    
+
     const attendance = await StaffAttendance.findByPk(id, {
-      include: [{ model: Staff }]
+      include: [{
+        model: Staff,
+        as: 'Staff',
+        required: true,
+        where: { schoolId: req.user.schoolId }
+      }]
     });
-    
+
     if (!attendance) {
       return res.status(404).json({ success: false, message: 'Attendance record not found' });
     }
-    
     if (!attendance.timeIn) {
       return res.status(400).json({ success: false, message: 'Please clock in first' });
     }
-    
     if (attendance.timeOut) {
       return res.status(400).json({ success: false, message: 'Already clocked out today' });
     }
-    
-    // Calculate hours worked
+
     const [inHours, inMinutes] = attendance.timeIn.split(':').map(Number);
     const [outHours, outMinutes] = timeOut.split(':').map(Number);
     const hoursWorked = ((outHours * 60 + outMinutes) - (inHours * 60 + inMinutes)) / 60;
-    
+
     await attendance.update({
       timeOut,
-      updatedAt: new Date(),
-      remarks: attendance.remarks 
-        ? `${attendance.remarks} | Clocked out at ${timeOut} (${hoursWorked.toFixed(1)} hours)` 
+      remarks: attendance.remarks
+        ? `${attendance.remarks} | Clocked out at ${timeOut} (${hoursWorked.toFixed(1)} hours)`
         : `Clocked out at ${timeOut} (${hoursWorked.toFixed(1)} hours)`
     });
-    
-    console.log('✅ Time Out recorded:', attendance.id, `Hours: ${hoursWorked.toFixed(1)}`);
-    
+
     res.json({
       success: true,
       message: `Time Out recorded. Hours worked: ${hoursWorked.toFixed(1)}`,
@@ -17677,62 +17665,62 @@ app.get('/api/staff-attendance', authenticate, async (req, res) => {
   try {
     const { staffId, startDate, endDate, department, status, approved } = req.query;
     const userId = req.user.id;
-    
-    let where = {};
-    
+    const schoolId = req.user.schoolId;
+
+    if (!schoolId) {
+      return res.status(400).json({ success: false, message: 'No school associated with user' });
+    }
+
+    const isAdmin = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL',
+                     'HR_MANAGER', 'HR', 'ACCOUNTANT'].includes(req.user.role);
+
+    // ---- Build staff-level filter (ALWAYS scoped to school) ----
+    const staffWhere = { schoolId };
+
     if (staffId) {
-      where.staffId = staffId;
-    } else {
-      const staff = await Staff.findOne({ where: { userId } });
-      
-      const isAdmin = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'HR_MANAGER', 'HR'].includes(req.user.role);
-      
-      if (staff && !isAdmin) {
-        where.staffId = staff.id;
-      } else if (department && isAdmin) {
-        const staffInDept = await Staff.findAll({
-          where: { department },
-          attributes: ['id']
-        });
-        where.staffId = staffInDept.map(s => s.id);
+      staffWhere.id = staffId;
+    } else if (!isAdmin) {
+      // Non-admins can only see their own attendance
+      const me = await Staff.findOne({ where: { userId, schoolId } });
+      if (!me) {
+        return res.json({ success: true, attendance: [] });
       }
+      staffWhere.id = me.id;
+    } else if (department) {
+      staffWhere.department = department;
     }
-    
+
+    // ---- Build attendance-level filter ----
+    const attendanceWhere = {};
     if (startDate || endDate) {
-      where.date = {};
-      if (startDate) where.date[Op.gte] = startDate;
-      if (endDate) where.date[Op.lte] = endDate;
+      attendanceWhere.date = {};
+      if (startDate) attendanceWhere.date[Op.gte] = startDate;
+      if (endDate)   attendanceWhere.date[Op.lte] = endDate;
     }
-    
-    if (status) where.status = status;
-    if (approved === 'true') where.approved = true;
-    if (approved === 'false') where.approved = false;
-    if (approved === 'pending') where.approvalStatus = 'PENDING';
- const attendance = await StaffAttendance.findAll({
-  where,
-  include: [
-    {
-      model: Staff,
-      as: 'Staff',                                      // ← ADD THIS
-      include: [
-        {
+    if (status) attendanceWhere.status = status;
+    if (approved === 'true')    attendanceWhere.approved = true;
+    if (approved === 'false')   attendanceWhere.approved = false;
+    if (approved === 'pending') attendanceWhere.approvalStatus = 'PENDING';
+
+    const attendance = await StaffAttendance.findAll({
+      where: attendanceWhere,
+      include: [{
+        model: Staff,
+        as: 'Staff',           // <-- matches: StaffAttendance.belongsTo(Staff, { as: 'Staff' })
+        required: true,
+        where: staffWhere,     // <-- CRITICAL: school scoping lives here
+        include: [{
           model: User,
-          as: 'User',                                   // ← and this (see note below)
           attributes: ['id', 'firstName', 'lastName', 'email', 'phone']
-        }
-      ]
-    }
-  ],
-  order: [['date', 'DESC']]
-});
-    
-    res.json({
-      success: true,
-      attendance
+        }]
+      }],
+      order: [['date', 'DESC']]
     });
+
+    res.json({ success: true, attendance });
   } catch (error) {
-    console.error('Error fetching attendance:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error('❌ Error fetching staff attendance:', error);
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 });
 
@@ -17741,35 +17729,30 @@ app.post('/api/staff-attendance/leave-request', authenticate, async (req, res) =
   try {
     const { date, leaveType, remarks } = req.body;
     const userId = req.user.id;
-    
-    const staff = await Staff.findOne({ where: { userId } });
-    
+
+    const staff = await Staff.findOne({
+      where: { userId, schoolId: req.user.schoolId }
+    });
     if (!staff) {
       return res.status(404).json({ success: false, message: 'Staff record not found' });
     }
-    
+
     const existing = await StaffAttendance.findOne({
-      where: {
-        staffId: staff.id,
-        date: date
-      }
+      where: { staffId: staff.id, date }
     });
-    
     if (existing) {
       return res.status(400).json({ success: false, message: 'Attendance already recorded for this date' });
     }
-    
+
     const attendance = await StaffAttendance.create({
       staffId: staff.id,
-      date: date,
+      date,
       status: 'LEAVE',
-      leaveType,
       remarks: remarks || `Leave request: ${leaveType}`,
-      schoolId: staff.schoolId,
       approved: false,
       approvalStatus: 'PENDING'
     });
-    
+
     res.json({
       success: true,
       message: 'Leave request submitted for approval',
@@ -17780,123 +17763,113 @@ app.post('/api/staff-attendance/leave-request', authenticate, async (req, res) =
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
-// ==================== GET MY PENDING REQUESTS (FIXED) ====================
+
+// ==================== GET MY PENDING REQUESTS ====================
 app.get('/api/staff-attendance/my-pending', authenticate, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // ---- Find the staff record for the logged-in user ----
-    const staff = await Staff.findOne({ where: { userId } });
-
+    const staff = await Staff.findOne({
+      where: { userId, schoolId: req.user.schoolId }
+    });
     if (!staff) {
-      return res.status(404).json({
-        success: false,
-        message: 'Staff record not found for your account'
-      });
+      return res.status(404).json({ success: false, message: 'Staff record not found for your account' });
     }
 
-    // ---- Fetch this staff member's pending attendance requests ----
     const pending = await StaffAttendance.findAll({
-      where: {
-        staffId: staff.id,
-        approved: false,
-        approvalStatus: 'PENDING'
-      },
+      where: { staffId: staff.id, approved: false, approvalStatus: 'PENDING' },
       order: [['date', 'ASC']]
     });
 
-    res.json({
-      success: true,
-      pending
-    });
+    res.json({ success: true, pending });
   } catch (error) {
     console.error('Error fetching pending requests:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
 // ==================== GET PENDING APPROVALS (HR/Admin) ====================
 app.get('/api/staff-attendance/pending', authenticate, async (req, res) => {
   try {
-    const canApprove = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'HR_MANAGER', 'HR'].includes(req.user.role);
-    
+    const canApprove = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL',
+                        'HR_MANAGER', 'HR'].includes(req.user.role);
     if (!canApprove) {
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
-    
-    const { department } = req.query;
-    
-    let where = {
-      approved: false,
-      approvalStatus: 'PENDING'
-    };
-    
-    if (department) {
-      const staffInDept = await Staff.findAll({
-        where: { department },
-        attributes: ['id']
-      });
-      where.staffId = staffInDept.map(s => s.id);
+
+    const schoolId = req.user.schoolId;
+    if (!schoolId) {
+      return res.status(400).json({ success: false, message: 'No school associated with user' });
     }
-    
+
+    const { department } = req.query;
+
+    const staffWhere = { schoolId };
+    if (department) staffWhere.department = department;
+
     const pending = await StaffAttendance.findAll({
-      where,
-      include: [
-        {
-          model: Staff,
-          include: [
-            {
-              model: User,
-              attributes: ['id', 'firstName', 'lastName', 'email']
-            }
-          ]
-        }
-      ],
+      where: { approved: false, approvalStatus: 'PENDING' },
+      include: [{
+        model: Staff,
+        as: 'Staff',           // <-- matches association alias
+        required: true,
+        where: staffWhere,     // <-- CRITICAL: school filter
+        include: [{
+          model: User,
+          attributes: ['id', 'firstName', 'lastName', 'email']
+        }]
+      }],
       order: [['date', 'ASC']]
     });
-    
-    res.json({
-      success: true,
-      pending
-    });
+
+    res.json({ success: true, pending });
   } catch (error) {
-    console.error('Error fetching pending approvals:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error('❌ Error fetching pending approvals:', error);
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 });
 
-// ==================== APPROVE/REJECT ATTENDANCE ====================
+// ==================== APPROVE / REJECT ATTENDANCE ====================
 app.patch('/api/staff-attendance/:id/approve', authenticate, async (req, res) => {
   try {
-    const canApprove = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'HR_MANAGER', 'HR'].includes(req.user.role);
-    
+    const canApprove = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL',
+                        'HR_MANAGER', 'HR'].includes(req.user.role);
     if (!canApprove) {
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
-    
+
     const { id } = req.params;
     const { action } = req.body;
-    
+
+    if (!['APPROVE', 'REJECT'].includes(action)) {
+      return res.status(400).json({ success: false, message: 'Action must be APPROVE or REJECT' });
+    }
+
     const approved = action === 'APPROVE';
     const approvalStatus = approved ? 'APPROVED' : 'REJECTED';
-    
-    const attendance = await StaffAttendance.findByPk(id);
-    
+
+    // Ensure the record belongs to a staff member in this school
+    const attendance = await StaffAttendance.findOne({
+      where: { id },
+      include: [{
+        model: Staff,
+        as: 'Staff',
+        required: true,
+        where: { schoolId: req.user.schoolId }
+      }]
+    });
+
     if (!attendance) {
       return res.status(404).json({ success: false, message: 'Attendance record not found' });
     }
-    
+
     await attendance.update({
       approved,
       approvalStatus,
       approvedBy: req.user.id,
       approvedAt: new Date()
     });
-    
+
     res.json({
       success: true,
       message: `Attendance ${action.toLowerCase()}d successfully`,
@@ -17912,15 +17885,19 @@ app.patch('/api/staff-attendance/:id/approve', authenticate, async (req, res) =>
 app.get('/api/staff-attendance/settings/:schoolId', authenticate, async (req, res) => {
   try {
     const { schoolId } = req.params;
-    
+
+    if (req.user.role !== 'SUPER_ADMIN' && req.user.schoolId !== schoolId) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
     const school = await School.findByPk(schoolId, {
       attributes: ['id', 'name', 'startTime', 'endTime', 'lateThreshold', 'earlyDepartureThreshold']
     });
-    
+
     if (!school) {
       return res.status(404).json({ success: false, message: 'School not found' });
     }
-    
+
     const startTime = school.startTime || '08:00';
     const lateThreshold = school.lateThreshold || 30;
     const [startHours, startMinutes] = startTime.split(':').map(Number);
@@ -17928,15 +17905,15 @@ app.get('/api/staff-attendance/settings/:schoolId', authenticate, async (req, re
     const lateHours = Math.floor(lateMinutes / 60);
     const lateMins = lateMinutes % 60;
     const lateTime = `${lateHours.toString().padStart(2, '0')}:${lateMins.toString().padStart(2, '0')}`;
-    
+
     res.json({
       success: true,
       settings: {
-        startTime: startTime,
+        startTime,
         endTime: school.endTime || '17:00',
-        lateThreshold: lateThreshold,
+        lateThreshold,
         earlyDepartureThreshold: school.earlyDepartureThreshold || 30,
-        lateTime: lateTime
+        lateTime
       }
     });
   } catch (error) {
@@ -17949,39 +17926,39 @@ app.get('/api/staff-attendance/settings/:schoolId', authenticate, async (req, re
 app.put('/api/staff-attendance/settings/:schoolId', authenticate, async (req, res) => {
   try {
     const canUpdate = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL'].includes(req.user.role);
-    
     if (!canUpdate) {
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
-    
+
     const { schoolId } = req.params;
     const { startTime, endTime, lateThreshold, earlyDepartureThreshold } = req.body;
-    
+
+    if (req.user.role !== 'SUPER_ADMIN' && req.user.schoolId !== schoolId) {
+      return res.status(403).json({ success: false, message: 'Access denied to this school' });
+    }
+
     if (startTime && !/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(startTime)) {
       return res.status(400).json({ success: false, message: 'Invalid start time format. Use HH:MM' });
     }
-    
     if (endTime && !/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(endTime)) {
       return res.status(400).json({ success: false, message: 'Invalid end time format. Use HH:MM' });
     }
-    
     if (lateThreshold && (lateThreshold < 0 || lateThreshold > 120)) {
       return res.status(400).json({ success: false, message: 'Late threshold must be between 0 and 120 minutes' });
     }
-    
+
     const school = await School.findByPk(schoolId);
-    
     if (!school) {
       return res.status(404).json({ success: false, message: 'School not found' });
     }
-    
+
     await school.update({
       startTime: startTime || undefined,
       endTime: endTime || undefined,
       lateThreshold: lateThreshold !== undefined ? lateThreshold : undefined,
       earlyDepartureThreshold: earlyDepartureThreshold !== undefined ? earlyDepartureThreshold : undefined
     });
-    
+
     res.json({
       success: true,
       message: 'Attendance settings updated successfully',
@@ -18001,21 +17978,27 @@ app.put('/api/staff-attendance/settings/:schoolId', authenticate, async (req, re
 // ==================== GET ATTENDANCE REPORT (DETAILED) ====================
 app.get('/api/staff-attendance/report', authenticate, async (req, res) => {
   try {
-    const canView = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'HR_MANAGER', 'HR'].includes(req.user.role);
+    const canView = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL',
+                     'HR_MANAGER', 'HR', 'ACCOUNTANT'].includes(req.user.role);
     if (!canView) {
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
-    const { startDate, endDate, department } = req.query;
+    const schoolId = req.user.schoolId;
+    if (!schoolId) {
+      return res.status(400).json({ success: false, message: 'No school associated with user' });
+    }
+
+    const { startDate, endDate, department, staffId } = req.query;
 
     const start = startDate || new Date(new Date().setDate(1)).toISOString().split('T')[0];
     const end   = endDate   || new Date().toISOString().split('T')[0];
 
-    // ---- Staff filter ----
-    const staffWhere = { schoolId: req.user.schoolId };
+    // ---- Staff filter (always school-scoped) ----
+    const staffWhere = { schoolId };
     if (department) staffWhere.department = department;
+    if (staffId)    staffWhere.id = staffId;
 
-    // ---- Fetch staff with their attendance in the range ----
     const staff = await Staff.findAll({
       where: staffWhere,
       include: [
@@ -18024,31 +18007,21 @@ app.get('/api/staff-attendance/report', authenticate, async (req, res) => {
           model: StaffAttendance,
           as: 'attendances',
           required: false,
-          where: {
-            date: { [Op.between]: [start, end] }
-          },
-          include: [
-            {
-              model: User,
-              as: 'approvedByUser',
-              attributes: ['id', 'firstName', 'lastName'],
-              required: false
-            }
-          ]
+          where: { date: { [Op.between]: [start, end] } },
+          include: [{
+            model: User,
+            as: 'approvedByUser',
+            attributes: ['id', 'firstName', 'lastName'],
+            required: false
+          }]
         }
       ],
       order: [['createdAt', 'ASC']]
     });
 
-    // ---- Tally counts ----
-    let totalPresent = 0;
-    let totalAbsent = 0;
-    let totalLate = 0;
-    let totalLeave = 0;
-    let pendingApprovals = 0;
-    let rejectedApprovals = 0;
+    let totalPresent = 0, totalAbsent = 0, totalLate = 0, totalLeave = 0;
+    let pendingApprovals = 0, rejectedApprovals = 0;
 
-    // ---- Per-staff breakdown ----
     const perStaff = staff.map(s => {
       const records = s.attendances || [];
 
@@ -18056,7 +18029,6 @@ app.get('/api/staff-attendance/report', authenticate, async (req, res) => {
       const absent  = records.filter(a => a.status === 'ABSENT'  && a.approved).length;
       const late    = records.filter(a => a.status === 'LATE'    && a.approved).length;
       const leave   = records.filter(a => a.status === 'LEAVE'   && a.approved).length;
-
       const pending = records.filter(a => a.approvalStatus === 'PENDING').length;
       const rejected = records.filter(a => a.approvalStatus === 'REJECTED').length;
 
@@ -18072,28 +18044,15 @@ app.get('/api/staff-attendance/report', authenticate, async (req, res) => {
       return {
         staffId: s.id,
         employeeId: s.employeeId,
-        name: s.User
-          ? `${s.User.firstName || ''} ${s.User.lastName || ''}`.trim()
-          : `Staff ${s.id}`,
+        name: s.User ? `${s.User.firstName || ''} ${s.User.lastName || ''}`.trim() : `Staff ${s.id}`,
         email: s.User?.email || null,
         phone: s.User?.phone || null,
-              department: s.department || '—',
+        department: s.department || '—',
         jobTitle: s.jobTitle || '—',
         staffType: s.staffType || '—',
         subjects: Array.isArray(s.subjects) ? s.subjects : [],
-        totals: {
-          present,
-          absent,
-          late,
-          leave,
-          pending,
-          rejected,
-          totalRecords
-        },
-        attendanceRate: totalRecords > 0
-          ? Math.round((present / totalRecords) * 100)
-          : 0,
-        // Full records so the UI can drill down if needed
+        totals: { present, absent, late, leave, pending, rejected, totalRecords },
+        attendanceRate: totalRecords > 0 ? Math.round((present / totalRecords) * 100) : 0,
         records: records.map(a => ({
           id: a.id,
           date: a.date,
@@ -18111,20 +18070,14 @@ app.get('/api/staff-attendance/report', authenticate, async (req, res) => {
       };
     });
 
-    // ---- Department breakdown (bonus) ----
     const byDepartment = {};
     perStaff.forEach(s => {
       const dept = s.department || 'Unassigned';
       if (!byDepartment[dept]) {
         byDepartment[dept] = {
-          department: dept,
-          staffCount: 0,
-          present: 0,
-          absent: 0,
-          late: 0,
-          leave: 0,
-          pending: 0,
-          rejected: 0
+          department: dept, staffCount: 0,
+          present: 0, absent: 0, late: 0, leave: 0,
+          pending: 0, rejected: 0
         };
       }
       byDepartment[dept].staffCount += 1;
@@ -18139,7 +18092,7 @@ app.get('/api/staff-attendance/report', authenticate, async (req, res) => {
     res.json({
       success: true,
       period: { startDate: start, endDate: end },
-      filters: { department: department || null },
+      filters: { department: department || null, staffId: staffId || null },
       summary: {
         totalStaff: staff.length,
         totalPresent,
@@ -18152,15 +18105,15 @@ app.get('/api/staff-attendance/report', authenticate, async (req, res) => {
           ? Math.round((totalPresent / (totalPresent + totalAbsent + totalLate + totalLeave)) * 100)
           : 0
       },
-      perStaff,                             // ← THE KEY NEW PIECE
+      perStaff,
       byDepartment: Object.values(byDepartment)
     });
-
   } catch (error) {
-    console.error('Error generating report:', error);
+    console.error('❌ Error generating report:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
+
 // GET /api/features - Get all features for a school
 app.get('/api/features', authenticate, async (req, res) => {
   try {
