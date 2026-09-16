@@ -8309,6 +8309,8 @@ const CourseUnitsModule = ({
     </div>
   );
 };
+
+
 const ExamModule = ({ 
   exams, setExams, 
   classes, subjects, students, 
@@ -9350,8 +9352,6 @@ const ExamModule = ({
           <td>${escapeHtml(time)}</td>
           <td>${escapeHtml(exam.examHall || '—')}</td>
           <td>${escapeHtml(exam.invigilator || '—')}</td>
-          <td>${exam.maxMarks || 100}</td>
-          <td><span class="status ${exam.isPublished ? 'status-published' : 'status-draft'}">${exam.isPublished ? 'Published' : 'Draft'}</span></td>
         </tr>
       `;
     }).join('');
@@ -9387,9 +9387,6 @@ const ExamModule = ({
             .num { text-align: center; font-weight: 700; color: #6b7280; width: 32px; }
             .strong { font-weight: 700; color: #1f2937; }
             .small { font-size: 10px; color: #6b7280; margin-top: 2px; }
-            .status { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 20px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
-            .status-published { background: #dcfce7; color: #166534; }
-            .status-draft { background: #fef3c7; color: #92400e; }
             .print-footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; gap: 32px; font-size: 11px; color: #4b5563; }
             .signature-line { flex: 1; padding-top: 24px; }
             @media print { body { padding: 0; } tr { page-break-inside: avoid; } thead { display: table-header-group; } }
@@ -9409,8 +9406,6 @@ const ExamModule = ({
                 <th>Time</th>
                 <th>Hall</th>
                 <th>Invigilator</th>
-                <th>Max</th>
-                <th>Status</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -9450,7 +9445,6 @@ const ExamModule = ({
         ? `${getProgramName(exam.programId)} • Year ${exam.year || '?'} • Module ${exam.module || '?'}`
         : `${getClassName(exam.classId)} • ${exam.term || 'Term 1'}`;
 
-    // Print only the rows that match the current filter/search
     const rowsToPrint = filteredBulkResults;
 
     const rows = rowsToPrint.map((entry, i) => {
@@ -9475,7 +9469,6 @@ const ExamModule = ({
       `;
     }).join('');
 
-    // Summary stats
     const present = rowsToPrint.filter(e => !e.isAbsent && e.marks !== '' && e.marks !== null).length;
     const absent = rowsToPrint.filter(e => e.isAbsent).length;
     const numericMarks = rowsToPrint
@@ -9547,15 +9540,12 @@ const ExamModule = ({
             .print-school-name { font-size: 22px; font-weight: 800; color: #4f46e5; text-transform: uppercase; letter-spacing: 1.2px; margin: 0 0 4px 0; }
             .print-doc-title { font-size: 15px; font-weight: 600; color: #374151; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.8px; }
             .print-generated { font-size: 11px; color: #6b7280; margin: 0; }
-
             .meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 18px; font-size: 11px; background: #f9fafb; padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; border: 1px solid #e5e7eb; }
             .meta span { color: #374151; }
-
             .summary { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 14px; }
             .stat { background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 6px; padding: 8px; text-align: center; }
             .stat-label { display: block; font-size: 9px; text-transform: uppercase; letter-spacing: 0.6px; color: #4338ca; font-weight: 700; }
             .stat-value { display: block; font-size: 16px; font-weight: 800; color: #1e1b4b; margin-top: 2px; }
-
             table { width: 100%; border-collapse: collapse; font-size: 11px; }
             th { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; padding: 8px 6px; text-align: left; font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
             td { border: 1px solid #e5e7eb; padding: 6px; vertical-align: middle; }
@@ -9569,7 +9559,6 @@ const ExamModule = ({
             .grade-mid { background: #dbeafe; color: #1e40af; }
             .grade-warn { background: #fef3c7; color: #92400e; }
             .grade-fail { background: #fee2e2; color: #991b1b; }
-
             .print-footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; gap: 24px; font-size: 11px; color: #4b5563; }
             .signature-line { flex: 1; padding-top: 24px; }
             @media print { body { padding: 0; } tr { page-break-inside: avoid; } thead { display: table-header-group; } }
@@ -9665,7 +9654,6 @@ const ExamModule = ({
             <i className="fas fa-sync-alt"></i>Refresh
           </button>
           
-          {/* ⬅️ NEW: Print button */}
           <button
             onClick={handlePrintExams}
             disabled={filteredExams.length === 0}
@@ -10097,7 +10085,6 @@ const ExamModule = ({
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold">📊 Bulk Results Entry</h3>
               <div className="flex gap-2">
-                {/* ⬅️ NEW: Print Results button */}
                 <button
                   onClick={handlePrintResults}
                   disabled={bulkResults.length === 0}
