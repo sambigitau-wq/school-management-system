@@ -8319,9 +8319,6 @@ const ExamModule = ({
   currentSchool, courses, programs, units, user 
 }) => {
   console.log('📝 ExamModule initialized');
-  console.log('📚 Programs received:', programs?.length);
-  console.log('📚 Courses received:', courses?.length);
-  console.log('📚 Units received:', units?.length);
 
   // ============================================================
   // SEARCHABLE SELECT COMPONENT
@@ -8480,6 +8477,9 @@ const ExamModule = ({
   const [selectedModule, setSelectedModule] = useState('');
   const [selectedUnit, setSelectedUnit] = useState('');
   const [selectedSubject, setSelectedSubject] = useState('');
+
+  // ⬅️ NEW: filter by exam name
+  const [selectedExamName, setSelectedExamName] = useState('');
   
   const [examNameOption, setExamNameOption] = useState('select');
   const [customExamName, setCustomExamName] = useState('');
@@ -8626,19 +8626,16 @@ const ExamModule = ({
 
     for (const url of endpoints) {
       try {
-        console.log(`🔎 Trying staff endpoint: ${url}`);
         const res = await api.get(url);
         const arr = extractStaffArray(res.data);
-        console.log(`📥 ${url} → returned ${arr.length} record(s)`);
         if (arr.length > 0) { rawStaff = arr; usedEndpoint = url; break; }
       } catch (err) {
-        console.warn(`⚠️ Endpoint failed: ${url}`, err?.response?.status, err?.message);
         lastError = err;
       }
     }
 
     if (rawStaff.length === 0) {
-      setStaffLoadError(lastError?.response?.data?.message || lastError?.message || 'No staff records found for this school. Add staff in the Staff module first.');
+      setStaffLoadError(lastError?.response?.data?.message || lastError?.message || 'No staff records found for this school.');
       setTeachingStaff([]); setLoadingStaff(false); return;
     }
 
@@ -8714,6 +8711,17 @@ const ExamModule = ({
     return classes.map(c => ({ value: c.id, label: c.name, subLabel: `Capacity: ${c.capacity || 'N/A'}` }));
   }, [classes]);
 
+  // ⬅️ NEW: exam name filter options derived from existing exams
+  const examNameFilterOptions = useMemo(() => {
+    if (!exams || exams.length === 0) return [];
+    const names = [...new Set(exams.map(e => e.name).filter(Boolean))].sort();
+    return names.map(name => ({
+      value: name,
+      label: name,
+      subLabel: `${exams.filter(e => e.name === name).length} exam(s)`
+    }));
+  }, [exams]);
+
   const getUnitOptionsForFilters = useCallback(() => {
     if (!filteredUnitsForFilters || filteredUnitsForFilters.length === 0) return [];
     return filteredUnitsForFilters.map(u => ({ 
@@ -8775,7 +8783,7 @@ const ExamModule = ({
   }, [examForm.courseId, examForm.programId, units, isUniversity, isTVET]);
 
   // ============================================================
-  // SUBJECT FILTERING — TWO SEPARATE EFFECTS
+  // SUBJECT FILTERING
   // ============================================================
   useEffect(() => {
     if (!isRegularSchool || !subjects || subjects.length === 0) { setFilteredSubjectsForFilters([]); return; }
@@ -8895,10 +8903,16 @@ const ExamModule = ({
   };
 
   // ============================================================
-  // FILTERED EXAMS
+  // FILTERED EXAMS — now also filters by selectedExamName
   // ============================================================
   const filteredExams = useMemo(() => {
     let filtered = exams || [];
+
+    // ⬅️ NEW: apply exam-name filter first
+    if (selectedExamName) {
+      filtered = filtered.filter(e => e.name === selectedExamName);
+    }
+
     if (isUniversity) {
       if (selectedCourse) filtered = filtered.filter(e => e.courseId === selectedCourse);
       if (selectedYear) filtered = filtered.filter(e => e.year === parseInt(selectedYear));
@@ -8914,7 +8928,7 @@ const ExamModule = ({
       if (selectedSubject) filtered = filtered.filter(e => e.subjectId === selectedSubject);
     }
     return filtered;
-  }, [exams, selectedCourse, selectedProgram, selectedYear, selectedSemester, selectedModule, selectedUnit, selectedClass, selectedSubject, isUniversity, isTVET]);
+  }, [exams, selectedExamName, selectedCourse, selectedProgram, selectedYear, selectedSemester, selectedModule, selectedUnit, selectedClass, selectedSubject, isUniversity, isTVET]);
 
   // ============================================================
   // REFRESH EXAMS
@@ -9068,7 +9082,7 @@ const ExamModule = ({
       try {
         const existingResults = await api.get(`/results?examId=${resultForm.examId}&studentId=${resultForm.studentId}`);
         if (existingResults.data.results?.length > 0) existingResult = existingResults.data.results[0];
-      } catch (err) { console.log('No existing result found, creating new one'); }
+      } catch (err) { }
       
       let response;
       if (existingResult) response = await api.put(`/results/${existingResult.id}`, resultData);
@@ -9128,7 +9142,7 @@ const ExamModule = ({
       try {
         const res = await api.get(`/results/exam/${examId}`);
         existingResults = res.data.results || [];
-      } catch (err) { console.log('No existing results'); }
+      } catch (err) { }
       
       let itemName = '';
       if (isUniversity || isTVET) itemName = units?.find(u => u.id === exam.unitId)?.name || 'Unknown Unit';
@@ -9175,9 +9189,6 @@ const ExamModule = ({
     }
   };
 
-  // ============================================================
-  // SAVE BULK RESULTS
-  // ============================================================
   const saveBulkResults = async () => {
     if (!canAddResults) { alert('You do not have permission to add results'); return; }
     const hasResults = bulkResults.some(e => e.marks !== '' || e.isAbsent);
@@ -9235,9 +9246,6 @@ const ExamModule = ({
     } finally { setLoading(false); }
   };
 
-  // ============================================================
-  // SELECTION HANDLERS
-  // ============================================================
   const handleSelectAllForMessage = (checked) => {
     setSelectAllForMessage(checked);
     if (checked) setSelectedStudentsForMessage(bulkResults.map(s => s.studentId));
@@ -9251,17 +9259,11 @@ const ExamModule = ({
     }
   };
 
-  // ============================================================
-  // DELETE EXAM
-  // ============================================================
   const handleDeleteExam = (examId) => {
     if (!canDeleteExams) { alert('You do not have permission to delete exams'); return; }
     if (window.confirm('Delete this exam?')) handleDelete('/exams', examId, setExams, exams);
   };
 
-  // ============================================================
-  // LOAD EXAMS ON MOUNT
-  // ============================================================
   useEffect(() => { refreshExams(); }, []);
 
   const filteredBulkResults = bulkResults.filter(entry => 
@@ -9295,6 +9297,18 @@ const ExamModule = ({
   };
 
   // ============================================================
+  // HEADLINE for the printed schedule
+  //  - If an exam name filter is active → "<Name> Examinations"
+  //  - Otherwise → "Examination Schedule"
+  // ============================================================
+  const getPrintHeadline = () => {
+    if (selectedExamName) {
+      return `${selectedExamName} Examinations`;
+    }
+    return 'Examination Schedule';
+  };
+
+  // ============================================================
   // PRINT EXAMS LIST
   // ============================================================
   const handlePrintExams = () => {
@@ -9305,8 +9319,10 @@ const ExamModule = ({
 
     const schoolName = currentSchool?.name || 'School';
     const schoolLogo = currentSchool?.contact?.logo || currentSchool?.branding?.logo || currentSchool?.logo || '';
+    const headline = getPrintHeadline();
 
     const filterBits = [];
+    if (selectedExamName) filterBits.push(`Exam: ${selectedExamName}`);
     if (isUniversity && selectedCourse) filterBits.push(`Course: ${getCourseName(selectedCourse)}`);
     if (isTVET && selectedProgram) filterBits.push(`Program: ${getProgramName(selectedProgram)}`);
     if (isRegularSchool && selectedClass) filterBits.push(`Class: ${getClassName(selectedClass)}`);
@@ -9321,7 +9337,7 @@ const ExamModule = ({
         ${schoolLogo ? `<img src="${schoolLogo}" alt="Logo" class="print-logo" />` : ''}
         <div class="print-title-block">
           <h1 class="print-school-name">${escapeHtml(schoolName)}</h1>
-          <h2 class="print-doc-title">Examination Schedule</h2>
+          <h2 class="print-doc-title">${escapeHtml(headline)}</h2>
           <p class="print-generated">Generated on ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
         </div>
       </div>
@@ -9345,13 +9361,13 @@ const ExamModule = ({
       return `
         <tr>
           <td class="num">${i + 1}</td>
-          <td><div class="strong">${escapeHtml(exam.name)}</div><div class="small">${escapeHtml(exam.type)}</div></td>
           <td>${escapeHtml(paper)}</td>
           <td>${escapeHtml(scope)}</td>
           <td>${escapeHtml(date)}</td>
           <td>${escapeHtml(time)}</td>
           <td>${escapeHtml(exam.examHall || '—')}</td>
           <td>${escapeHtml(exam.invigilator || '—')}</td>
+          <td>${escapeHtml(exam.type || '—')}</td>
         </tr>
       `;
     }).join('');
@@ -9367,7 +9383,7 @@ const ExamModule = ({
       <!DOCTYPE html>
       <html>
         <head>
-          <title>${escapeHtml(schoolName)} — Examination Schedule</title>
+          <title>${escapeHtml(schoolName)} — ${escapeHtml(headline)}</title>
           <meta charset="UTF-8" />
           <style>
             @page { size: A4 landscape; margin: 12mm; }
@@ -9385,8 +9401,6 @@ const ExamModule = ({
             td { border: 1px solid #e5e7eb; padding: 6px; vertical-align: top; }
             tr:nth-child(even) td { background: #fafaff; }
             .num { text-align: center; font-weight: 700; color: #6b7280; width: 32px; }
-            .strong { font-weight: 700; color: #1f2937; }
-            .small { font-size: 10px; color: #6b7280; margin-top: 2px; }
             .print-footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; gap: 32px; font-size: 11px; color: #4b5563; }
             .signature-line { flex: 1; padding-top: 24px; }
             @media print { body { padding: 0; } tr { page-break-inside: avoid; } thead { display: table-header-group; } }
@@ -9399,13 +9413,13 @@ const ExamModule = ({
             <thead>
               <tr>
                 <th>#</th>
-                <th>Exam</th>
                 <th>${isUniversity || isTVET ? 'Unit' : 'Subject'}</th>
                 <th>${isUniversity ? 'Course' : isTVET ? 'Program' : 'Class'}</th>
                 <th>Date</th>
                 <th>Time</th>
                 <th>Hall</th>
                 <th>Invigilator</th>
+                <th>Type</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -9420,17 +9434,11 @@ const ExamModule = ({
   };
 
   // ============================================================
-  // PRINT RESULTS SHEET (Bulk Modal)
+  // PRINT RESULTS SHEET
   // ============================================================
   const handlePrintResults = () => {
-    if (!selectedExamForResults) {
-      alert('No exam selected.');
-      return;
-    }
-    if (!bulkResults || bulkResults.length === 0) {
-      alert('No students to print.');
-      return;
-    }
+    if (!selectedExamForResults) { alert('No exam selected.'); return; }
+    if (!bulkResults || bulkResults.length === 0) { alert('No students to print.'); return; }
 
     const exam = exams.find(e => e.id === selectedExamForResults);
     if (!exam) { alert('Exam not found.'); return; }
@@ -9692,10 +9700,20 @@ const ExamModule = ({
         </div>
       </div>
 
-      {/* Filters Section */}
+      {/* Filters Section — now with Exam Name dropdown */}
       <div className="bg-white p-6 rounded-xl shadow-sm">
         <h3 className="text-lg font-semibold mb-4">🔍 Filter Exams</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* ⬅️ NEW: Exam Name filter */}
+          <SearchableSelect
+            label="Exam Name / Term"
+            value={selectedExamName}
+            onChange={(e) => setSelectedExamName(e.target.value)}
+            options={examNameFilterOptions}
+            placeholder="All exam names"
+            emptyMessage="No exam names yet"
+          />
+
           {isUniversity && (<>
             <SearchableSelect label="Course" value={selectedCourse}
               onChange={(e) => { setSelectedCourse(e.target.value); setSelectedUnit(''); setSelectedSemester(''); }}
@@ -9743,11 +9761,17 @@ const ExamModule = ({
         <div className="mt-4 flex justify-between items-center">
           <p className="text-sm text-gray-500">
             Found <span className="font-bold text-indigo-600">{filteredExams.length}</span> exam(s)
+            {selectedExamName && (
+              <span className="ml-2 text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full">
+                Headline will be: <strong>{getPrintHeadline()}</strong>
+              </span>
+            )}
           </p>
           <div className="flex gap-3">
-            {(selectedCourse || selectedProgram || selectedClass || selectedSubject || selectedUnit || selectedYear || selectedSemester || selectedModule) && (
+            {(selectedExamName || selectedCourse || selectedProgram || selectedClass || selectedSubject || selectedUnit || selectedYear || selectedSemester || selectedModule) && (
               <button
                 onClick={() => {
+                  setSelectedExamName('');
                   setSelectedCourse(''); setSelectedProgram(''); setSelectedClass('');
                   setSelectedSubject(''); setSelectedUnit(''); setSelectedYear('');
                   setSelectedSemester(''); setSelectedModule('');
@@ -9769,7 +9793,7 @@ const ExamModule = ({
         </div>
       </div>
 
-      {/* Exam Form Modal */}
+      {/* Exam Form Modal — unchanged */}
       {showExamForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-white p-6 rounded-xl shadow-sm max-w-4xl w-full max-h-[90vh] overflow-auto">
@@ -9891,12 +9915,6 @@ const ExamModule = ({
                       placeholder={`Search ${isUniversity ? 'unit' : 'module'}...`}
                       emptyMessage={`No ${isUniversity ? 'units' : 'modules'} available`}
                       required disabled={(!examForm.courseId && !examForm.programId)} />
-                    {filteredUnitsForForm.length > 0 && (
-                      <p className="text-xs text-green-600 mt-1">
-                        <i className="fas fa-check-circle mr-1"></i>
-                        {filteredUnitsForForm.length} {isUniversity ? 'units' : 'modules'} available
-                      </p>
-                    )}
                   </div>
                 )}
 
@@ -9907,12 +9925,6 @@ const ExamModule = ({
                       options={getSubjectOptionsForForm()} placeholder="Search subject..."
                       emptyMessage={!examForm.classId ? "Select a class first" : "No subjects available for this class"}
                       required disabled={!examForm.classId} />
-                    {examForm.classId && filteredSubjectsForForm.length > 0 && (
-                      <p className="text-xs text-green-600 mt-1">
-                        <i className="fas fa-check-circle mr-1"></i>
-                        {filteredSubjectsForForm.length} subject(s) available for {getClassName(examForm.classId)}
-                      </p>
-                    )}
                   </div>
                 )}
 
@@ -9984,18 +9996,6 @@ const ExamModule = ({
                   {examForm.invigilatorId && (
                     <p className="text-xs text-gray-500 mt-1">Selected: {getStaffName(examForm.invigilatorId)}</p>
                   )}
-                  {!loadingStaff && teachingStaff.length > 0 && (
-                    <p className="text-xs text-green-600 mt-1">
-                      <i className="fas fa-check-circle mr-1"></i>
-                      {teachingStaff.length} teaching staff available
-                    </p>
-                  )}
-                  {!loadingStaff && teachingStaff.length === 0 && (
-                    <button type="button" onClick={fetchTeachingStaff}
-                      className="text-xs text-indigo-600 hover:text-indigo-800 mt-1 underline">
-                      Reload teaching staff
-                    </button>
-                  )}
                 </div>
               </div>
 
@@ -10016,7 +10016,7 @@ const ExamModule = ({
         </div>
       )}
 
-      {/* Single Result Modal */}
+      {/* Single Result Modal — unchanged */}
       {showResultForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-xl shadow-sm max-w-md w-full">
@@ -10046,9 +10046,6 @@ const ExamModule = ({
                   className="w-full px-3 py-2 border rounded-lg" min="0"
                   max={exams.find(e => e.id === resultForm.examId)?.maxMarks || 100}
                   disabled={resultForm.isAbsent} step="0.5" />
-                <p className="text-xs text-gray-500 mt-1">
-                  Max: {exams.find(e => e.id === resultForm.examId)?.maxMarks || 100} marks
-                </p>
               </div>
               <div className="flex items-center space-x-2">
                 <input type="checkbox" id="isAbsent" checked={resultForm.isAbsent}
@@ -10078,7 +10075,7 @@ const ExamModule = ({
         </div>
       )}
 
-      {/* Bulk Results Modal */}
+      {/* Bulk Results Modal — unchanged */}
       {showBulkResultForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-white p-6 rounded-xl shadow-sm max-w-6xl w-full max-h-[90vh] overflow-auto">
@@ -10180,7 +10177,7 @@ const ExamModule = ({
         </div>
       )}
 
-      {/* Exams Table */}
+      {/* Exams Table — unchanged */}
       <div className="bg-white rounded-xl shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -32862,6 +32859,814 @@ const FeesModule = ({
           </div>
         </div>
       </div>
+    </div>
+  );
+};
+
+
+// ==================== FEE TRANSFER MODULE ====================
+const FeeTransferModule = ({
+  currentSchool,
+  user,
+  students = [],
+  onRefreshFees
+}) => {
+  const [transfers, setTransfers] = useState([]);
+  const [stats, setStats] = useState({ pending: 0, approved: 0, rejected: 0, cancelled: 0, totalAmount: 0 });
+  const [loading, setLoading] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [showApproveModal, setShowApproveModal] = useState(false);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [selectedTransfer, setSelectedTransfer] = useState(null);
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+
+  const [form, setForm] = useState({
+    fromStudentId: '',
+    toStudentId: '',
+    amount: '',
+    reason: '',
+    requestNotes: ''
+  });
+
+  const [fromBalance, setFromBalance] = useState(null);
+  const [loadingBalance, setLoadingBalance] = useState(false);
+  const [approvalNotes, setApprovalNotes] = useState('');
+  const [rejectReason, setRejectReason] = useState('');
+
+  // ============ PERMISSIONS ============
+  const canInitiate = ['SUPER_ADMIN','SCHOOL_ADMIN','PRINCIPAL','DEPUTY_PRINCIPAL','ACCOUNTANT','FINANCE_OFFICER'].includes(user?.role);
+  const canApprove  = ['SUPER_ADMIN','SCHOOL_ADMIN','PRINCIPAL','DEPUTY_PRINCIPAL','HEAD_TEACHER'].includes(user?.role);
+
+  // ============ HELPERS ============
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-KE', {
+      style: 'currency',
+      currency: 'KES',
+      minimumFractionDigits: 0
+    }).format(amount || 0);
+  };
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return '—';
+    const d = new Date(dateStr);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  const formatDateTime = (dateStr) => {
+    if (!dateStr) return '—';
+    const d = new Date(dateStr);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'PENDING':   return 'bg-yellow-100 text-yellow-800';
+      case 'APPROVED':  return 'bg-green-100 text-green-800';
+      case 'REJECTED':  return 'bg-red-100 text-red-800';
+      case 'CANCELLED': return 'bg-gray-100 text-gray-800';
+      default:          return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getStudentLabel = (student) => {
+    if (!student) return 'Unknown';
+    return `${student.firstName || ''} ${student.lastName || ''} (${student.admissionNumber || '—'})`.trim();
+  };
+
+  const getUserName = (u) => {
+    if (!u) return '—';
+    return `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email || '—';
+  };
+
+  // ============ LOAD ============
+  const loadTransfers = async () => {
+    setLoading(true);
+    setErrorMessage('');
+    try {
+      const params = {};
+      if (filterStatus !== 'all') params.status = filterStatus;
+      const res = await api.get('/fee-transfers', { params });
+      setTransfers(res.data.transfers || []);
+    } catch (err) {
+      console.error('Load transfers error:', err);
+      setErrorMessage(err.response?.data?.message || 'Failed to load transfers');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadStats = async () => {
+    try {
+      const res = await api.get('/fee-transfers/stats');
+      setStats(res.data.stats || { pending: 0, approved: 0, rejected: 0, cancelled: 0, totalAmount: 0 });
+    } catch (err) {
+      console.error('Load stats error:', err);
+    }
+  };
+
+  useEffect(() => { loadTransfers(); }, [filterStatus]);
+  useEffect(() => { loadStats(); }, []);
+
+  // Load sender's transferable balance whenever fromStudentId changes
+  useEffect(() => {
+    if (!form.fromStudentId) {
+      setFromBalance(null);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      setLoadingBalance(true);
+      try {
+        const res = await api.get(`/students/${form.fromStudentId}/transferable-balance`);
+        if (!cancelled) setFromBalance(res.data);
+      } catch (err) {
+        if (!cancelled) {
+          console.error('Load balance error:', err);
+          setFromBalance(null);
+        }
+      } finally {
+        if (!cancelled) setLoadingBalance(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [form.fromStudentId]);
+
+  // ============ SUBMIT ============
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    if (!form.fromStudentId)  { setErrorMessage('Select sender student'); return; }
+    if (!form.toStudentId)    { setErrorMessage('Select receiver student'); return; }
+    if (form.fromStudentId === form.toStudentId) {
+      setErrorMessage('Sender and receiver must be different students'); return;
+    }
+    const amt = parseFloat(form.amount);
+    if (!Number.isFinite(amt) || amt <= 0) { setErrorMessage('Enter a valid amount'); return; }
+    if (fromBalance && amt > fromBalance.transferable) {
+      setErrorMessage(`Amount exceeds available balance (${formatCurrency(fromBalance.transferable)})`);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await api.post('/fee-transfers', {
+        fromStudentId: form.fromStudentId,
+        toStudentId: form.toStudentId,
+        amount: amt,
+        reason: form.reason || null,
+        requestNotes: form.requestNotes || null
+      });
+      setSuccessMessage('✅ Transfer request submitted for approval');
+      setShowForm(false);
+      setForm({ fromStudentId: '', toStudentId: '', amount: '', reason: '', requestNotes: '' });
+      setFromBalance(null);
+      await Promise.all([loadTransfers(), loadStats()]);
+      setTimeout(() => setSuccessMessage(''), 4000);
+    } catch (err) {
+      setErrorMessage(err.response?.data?.message || 'Failed to submit transfer');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ============ APPROVE ============
+  const openApprove = (transfer) => {
+    setSelectedTransfer(transfer);
+    setApprovalNotes('');
+    setShowApproveModal(true);
+  };
+
+  const handleApprove = async () => {
+    if (!selectedTransfer) return;
+    setLoading(true);
+    setErrorMessage('');
+    try {
+      await api.patch(`/fee-transfers/${selectedTransfer.id}/approve`, { approvalNotes });
+      setSuccessMessage('✅ Transfer approved and money moved');
+      setShowApproveModal(false);
+      setSelectedTransfer(null);
+      await Promise.all([loadTransfers(), loadStats()]);
+      if (typeof onRefreshFees === 'function') onRefreshFees();
+      setTimeout(() => setSuccessMessage(''), 4000);
+    } catch (err) {
+      setErrorMessage(err.response?.data?.message || 'Failed to approve transfer');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ============ REJECT ============
+  const openReject = (transfer) => {
+    setSelectedTransfer(transfer);
+    setRejectReason('');
+    setShowRejectModal(true);
+  };
+
+  const handleReject = async () => {
+    if (!selectedTransfer) return;
+    if (!rejectReason.trim()) { setErrorMessage('Please provide a reason'); return; }
+    setLoading(true);
+    setErrorMessage('');
+    try {
+      await api.patch(`/fee-transfers/${selectedTransfer.id}/reject`, { rejectReason });
+      setSuccessMessage('Transfer rejected');
+      setShowRejectModal(false);
+      setSelectedTransfer(null);
+      await Promise.all([loadTransfers(), loadStats()]);
+      setTimeout(() => setSuccessMessage(''), 4000);
+    } catch (err) {
+      setErrorMessage(err.response?.data?.message || 'Failed to reject transfer');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ============ CANCEL ============
+  const handleCancel = async (transfer) => {
+    if (!window.confirm('Cancel this transfer request?')) return;
+    setLoading(true);
+    try {
+      await api.patch(`/fee-transfers/${transfer.id}/cancel`);
+      setSuccessMessage('Transfer cancelled');
+      await Promise.all([loadTransfers(), loadStats()]);
+      setTimeout(() => setSuccessMessage(''), 4000);
+    } catch (err) {
+      setErrorMessage(err.response?.data?.message || 'Failed to cancel transfer');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ============ FILTERED LIST ============
+  const filteredTransfers = useMemo(() => {
+    if (!searchTerm.trim()) return transfers;
+    const s = searchTerm.trim().toLowerCase();
+    return transfers.filter(t => {
+      const from = t.fromStudent || {};
+      const to = t.toStudent || {};
+      return (
+        (from.firstName || '').toLowerCase().includes(s) ||
+        (from.lastName || '').toLowerCase().includes(s) ||
+        (from.admissionNumber || '').toLowerCase().includes(s) ||
+        (to.firstName || '').toLowerCase().includes(s) ||
+        (to.lastName || '').toLowerCase().includes(s) ||
+        (to.admissionNumber || '').toLowerCase().includes(s) ||
+        (t.reason || '').toLowerCase().includes(s)
+      );
+    });
+  }, [transfers, searchTerm]);
+
+  // ============ STUDENT OPTIONS ============
+  const studentOptions = useMemo(() => {
+    return (students || [])
+      .filter(s => s && s.id)
+      .map(s => ({
+        value: s.id,
+        label: `${s.firstName || ''} ${s.lastName || ''}`.trim(),
+        subLabel: `Adm: ${s.admissionNumber || '—'}`
+      }));
+  }, [students]);
+
+  // ============ RENDER ============
+  return (
+    <div className="space-y-6">
+      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50" />}
+
+      {successMessage && (
+        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center justify-between">
+          <span><i className="fas fa-check-circle mr-2" />{successMessage}</span>
+          <button onClick={() => setSuccessMessage('')} className="text-green-500 hover:text-green-700">
+            <i className="fas fa-times" />
+          </button>
+        </div>
+      )}
+      {errorMessage && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
+          <span><i className="fas fa-exclamation-circle mr-2" />{errorMessage}</span>
+          <button onClick={() => setErrorMessage('')} className="text-red-500 hover:text-red-700">
+            <i className="fas fa-times" />
+          </button>
+        </div>
+      )}
+
+      {/* Header */}
+      <div className="flex flex-wrap justify-between items-center gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800">
+            <i className="fas fa-exchange-alt mr-2 text-indigo-600" />
+            Fee Transfers
+          </h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Transfer paid fees between students. Requires Principal / Admin / Head Teacher approval.
+          </p>
+        </div>
+        {canInitiate && (
+          <button
+            onClick={() => setShowForm(true)}
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2"
+          >
+            <i className="fas fa-plus" />New Transfer Request
+          </button>
+        )}
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="bg-yellow-50 border border-yellow-200 p-4 rounded-lg text-center">
+          <p className="text-xs text-yellow-700 uppercase font-semibold">Pending</p>
+          <p className="text-2xl font-bold text-yellow-800">{stats.pending}</p>
+        </div>
+        <div className="bg-green-50 border border-green-200 p-4 rounded-lg text-center">
+          <p className="text-xs text-green-700 uppercase font-semibold">Approved</p>
+          <p className="text-2xl font-bold text-green-800">{stats.approved}</p>
+        </div>
+        <div className="bg-red-50 border border-red-200 p-4 rounded-lg text-center">
+          <p className="text-xs text-red-700 uppercase font-semibold">Rejected</p>
+          <p className="text-2xl font-bold text-red-800">{stats.rejected}</p>
+        </div>
+        <div className="bg-gray-50 border border-gray-200 p-4 rounded-lg text-center">
+          <p className="text-xs text-gray-700 uppercase font-semibold">Cancelled</p>
+          <p className="text-2xl font-bold text-gray-800">{stats.cancelled}</p>
+        </div>
+        <div className="bg-indigo-50 border border-indigo-200 p-4 rounded-lg text-center">
+          <p className="text-xs text-indigo-700 uppercase font-semibold">Total Moved</p>
+          <p className="text-xl font-bold text-indigo-800">{formatCurrency(stats.totalAmount)}</p>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="bg-white p-4 rounded-xl shadow-sm border flex flex-wrap gap-3 items-center">
+        <div className="flex-1 min-w-[220px]">
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Search by student name, admission no, or reason…"
+            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+        <select
+          value={filterStatus}
+          onChange={(e) => setFilterStatus(e.target.value)}
+          className="px-3 py-2 border rounded-lg"
+        >
+          <option value="all">All Statuses</option>
+          <option value="PENDING">Pending</option>
+          <option value="APPROVED">Approved</option>
+          <option value="REJECTED">Rejected</option>
+          <option value="CANCELLED">Cancelled</option>
+        </select>
+        <button onClick={() => { loadTransfers(); loadStats(); }}
+                className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700">
+          <i className="fas fa-sync-alt mr-1" />Refresh
+        </button>
+      </div>
+
+      {/* Form Modal */}
+      {showForm && canInitiate && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold">
+                <i className="fas fa-exchange-alt mr-2 text-indigo-600" />
+                New Fee Transfer Request
+              </h3>
+              <button onClick={() => setShowForm(false)} className="text-gray-500 hover:text-gray-700">
+                <i className="fas fa-times" />
+              </button>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 text-blue-800 p-3 rounded-lg text-sm mb-4">
+              <i className="fas fa-info-circle mr-2" />
+              Money will be moved from the sender's paid balance to the receiver's account.
+              A Principal, Admin, or Head Teacher must approve before the transfer is finalized.
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {/* FROM */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  From Student (Sender) <span className="text-red-500">*</span>
+                </label>
+                <SearchableSelectLocal
+                  value={form.fromStudentId}
+                  onChange={(e) => setForm({ ...form, fromStudentId: e.target.value })}
+                  options={studentOptions}
+                  placeholder="Search sender student…"
+                  emptyMessage="No students available"
+                />
+                {loadingBalance && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    <i className="fas fa-spinner fa-spin mr-1" />Checking balance…
+                  </p>
+                )}
+                {fromBalance && !loadingBalance && (
+                  <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                    <div className="bg-gray-50 border rounded p-2">
+                      <p className="text-gray-500">Total Paid</p>
+                      <p className="font-bold text-gray-800">{formatCurrency(fromBalance.totalPaid)}</p>
+                    </div>
+                    <div className="bg-yellow-50 border border-yellow-200 rounded p-2">
+                      <p className="text-yellow-700">Pending</p>
+                      <p className="font-bold text-yellow-800">{formatCurrency(fromBalance.pendingAmount)}</p>
+                    </div>
+                    <div className="bg-green-50 border border-green-200 rounded p-2">
+                      <p className="text-green-700">Available</p>
+                      <p className="font-bold text-green-800">{formatCurrency(fromBalance.transferable)}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* TO */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  To Student (Receiver) <span className="text-red-500">*</span>
+                </label>
+                <SearchableSelectLocal
+                  value={form.toStudentId}
+                  onChange={(e) => setForm({ ...form, toStudentId: e.target.value })}
+                  options={studentOptions.filter(o => o.value !== form.fromStudentId)}
+                  placeholder="Search receiver student…"
+                  emptyMessage="No students available"
+                />
+              </div>
+
+              {/* AMOUNT */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Amount (KES) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  step="0.01"
+                  value={form.amount}
+                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                  placeholder="e.g., 5000"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  required
+                />
+                {fromBalance && form.amount && parseFloat(form.amount) > fromBalance.transferable && (
+                  <p className="text-xs text-red-600 mt-1">
+                    <i className="fas fa-exclamation-triangle mr-1" />
+                    Exceeds available balance ({formatCurrency(fromBalance.transferable)})
+                  </p>
+                )}
+              </div>
+
+              {/* REASON */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Reason for Transfer
+                </label>
+                <input
+                  type="text"
+                  value={form.reason}
+                  onChange={(e) => setForm({ ...form, reason: e.target.value })}
+                  placeholder="e.g., Parent requested transfer of overpaid fees"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              {/* NOTES */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Additional Notes (optional)
+                </label>
+                <textarea
+                  value={form.requestNotes}
+                  onChange={(e) => setForm({ ...form, requestNotes: e.target.value })}
+                  rows={3}
+                  placeholder="Any extra context for the approver…"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2 border-t">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 bg-indigo-600 text-white py-2.5 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {loading ? 'Submitting…' : 'Submit for Approval'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowForm(false); setFromBalance(null); }}
+                  className="bg-gray-500 text-white py-2.5 px-6 rounded-lg hover:bg-gray-600"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Approve Modal */}
+      {showApproveModal && selectedTransfer && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+            <h3 className="text-xl font-bold mb-2 text-green-700">
+              <i className="fas fa-check-circle mr-2" />Approve Transfer
+            </h3>
+            <p className="text-sm text-gray-600 mb-4">
+              This will move <strong>{formatCurrency(selectedTransfer.amount)}</strong> from{' '}
+              <strong>{getStudentLabel(selectedTransfer.fromStudent)}</strong> to{' '}
+              <strong>{getStudentLabel(selectedTransfer.toStudent)}</strong>.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Approval Notes (optional)</label>
+                <textarea
+                  value={approvalNotes}
+                  onChange={(e) => setApprovalNotes(e.target.value)}
+                  rows={3}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500"
+                  placeholder="e.g., Verified by bursar"
+                />
+              </div>
+              <div className="flex gap-2 pt-2 border-t">
+                <button
+                  onClick={handleApprove}
+                  disabled={loading}
+                  className="flex-1 bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 disabled:opacity-50"
+                >
+                  {loading ? 'Approving…' : 'Approve & Move Money'}
+                </button>
+                <button
+                  onClick={() => { setShowApproveModal(false); setSelectedTransfer(null); }}
+                  className="bg-gray-500 text-white py-2 px-6 rounded-lg hover:bg-gray-600"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reject Modal */}
+      {showRejectModal && selectedTransfer && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+            <h3 className="text-xl font-bold mb-2 text-red-700">
+              <i className="fas fa-times-circle mr-2" />Reject Transfer
+            </h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Rejecting the transfer of <strong>{formatCurrency(selectedTransfer.amount)}</strong>.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Reason for Rejection <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  rows={3}
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-red-500"
+                  placeholder="e.g., Insufficient documentation"
+                  required
+                />
+              </div>
+              <div className="flex gap-2 pt-2 border-t">
+                <button
+                  onClick={handleReject}
+                  disabled={loading || !rejectReason.trim()}
+                  className="flex-1 bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 disabled:opacity-50"
+                >
+                  {loading ? 'Rejecting…' : 'Confirm Rejection'}
+                </button>
+                <button
+                  onClick={() => { setShowRejectModal(false); setSelectedTransfer(null); }}
+                  className="bg-gray-500 text-white py-2 px-6 rounded-lg hover:bg-gray-600"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Table */}
+      <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-200">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">From (Sender)</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">To (Receiver)</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reason</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Requested By</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {filteredTransfers.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-12 text-center text-gray-500">
+                    <i className="fas fa-exchange-alt text-5xl text-gray-300 mb-3 block" />
+                    <p className="text-lg font-medium">No transfers found</p>
+                    <p className="text-sm text-gray-400 mt-1">
+                      {filterStatus === 'all' && !searchTerm
+                        ? 'Click "New Transfer Request" to get started'
+                        : 'Try adjusting your filters'}
+                    </p>
+                  </td>
+                </tr>
+              ) : (
+                filteredTransfers.map(t => (
+                  <tr key={t.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      {formatDate(t.requestedAt || t.createdAt)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-gray-800">{t.fromStudent?.firstName} {t.fromStudent?.lastName}</p>
+                      <p className="text-xs text-gray-500 font-mono">{t.fromStudent?.admissionNumber}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-gray-800">{t.toStudent?.firstName} {t.toStudent?.lastName}</p>
+                      <p className="text-xs text-gray-500 font-mono">{t.toStudent?.admissionNumber}</p>
+                    </td>
+                    <td className="px-4 py-3 text-right font-bold text-indigo-700">
+                      {formatCurrency(t.amount)}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600 max-w-xs truncate" title={t.reason || ''}>
+                      {t.reason || '—'}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      {getUserName(t.requestedByUser)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(t.status)}`}>
+                        {t.status}
+                      </span>
+                      {t.status === 'APPROVED' && t.approvedByUser && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          by {getUserName(t.approvedByUser)} · {formatDate(t.approvedAt)}
+                        </p>
+                      )}
+                      {t.status === 'REJECTED' && (
+                        <p className="text-xs text-red-600 mt-1" title={t.rejectReason || ''}>
+                          {t.rejectReason ? t.rejectReason.substring(0, 40) + (t.rejectReason.length > 40 ? '…' : '') : ''}
+                        </p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex flex-wrap gap-1 justify-end">
+                        {t.status === 'PENDING' && canApprove && (
+                          <>
+                            <button
+                              onClick={() => openApprove(t)}
+                              className="text-xs px-3 py-1.5 bg-green-50 text-green-700 rounded-md hover:bg-green-100 font-medium whitespace-nowrap"
+                              title="Approve"
+                            >
+                              <i className="fas fa-check mr-1" />Approve
+                            </button>
+                            <button
+                              onClick={() => openReject(t)}
+                              className="text-xs px-3 py-1.5 bg-red-50 text-red-700 rounded-md hover:bg-red-100 font-medium whitespace-nowrap"
+                              title="Reject"
+                            >
+                              <i className="fas fa-times mr-1" />Reject
+                            </button>
+                          </>
+                        )}
+                        {t.status === 'PENDING' && (
+                          <button
+                            onClick={() => handleCancel(t)}
+                            className="text-xs px-3 py-1.5 bg-gray-50 text-gray-700 rounded-md hover:bg-gray-100 font-medium whitespace-nowrap"
+                            title="Cancel"
+                          >
+                            Cancel
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Details expander — optional: show full transfer log when hovering on a row */}
+    </div>
+  );
+};
+
+// ============================================================
+//  Local SearchableSelect — a small version used by the form
+//  (in case you don't have one at module scope already)
+// ============================================================
+const SearchableSelectLocal = ({ value, onChange, options = [], placeholder = '', emptyMessage = 'No options' }) => {
+  const [search, setSearch] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const wrapRef = useRef(null);
+
+  const safeOptions = Array.isArray(options) ? options : [];
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return safeOptions;
+    const s = search.toLowerCase();
+    return safeOptions.filter(o =>
+      (o.label || '').toLowerCase().includes(s) ||
+      (o.subLabel || '').toLowerCase().includes(s) ||
+      String(o.value ?? '').toLowerCase().includes(s)
+    );
+  }, [safeOptions, search]);
+
+  const selected = useMemo(
+    () => safeOptions.find(o => String(o.value) === String(value)) || null,
+    [safeOptions, value]
+  );
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onDown = (e) => {
+      if (!wrapRef.current) return;
+      if (wrapRef.current.contains(e.target)) return;
+      setIsOpen(false); setIsFocused(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [isOpen]);
+
+  const display = isFocused ? search : (selected ? selected.label : '');
+
+  return (
+    <div className="relative" ref={wrapRef}>
+      <input
+        type="text"
+        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
+        value={display}
+        onChange={(e) => {
+          setSearch(e.target.value);
+          setIsOpen(true); setIsFocused(true);
+          if (e.target.value === '') onChange({ target: { value: '' } });
+        }}
+        onFocus={() => {
+          setIsFocused(true); setIsOpen(true);
+          if (selected && !search) setSearch(selected.label);
+        }}
+        onBlur={() => setTimeout(() => {
+          if (!wrapRef.current) return;
+          if (wrapRef.current.contains(document.activeElement)) return;
+          setIsOpen(false); setIsFocused(false);
+          setSearch(selected ? selected.label : '');
+        }, 120)}
+        placeholder={placeholder}
+        autoComplete="off"
+      />
+      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+        <svg className={`w-4 h-4 text-gray-400 ${isOpen ? 'rotate-180' : ''}`}
+             fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </div>
+      {isOpen && (
+        <div className="absolute left-0 right-0 top-full mt-1 bg-white border rounded-lg shadow-xl max-h-60 overflow-auto z-[9999]">
+          {safeOptions.length === 0 ? (
+            <div className="px-3 py-4 text-center text-gray-500 text-sm">{emptyMessage}</div>
+          ) : filtered.length === 0 ? (
+            <div className="px-3 py-4 text-center text-gray-500 text-sm">No results</div>
+          ) : (
+            filtered.map((opt, i) => (
+              <div
+                key={String(opt.value ?? i)}
+                className={`px-3 py-2 cursor-pointer border-b last:border-b-0 ${
+                  String(opt.value) === String(value) ? 'bg-indigo-50 text-indigo-700' : 'hover:bg-indigo-50'
+                }`}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  onChange({ target: { value: opt.value } });
+                  setSearch(opt.label);
+                  setIsOpen(false); setIsFocused(false);
+                }}
+              >
+                <div className="font-medium">{opt.label}</div>
+                {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -62915,7 +63720,7 @@ const canAccessModule = (user, moduleId) => {
       'dashboard', 'classes', 'subjects', 'students', 'staff', 'exams',
       'results', 'timetable', 'attendance', 'schemes-of-work', 'course-units',
       'promotion', 'exam-cards', 'student-arrival', 'fees', 'fee-allocation',
-      'fee-collection', 'receipt-history', 'reports', 'fee-reminders',
+      'fee-collection', 'receipt-history', 'reports', 'fee-reminders','fee-transfers',
       'staff-attendance', 'payroll', 'card-management', 'certificates',
       'alumni', 'live-classroom', 'online-exams', 'receptionist', 'events',
       'announcements', 'messages', 'settings', 'course-enrollment',
@@ -62930,7 +63735,7 @@ const canAccessModule = (user, moduleId) => {
     ],
     'ACCOUNTANT': [
       'dashboard', 'fees', 'fee-allocation', 'fee-collection', 'receipt-history',
-      'other-income', 'expenses', 'reports', 'fee-reminders', 'payroll',
+      'other-income', 'expenses', 'reports', 'fee-reminders',  'fee-transfers', 'payroll',
       'receptionist', 'events', 'announcements', 'settings'
     ],
     'LIBRARIAN': [
@@ -62963,7 +63768,7 @@ const canAccessModule = (user, moduleId) => {
       'schemes-of-work', 'course-units', 'promotion', 'exam-cards',
       'student-arrival', 'fees', 'fee-allocation', 'fee-collection',
       'receipt-history', 'other-income', 'expenses', 'reports',
-      'fee-reminders', 'staff', 'staff-attendance', 'payroll',
+      'fee-reminders','fee-transfers', 'staff', 'staff-attendance', 'payroll',
       'library', 'transport', 'hostel', 'inventory', 'card-management',
       'certificates', 'alumni', 'live-classroom', 'online-exams',
       'receptionist', 'events', 'announcements', 'messages', 'settings',
@@ -63395,7 +64200,8 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
           { icon: "credit-card", label: "Fee Collection", id: 'fee-collection' },
           { icon: "receipt", label: "Receipt History", id: 'receipt-history' },
           { icon: "file-invoice", label: "Reports", id: 'reports' },
-          { icon: "bell", label: "Fee Reminders", id: 'fee-reminders' }
+          { icon: "bell", label: "Fee Reminders", id: 'fee-reminders' },
+          { icon: "exchange-alt", label: "Fee Transfers", id: 'fee-transfers' }
         ]
       },
       {
@@ -63498,6 +64304,7 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
           { icon: "minus-circle", label: "Expenses", id: 'expenses' },
           { icon: "file-invoice", label: "Reports", id: 'reports' },
           { icon: "bell", label: "Fee Reminders", id: 'fee-reminders' },
+             { icon: "exchange-alt", label: "Fee Transfers", id: 'fee-transfers' },
           { icon: "money-bill-wave", label: "Payroll", id: 'payroll' }
         ]
       },
@@ -63760,7 +64567,8 @@ if (isTVET) {
         { icon: "plus-circle", label: "Other Income", id: 'other-income' },
         { icon: "minus-circle", label: "Expenses", id: 'expenses' },
         { icon: "file-invoice", label: "Reports", id: 'reports' },
-        { icon: "bell", label: "Fee Reminders", id: 'fee-reminders' }
+        { icon: "bell", label: "Fee Reminders", id: 'fee-reminders' },
+           { icon: "exchange-alt", label: "Fee Transfers", id: 'fee-transfers' }
       ]
     },
     {
@@ -66288,6 +67096,19 @@ return (
             user={user} 
           />
         )}
+
+        {activeModule === 'fee-transfers' && canAccessModule(user, 'fee-transfers') && (
+  <FeeTransferModule
+    currentSchool={currentSchool}
+    user={user}
+    students={students}
+    onRefreshFees={() => {
+      // optional: refetch payments/fees
+      fetchData('/payments', setPayments, 'payments');
+      fetchData('/fees', setFees, 'fees');
+    }}
+  />
+)}
 
         {activeModule === 'reports' && canAccessModule(user, 'reports') && (
           <ReportsModule 
