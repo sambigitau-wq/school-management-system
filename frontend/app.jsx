@@ -37911,6 +37911,7 @@ const SettingsModule = ({
     </div>
   );
 };
+
 // ==================== COMPLETE STAFF ATTENDANCE MODULE (SCHOOL-AWARE) ====================
 const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user }) => {
   console.log('👤 StaffAttendanceModule initialized');
@@ -38122,7 +38123,6 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDepartment, setSelectedDepartment] = useState('');
-  const [selectedSubject, setSelectedSubject] = useState('');
   const [viewMode, setViewMode] = useState('self');
   const [myAttendance, setMyAttendance] = useState([]);
   const [myPendingRequests, setMyPendingRequests] = useState([]);
@@ -38156,8 +38156,8 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
   ], []);
 
   // ==================== DYNAMIC FILTER OPTIONS ====================
-  // University/TVET → Department
-  // Primary/Secondary → Subject
+  // University/TVET → Department filter
+  // Primary/Secondary → Staff Type filter (subjects removed)
   // Fallback → Staff Type
   const filterOptions = useMemo(() => {
     const opts = [];
@@ -38179,37 +38179,8 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
       return opts;
     }
 
-    if (isPrimaryOrSecondary) {
-      // Flatten all subjects across all staff
-      const subjectCounts = {};
-      (staff || []).forEach(s => {
-        const subs = Array.isArray(s.subjects) ? s.subjects : [];
-        subs.forEach(sub => {
-          if (!sub) return;
-          const key = typeof sub === 'string' ? sub : (sub.name || sub.code || '');
-          if (!key) return;
-          subjectCounts[key] = (subjectCounts[key] || 0) + 1;
-        });
-      });
-
-      const subjectKeys = Object.keys(subjectCounts).sort();
-      if (subjectKeys.length === 0) {
-        opts.push({ value: '', label: 'No subjects assigned to staff yet' });
-      } else {
-        opts.push({ value: '', label: 'All Subjects' });
-        subjectKeys.forEach(sub => {
-          opts.push({
-            value: sub,
-            label: sub,
-            subLabel: `${subjectCounts[sub]} teacher${subjectCounts[sub] !== 1 ? 's' : ''}`
-          });
-        });
-      }
-      return opts;
-    }
-
-    // Fallback: staff type
-    opts.push({ value: '', label: 'All Staff' });
+    // Primary/Secondary AND fallback: staff type
+    opts.push({ value: '', label: 'All Staff Types' });
     ['TEACHING', 'NON_TEACHING', 'ACADEMIC', 'ADMINISTRATIVE', 'TECHNICAL', 'RESEARCH'].forEach(t => {
       const count = (staff || []).filter(s => s.staffType === t).length;
       if (count > 0) {
@@ -38221,14 +38192,13 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
       }
     });
     return opts;
-  }, [staff, isUniversityOrTVET, isPrimaryOrSecondary]);
+  }, [staff, isUniversityOrTVET]);
 
   // ✅ Label to display next to the filter
-  const filterLabel = isUniversityOrTVET
-    ? 'Department'
-    : isPrimaryOrSecondary
-      ? 'Subject'
-      : 'Staff Type';
+  const filterLabel = isUniversityOrTVET ? 'Department' : 'Staff Type';
+
+  // ==================== STATE FOR STAFF TYPE FILTER ====================
+  const [selectedStaffType, setSelectedStaffType] = useState('');
 
   // ==================== TIME HELPERS ====================
   const isTimeLate = (timeIn) => {
@@ -38248,15 +38218,6 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
       'OFF': 'bg-gray-100 text-gray-800'
     };
     return colors[status] || 'bg-gray-100 text-gray-800';
-  };
-
-  // ==================== HELPER: Get staff subjects as string array ====================
-  const getStaffSubjectKeys = (s) => {
-    const subs = Array.isArray(s.subjects) ? s.subjects : [];
-    return subs.map(sub => {
-      if (!sub) return '';
-      return typeof sub === 'string' ? sub : (sub.name || sub.code || '');
-    }).filter(Boolean);
   };
 
   // ==================== DATA LOADERS ====================
@@ -38327,15 +38288,15 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
 
       let pending = res.data.pending || [];
 
-      // Client-side subject filter for primary/secondary
-      if (isPrimaryOrSecondary && selectedSubject) {
+      // Client-side staff-type filter (primary/secondary)
+      if (!isUniversityOrTVET && selectedStaffType) {
         const staffById = {};
         (staff || []).forEach(s => { staffById[s.id] = s; });
 
         pending = pending.filter(rec => {
           const s = staffById[rec.staffId];
           if (!s) return false;
-          return getStaffSubjectKeys(s).includes(selectedSubject);
+          return s.staffType === selectedStaffType;
         });
       }
 
@@ -38362,15 +38323,15 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
       const res = await api.get('/staff-attendance', { params });
       let records = res.data.attendance || [];
 
-      // Client-side subject filter for primary/secondary
-      if (isPrimaryOrSecondary && selectedSubject) {
+      // Client-side staff-type filter (primary/secondary)
+      if (!isUniversityOrTVET && selectedStaffType) {
         const staffById = {};
         (staff || []).forEach(s => { staffById[s.id] = s; });
 
         records = records.filter(rec => {
           const s = staffById[rec.staffId];
           if (!s) return false;
-          return getStaffSubjectKeys(s).includes(selectedSubject);
+          return s.staffType === selectedStaffType;
         });
       }
 
@@ -38396,15 +38357,15 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
       const res = await api.get('/staff-attendance/report', { params });
       let report = res.data;
 
-      // Client-side subject filter for primary/secondary
-      if (isPrimaryOrSecondary && selectedSubject && Array.isArray(report.perStaff)) {
+      // Client-side staff-type filter (primary/secondary)
+      if (!isUniversityOrTVET && selectedStaffType && Array.isArray(report.perStaff)) {
         const staffById = {};
         (staff || []).forEach(s => { staffById[s.id] = s; });
 
         const filteredPerStaff = report.perStaff.filter(s => {
           const fullStaff = staffById[s.staffId];
           if (!fullStaff) return false;
-          return getStaffSubjectKeys(fullStaff).includes(selectedSubject);
+          return fullStaff.staffType === selectedStaffType;
         });
 
         // Recompute summary
@@ -38608,10 +38569,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                 ? currentStaffMember.jobTitle
                 : (currentStaffMember.staffType || 'Staff')}
               {' • '}
-              {currentStaffMember.department
-                || (isPrimaryOrSecondary && getStaffSubjectKeys(currentStaffMember).length > 0
-                  ? getStaffSubjectKeys(currentStaffMember).slice(0, 2).join(', ')
-                  : 'No Department')}
+              {currentStaffMember.department || 'No Department'}
             </span>
           </div>
         )}
@@ -39070,17 +39028,13 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
             {!(isDepartmentHead && isUniversityOrTVET) && (
               <SearchableSelect
                 label={filterLabel}
-                value={isUniversityOrTVET ? selectedDepartment : selectedSubject}
+                value={isUniversityOrTVET ? selectedDepartment : selectedStaffType}
                 onChange={(e) => {
                   if (isUniversityOrTVET) setSelectedDepartment(e.target.value);
-                  else setSelectedSubject(e.target.value);
+                  else setSelectedStaffType(e.target.value);
                 }}
                 options={filterOptions}
-                placeholder={
-                  isUniversityOrTVET ? 'All Departments'
-                    : isPrimaryOrSecondary ? 'All Subjects'
-                      : 'All Staff'
-                }
+                placeholder={isUniversityOrTVET ? 'All Departments' : 'All Staff Types'}
               />
             )}
           </div>
@@ -39099,7 +39053,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                   <tr>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                      {isUniversityOrTVET ? 'Department' : 'Subjects'}
+                      {isUniversityOrTVET ? 'Department' : 'Staff Type'}
                     </th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
@@ -39117,7 +39071,6 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                       : '—';
 
                     const recordStaff = (staff || []).find(s => s.id === record.staffId) || record.Staff;
-                    const subjectKeys = recordStaff ? getStaffSubjectKeys(recordStaff) : [];
 
                     return (
                       <tr key={record.id} className="hover:bg-gray-50">
@@ -39127,19 +39080,14 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                         <td className="px-4 py-2 text-sm">
                           {isUniversityOrTVET ? (
                             record.Staff?.department || '—'
-                          ) : subjectKeys.length > 0 ? (
-                            <div className="flex flex-wrap gap-1">
-                              {subjectKeys.slice(0, 3).map((sub, i) => (
-                                <span key={i} className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded text-xs">
-                                  {sub}
-                                </span>
-                              ))}
-                              {subjectKeys.length > 3 && (
-                                <span className="text-xs text-gray-400">+{subjectKeys.length - 3}</span>
-                              )}
-                            </div>
                           ) : (
-                            <span className="text-gray-400">—</span>
+                            recordStaff?.staffType ? (
+                              <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded text-xs">
+                                {recordStaff.staffType.replace(/_/g, ' ')}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400">—</span>
+                            )
                           )}
                         </td>
                         <td className="px-4 py-2">{new Date(record.date).toLocaleDateString()}</td>
@@ -39181,17 +39129,13 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
           <div className="mb-4 max-w-sm">
             <SearchableSelect
               label={`Filter by ${filterLabel}`}
-              value={isUniversityOrTVET ? selectedDepartment : selectedSubject}
+              value={isUniversityOrTVET ? selectedDepartment : selectedStaffType}
               onChange={(e) => {
                 if (isUniversityOrTVET) setSelectedDepartment(e.target.value);
-                else setSelectedSubject(e.target.value);
+                else setSelectedStaffType(e.target.value);
               }}
               options={filterOptions}
-              placeholder={
-                isUniversityOrTVET ? 'All Departments'
-                  : isPrimaryOrSecondary ? 'All Subjects'
-                    : 'All Staff'
-              }
+              placeholder={isUniversityOrTVET ? 'All Departments' : 'All Staff Types'}
             />
           </div>
 
@@ -39202,7 +39146,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                   <tr>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                      {isUniversityOrTVET ? 'Department' : 'Subjects'}
+                      {isUniversityOrTVET ? 'Department' : 'Staff Type'}
                     </th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
@@ -39215,7 +39159,6 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                 <tbody className="divide-y">
                   {pendingApprovals.map(record => {
                     const recordStaff = (staff || []).find(s => s.id === record.staffId) || record.Staff;
-                    const subjectKeys = recordStaff ? getStaffSubjectKeys(recordStaff) : [];
 
                     return (
                       <tr key={record.id} className="hover:bg-gray-50">
@@ -39225,19 +39168,14 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                         <td className="px-4 py-2 text-sm">
                           {isUniversityOrTVET ? (
                             record.Staff?.department || '—'
-                          ) : subjectKeys.length > 0 ? (
-                            <div className="flex flex-wrap gap-1">
-                              {subjectKeys.slice(0, 2).map((sub, i) => (
-                                <span key={i} className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded text-xs">
-                                  {sub}
-                                </span>
-                              ))}
-                              {subjectKeys.length > 2 && (
-                                <span className="text-xs text-gray-400">+{subjectKeys.length - 2}</span>
-                              )}
-                            </div>
                           ) : (
-                            <span className="text-gray-400">—</span>
+                            recordStaff?.staffType ? (
+                              <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded text-xs">
+                                {recordStaff.staffType.replace(/_/g, ' ')}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400">—</span>
+                            )
                           )}
                         </td>
                         <td className="px-4 py-2">{new Date(record.date).toLocaleDateString()}</td>
@@ -39307,17 +39245,13 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
               </div>
               <SearchableSelect
                 label={filterLabel}
-                value={isUniversityOrTVET ? selectedDepartment : selectedSubject}
+                value={isUniversityOrTVET ? selectedDepartment : selectedStaffType}
                 onChange={(e) => {
                   if (isUniversityOrTVET) setSelectedDepartment(e.target.value);
-                  else setSelectedSubject(e.target.value);
+                  else setSelectedStaffType(e.target.value);
                 }}
                 options={filterOptions}
-                placeholder={
-                  isUniversityOrTVET ? 'All Departments'
-                    : isPrimaryOrSecondary ? 'All Subjects'
-                      : 'All Staff'
-                }
+                placeholder={isUniversityOrTVET ? 'All Departments' : 'All Staff Types'}
               />
               <div className="flex items-end">
                 <button
@@ -39388,7 +39322,7 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee ID</th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            {isUniversityOrTVET ? 'Department' : 'Subjects'}
+                            {isUniversityOrTVET ? 'Department' : 'Staff Type'}
                           </th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Job Title</th>
                           <th className="px-4 py-3 text-center text-xs font-medium text-green-600 uppercase">Present</th>
@@ -39402,7 +39336,6 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                       <tbody className="divide-y">
                         {attendanceReport.perStaff.map(s => {
                           const fullStaff = (staff || []).find(x => x.id === s.staffId);
-                          const subjectKeys = fullStaff ? getStaffSubjectKeys(fullStaff) : (Array.isArray(s.subjects) ? s.subjects : []);
 
                           return (
                             <tr key={s.staffId} className="hover:bg-gray-50">
@@ -39414,19 +39347,14 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
                               <td className="px-4 py-3 text-sm">
                                 {isUniversityOrTVET ? (
                                   s.department
-                                ) : subjectKeys.length > 0 ? (
-                                  <div className="flex flex-wrap gap-1">
-                                    {subjectKeys.map((sub, i) => {
-                                      const label = typeof sub === 'string' ? sub : (sub.name || sub.code || '');
-                                      return (
-                                        <span key={i} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded text-xs">
-                                          {label}
-                                        </span>
-                                      );
-                                    })}
-                                  </div>
                                 ) : (
-                                  <span className="text-gray-400">No subjects</span>
+                                  fullStaff?.staffType ? (
+                                    <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded text-xs">
+                                      {fullStaff.staffType.replace(/_/g, ' ')}
+                                    </span>
+                                  ) : (
+                                    <span className="text-gray-400">—</span>
+                                  )
                                 )}
                               </td>
                               <td className="px-4 py-3 text-sm">{s.jobTitle}</td>
