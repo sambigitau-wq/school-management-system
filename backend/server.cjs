@@ -4465,17 +4465,45 @@ app.post('/api/auth/login', async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 });
-
 app.get('/api/auth/me', authenticate, async (req, res) => {
   try {
     const user = await User.findByPk(req.user.id, {
-      attributes: { exclude: ['password'] },
-      include: [{ model: School }]
+      attributes: { exclude: ['password'] }
     });
-    res.json({ success: true, user });
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // ✅ Load permissions from the role
+    let roleObject = null;
+    let permissions = [];
+
+    if (user.roleId) {
+      roleObject = await Role.findByPk(user.roleId, {
+        attributes: ['id', 'name', 'permissions', 'isSystemRole']
+      });
+      if (roleObject) {
+        permissions = roleObject.permissions || [];
+      }
+    }
+
+    // ✅ Fallback to default role permissions
+    if (permissions.length === 0 && user.role) {
+      permissions = getPermissionsForRole(user.role);
+    }
+
+    res.json({
+      success: true,
+      user: {
+        ...user.toJSON(),
+        roleObject,
+        permissions
+      }
+    });
   } catch (error) {
     console.error('Get user error:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
@@ -20451,45 +20479,55 @@ app.get('/api/system/health', authenticate, async (req, res) => {
     });
   }
 });
-
-// ==================== DYNAMIC ROLES API ROUTES (FIXED) ====================
-
-// GET all roles for a school - FIXED (NO circular references)
+// ==================== GET ALL ROLES ====================
 app.get('/api/roles', authenticate, async (req, res) => {
   try {
-    // ✅ Get roles WITHOUT including users
+    const where = { isActive: true };
+
+    // SUPER_ADMIN sees all; others see only their school
+    if (req.user.role !== 'SUPER_ADMIN') {
+      where.schoolId = req.user.schoolId;
+    } else if (req.query.schoolId) {
+      where.schoolId = req.query.schoolId;
+    }
+
     const roles = await Role.findAll({
-      where: { 
-        schoolId: req.user.schoolId,
-        isActive: true 
-      },
+      where,
       order: [['isSystemRole', 'DESC'], ['name', 'ASC']]
     });
-    
-    // ✅ Count users per role with a separate query (no circular reference)
-    const rolesWithCount = await Promise.all(roles.map(async (role) => {
-      const userCount = await User.count({ 
-        where: { roleId: role.id } 
-      });
-      return {
-        ...role.toJSON(),
-        userCount
-      };
+
+    if (roles.length === 0) {
+      return res.json({ success: true, roles: [] });
+    }
+
+    // ✅ Count users per role in ONE query
+    const roleIds = roles.map(r => r.id);
+    const counts = await User.findAll({
+      attributes: [
+        'roleId',
+        [sequelize.fn('COUNT', sequelize.col('id')), 'count']
+      ],
+      where: { roleId: roleIds },
+      group: ['roleId'],
+      raw: true
+    });
+
+    const countMap = counts.reduce((acc, row) => {
+      acc[row.roleId] = parseInt(row.count, 10);
+      return acc;
+    }, {});
+
+    const rolesWithCount = roles.map(r => ({
+      ...r.toJSON(),
+      userCount: countMap[r.id] || 0
     }));
-    
-    res.json({ 
-      success: true, 
-      roles: rolesWithCount 
-    });
+
+    res.json({ success: true, roles: rolesWithCount });
   } catch (error) {
-    console.error('Get roles error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    console.error('❌ Get roles error:', error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
-
 // GET single role - FIXED
 app.get('/api/roles/:id', authenticate, async (req, res) => {
   try {
@@ -20791,21 +20829,46 @@ app.patch('/api/roles/:id/permissions', authenticate, async (req, res) => {
   }
 });
 
+// ==================== ASSIGN ROLE TO USER ====================
 app.patch('/api/users/:userId/role', authenticate, async (req, res) => {
   try {
+    const { userId } = req.params;
     const { roleId } = req.body;
 
-    const user = await User.findByPk(req.params.userId);
+    // ✅ Permission check
+    const canAssign = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL'].includes(req.user.role);
+    if (!canAssign) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to assign roles'
+      });
+    }
+
+    // ✅ Find user
+    const userWhere = { id: userId };
+    if (req.user.role !== 'SUPER_ADMIN') {
+      userWhere.schoolId = req.user.schoolId;
+    }
+
+    const user = await User.findOne({ where: userWhere });
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    // If assigning, verify role belongs to this school
+    // ✅ Verify role (if assigning)
+    let roleInfo = null;
     if (roleId) {
-      const role = await Role.findOne({
-        where: { id: roleId, schoolId: req.user.schoolId }
+      const roleWhere = { id: roleId };
+      if (req.user.role !== 'SUPER_ADMIN') {
+        roleWhere.schoolId = req.user.schoolId;
+      }
+
+      roleInfo = await Role.findOne({
+        where: roleWhere,
+        attributes: ['id', 'name', 'permissions', 'isSystemRole', 'userCount']
       });
-      if (!role) {
+
+      if (!roleInfo) {
         return res.status(404).json({
           success: false,
           message: 'Role not found or does not belong to your school'
@@ -20813,34 +20876,29 @@ app.patch('/api/users/:userId/role', authenticate, async (req, res) => {
       }
     }
 
-    const oldUser = { ...user.toJSON() };
-    await user.update({ roleId });
-    await createAuditLog(req, 'ASSIGN_ROLE', 'USER', user.id, oldUser, user);
+    // ✅ Update the user's roleId
+    await user.update({ roleId: roleId || null });
 
-    // Re-fetch WITHOUT the include to avoid circular refs, then attach role
+    // ✅ Invalidate cache so permissions are re-read
+    userCache.delete(user.id);
+
+    // ✅ Re-fetch user
     const updatedUser = await User.findByPk(user.id, {
       attributes: { exclude: ['password'] }
     });
 
-    let roleInfo = null;
-    if (roleId) {
-      roleInfo = await Role.findByPk(roleId, {
-        attributes: ['id', 'name', 'permissions']
-      });
-    }
-
-    // Return BOTH forms so any frontend can pick what it needs
-    const data = updatedUser.toJSON();
-    data.Role = roleInfo ? roleInfo.toJSON() : null;
-
+    // ✅ Explicitly return the role object — the frontend NEEDS this
     res.json({
       success: true,
-      user: data,
+      user: updatedUser.toJSON(),
       role: roleInfo ? roleInfo.toJSON() : null,
-      message: roleId ? 'Role assigned successfully' : 'Role removed successfully'
+      message: roleId
+        ? `Role "${roleInfo.name}" assigned successfully`
+        : 'Role removed successfully'
     });
+
   } catch (error) {
-    console.error('Assign role error:', error);
+    console.error('❌ Assign role error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
