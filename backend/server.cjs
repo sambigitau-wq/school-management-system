@@ -20835,7 +20835,9 @@ app.patch('/api/users/:userId/role', authenticate, async (req, res) => {
     const { userId } = req.params;
     const { roleId } = req.body;
 
-    // ✅ Permission check
+    console.log('🎭 Assign role request:', { userId, roleId, by: req.user?.id });
+
+    // ---- 1. Permission check ----
     const canAssign = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL'].includes(req.user.role);
     if (!canAssign) {
       return res.status(403).json({
@@ -20844,54 +20846,69 @@ app.patch('/api/users/:userId/role', authenticate, async (req, res) => {
       });
     }
 
-    // ✅ Find user
-    const userWhere = { id: userId };
-    if (req.user.role !== 'SUPER_ADMIN') {
-      userWhere.schoolId = req.user.schoolId;
-    }
-
-    const user = await User.findOne({ where: userWhere });
+    // ---- 2. Find user ----
+    const user = await User.findByPk(userId);
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    // ✅ Verify role (if assigning)
+    // ---- 3. School scope ----
+    if (req.user.role !== 'SUPER_ADMIN' && user.schoolId !== req.user.schoolId) {
+      return res.status(403).json({
+        success: false,
+        message: 'You cannot modify users from another school'
+      });
+    }
+
+    // ---- 4. Validate role (if provided) ----
+    // ⚠️ Only select columns that ACTUALLY EXIST on the Roles table.
     let roleInfo = null;
     if (roleId) {
-      const roleWhere = { id: roleId };
-      if (req.user.role !== 'SUPER_ADMIN') {
-        roleWhere.schoolId = req.user.schoolId;
-      }
-
-      roleInfo = await Role.findOne({
-        where: roleWhere,
-        attributes: ['id', 'name', 'permissions', 'isSystemRole', 'userCount']
+      roleInfo = await Role.findByPk(roleId, {
+        attributes: ['id', 'name', 'permissions', 'isSystemRole', 'isActive', 'schoolId', 'createdAt', 'updatedAt']
       });
-
       if (!roleInfo) {
-        return res.status(404).json({
+        return res.status(404).json({ success: false, message: 'Role not found' });
+      }
+      if (req.user.role !== 'SUPER_ADMIN' && roleInfo.schoolId !== req.user.schoolId) {
+        return res.status(403).json({
           success: false,
-          message: 'Role not found or does not belong to your school'
+          message: 'That role does not belong to your school'
         });
       }
     }
 
-    // ✅ Update the user's roleId
+    // ---- 5. Update ----
     await user.update({ roleId: roleId || null });
 
-    // ✅ Invalidate cache so permissions are re-read
-    userCache.delete(user.id);
-
-    // ✅ Re-fetch user
-    const updatedUser = await User.findByPk(user.id, {
+    // ---- 6. Return updated user (fresh fetch) ----
+    const updated = await User.findByPk(userId, {
       attributes: { exclude: ['password'] }
     });
 
-    // ✅ Explicitly return the role object — the frontend NEEDS this
-    res.json({
+    // ✅ Compute userCount for the role on the fly (not a DB column)
+    let rolePayload = null;
+    if (roleInfo) {
+      const userCount = await User.count({ where: { roleId: roleInfo.id } });
+      rolePayload = {
+        id: roleInfo.id,
+        name: roleInfo.name,
+        permissions: roleInfo.permissions || [],
+        isSystemRole: roleInfo.isSystemRole,
+        isActive: roleInfo.isActive,
+        userCount
+      };
+    }
+
+    const payload = updated.toJSON();
+    payload.Role = rolePayload;
+
+    console.log('✅ Role assigned:', { userId, roleName: roleInfo?.name });
+
+    return res.json({
       success: true,
-      user: updatedUser.toJSON(),
-      role: roleInfo ? roleInfo.toJSON() : null,
+      user: payload,
+      role: rolePayload,
       message: roleId
         ? `Role "${roleInfo.name}" assigned successfully`
         : 'Role removed successfully'
@@ -20899,7 +20916,11 @@ app.patch('/api/users/:userId/role', authenticate, async (req, res) => {
 
   } catch (error) {
     console.error('❌ Assign role error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    console.error('❌ Stack:', error.stack);
+    return res.status(500).json({
+      success: false,
+      message: error.message
+    });
   }
 });
 // ==================== STUDENT ARRIVAL ROUTES ====================
