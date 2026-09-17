@@ -581,19 +581,18 @@ const GlobalLoadingIndicator = ({ loading }) => {
 };
 
 
-// ==================== COMPLETE ROLES MANAGEMENT MODULE ====================
+// ============================================================
+//  COMPLETE ROLES MANAGEMENT MODULE
+// ============================================================
 const RolesManagementModule = ({
   user,
-  users,
+  users = [],
   setUsers,
   currentSchool,
   roles = [],
-  setRoles
+  setRoles,
 }) => {
   // ==================== STATE ====================
-  // NOTE: `roles` and `setRoles` come from props (lifted state).
-  // Do NOT declare a local useState for roles here.
-
   const [allPermissions, setAllPermissions] = useState([]);
   const [permissionsGrouped, setPermissionsGrouped] = useState({});
   const [selectedRole, setSelectedRole] = useState(null);
@@ -603,55 +602,62 @@ const RolesManagementModule = ({
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
-  const [roleForm, setRoleForm] = useState({ name: '', description: '', permissions: [] });
+  const [roleForm, setRoleForm] = useState({
+    name: '',
+    description: '',
+    permissions: [],
+  });
   const [selectedPermissions, setSelectedPermissions] = useState([]);
   const [editingRole, setEditingRole] = useState(null);
   const [assignRoleId, setAssignRoleId] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [expandedCategories, setExpandedCategories] = useState({});
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
 
-  const canManageRoles = user?.role === 'SUPER_ADMIN' || user?.role === 'SCHOOL_ADMIN';
+  // ✅ SEPARATE search terms to avoid the "same search term for both" bug
+  const [roleSearchTerm, setRoleSearchTerm] = useState('');
+  const [permissionSearchTerm, setPermissionSearchTerm] = useState('');
+
+  const canManageRoles =
+    user?.role === 'SUPER_ADMIN' || user?.role === 'SCHOOL_ADMIN';
 
   // ==================== PERMISSION CATEGORIES WITH EMOJIS ====================
   const permissionCategories = {
-    'students': '👨‍🎓 Student Management',
-    'academic': '📚 Academic',
-    'attendance': '📋 Attendance',
-    'finance': '💰 Finance',
-    'hr': '👔 Human Resources',
-    'library': '📖 Library',
-    'transport': '🚌 Transport',
-    'hostel': '🏠 Hostel',
-    'inventory': '📦 Inventory',
-    'admin': '⚙️ Administration',
-    'reports': '📊 Reports',
-    'communication': '📢 Communication',
-    'health': '🏥 Health',
-    'self': '👤 Self Service',
-    'card_management': '🪪 Card Management',
-    'certificates': '📜 Certificates',
-    'online_exams': '💻 Online Exams',
-    'live_classroom': '🎥 Live Classroom',
-    'alumni': '🎓 Alumni',
-    'receptionist': '🏢 Receptionist',
-    'course_enrollment': '📋 Course Enrollment',
-    'unit_registration': '📚 Unit Registration',
-    'schemes_of_work': '📝 Schemes of Work',
-    'exam_cards': '🪪 Exam Cards',
-    'fee_allocation': '💰 Fee Allocation',
-    'fee_collection': '💳 Fee Collection',
-    'receipt_history': '🧾 Receipt History',
-    'payroll': '💵 Payroll',
-    'staff_attendance': '👔 Staff Attendance',
-    'student_arrival': '🚸 Student Arrival',
-    'sickbay': '🏥 Sick Bay',
-    'fee_statement': '🧾 Fee Statement'
+    students: '👨‍🎓 Student Management',
+    academic: '📚 Academic',
+    attendance: '📋 Attendance',
+    finance: '💰 Finance',
+    hr: '👔 Human Resources',
+    library: '📖 Library',
+    transport: '🚌 Transport',
+    hostel: '🏠 Hostel',
+    inventory: '📦 Inventory',
+    admin: '⚙️ Administration',
+    reports: '📊 Reports',
+    communication: '📢 Communication',
+    health: '🏥 Health',
+    self: '👤 Self Service',
+    card_management: '🪪 Card Management',
+    certificates: '📜 Certificates',
+    online_exams: '💻 Online Exams',
+    live_classroom: '🎥 Live Classroom',
+    alumni: '🎓 Alumni',
+    receptionist: '🏢 Receptionist',
+    course_enrollment: '📋 Course Enrollment',
+    unit_registration: '📚 Unit Registration',
+    schemes_of_work: '📝 Schemes of Work',
+    exam_cards: '🪪 Exam Cards',
+    fee_allocation: '💰 Fee Allocation',
+    fee_collection: '💳 Fee Collection',
+    receipt_history: '🧾 Receipt History',
+    payroll: '💵 Payroll',
+    staff_attendance: '👔 Staff Attendance',
+    student_arrival: '🚸 Student Arrival',
+    sickbay: '🏥 Sick Bay',
+    fee_statement: '🧾 Fee Statement',
   };
 
-  // ==================== NEW FEATURE MODULES ====================
   const newFeatureModules = [
     'card_management',
     'certificates',
@@ -670,38 +676,37 @@ const RolesManagementModule = ({
     'staff_attendance',
     'student_arrival',
     'sickbay',
-    'fee_statement'
+    'fee_statement',
   ];
 
-  // ==================== DERIVED: FILTERED ROLES (via useMemo only) ====================
-  // Single source of truth for the filtered list.
-  // Do NOT also push to it via setFilteredRoles inside a useEffect.
+  // ==================== DERIVED: FILTERED ROLES ====================
   const filteredRoles = useMemo(() => {
     let list = Array.isArray(roles) ? roles : [];
 
-    if (searchTerm.trim()) {
-      const term = searchTerm.toLowerCase();
-      list = list.filter(r =>
-        (r.name || '').toLowerCase().includes(term) ||
-        (r.description || '').toLowerCase().includes(term)
+    if (roleSearchTerm.trim()) {
+      const term = roleSearchTerm.toLowerCase();
+      list = list.filter(
+        (r) =>
+          (r.name || '').toLowerCase().includes(term) ||
+          (r.description || '').toLowerCase().includes(term)
       );
     }
 
     if (filterStatus === 'system') {
-      list = list.filter(r => r.isSystemRole === true);
+      list = list.filter((r) => r.isSystemRole === true);
     } else if (filterStatus === 'custom') {
-      list = list.filter(r => r.isSystemRole !== true);
+      list = list.filter((r) => r.isSystemRole !== true);
     }
 
     return list;
-  }, [roles, searchTerm, filterStatus]);
+  }, [roles, roleSearchTerm, filterStatus]);
 
   // ==================== LOAD FUNCTIONS ====================
   const loadRoles = async () => {
     setLoading(true);
     try {
       const res = await api.get('/roles');
-      const fetched = res.data.roles || [];
+      const fetched = res.data?.roles || [];
       if (typeof setRoles === 'function') {
         setRoles(fetched);
       }
@@ -717,18 +722,18 @@ const RolesManagementModule = ({
   const loadPermissions = async () => {
     try {
       const res = await api.get('/permissions');
-      setAllPermissions(res.data.permissions || []);
+      const perms = res.data?.permissions || [];
+      setAllPermissions(perms);
 
       const grouped = {};
-      (res.data.permissions || []).forEach(perm => {
+      perms.forEach((perm) => {
         if (!grouped[perm.category]) grouped[perm.category] = [];
         grouped[perm.category].push(perm);
       });
       setPermissionsGrouped(grouped);
 
-      // Expand new feature categories by default
       const expanded = {};
-      Object.keys(grouped).forEach(category => {
+      Object.keys(grouped).forEach((category) => {
         expanded[category] = newFeatureModules.includes(category);
       });
       setExpandedCategories(expanded);
@@ -758,10 +763,12 @@ const RolesManagementModule = ({
     }
 
     const duplicate = (roles || []).find(
-      r => (r.name || '').trim().toLowerCase() === trimmedName.toLowerCase()
+      (r) => (r.name || '').trim().toLowerCase() === trimmedName.toLowerCase()
     );
     if (duplicate) {
-      alert(`❌ A role named "${trimmedName}" already exists. Please use a different name.`);
+      alert(
+        `❌ A role named "${trimmedName}" already exists. Please use a different name.`
+      );
       return;
     }
 
@@ -770,21 +777,39 @@ const RolesManagementModule = ({
     setSuccess('');
 
     try {
-      const res = await api.post('/roles', {
+      const payload = {
         name: trimmedName,
         description: trimmedDesc,
-        permissions: Array.isArray(roleForm.permissions) ? roleForm.permissions : []
-      });
+        permissions: Array.isArray(roleForm.permissions)
+          ? roleForm.permissions
+          : [],
+      };
 
+      // ✅ Pass schoolId for SUPER_ADMIN (needed if they're not bound to a school)
+      if (user?.role === 'SUPER_ADMIN' && currentSchool?.id) {
+        payload.schoolId = currentSchool.id;
+      }
+
+      const res = await api.post('/roles', payload);
       const newRole = res.data?.role || res.data?.data?.role || res.data;
+
       if (!newRole || !newRole.id) {
         console.error('Unexpected response from POST /roles:', res.data);
         throw new Error('Server did not return a valid role object');
       }
 
-      // Update the lifted state via setRoles from props
       if (typeof setRoles === 'function') {
-        setRoles(prev => [...prev, newRole]);
+        setRoles((prev) => [...prev, newRole]);
+      }
+
+      // ✅ Refresh roles from server for userCount + consistency
+      try {
+        const rolesRes = await api.get('/roles');
+        if (typeof setRoles === 'function') {
+          setRoles(rolesRes.data?.roles || []);
+        }
+      } catch (e) {
+        /* ignore */
       }
 
       setShowCreateModal(false);
@@ -794,7 +819,8 @@ const RolesManagementModule = ({
       setTimeout(() => setSuccess(''), 4000);
     } catch (error) {
       console.error('Error creating role:', error);
-      const msg = error.response?.data?.message || error.message || 'Failed to create role';
+      const msg =
+        error.response?.data?.message || error.message || 'Failed to create role';
       setError(msg);
       setTimeout(() => setError(''), 5000);
     } finally {
@@ -813,8 +839,9 @@ const RolesManagementModule = ({
     }
 
     const duplicate = (roles || []).find(
-      r => r.id !== selectedRole.id &&
-           (r.name || '').trim().toLowerCase() === trimmedName.toLowerCase()
+      (r) =>
+        r.id !== selectedRole.id &&
+        (r.name || '').trim().toLowerCase() === trimmedName.toLowerCase()
     );
     if (duplicate) {
       alert(`❌ A role named "${trimmedName}" already exists.`);
@@ -831,7 +858,7 @@ const RolesManagementModule = ({
         description: (roleForm.description || '').trim(),
         permissions: Array.isArray(roleForm.permissions)
           ? roleForm.permissions
-          : (selectedRole.permissions || [])
+          : selectedRole.permissions || [],
       });
 
       const updatedRole = res.data?.role || res.data?.data?.role || res.data;
@@ -840,7 +867,9 @@ const RolesManagementModule = ({
       }
 
       if (typeof setRoles === 'function') {
-        setRoles(prev => prev.map(r => r.id === updatedRole.id ? updatedRole : r));
+        setRoles((prev) =>
+          prev.map((r) => (r.id === updatedRole.id ? updatedRole : r))
+        );
       }
 
       setShowEditModal(false);
@@ -852,7 +881,8 @@ const RolesManagementModule = ({
       setTimeout(() => setSuccess(''), 4000);
     } catch (error) {
       console.error('Error updating role:', error);
-      const msg = error.response?.data?.message || error.message || 'Failed to update role';
+      const msg =
+        error.response?.data?.message || error.message || 'Failed to update role';
       setError(msg);
       setTimeout(() => setError(''), 5000);
     } finally {
@@ -866,7 +896,9 @@ const RolesManagementModule = ({
       alert('❌ Cannot delete system roles');
       return;
     }
-    if (!window.confirm(`Delete role "${role.name}"? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete role "${role.name}"? This cannot be undone.`)) {
+      return;
+    }
 
     setLoading(true);
     setError('');
@@ -876,14 +908,15 @@ const RolesManagementModule = ({
       await api.delete(`/roles/${role.id}`);
 
       if (typeof setRoles === 'function') {
-        setRoles(prev => prev.filter(r => r.id !== role.id));
+        setRoles((prev) => prev.filter((r) => r.id !== role.id));
       }
 
       setSuccess(`✅ Role "${role.name}" deleted successfully!`);
       setTimeout(() => setSuccess(''), 4000);
     } catch (error) {
       console.error('Error deleting role:', error);
-      const msg = error.response?.data?.message || error.message || 'Failed to delete role';
+      const msg =
+        error.response?.data?.message || error.message || 'Failed to delete role';
       setError(msg);
       setTimeout(() => setError(''), 5000);
     } finally {
@@ -900,13 +933,17 @@ const RolesManagementModule = ({
 
     try {
       await api.patch(`/roles/${selectedRole.id}/permissions`, {
-        permissions: selectedPermissions
+        permissions: selectedPermissions,
       });
 
       if (typeof setRoles === 'function') {
-        setRoles(prev => prev.map(r =>
-          r.id === selectedRole.id ? { ...r, permissions: selectedPermissions } : r
-        ));
+        setRoles((prev) =>
+          prev.map((r) =>
+            r.id === selectedRole.id
+              ? { ...r, permissions: selectedPermissions }
+              : r
+          )
+        );
       }
 
       setShowPermissionsModal(false);
@@ -916,7 +953,10 @@ const RolesManagementModule = ({
       setTimeout(() => setSuccess(''), 4000);
     } catch (error) {
       console.error('Error updating permissions:', error);
-      const msg = error.response?.data?.message || error.message || 'Failed to update permissions';
+      const msg =
+        error.response?.data?.message ||
+        error.message ||
+        'Failed to update permissions';
       setError(msg);
       setTimeout(() => setError(''), 5000);
     } finally {
@@ -924,7 +964,7 @@ const RolesManagementModule = ({
     }
   };
 
-  // ==================== ASSIGN ROLE TO A SINGLE USER ====================
+  // ==================== ASSIGN ROLE TO USER ====================
   const handleAssignRole = async () => {
     if (!selectedUser) {
       setError('Please select a user');
@@ -943,29 +983,65 @@ const RolesManagementModule = ({
 
     try {
       const res = await api.patch(`/users/${selectedUser.id}/role`, {
-        roleId: assignRoleId
+        roleId: assignRoleId,
       });
 
       const updatedUser = res.data?.user || res.data?.data?.user;
       const updatedRole = res.data?.role || res.data?.data?.role;
 
-      if (typeof setUsers === 'function') {
-        setUsers(prev => prev.map(u =>
-          u.id === selectedUser.id
-            ? {
-                ...u,
-                roleId: updatedUser?.roleId ?? assignRoleId,
-                role: updatedUser?.role ?? u.role,
-                Role: updatedRole ?? u.Role
-              }
-            : u
-        ));
+      if (!updatedUser) {
+        throw new Error('Server did not return the updated user');
       }
 
-      // Refresh roles to update the userCount
-      const rolesRes = await api.get('/roles');
-      if (typeof setRoles === 'function') {
-        setRoles(rolesRes.data.roles || []);
+      // ✅ Update the users array immediately
+      if (typeof setUsers === 'function') {
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.id === selectedUser.id
+              ? {
+                  ...u,
+                  roleId: updatedUser.roleId ?? assignRoleId,
+                  role: updatedUser.role ?? u.role,
+                  Role: updatedRole ?? updatedUser.Role ?? u.Role,
+                }
+              : u
+          )
+        );
+      }
+
+      // ✅ Refresh roles to update userCount
+      try {
+        const rolesRes = await api.get('/roles');
+        if (typeof setRoles === 'function') {
+          setRoles(rolesRes.data?.roles || []);
+        }
+      } catch (e) {
+        /* ignore */
+      }
+
+      // ✅ Refresh users from server for consistency
+      try {
+        const usersRes = await api.get('/users');
+        if (typeof setUsers === 'function') {
+          setUsers(usersRes.data?.users || []);
+        }
+      } catch (e) {
+        /* ignore */
+      }
+
+      // ✅ If the admin just changed their OWN role, refresh permissions
+      if (selectedUser.id === user?.id) {
+        try {
+          const meRes = await api.get('/auth/me');
+          if (meRes.data?.user?.permissions) {
+            localStorage.setItem(
+              'userPermissions',
+              JSON.stringify(meRes.data.user.permissions)
+            );
+          }
+        } catch (e) {
+          console.warn('Could not refresh own permissions:', e.message);
+        }
       }
 
       setShowAssignModal(false);
@@ -973,11 +1049,14 @@ const RolesManagementModule = ({
       setAssignRoleId('');
 
       const roleName = updatedRole?.name || 'role';
-      setSuccess(`✅ Assigned ${roleName} to ${selectedUser.firstName} ${selectedUser.lastName}`);
+      setSuccess(
+        `✅ Assigned ${roleName} to ${selectedUser.firstName} ${selectedUser.lastName}`
+      );
       setTimeout(() => setSuccess(''), 4000);
     } catch (err) {
       console.error('Assign role error:', err);
-      const msg = err.response?.data?.message || err.message || 'Failed to assign role';
+      const msg =
+        err.response?.data?.message || err.message || 'Failed to assign role';
       setError(msg);
       setTimeout(() => setError(''), 5000);
     } finally {
@@ -987,26 +1066,34 @@ const RolesManagementModule = ({
 
   // ==================== PERMISSION TOGGLES ====================
   const togglePermission = (permKey) => {
-    setSelectedPermissions(prev =>
-      prev.includes(permKey) ? prev.filter(p => p !== permKey) : [...prev, permKey]
+    setSelectedPermissions((prev) =>
+      prev.includes(permKey)
+        ? prev.filter((p) => p !== permKey)
+        : [...prev, permKey]
     );
   };
 
   const toggleAllCategory = (category, permissions) => {
-    const categoryPerms = permissions.map(p => p.key);
-    const allSelected = categoryPerms.every(p => selectedPermissions.includes(p));
+    const categoryPerms = permissions.map((p) => p.key);
+    const allSelected = categoryPerms.every((p) =>
+      selectedPermissions.includes(p)
+    );
 
     if (allSelected) {
-      setSelectedPermissions(prev => prev.filter(p => !categoryPerms.includes(p)));
+      setSelectedPermissions((prev) =>
+        prev.filter((p) => !categoryPerms.includes(p))
+      );
     } else {
-      setSelectedPermissions(prev => [...new Set([...prev, ...categoryPerms])]);
+      setSelectedPermissions((prev) => [
+        ...new Set([...prev, ...categoryPerms]),
+      ]);
     }
   };
 
   const toggleCategoryExpand = (category) => {
-    setExpandedCategories(prev => ({
+    setExpandedCategories((prev) => ({
       ...prev,
-      [category]: !prev[category]
+      [category]: !prev[category],
     }));
   };
 
@@ -1015,7 +1102,9 @@ const RolesManagementModule = ({
     return (
       <div className="bg-white p-8 rounded-xl shadow-sm text-center">
         <i className="fas fa-lock text-5xl text-gray-400 mb-4"></i>
-        <p className="text-gray-500">You do not have permission to manage roles.</p>
+        <p className="text-gray-500">
+          You do not have permission to manage roles.
+        </p>
       </div>
     );
   }
@@ -1023,10 +1112,16 @@ const RolesManagementModule = ({
   // ==================== STATS ====================
   const getRoleStats = () => {
     const total = (roles || []).length;
-    const systemRoles = (roles || []).filter(r => r.isSystemRole).length;
+    const systemRoles = (roles || []).filter((r) => r.isSystemRole).length;
     const customRoles = total - systemRoles;
-    const totalPermissions = (roles || []).reduce((sum, r) => sum + (r.permissions?.length || 0), 0);
-    const totalUsers = (roles || []).reduce((sum, r) => sum + (r.userCount || 0), 0);
+    const totalPermissions = (roles || []).reduce(
+      (sum, r) => sum + (r.permissions?.length || 0),
+      0
+    );
+    const totalUsers = (roles || []).reduce(
+      (sum, r) => sum + (r.userCount || 0),
+      0
+    );
 
     return { total, systemRoles, customRoles, totalPermissions, totalUsers };
   };
@@ -1036,21 +1131,35 @@ const RolesManagementModule = ({
   // ==================== RENDER ====================
   return (
     <div className="space-y-6">
-      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
+      {loading && (
+        <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>
+      )}
 
-      {/* Success/Error banners */}
+      {/* Success / Error banners */}
       {success && (
         <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center justify-between">
-          <span><i className="fas fa-check-circle mr-2" />{success}</span>
-          <button onClick={() => setSuccess('')} className="text-green-500 hover:text-green-700">
+          <span>
+            <i className="fas fa-check-circle mr-2" />
+            {success}
+          </span>
+          <button
+            onClick={() => setSuccess('')}
+            className="text-green-500 hover:text-green-700"
+          >
             <i className="fas fa-times" />
           </button>
         </div>
       )}
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
-          <span><i className="fas fa-exclamation-circle mr-2" />{error}</span>
-          <button onClick={() => setError('')} className="text-red-500 hover:text-red-700">
+          <span>
+            <i className="fas fa-exclamation-circle mr-2" />
+            {error}
+          </span>
+          <button
+            onClick={() => setError('')}
+            className="text-red-500 hover:text-red-700"
+          >
             <i className="fas fa-times" />
           </button>
         </div>
@@ -1060,7 +1169,9 @@ const RolesManagementModule = ({
       <div className="flex justify-between items-center flex-wrap gap-4">
         <div>
           <h2 className="text-2xl font-bold">Role Management</h2>
-          <p className="text-sm text-gray-500 mt-1">Manage roles and permissions for your school</p>
+          <p className="text-sm text-gray-500 mt-1">
+            Manage roles and permissions for your school
+          </p>
         </div>
         <button
           onClick={() => setShowCreateModal(true)}
@@ -1103,8 +1214,8 @@ const RolesManagementModule = ({
               type="text"
               placeholder="Search roles by name or description..."
               className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={roleSearchTerm}
+              onChange={(e) => setRoleSearchTerm(e.target.value)}
             />
           </div>
           <select
@@ -1127,8 +1238,12 @@ const RolesManagementModule = ({
         {filteredRoles.length === 0 ? (
           <div className="col-span-3 text-center py-12 text-gray-500">
             <i className="fas fa-users-cog text-5xl text-gray-300 mb-3 block"></i>
-            <p>{searchTerm ? 'No roles match your search' : 'No roles created yet'}</p>
-            {!searchTerm && (
+            <p>
+              {roleSearchTerm
+                ? 'No roles match your search'
+                : 'No roles created yet'}
+            </p>
+            {!roleSearchTerm && (
               <button
                 onClick={() => setShowCreateModal(true)}
                 className="mt-3 text-indigo-600 hover:text-indigo-800"
@@ -1138,16 +1253,24 @@ const RolesManagementModule = ({
             )}
           </div>
         ) : (
-          filteredRoles.map(role => {
-            const isNewRole = !role.isSystemRole && role.createdAt &&
-              new Date(role.createdAt) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+          filteredRoles.map((role) => {
+            const isNewRole =
+              !role.isSystemRole &&
+              role.createdAt &&
+              new Date(role.createdAt) >
+                new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
             return (
-              <div key={role.id} className="bg-white rounded-xl shadow-sm p-6 hover:shadow-md transition-shadow border border-gray-200">
+              <div
+                key={role.id}
+                className="bg-white rounded-xl shadow-sm p-6 hover:shadow-md transition-shadow border border-gray-200"
+              >
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
-                      <h3 className="text-lg font-bold text-gray-800">{role.name}</h3>
+                      <h3 className="text-lg font-bold text-gray-800">
+                        {role.name}
+                      </h3>
                       {isNewRole && (
                         <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs animate-pulse">
                           New
@@ -1155,7 +1278,9 @@ const RolesManagementModule = ({
                       )}
                     </div>
                     {role.description && (
-                      <p className="text-sm text-gray-600 mt-1">{role.description}</p>
+                      <p className="text-sm text-gray-600 mt-1">
+                        {role.description}
+                      </p>
                     )}
                     <div className="flex flex-wrap gap-2 mt-2">
                       {role.isSystemRole ? (
@@ -1179,6 +1304,7 @@ const RolesManagementModule = ({
                       onClick={() => {
                         setSelectedRole(role);
                         setSelectedPermissions(role.permissions || []);
+                        setPermissionSearchTerm('');
                         setShowPermissionsModal(true);
                       }}
                       className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
@@ -1195,7 +1321,7 @@ const RolesManagementModule = ({
                             setRoleForm({
                               name: role.name,
                               description: role.description || '',
-                              permissions: role.permissions || []
+                              permissions: role.permissions || [],
                             });
                             setShowEditModal(true);
                           }}
@@ -1219,11 +1345,15 @@ const RolesManagementModule = ({
                 <div className="mt-4 grid grid-cols-2 gap-2">
                   <div className="bg-gray-50 p-2 rounded-lg text-center">
                     <p className="text-xs text-gray-500">Users</p>
-                    <p className="text-lg font-bold text-gray-700">{role.userCount || 0}</p>
+                    <p className="text-lg font-bold text-gray-700">
+                      {role.userCount || 0}
+                    </p>
                   </div>
                   <div className="bg-gray-50 p-2 rounded-lg text-center">
                     <p className="text-xs text-gray-500">Permissions</p>
-                    <p className="text-lg font-bold text-gray-700">{role.permissions?.length || 0}</p>
+                    <p className="text-lg font-bold text-gray-700">
+                      {role.permissions?.length || 0}
+                    </p>
                   </div>
                 </div>
 
@@ -1249,29 +1379,40 @@ const RolesManagementModule = ({
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold">Create New Role</h3>
-              <button onClick={() => setShowCreateModal(false)} className="text-gray-500 hover:text-gray-700">
+              <button
+                onClick={() => setShowCreateModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
                 <i className="fas fa-times"></i>
               </button>
             </div>
             <form onSubmit={handleCreateRole} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Role Name *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Role Name *
+                </label>
                 <input
                   type="text"
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                   value={roleForm.name}
-                  onChange={(e) => setRoleForm({ ...roleForm, name: e.target.value })}
+                  onChange={(e) =>
+                    setRoleForm({ ...roleForm, name: e.target.value })
+                  }
                   required
                   disabled={loading}
                   placeholder="e.g., Department Head"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Description
+                </label>
                 <textarea
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                   value={roleForm.description}
-                  onChange={(e) => setRoleForm({ ...roleForm, description: e.target.value })}
+                  onChange={(e) =>
+                    setRoleForm({ ...roleForm, description: e.target.value })
+                  }
                   rows="3"
                   disabled={loading}
                   placeholder="What permissions does this role have?"
@@ -1304,28 +1445,39 @@ const RolesManagementModule = ({
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold">Edit Role</h3>
-              <button onClick={() => setShowEditModal(false)} className="text-gray-500 hover:text-gray-700">
+              <button
+                onClick={() => setShowEditModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
                 <i className="fas fa-times"></i>
               </button>
             </div>
             <form onSubmit={handleUpdateRole} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Role Name *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Role Name *
+                </label>
                 <input
                   type="text"
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                   value={roleForm.name}
-                  onChange={(e) => setRoleForm({ ...roleForm, name: e.target.value })}
+                  onChange={(e) =>
+                    setRoleForm({ ...roleForm, name: e.target.value })
+                  }
                   required
                   disabled={loading}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Description
+                </label>
                 <textarea
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                   value={roleForm.description}
-                  onChange={(e) => setRoleForm({ ...roleForm, description: e.target.value })}
+                  onChange={(e) =>
+                    setRoleForm({ ...roleForm, description: e.target.value })
+                  }
                   rows="3"
                   disabled={loading}
                 />
@@ -1369,11 +1521,17 @@ const RolesManagementModule = ({
                   )}
                 </div>
                 <p className="text-sm text-gray-600 mt-1">
-                  <span className="font-medium text-indigo-600">{selectedPermissions.length}</span> of{' '}
-                  <span className="font-medium">{allPermissions.length}</span> permissions selected
+                  <span className="font-medium text-indigo-600">
+                    {selectedPermissions.length}
+                  </span>{' '}
+                  of <span className="font-medium">{allPermissions.length}</span>{' '}
+                  permissions selected
                 </p>
               </div>
-              <button onClick={() => setShowPermissionsModal(false)} className="text-gray-500 hover:text-gray-700">
+              <button
+                onClick={() => setShowPermissionsModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
                 <i className="fas fa-times text-xl"></i>
               </button>
             </div>
@@ -1386,39 +1544,59 @@ const RolesManagementModule = ({
                   type="text"
                   placeholder="Search permissions by name, key, or description..."
                   className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                  value={permissionSearchTerm}
+                  onChange={(e) => setPermissionSearchTerm(e.target.value)}
                 />
               </div>
             </div>
 
             <div className="space-y-4">
-              {Object.keys(permissionsGrouped).map(category => {
+              {Object.keys(permissionsGrouped).map((category) => {
                 const categoryPerms = permissionsGrouped[category] || [];
-                const filteredCategoryPerms = searchTerm
-                  ? categoryPerms.filter(p =>
-                      p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                      p.key.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                      p.description?.toLowerCase().includes(searchTerm.toLowerCase())
+                const filteredCategoryPerms = permissionSearchTerm
+                  ? categoryPerms.filter(
+                      (p) =>
+                        p.name
+                          .toLowerCase()
+                          .includes(permissionSearchTerm.toLowerCase()) ||
+                        p.key
+                          .toLowerCase()
+                          .includes(permissionSearchTerm.toLowerCase()) ||
+                        p.description
+                          ?.toLowerCase()
+                          .includes(permissionSearchTerm.toLowerCase())
                     )
                   : categoryPerms;
 
                 if (filteredCategoryPerms.length === 0) return null;
 
-                const allSelected = filteredCategoryPerms.every(p => selectedPermissions.includes(p.key));
+                const allSelected = filteredCategoryPerms.every((p) =>
+                  selectedPermissions.includes(p.key)
+                );
                 const isNewFeature = newFeatureModules.includes(category);
                 const isExpanded = expandedCategories[category] !== false;
 
                 return (
-                  <div key={category} className={`border rounded-lg overflow-hidden ${isNewFeature ? 'border-purple-200' : 'border-gray-200'}`}>
+                  <div
+                    key={category}
+                    className={`border rounded-lg overflow-hidden ${
+                      isNewFeature ? 'border-purple-200' : 'border-gray-200'
+                    }`}
+                  >
                     <div
                       className={`px-4 py-3 flex justify-between items-center cursor-pointer ${
-                        isNewFeature ? 'bg-purple-50 hover:bg-purple-100' : 'bg-gray-50 hover:bg-gray-100'
+                        isNewFeature
+                          ? 'bg-purple-50 hover:bg-purple-100'
+                          : 'bg-gray-50 hover:bg-gray-100'
                       }`}
                       onClick={() => toggleCategoryExpand(category)}
                     >
                       <div className="flex items-center gap-3">
-                        <i className={`fas fa-chevron-${isExpanded ? 'down' : 'right'} text-gray-400 text-xs`}></i>
+                        <i
+                          className={`fas fa-chevron-${
+                            isExpanded ? 'down' : 'right'
+                          } text-gray-400 text-xs`}
+                        ></i>
                         <h4 className="font-medium">
                           {permissionCategories[category] || category}
                           {isNewFeature && (
@@ -1433,7 +1611,12 @@ const RolesManagementModule = ({
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="text-sm text-gray-600">
-                          {filteredCategoryPerms.filter(p => selectedPermissions.includes(p.key)).length} / {filteredCategoryPerms.length} selected
+                          {
+                            filteredCategoryPerms.filter((p) =>
+                              selectedPermissions.includes(p.key)
+                            ).length
+                          }{' '}
+                          / {filteredCategoryPerms.length} selected
                         </span>
                         <button
                           onClick={(e) => {
@@ -1453,16 +1636,26 @@ const RolesManagementModule = ({
 
                     {isExpanded && (
                       <div className="p-3 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                        {filteredCategoryPerms.map(perm => {
-                          const isNewFeaturePerm = newFeatureModules.includes(perm.module);
-                          const isSelected = selectedPermissions.includes(perm.key);
+                        {filteredCategoryPerms.map((perm) => {
+                          const isNewFeaturePerm = newFeatureModules.includes(
+                            perm.module
+                          );
+                          const isSelected = selectedPermissions.includes(
+                            perm.key
+                          );
 
                           return (
                             <label
                               key={perm.key}
                               className={`flex items-start space-x-2 p-2 rounded cursor-pointer transition-colors ${
-                                isSelected ? 'bg-indigo-50 border border-indigo-200' : 'hover:bg-gray-50'
-                              } ${isNewFeaturePerm ? 'border-l-4 border-l-purple-400' : ''}`}
+                                isSelected
+                                  ? 'bg-indigo-50 border border-indigo-200'
+                                  : 'hover:bg-gray-50'
+                              } ${
+                                isNewFeaturePerm
+                                  ? 'border-l-4 border-l-purple-400'
+                                  : ''
+                              }`}
                             >
                               <input
                                 type="checkbox"
@@ -1471,14 +1664,24 @@ const RolesManagementModule = ({
                                 className="mt-1 rounded"
                               />
                               <div>
-                                <p className={`text-sm font-medium ${isSelected ? 'text-indigo-700' : ''}`}>
+                                <p
+                                  className={`text-sm font-medium ${
+                                    isSelected ? 'text-indigo-700' : ''
+                                  }`}
+                                >
                                   {perm.name}
                                   {isNewFeaturePerm && (
-                                    <span className="ml-1 text-[10px] text-purple-500">🆕</span>
+                                    <span className="ml-1 text-[10px] text-purple-500">
+                                      🆕
+                                    </span>
                                   )}
                                 </p>
-                                <p className="text-xs text-gray-500">{perm.description}</p>
-                                <p className="text-[10px] text-gray-400 font-mono">Key: {perm.key}</p>
+                                <p className="text-xs text-gray-500">
+                                  {perm.description}
+                                </p>
+                                <p className="text-[10px] text-gray-400 font-mono">
+                                  Key: {perm.key}
+                                </p>
                               </div>
                             </label>
                           );
@@ -1495,15 +1698,29 @@ const RolesManagementModule = ({
               <div className="flex flex-wrap justify-between items-center gap-2">
                 <div>
                   <span className="text-sm text-gray-600">Selected: </span>
-                  <span className="font-bold text-indigo-600">{selectedPermissions.length}</span>
-                  <span className="text-sm text-gray-600"> of {allPermissions.length} permissions</span>
+                  <span className="font-bold text-indigo-600">
+                    {selectedPermissions.length}
+                  </span>
+                  <span className="text-sm text-gray-600">
+                    {' '}
+                    of {allPermissions.length} permissions
+                  </span>
                   <span className="text-sm text-gray-600 ml-3">
-                    ({allPermissions.length > 0 ? Math.round((selectedPermissions.length / allPermissions.length) * 100) : 0}%)
+                    (
+                    {allPermissions.length > 0
+                      ? Math.round(
+                          (selectedPermissions.length / allPermissions.length) *
+                            100
+                        )
+                      : 0}
+                    %)
                   </span>
                 </div>
                 <div className="flex gap-2 flex-wrap">
                   <button
-                    onClick={() => setSelectedPermissions(allPermissions.map(p => p.key))}
+                    onClick={() =>
+                      setSelectedPermissions(allPermissions.map((p) => p.key))
+                    }
                     className="text-sm px-3 py-1 bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200"
                   >
                     Select All
@@ -1517,8 +1734,8 @@ const RolesManagementModule = ({
                   <button
                     onClick={() => {
                       const newFeaturePerms = allPermissions
-                        .filter(p => newFeatureModules.includes(p.module))
-                        .map(p => p.key);
+                        .filter((p) => newFeatureModules.includes(p.module))
+                        .map((p) => p.key);
                       setSelectedPermissions(newFeaturePerms);
                     }}
                     className="text-sm px-3 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200"
@@ -1536,12 +1753,19 @@ const RolesManagementModule = ({
                 className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2"
               >
                 {loading ? (
-                  <><i className="fas fa-spinner fa-spin"></i> Saving...</>
+                  <>
+                    <i className="fas fa-spinner fa-spin"></i> Saving...
+                  </>
                 ) : (
-                  <><i className="fas fa-save"></i> Save Permissions</>
+                  <>
+                    <i className="fas fa-save"></i> Save Permissions
+                  </>
                 )}
               </button>
-              <button onClick={() => setShowPermissionsModal(false)} className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
+              <button
+                onClick={() => setShowPermissionsModal(false)}
+                className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
+              >
                 Cancel
               </button>
             </div>
@@ -1555,23 +1779,28 @@ const RolesManagementModule = ({
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold">Assign Role to User</h3>
-              <button onClick={() => setShowAssignModal(false)} className="text-gray-500 hover:text-gray-700">
+              <button
+                onClick={() => setShowAssignModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
                 <i className="fas fa-times"></i>
               </button>
             </div>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Select User</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Select User
+                </label>
                 <select
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                   value={selectedUser?.id || ''}
                   onChange={(e) => {
-                    const u = users.find(x => x.id === e.target.value);
+                    const u = users.find((x) => x.id === e.target.value);
                     setSelectedUser(u);
                   }}
                 >
                   <option value="">-- Select User --</option>
-                  {(users || []).map(u => (
+                  {(users || []).map((u) => (
                     <option key={u.id} value={u.id}>
                       {u.firstName} {u.lastName} ({u.email})
                       {u.role ? ` • ${u.role}` : ''}
@@ -1580,14 +1809,16 @@ const RolesManagementModule = ({
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Select Role</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Select Role
+                </label>
                 <select
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                   value={assignRoleId}
                   onChange={(e) => setAssignRoleId(e.target.value)}
                 >
                   <option value="">-- Select Role --</option>
-                  {(roles || []).map(r => (
+                  {(roles || []).map((r) => (
                     <option key={r.id} value={r.id}>
                       {r.name}
                       {r.isSystemRole ? ' (System)' : ''}
@@ -1601,7 +1832,14 @@ const RolesManagementModule = ({
                 <div className="bg-blue-50 p-3 rounded-lg">
                   <p className="text-sm text-blue-700">
                     <i className="fas fa-info-circle mr-1"></i>
-                    Assigning <strong>{(roles || []).find(r => r.id === assignRoleId)?.name}</strong> to <strong>{selectedUser.firstName} {selectedUser.lastName}</strong>
+                    Assigning{' '}
+                    <strong>
+                      {(roles || []).find((r) => r.id === assignRoleId)?.name}
+                    </strong>{' '}
+                    to{' '}
+                    <strong>
+                      {selectedUser.firstName} {selectedUser.lastName}
+                    </strong>
                   </p>
                 </div>
               )}
@@ -1612,12 +1850,19 @@ const RolesManagementModule = ({
                   className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {loading ? (
-                    <><i className="fas fa-spinner fa-spin"></i> Assigning...</>
+                    <>
+                      <i className="fas fa-spinner fa-spin"></i> Assigning...
+                    </>
                   ) : (
-                    <><i className="fas fa-user-check"></i> Assign Role</>
+                    <>
+                      <i className="fas fa-user-check"></i> Assign Role
+                    </>
                   )}
                 </button>
-                <button onClick={() => setShowAssignModal(false)} className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
+                <button
+                  onClick={() => setShowAssignModal(false)}
+                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
+                >
                   Cancel
                 </button>
               </div>
@@ -18396,7 +18641,7 @@ const StaffModule = ({
   currentSchool,
   user,
   departments = [],
-  roles = []    
+  roles = [],
 }) => {
   // ---- Aliases for the module-scope sub-components ----
   const SearchableSelect = StaffSearchableSelect;
@@ -18409,7 +18654,7 @@ const StaffModule = ({
   const [loading, setLoading] = useState(false);
   const [payrollForm, setPayrollForm] = useState({
     month: new Date().getMonth() + 1,
-    year: new Date().getFullYear()
+    year: new Date().getFullYear(),
   });
   const [searchTerm, setSearchTerm] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('');
@@ -18438,9 +18683,11 @@ const StaffModule = ({
   const getUserDisplayName = (member) => {
     if (!member) return 'Unknown Staff';
     const userData = member.User || {};
-    return `${userData.firstName || ''} ${userData.lastName || ''}`.trim()
-      || member.employeeId
-      || 'Unknown Staff';
+    return (
+      `${userData.firstName || ''} ${userData.lastName || ''}`.trim() ||
+      member.employeeId ||
+      'Unknown Staff'
+    );
   };
 
   const getUserInitials = (member) => {
@@ -18453,14 +18700,16 @@ const StaffModule = ({
 
   const getTotalSalary = (member) => {
     if (!member || !member.salary) return 0;
-    return (parseFloat(member.salary.basic) || 0)
-         + (parseFloat(member.salary.house) || 0)
-         + (parseFloat(member.salary.transport) || 0);
+    return (
+      (parseFloat(member.salary.basic) || 0) +
+      (parseFloat(member.salary.house) || 0) +
+      (parseFloat(member.salary.transport) || 0)
+    );
   };
 
   const getDepartmentName = (departmentId) => {
     if (!departmentId) return 'N/A';
-    const dept = departments?.find(d => d.id === departmentId);
+    const dept = departments?.find((d) => d.id === departmentId);
     return dept?.name || 'N/A';
   };
 
@@ -18468,7 +18717,7 @@ const StaffModule = ({
     return new Intl.NumberFormat('en-KE', {
       style: 'currency',
       currency: 'KES',
-      minimumFractionDigits: 0
+      minimumFractionDigits: 0,
     }).format(amount || 0);
   };
 
@@ -18477,157 +18726,156 @@ const StaffModule = ({
     const n = parseFloat(String(v).replace(/,/g, ''));
     return Number.isFinite(n) ? n : 0;
   };
-const staffRoleOptions = useMemo(() => {
-  // ---- 1. Built-in options (unchanged, based on school type) ----
-  let builtIn = [];
 
-  if (isUniversity) {
-    builtIn = [
-      { value: 'PROFESSOR',          label: 'Professor' },
-      { value: 'SENIOR_LECTURER',    label: 'Senior Lecturer' },
-      { value: 'LECTURER',           label: 'Lecturer' },
-      { value: 'ASSISTANT_LECTURER', label: 'Assistant Lecturer' },
-      { value: 'TUTOR',              label: 'Tutor' },
-      { value: 'HOD_LECTURER',       label: 'Head of Department (Academic)' },
-      { value: 'DEAN',               label: 'Dean' },
-      { value: 'REGISTRAR',          label: 'Registrar' },
-      { value: 'LIBRARIAN',          label: 'Librarian' },
-      { value: 'IT_OFFICER',         label: 'IT Officer' },
-      { value: 'ADMINISTRATOR',      label: 'Administrator' },
-      { value: 'FINANCE_OFFICER',    label: 'Finance Officer' },
-      { value: 'SUPPORT_STAFF',      label: 'Support Staff' },
-      { value: 'LAB_TECHNICIAN',     label: 'Lab Technician' },
-      { value: 'COUNSELOR',          label: 'Counselor' },
-      { value: 'NURSE',              label: 'Nurse' },
-    ];
-  } else if (isTVET) {
-    builtIn = [
-      { value: 'TECHNICAL_INSTRUCTOR', label: 'Technical Instructor' },
-      { value: 'WORKSHOP_SUPERVISOR',  label: 'Workshop Supervisor' },
-      { value: 'HOD',                  label: 'Head of Department' },
-      { value: 'PRINCIPAL',            label: 'Principal' },
-      { value: 'DEPUTY_PRINCIPAL',     label: 'Deputy Principal' },
-      { value: 'CLASS_TEACHER',        label: 'Class Teacher' },
-      { value: 'SUBJECT_TEACHER',      label: 'Subject Teacher' },
-      { value: 'SUPPORT_STAFF',        label: 'Support Staff' },
-      { value: 'LAB_TECHNICIAN',       label: 'Lab Technician' },
-      { value: 'LIBRARIAN',            label: 'Librarian' },
-      { value: 'ADMINISTRATOR',        label: 'Administrator' },
-      { value: 'FINANCE_OFFICER',      label: 'Finance Officer' },
-      { value: 'IT_OFFICER',           label: 'IT Officer' },
-      { value: 'COUNSELOR',            label: 'Counselor' },
-      { value: 'NURSE',                label: 'Nurse' },
-    ];
-  } else if (isSecondary) {
-    builtIn = [
-      { value: 'PRINCIPAL',        label: 'Principal' },
-      { value: 'DEPUTY_PRINCIPAL', label: 'Deputy Principal' },
-      { value: 'HOD',              label: 'Head of Department' },
-      { value: 'CLASS_TEACHER',    label: 'Class Teacher' },
-      { value: 'SUBJECT_TEACHER',  label: 'Subject Teacher' },
-      { value: 'SUPPORT_STAFF',    label: 'Support Staff' },
-      { value: 'LAB_TECHNICIAN',   label: 'Lab Technician' },
-      { value: 'LIBRARIAN',        label: 'Librarian' },
-      { value: 'ADMINISTRATOR',    label: 'Administrator' },
-      { value: 'FINANCE_OFFICER',  label: 'Finance Officer' },
-      { value: 'IT_OFFICER',       label: 'IT Officer' },
-      { value: 'COUNSELOR',        label: 'Counselor' },
-      { value: 'NURSE',            label: 'Nurse' },
-    ];
-  } else {
-    builtIn = [
-      { value: 'HEAD_TEACHER',        label: 'Head Teacher' },
-      { value: 'DEPUTY_HEAD_TEACHER', label: 'Deputy Head Teacher' },
-      { value: 'SENIOR_TEACHER',      label: 'Senior Teacher' },
-      { value: 'CLASS_TEACHER',       label: 'Class Teacher' },
-      { value: 'SUBJECT_TEACHER',     label: 'Subject Teacher' },
-      { value: 'SUPPORT_STAFF',       label: 'Support Staff' },
-      { value: 'LAB_TECHNICIAN',      label: 'Lab Technician' },
-      { value: 'LIBRARIAN',           label: 'Librarian' },
-      { value: 'ADMINISTRATOR',       label: 'Administrator' },
-      { value: 'FINANCE_OFFICER',     label: 'Finance Officer' },
-      { value: 'IT_OFFICER',          label: 'IT Officer' },
-      { value: 'COUNSELOR',           label: 'Counselor' },
-      { value: 'NURSE',               label: 'Nurse' },
-    ];
-  }
+  // ==================== STAFF ROLE OPTIONS ====================
+  const staffRoleOptions = useMemo(() => {
+    // -------- 1. Built-in role options (school-type aware) --------
+    let builtIn = [];
 
-  // ---- 2. Custom roles from the Roles Management module ----
-  // Convert each custom role into an option. The `value` uses the role's name
-  // (not its UUID) so it stays compatible with the existing backend which
-  // stores `staffRole` as a string.
-  const existingValues = new Set(builtIn.map(o => o.value));
+    if (isUniversity) {
+      builtIn = [
+        { value: 'PROFESSOR', label: 'Professor' },
+        { value: 'SENIOR_LECTURER', label: 'Senior Lecturer' },
+        { value: 'LECTURER', label: 'Lecturer' },
+        { value: 'ASSISTANT_LECTURER', label: 'Assistant Lecturer' },
+        { value: 'TUTOR', label: 'Tutor' },
+        { value: 'HOD_LECTURER', label: 'Head of Department (Academic)' },
+        { value: 'DEAN', label: 'Dean' },
+        { value: 'REGISTRAR', label: 'Registrar' },
+        { value: 'LIBRARIAN', label: 'Librarian' },
+        { value: 'IT_OFFICER', label: 'IT Officer' },
+        { value: 'ADMINISTRATOR', label: 'Administrator' },
+        { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
+        { value: 'SUPPORT_STAFF', label: 'Support Staff' },
+        { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
+        { value: 'COUNSELOR', label: 'Counselor' },
+        { value: 'NURSE', label: 'Nurse' },
+      ];
+    } else if (isTVET) {
+      builtIn = [
+        { value: 'TECHNICAL_INSTRUCTOR', label: 'Technical Instructor' },
+        { value: 'WORKSHOP_SUPERVISOR', label: 'Workshop Supervisor' },
+        { value: 'HOD', label: 'Head of Department' },
+        { value: 'PRINCIPAL', label: 'Principal' },
+        { value: 'DEPUTY_PRINCIPAL', label: 'Deputy Principal' },
+        { value: 'CLASS_TEACHER', label: 'Class Teacher' },
+        { value: 'SUBJECT_TEACHER', label: 'Subject Teacher' },
+        { value: 'SUPPORT_STAFF', label: 'Support Staff' },
+        { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
+        { value: 'LIBRARIAN', label: 'Librarian' },
+        { value: 'ADMINISTRATOR', label: 'Administrator' },
+        { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
+        { value: 'IT_OFFICER', label: 'IT Officer' },
+        { value: 'COUNSELOR', label: 'Counselor' },
+        { value: 'NURSE', label: 'Nurse' },
+      ];
+    } else if (isSecondary) {
+      builtIn = [
+        { value: 'PRINCIPAL', label: 'Principal' },
+        { value: 'DEPUTY_PRINCIPAL', label: 'Deputy Principal' },
+        { value: 'HOD', label: 'Head of Department' },
+        { value: 'CLASS_TEACHER', label: 'Class Teacher' },
+        { value: 'SUBJECT_TEACHER', label: 'Subject Teacher' },
+        { value: 'SUPPORT_STAFF', label: 'Support Staff' },
+        { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
+        { value: 'LIBRARIAN', label: 'Librarian' },
+        { value: 'ADMINISTRATOR', label: 'Administrator' },
+        { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
+        { value: 'IT_OFFICER', label: 'IT Officer' },
+        { value: 'COUNSELOR', label: 'Counselor' },
+        { value: 'NURSE', label: 'Nurse' },
+      ];
+    } else {
+      builtIn = [
+        { value: 'HEAD_TEACHER', label: 'Head Teacher' },
+        { value: 'DEPUTY_HEAD_TEACHER', label: 'Deputy Head Teacher' },
+        { value: 'SENIOR_TEACHER', label: 'Senior Teacher' },
+        { value: 'CLASS_TEACHER', label: 'Class Teacher' },
+        { value: 'SUBJECT_TEACHER', label: 'Subject Teacher' },
+        { value: 'SUPPORT_STAFF', label: 'Support Staff' },
+        { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
+        { value: 'LIBRARIAN', label: 'Librarian' },
+        { value: 'ADMINISTRATOR', label: 'Administrator' },
+        { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
+        { value: 'IT_OFFICER', label: 'IT Officer' },
+        { value: 'COUNSELOR', label: 'Counselor' },
+        { value: 'NURSE', label: 'Nurse' },
+      ];
+    }
 
-  const customRoleOptions = (Array.isArray(roles) ? roles : [])
-    .filter(r => r && r.name && r.isActive !== false)
-    .filter(r => !r.isSystemRole) 
-    // Skip any custom role whose name already collides with a built-in option
-    .filter(r => {
-      const normalized = String(r.name).trim().replace(/\s+/g, '_').toUpperCase();
-      return !existingValues.has(normalized);
-    })
-    .map(r => ({
-      value: String(r.name).trim().replace(/\s+/g, '_').toUpperCase(),
-      label: r.name,
-      subLabel: r.isSystemRole ? 'System role' : 'Custom role'
-    }));
+    // -------- 2. Custom roles from Roles Management --------
+    const existingValues = new Set(builtIn.map((o) => o.value));
 
-  // ---- 3. Merge: built-ins first, then custom roles ----
-  return [...builtIn, ...customRoleOptions];
-}, [isUniversity, isTVET, isSecondary, roles]);
+    const customRoleOptions = (Array.isArray(roles) ? roles : [])
+      .filter((r) => r && r.name && r.isActive !== false)
+      .map((r) => ({
+        value: String(r.name).trim().replace(/\s+/g, '_').toUpperCase(),
+        label: r.name,
+        subLabel: r.isSystemRole ? 'System role' : 'Custom role',
+        isSystemRole: !!r.isSystemRole,
+      }))
+      .filter((o) => !existingValues.has(o.value));
+
+    // -------- 3. Merge --------
+    return [...builtIn, ...customRoleOptions];
+  }, [isUniversity, isTVET, isSecondary, roles]);
+
   // ==================== OPTIONS ====================
   const departmentOptions = useMemo(() => {
     if (!departments || departments.length === 0) return [];
-    return departments.map(d => ({
+    return departments.map((d) => ({
       value: d.id,
       label: d.name,
-      subLabel: d.faculty?.name || ''
+      subLabel: d.faculty?.name || '',
     }));
   }, [departments]);
 
   const userOptions = useMemo(() => {
     if (!users || users.length === 0) return [];
-    const existingUserIds = new Set(staff.map(s => s.userId).filter(Boolean));
+    const existingUserIds = new Set(staff.map((s) => s.userId).filter(Boolean));
     return users
-      .filter(u => !existingUserIds.has(u.id) || u.id === form.userId)
-      .map(u => ({
+      .filter((u) => !existingUserIds.has(u.id) || u.id === form.userId)
+      .map((u) => ({
         value: u.id,
         label: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email,
-        subLabel: `${u.role || 'User'} • ${u.email}`
+        subLabel: `${u.role || 'User'} • ${u.email}`,
       }));
   }, [users, staff, form.userId]);
 
   const staffTypeOptions = [
-    { value: 'TEACHING',     label: 'Teaching Staff' },
-    { value: 'NON_TEACHING', label: 'Non-Teaching Staff' }
+    { value: 'TEACHING', label: 'Teaching Staff' },
+    { value: 'NON_TEACHING', label: 'Non-Teaching Staff' },
   ];
 
   const monthOptions = [
-    { value: 1,  label: 'January'   },
-    { value: 2,  label: 'February'  },
-    { value: 3,  label: 'March'     },
-    { value: 4,  label: 'April'     },
-    { value: 5,  label: 'May'       },
-    { value: 6,  label: 'June'      },
-    { value: 7,  label: 'July'      },
-    { value: 8,  label: 'August'    },
-    { value: 9,  label: 'September' },
-    { value: 10, label: 'October'   },
-    { value: 11, label: 'November'  },
-    { value: 12, label: 'December'  }
+    { value: 1, label: 'January' },
+    { value: 2, label: 'February' },
+    { value: 3, label: 'March' },
+    { value: 4, label: 'April' },
+    { value: 5, label: 'May' },
+    { value: 6, label: 'June' },
+    { value: 7, label: 'July' },
+    { value: 8, label: 'August' },
+    { value: 9, label: 'September' },
+    { value: 10, label: 'October' },
+    { value: 11, label: 'November' },
+    { value: 12, label: 'December' },
   ];
 
   const uniqueDepartments = useMemo(() => {
     const deptMap = new Map();
-    staff.forEach(member => {
+    staff.forEach((member) => {
       if (member.departmentId) {
-        const dept = departments?.find(d => d.id === member.departmentId);
+        const dept = departments?.find((d) => d.id === member.departmentId);
         if (dept && !deptMap.has(member.departmentId)) {
           deptMap.set(member.departmentId, dept);
         }
       }
       if (member.department && !deptMap.has(member.department)) {
-        deptMap.set(member.department, { id: member.department, name: member.department });
+        deptMap.set(member.department, {
+          id: member.department,
+          name: member.department,
+        });
       }
     });
     return Array.from(deptMap.values());
@@ -18635,32 +18883,41 @@ const staffRoleOptions = useMemo(() => {
 
   const departmentFilterOptions = useMemo(() => {
     if (!uniqueDepartments || uniqueDepartments.length === 0) return [];
-    return uniqueDepartments.map(dept => ({ value: dept.id, label: dept.name }));
+    return uniqueDepartments.map((dept) => ({
+      value: dept.id,
+      label: dept.name,
+    }));
   }, [uniqueDepartments]);
 
   // ==================== FILTERED STAFF ====================
   const filteredStaff = useMemo(() => {
     let filtered = [...staff];
+
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(member => {
+      filtered = filtered.filter((member) => {
         const u = member.User || {};
-        return `${u.firstName || ''} ${u.lastName || ''}`.toLowerCase().includes(term)
-            || (member.employeeId || '').toLowerCase().includes(term)
-            || (member.jobTitle || '').toLowerCase().includes(term)
-            || (member.department || '').toLowerCase().includes(term)
-            || (u.email || '').toLowerCase().includes(term)
-            || (member.staffRole || '').replace(/_/g, ' ').toLowerCase().includes(term);
+        return (
+          `${u.firstName || ''} ${u.lastName || ''}`.toLowerCase().includes(term) ||
+          (member.employeeId || '').toLowerCase().includes(term) ||
+          (member.jobTitle || '').toLowerCase().includes(term) ||
+          (member.department || '').toLowerCase().includes(term) ||
+          (u.email || '').toLowerCase().includes(term) ||
+          (member.staffRole || '').replace(/_/g, ' ').toLowerCase().includes(term)
+        );
       });
     }
+
     if (departmentFilter) {
-      filtered = filtered.filter(m =>
-        m.departmentId === departmentFilter || m.department === departmentFilter
+      filtered = filtered.filter(
+        (m) => m.departmentId === departmentFilter || m.department === departmentFilter
       );
     }
+
     if (staffTypeFilter) {
-      filtered = filtered.filter(m => m.staffType === staffTypeFilter);
+      filtered = filtered.filter((m) => m.staffType === staffTypeFilter);
     }
+
     return filtered;
   }, [staff, searchTerm, departmentFilter, staffTypeFilter]);
 
@@ -18713,10 +18970,10 @@ const staffRoleOptions = useMemo(() => {
         employmentDate: formattedDate,
         schoolId: currentSchool?.id || user?.schoolId,
         salary: {
-          basic:     parseMoney(form.salary?.basic),
-          house:     parseMoney(form.salary?.house),
-          transport: parseMoney(form.salary?.transport)
-        }
+          basic: parseMoney(form.salary?.basic),
+          house: parseMoney(form.salary?.house),
+          transport: parseMoney(form.salary?.transport),
+        },
       };
 
       if (!showSubjects) delete formData.subjects;
@@ -18725,7 +18982,7 @@ const staffRoleOptions = useMemo(() => {
         delete formData.department;
       }
 
-      ['employeeId', 'tscNumber', 'specialization'].forEach(field => {
+      ['employeeId', 'tscNumber', 'specialization'].forEach((field) => {
         if (formData[field] === '') formData[field] = null;
       });
 
@@ -18766,8 +19023,7 @@ const staffRoleOptions = useMemo(() => {
       staffType: 'TEACHING',
       staffRole: '',
       bankDetails: { bank: '', branch: '', account: '' },
-      // Empty strings so MoneyInput shows placeholders
-      salary: { basic: '', house: '', transport: '' }
+      salary: { basic: '', house: '', transport: '' },
     });
   };
 
@@ -18790,11 +19046,13 @@ const staffRoleOptions = useMemo(() => {
       const res = await api.post('/payroll/process', {
         month: payrollForm.month,
         year: payrollForm.year,
-        schoolId: currentSchool?.id
+        schoolId: currentSchool?.id,
       });
       setPayroll(res.data.payrolls || []);
       setShowPayrollForm(false);
-      setSuccessMessage(`✅ Payroll processed for ${res.data.payrolls?.length || 0} staff members!`);
+      setSuccessMessage(
+        `✅ Payroll processed for ${res.data.payrolls?.length || 0} staff members!`
+      );
       setTimeout(() => setSuccessMessage(''), 5000);
     } catch (error) {
       console.error('❌ Payroll error:', error);
@@ -18839,19 +19097,29 @@ const staffRoleOptions = useMemo(() => {
       employmentDate: member.employmentDate
         ? new Date(member.employmentDate).toISOString().split('T')[0]
         : new Date().toISOString().split('T')[0],
-      // Preserve raw values as strings so MoneyInput shows them nicely
       salary: {
-        basic:     salary.basic     !== undefined && salary.basic     !== null ? String(salary.basic)     : '',
-        house:     salary.house     !== undefined && salary.house     !== null ? String(salary.house)     : '',
-        transport: salary.transport !== undefined && salary.transport !== null ? String(salary.transport) : ''
+        basic:
+          salary.basic !== undefined && salary.basic !== null
+            ? String(salary.basic)
+            : '',
+        house:
+          salary.house !== undefined && salary.house !== null
+            ? String(salary.house)
+            : '',
+        transport:
+          salary.transport !== undefined && salary.transport !== null
+            ? String(salary.transport)
+            : '',
       },
       departmentId: member.departmentId || '',
       department: member.department || '',
-      staffRole: member.staffRole || ''
+      staffRole: member.staffRole || '',
     });
     setEditingId(member.id);
     setTimeout(() => {
-      document.getElementById('staff-form')?.scrollIntoView({ behavior: 'smooth' });
+      document
+        .getElementById('staff-form')
+        ?.scrollIntoView({ behavior: 'smooth' });
     }, 100);
   };
 
@@ -18863,20 +19131,34 @@ const staffRoleOptions = useMemo(() => {
   // ==================== RENDER ====================
   return (
     <div className="space-y-6">
-      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50" />}
+      {loading && (
+        <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50" />
+      )}
 
       {successMessage && (
         <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center justify-between">
-          <span><i className="fas fa-check-circle mr-2" />{successMessage}</span>
-          <button onClick={() => setSuccessMessage('')} className="text-green-500 hover:text-green-700">
+          <span>
+            <i className="fas fa-check-circle mr-2" />
+            {successMessage}
+          </span>
+          <button
+            onClick={() => setSuccessMessage('')}
+            className="text-green-500 hover:text-green-700"
+          >
             <i className="fas fa-times" />
           </button>
         </div>
       )}
       {errorMessage && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
-          <span><i className="fas fa-exclamation-circle mr-2" />{errorMessage}</span>
-          <button onClick={() => setErrorMessage('')} className="text-red-500 hover:text-red-700">
+          <span>
+            <i className="fas fa-exclamation-circle mr-2" />
+            {errorMessage}
+          </span>
+          <button
+            onClick={() => setErrorMessage('')}
+            className="text-red-500 hover:text-red-700"
+          >
             <i className="fas fa-times" />
           </button>
         </div>
@@ -18887,8 +19169,9 @@ const staffRoleOptions = useMemo(() => {
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Staff Management</h2>
           <p className="text-sm text-gray-500 mt-1">
-            {staff.length} staff members • {staff.filter(s => s.staffType === 'TEACHING').length} teaching •{' '}
-            {staff.filter(s => s.staffType === 'NON_TEACHING').length} non-teaching
+            {staff.length} staff members •{' '}
+            {staff.filter((s) => s.staffType === 'TEACHING').length} teaching •{' '}
+            {staff.filter((s) => s.staffType === 'NON_TEACHING').length} non-teaching
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -18897,7 +19180,8 @@ const staffRoleOptions = useMemo(() => {
               onClick={() => setShowPayrollForm(true)}
               className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center gap-2"
             >
-              <i className="fas fa-money-bill-wave" />Process Payroll
+              <i className="fas fa-money-bill-wave" />
+              Process Payroll
             </button>
           )}
           {canEdit && (
@@ -18905,19 +19189,23 @@ const staffRoleOptions = useMemo(() => {
               onClick={() => {
                 handleCancel();
                 setTimeout(() => {
-                  document.getElementById('staff-form')?.scrollIntoView({ behavior: 'smooth' });
+                  document
+                    .getElementById('staff-form')
+                    ?.scrollIntoView({ behavior: 'smooth' });
                 }, 100);
               }}
               className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2"
             >
-              <i className="fas fa-plus" />{editingId ? 'Cancel Edit' : 'Add Staff'}
+              <i className="fas fa-plus" />
+              {editingId ? 'Cancel Edit' : 'Add Staff'}
             </button>
           )}
           <button
             onClick={() => setShowFilters(!showFilters)}
             className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 flex items-center gap-2"
           >
-            <i className="fas fa-filter" />Filters
+            <i className="fas fa-filter" />
+            Filters
           </button>
         </div>
       </div>
@@ -18928,10 +19216,15 @@ const staffRoleOptions = useMemo(() => {
             <i className="fas fa-school mr-2" />
             Managing staff for: <strong>{currentSchool.name}</strong>
             <span className="ml-2 text-xs text-blue-500">
-              ({schoolCategory === 'UNIVERSITY' ? 'University'
-                : schoolCategory === 'COLLEGE_TVET' ? 'TVET'
-                : schoolCategory === 'SENIOR_SECONDARY' ? 'Secondary'
-                : 'Primary/JSS'})
+              (
+              {schoolCategory === 'UNIVERSITY'
+                ? 'University'
+                : schoolCategory === 'COLLEGE_TVET'
+                ? 'TVET'
+                : schoolCategory === 'SENIOR_SECONDARY'
+                ? 'Secondary'
+                : 'Primary/JSS'}
+              )
             </span>
           </p>
         </div>
@@ -18969,7 +19262,11 @@ const staffRoleOptions = useMemo(() => {
               Showing {filteredStaff.length} of {staff.length} staff members
             </span>
             <button
-              onClick={() => { setSearchTerm(''); setDepartmentFilter(''); setStaffTypeFilter(''); }}
+              onClick={() => {
+                setSearchTerm('');
+                setDepartmentFilter('');
+                setStaffTypeFilter('');
+              }}
               className="text-sm text-indigo-600 hover:text-indigo-800"
             >
               Clear Filters
@@ -18980,12 +19277,22 @@ const staffRoleOptions = useMemo(() => {
 
       {/* Staff Form */}
       {canEdit && (
-        <div id="staff-form" className="bg-white p-6 rounded-xl shadow-sm border-2 border-indigo-100">
+        <div
+          id="staff-form"
+          className="bg-white p-6 rounded-xl shadow-sm border-2 border-indigo-100"
+        >
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            {editingId
-              ? <><i className="fas fa-edit text-indigo-600" />Edit Staff Member</>
-              : <><i className="fas fa-user-plus text-indigo-600" />Add New Staff</>
-            }
+            {editingId ? (
+              <>
+                <i className="fas fa-edit text-indigo-600" />
+                Edit Staff Member
+              </>
+            ) : (
+              <>
+                <i className="fas fa-user-plus text-indigo-600" />
+                Add New Staff
+              </>
+            )}
           </h3>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -19001,7 +19308,8 @@ const staffRoleOptions = useMemo(() => {
             />
             {editingId && (
               <p className="text-xs text-gray-500 mt-1">
-                <i className="fas fa-info-circle mr-1" />User account cannot be changed after creation
+                <i className="fas fa-info-circle mr-1" />
+                User account cannot be changed after creation
               </p>
             )}
 
@@ -19009,14 +19317,18 @@ const staffRoleOptions = useMemo(() => {
               <TextInput
                 label="Employee ID"
                 value={form.employeeId || ''}
-                onChange={(e) => setForm({ ...form, employeeId: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, employeeId: e.target.value })
+                }
                 placeholder="e.g., EMP001"
                 disabled={loading}
               />
               <TextInput
                 label="TSC Number"
                 value={form.tscNumber || ''}
-                onChange={(e) => setForm({ ...form, tscNumber: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, tscNumber: e.target.value })
+                }
                 placeholder="e.g., TSC-12345"
                 disabled={loading}
               />
@@ -19040,20 +19352,32 @@ const staffRoleOptions = useMemo(() => {
                   value={form.departmentId || ''}
                   onChange={(e) => {
                     const deptId = e.target.value;
-                    const dept = departments?.find(d => d.id === deptId);
-                    setForm({ ...form, departmentId: deptId, department: dept?.name || '' });
+                    const dept = departments?.find((d) => d.id === deptId);
+                    setForm({
+                      ...form,
+                      departmentId: deptId,
+                      department: dept?.name || '',
+                    });
                   }}
                   options={departmentOptions}
                   placeholder="Search departments..."
-                  emptyMessage={departments?.length > 0 ? 'No departments available' : 'No departments configured for this school'}
+                  emptyMessage={
+                    departments?.length > 0
+                      ? 'No departments available'
+                      : 'No departments configured for this school'
+                  }
                   required
                   disabled={loading}
                 />
                 <TextInput
                   label="Job Title"
                   value={form.jobTitle || ''}
-                  onChange={(e) => setForm({ ...form, jobTitle: e.target.value })}
-                  placeholder={isUniversity ? 'e.g., Senior Lecturer' : 'e.g., Workshop Supervisor'}
+                  onChange={(e) =>
+                    setForm({ ...form, jobTitle: e.target.value })
+                  }
+                  placeholder={
+                    isUniversity ? 'e.g., Senior Lecturer' : 'e.g., Workshop Supervisor'
+                  }
                   required
                   disabled={loading}
                 />
@@ -19074,14 +19398,18 @@ const staffRoleOptions = useMemo(() => {
                 label="Employment Date"
                 type="date"
                 value={form.employmentDate || new Date().toISOString().split('T')[0]}
-                onChange={(e) => setForm({ ...form, employmentDate: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, employmentDate: e.target.value })
+                }
                 required
                 disabled={loading}
               />
               <SearchableSelect
                 label="Staff Type"
                 value={form.staffType || ''}
-                onChange={(e) => setForm({ ...form, staffType: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, staffType: e.target.value })
+                }
                 options={staffTypeOptions}
                 placeholder="Select staff type..."
                 emptyMessage="No staff types available"
@@ -19094,15 +19422,21 @@ const staffRoleOptions = useMemo(() => {
                 <TextInput
                   label="Subjects (comma separated)"
                   value={form.subjects?.join(', ') || ''}
-                  onChange={(e) => setForm({
-                    ...form,
-                    subjects: e.target.value.split(',').map(s => s.trim()).filter(Boolean)
-                  })}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      subjects: e.target.value
+                        .split(',')
+                        .map((s) => s.trim())
+                        .filter(Boolean),
+                    })
+                  }
                   placeholder="Mathematics, Physics, Chemistry"
                   disabled={loading}
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  <i className="fas fa-info-circle mr-1" />Enter subjects separated by commas
+                  <i className="fas fa-info-circle mr-1" />
+                  Enter subjects separated by commas
                 </p>
               </div>
             )}
@@ -19111,7 +19445,9 @@ const staffRoleOptions = useMemo(() => {
               <TextInput
                 label="Specialization"
                 value={form.specialization || ''}
-                onChange={(e) => setForm({ ...form, specialization: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, specialization: e.target.value })
+                }
                 placeholder="e.g., Electrical Engineering, Computer Science"
                 disabled={loading}
               />
@@ -19120,48 +19456,57 @@ const staffRoleOptions = useMemo(() => {
             {/* Salary Details */}
             <div className="border-t pt-4">
               <h4 className="font-medium text-gray-700 mb-3 flex items-center gap-2">
-                <i className="fas fa-money-bill text-green-600" />Salary Details
+                <i className="fas fa-money-bill text-green-600" />
+                Salary Details
               </h4>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <MoneyInput
                   label="Basic Salary"
                   value={form.salary?.basic ?? ''}
-                  onChange={(raw) => setForm({
-                    ...form,
-                    salary: { ...form.salary, basic: raw }
-                  })}
+                  onChange={(raw) =>
+                    setForm({
+                      ...form,
+                      salary: { ...form.salary, basic: raw },
+                    })
+                  }
                   placeholder="e.g., 50000"
                   disabled={loading}
                 />
                 <MoneyInput
                   label="House Allowance"
                   value={form.salary?.house ?? ''}
-                  onChange={(raw) => setForm({
-                    ...form,
-                    salary: { ...form.salary, house: raw }
-                  })}
+                  onChange={(raw) =>
+                    setForm({
+                      ...form,
+                      salary: { ...form.salary, house: raw },
+                    })
+                  }
                   placeholder="e.g., 15000"
                   disabled={loading}
                 />
                 <MoneyInput
                   label="Transport Allowance"
                   value={form.salary?.transport ?? ''}
-                  onChange={(raw) => setForm({
-                    ...form,
-                    salary: { ...form.salary, transport: raw }
-                  })}
+                  onChange={(raw) =>
+                    setForm({
+                      ...form,
+                      salary: { ...form.salary, transport: raw },
+                    })
+                  }
                   placeholder="e.g., 5000"
                   disabled={loading}
                 />
               </div>
               <div className="mt-2 p-3 bg-gray-50 rounded-lg">
                 <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium text-gray-600">Total Monthly Salary:</span>
+                  <span className="text-sm font-medium text-gray-600">
+                    Total Monthly Salary:
+                  </span>
                   <span className="text-lg font-bold text-green-600">
                     {formatCurrency(
                       parseMoney(form.salary?.basic) +
-                      parseMoney(form.salary?.house) +
-                      parseMoney(form.salary?.transport)
+                        parseMoney(form.salary?.house) +
+                        parseMoney(form.salary?.transport)
                     )}
                   </span>
                 </div>
@@ -19174,10 +19519,19 @@ const staffRoleOptions = useMemo(() => {
                 disabled={loading}
                 className="flex-1 bg-indigo-600 text-white py-2.5 px-4 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {loading
-                  ? <><i className="fas fa-spinner fa-spin" />Saving...</>
-                  : <><i className={`fas fa-${editingId ? 'save' : 'plus-circle'}`} />{editingId ? 'Update Staff' : 'Add Staff'}</>
-                }
+                {loading ? (
+                  <>
+                    <i className="fas fa-spinner fa-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <i
+                      className={`fas fa-${editingId ? 'save' : 'plus-circle'}`}
+                    />
+                    {editingId ? 'Update Staff' : 'Add Staff'}
+                  </>
+                )}
               </button>
               {editingId && (
                 <button
@@ -19198,17 +19552,20 @@ const staffRoleOptions = useMemo(() => {
       <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-200">
         <div className="px-6 py-4 bg-gray-50 border-b flex justify-between items-center flex-wrap gap-2">
           <h3 className="font-semibold text-lg flex items-center gap-2">
-            <i className="fas fa-users text-indigo-600" />Staff List
+            <i className="fas fa-users text-indigo-600" />
+            Staff List
             <span className="text-sm font-normal text-gray-500">
-              ({filteredStaff.length} {filteredStaff.length === 1 ? 'member' : 'members'})
+              ({filteredStaff.length}{' '}
+              {filteredStaff.length === 1 ? 'member' : 'members'})
             </span>
           </h3>
           <div className="flex items-center gap-2 text-sm text-gray-500">
             <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full">
-              {staff.filter(s => s.staffType === 'TEACHING').length} Teaching
+              {staff.filter((s) => s.staffType === 'TEACHING').length} Teaching
             </span>
             <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full">
-              {staff.filter(s => s.staffType === 'NON_TEACHING').length} Non-Teaching
+              {staff.filter((s) => s.staffType === 'NON_TEACHING').length}{' '}
+              Non-Teaching
             </span>
           </div>
         </div>
@@ -19225,12 +19582,18 @@ const staffRoleOptions = useMemo(() => {
               </p>
             </div>
           ) : (
-            filteredStaff.map(member => {
+            filteredStaff.map((member) => {
               const u = member.User || {};
               const totalSalary = getTotalSalary(member);
-              const departmentName = getDepartmentName(member.departmentId) || member.department || 'N/A';
+              const departmentName =
+                getDepartmentName(member.departmentId) ||
+                member.department ||
+                'N/A';
               const staffRoleDisplay = member.staffRole
-                ? member.staffRole.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase())
+                ? member.staffRole
+                    .replace(/_/g, ' ')
+                    .toLowerCase()
+                    .replace(/\b\w/g, (l) => l.toUpperCase())
                 : 'N/A';
 
               return (
@@ -19242,50 +19605,81 @@ const staffRoleOptions = useMemo(() => {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center space-x-3">
                         <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0">
-                          <span className="text-indigo-600 font-bold text-lg">{getUserInitials(member)}</span>
+                          <span className="text-indigo-600 font-bold text-lg">
+                            {getUserInitials(member)}
+                          </span>
                         </div>
                         <div className="min-w-0">
-                          <h4 className="font-semibold text-gray-800 truncate">{getUserDisplayName(member)}</h4>
-                          <p className="text-sm text-gray-600 truncate">{member.jobTitle || 'No Job Title'}</p>
-                          <p className="text-xs text-gray-400 truncate">{u.email || 'No email'}</p>
+                          <h4 className="font-semibold text-gray-800 truncate">
+                            {getUserDisplayName(member)}
+                          </h4>
+                          <p className="text-sm text-gray-600 truncate">
+                            {member.jobTitle || 'No Job Title'}
+                          </p>
+                          <p className="text-xs text-gray-400 truncate">
+                            {u.email || 'No email'}
+                          </p>
                         </div>
                       </div>
 
                       <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                         <div>
                           <span className="text-gray-500">Staff Type:</span>
-                          <span className={`ml-1 font-medium ${member.staffType === 'TEACHING' ? 'text-green-600' : 'text-blue-600'}`}>
-                            {member.staffType === 'TEACHING' ? 'Teaching' : 'Non-Teaching'}
+                          <span
+                            className={`ml-1 font-medium ${
+                              member.staffType === 'TEACHING'
+                                ? 'text-green-600'
+                                : 'text-blue-600'
+                            }`}
+                          >
+                            {member.staffType === 'TEACHING'
+                              ? 'Teaching'
+                              : 'Non-Teaching'}
                           </span>
                         </div>
                         <div>
                           <span className="text-gray-500">Role:</span>
-                          <span className="ml-1 font-medium text-indigo-600">{staffRoleDisplay}</span>
+                          <span className="ml-1 font-medium text-indigo-600">
+                            {staffRoleDisplay}
+                          </span>
                         </div>
                         {showDepartment && (
                           <div className="col-span-2">
                             <span className="text-gray-500">Department:</span>
-                            <span className="ml-1 font-medium truncate block">{departmentName}</span>
+                            <span className="ml-1 font-medium truncate block">
+                              {departmentName}
+                            </span>
                           </div>
                         )}
                         <div>
                           <span className="text-gray-500">Employee ID:</span>
-                          <span className="ml-1 font-mono text-sm">{member.employeeId || 'N/A'}</span>
+                          <span className="ml-1 font-mono text-sm">
+                            {member.employeeId || 'N/A'}
+                          </span>
                         </div>
                         <div>
                           <span className="text-gray-500">Hired:</span>
                           <span className="ml-1 font-medium">
-                            {member.employmentDate ? new Date(member.employmentDate).toLocaleDateString() : 'N/A'}
+                            {member.employmentDate
+                              ? new Date(
+                                  member.employmentDate
+                                ).toLocaleDateString()
+                              : 'N/A'}
                           </span>
                         </div>
                       </div>
 
                       {showSubjects && member.subjects?.length > 0 && (
                         <div className="mt-2">
-                          <span className="text-xs text-gray-500">Subjects:</span>
+                          <span className="text-xs text-gray-500">
+                            Subjects:
+                          </span>
                           <div className="flex flex-wrap gap-1 mt-1">
                             {member.subjects.slice(0, 3).map((subject, idx) => (
-                              <span key={`${member.id}-sub-${idx}`} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-xs">
+                              <span
+                                key={`${member.id}-sub-${idx}`}
+                                className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-xs"
+                              >
                                 {subject}
                               </span>
                             ))}
@@ -19300,19 +19694,34 @@ const staffRoleOptions = useMemo(() => {
 
                       <div className="mt-2 pt-2 border-t text-sm">
                         <span className="text-gray-500">Salary:</span>
-                        <span className="ml-2 font-medium text-green-600">{formatCurrency(totalSalary)}</span>
+                        <span className="ml-2 font-medium text-green-600">
+                          {formatCurrency(totalSalary)}
+                        </span>
                       </div>
                     </div>
 
                     {(canEdit || canDelete) && (
                       <div className="flex flex-col space-y-1 ml-2">
                         {canEdit && (
-                          <button onClick={() => handleEdit(member)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg" title="Edit">
+                          <button
+                            onClick={() => handleEdit(member)}
+                            className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg"
+                            title="Edit"
+                          >
                             <i className="fas fa-edit" />
                           </button>
                         )}
                         {canDelete && (
-                          <button onClick={() => handleDelete(member.id, getUserDisplayName(member))} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
+                          <button
+                            onClick={() =>
+                              handleDelete(
+                                member.id,
+                                getUserDisplayName(member)
+                              )
+                            }
+                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
+                            title="Delete"
+                          >
                             <i className="fas fa-trash" />
                           </button>
                         )}
@@ -19332,9 +19741,14 @@ const staffRoleOptions = useMemo(() => {
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold flex items-center gap-2">
-                <i className="fas fa-calculator text-green-600" />Process Monthly Payroll
+                <i className="fas fa-calculator text-green-600" />
+                Process Monthly Payroll
               </h3>
-              <button onClick={() => setShowPayrollForm(false)} className="text-gray-500 hover:text-gray-700" disabled={loading}>
+              <button
+                onClick={() => setShowPayrollForm(false)}
+                className="text-gray-500 hover:text-gray-700"
+                disabled={loading}
+              >
                 <i className="fas fa-times" />
               </button>
             </div>
@@ -19344,7 +19758,12 @@ const staffRoleOptions = useMemo(() => {
                 <SearchableSelect
                   label="Month"
                   value={payrollForm.month}
-                  onChange={(e) => setPayrollForm({ ...payrollForm, month: parseInt(e.target.value, 10) })}
+                  onChange={(e) =>
+                    setPayrollForm({
+                      ...payrollForm,
+                      month: parseInt(e.target.value, 10),
+                    })
+                  }
                   options={monthOptions}
                   placeholder="Select month..."
                   emptyMessage="No months available"
@@ -19354,7 +19773,12 @@ const staffRoleOptions = useMemo(() => {
                   label="Year"
                   type="number"
                   value={payrollForm.year}
-                  onChange={(e) => setPayrollForm({ ...payrollForm, year: parseInt(e.target.value, 10) || '' })}
+                  onChange={(e) =>
+                    setPayrollForm({
+                      ...payrollForm,
+                      year: parseInt(e.target.value, 10) || '',
+                    })
+                  }
                   disabled={loading}
                 />
               </div>
@@ -19363,12 +19787,20 @@ const staffRoleOptions = useMemo(() => {
                 <div className="flex items-start">
                   <i className="fas fa-info-circle text-yellow-600 mt-0.5 mr-2" />
                   <div>
-                    <p className="text-sm text-yellow-800 font-medium">Payroll Summary</p>
+                    <p className="text-sm text-yellow-800 font-medium">
+                      Payroll Summary
+                    </p>
                     <p className="text-sm text-yellow-700 mt-1">
-                      Processing payroll for <strong>{staff.length}</strong> staff members for{' '}
+                      Processing payroll for <strong>{staff.length}</strong>{' '}
+                      staff members for{' '}
                       <strong>
-                        {new Date(payrollForm.year, payrollForm.month - 1).toLocaleString('default', { month: 'long' })} {payrollForm.year}
-                      </strong>.
+                        {new Date(
+                          payrollForm.year,
+                          payrollForm.month - 1
+                        ).toLocaleString('default', { month: 'long' })}{' '}
+                        {payrollForm.year}
+                      </strong>
+                      .
                     </p>
                   </div>
                 </div>
@@ -19380,9 +19812,23 @@ const staffRoleOptions = useMemo(() => {
                   disabled={loading || staff.length === 0}
                   className="flex-1 bg-green-600 text-white py-2.5 px-4 rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  {loading ? <><i className="fas fa-spinner fa-spin" />Processing...</> : <><i className="fas fa-calculator" />Process Payroll</>}
+                  {loading ? (
+                    <>
+                      <i className="fas fa-spinner fa-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <i className="fas fa-calculator" />
+                      Process Payroll
+                    </>
+                  )}
                 </button>
-                <button onClick={() => setShowPayrollForm(false)} disabled={loading} className="bg-gray-500 text-white py-2.5 px-6 rounded-lg hover:bg-gray-600">
+                <button
+                  onClick={() => setShowPayrollForm(false)}
+                  disabled={loading}
+                  className="bg-gray-500 text-white py-2.5 px-6 rounded-lg hover:bg-gray-600"
+                >
                   Cancel
                 </button>
               </div>
@@ -19393,8 +19839,6 @@ const staffRoleOptions = useMemo(() => {
     </div>
   );
 };
-
-
 // ==================== FIXED LIBRARY MODULE WITH SCHOOLID ====================
 const LibraryModule = ({ 
   books, setBooks, borrows, setBorrows, students, 
@@ -63672,6 +64116,8 @@ function App() {
   const [staffAttendance, setStaffAttendance] = useState([]);
   const [sickBayData, setSickBayData] = useState(null);
    const [roles, setRoles] = useState([]);
+   const [roleSearchTerm, setRoleSearchTerm] = useState('');
+const [permissionSearchTerm, setPermissionSearchTerm] = useState('');
   
   const [dashboardSections, setDashboardSections] = useState([]);
   const [schoolSettings, setSchoolSettings] = useState({
@@ -64943,19 +65389,18 @@ if (isTVET) {
           setSchools(allSchools);
           console.log('✅ Schools loaded:', allSchools.length);
           
-     if (user?.role !== 'SUPER_ADMIN' && user?.schoolId) {
-  const userSchool = allSchools.find(s => s.id === user.schoolId);
-  if (userSchool) {
-    setCurrentSchool(userSchool);
-    // ✅ Add this line:
-    setSchoolSettings({ 
-      logo: userSchool.contact?.logo || '', 
-      name: userSchool.name, 
-      category: userSchool.category 
-    });
-    console.log('✅ Current school set to:', userSchool.name);
-  }
-}
+          if (user?.role !== 'SUPER_ADMIN' && user?.schoolId) {
+            const userSchool = allSchools.find(s => s.id === user.schoolId);
+            if (userSchool) {
+              setCurrentSchool(userSchool);
+              setSchoolSettings({ 
+                logo: userSchool.contact?.logo || '', 
+                name: userSchool.name, 
+                category: userSchool.category 
+              });
+              console.log('✅ Current school set to:', userSchool.name);
+            }
+          }
         }
       } catch (error) {
         console.error('❌ Error fetching schools:', error);
@@ -65026,6 +65471,20 @@ if (isTVET) {
         console.error('Error fetching course enrollments:', err);
         setCourseEnrollments([]);
       }
+
+      // ✅ ============================================================
+      // ✅ NEW: Fetch roles (needed by StaffModule + RolesManagementModule)
+      // ✅ ============================================================
+      try {
+        const rolesRes = await api.get('/roles');
+        const fetchedRoles = rolesRes.data?.roles || [];
+        setRoles(fetchedRoles);
+        console.log('✅ Roles loaded:', fetchedRoles.length);
+      } catch (err) {
+        console.error('❌ Error fetching roles:', err);
+        setRoles([]);
+      }
+      // ✅ ============================================================
 
       // Fetch all other data in parallel
       const otherFetches = await Promise.allSettled([
