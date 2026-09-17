@@ -21297,13 +21297,21 @@ app.patch('/api/users/:userId/role', authenticate, async (req, res) => {
       return aliases[n] || null;
     };
 
-    const enumRole = roleId ? roleNameToEnum(roleInfo.name) : null;
+    // ✅ 1) Snapshot the user's OLD role BEFORE changing it
+    const oldUserRole = {
+      roleId: user.roleId,
+      role:   user.role
+    };
 
-    // Update BOTH fields
+    // ✅ 2) Compute the new enum + update data (declared ONCE)
+    const enumRole = roleId ? roleNameToEnum(roleInfo?.name) : null;
+
     const updateData = { roleId: roleId || null };
     if (enumRole) {
       updateData.role = enumRole;
     }
+
+    // ✅ 3) Apply the update
     await user.update(updateData);
 
     console.log('✅ Assigned role:', {
@@ -21313,7 +21321,21 @@ app.patch('/api/users/:userId/role', authenticate, async (req, res) => {
       legacyEnumRole: enumRole
     });
 
-    // Return updated user with computed userCount
+    // ✅ 4) Audit log the role assignment (old → new)
+    await createAuditLog(
+      req,
+      'ASSIGN_ROLE',
+      'USER',
+      user.id,
+      oldUserRole,
+      {
+        roleId:   user.roleId,
+        role:     user.role,
+        roleName: roleInfo?.name || null
+      }
+    );
+
+    // ✅ 5) Build the response payload
     const updated = await User.findByPk(userId, { attributes: { exclude: ['password'] } });
 
     let rolePayload = null;
@@ -21328,31 +21350,6 @@ app.patch('/api/users/:userId/role', authenticate, async (req, res) => {
       };
     }
 
-        // ✅ Snapshot the user's old role before changing it
-    const oldUserRole = {
-      roleId: user.roleId,
-      role:   user.role
-    };
-
-    const enumRole = roleId ? roleNameToEnum(roleInfo.name) : null;
-
-    const updateData = { roleId: roleId || null };
-    if (enumRole) updateData.role = enumRole;
-    await user.update(updateData);
-
-    // ✅ Audit log the role assignment
-    await createAuditLog(
-      req,
-      'ASSIGN_ROLE',
-      'USER',
-      user.id,
-      oldUserRole,
-      {
-        roleId:   user.roleId,
-        role:     user.role,
-        roleName: roleInfo?.name || null
-      }
-    );
     const payload = updated.toJSON();
     payload.Role = rolePayload;
 
