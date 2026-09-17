@@ -26606,15 +26606,116 @@ const PORT = process.env.PORT || 5000;
 
 (async () => {
   try {
+    // ============================================================
+    //  1. Verify DB connection
+    // ============================================================
     await sequelize.authenticate();
     console.log('✅ Database connection established');
 
-
-const syncOptions = { alter: false, force: false };
-
-await sequelize.sync(syncOptions);
+    // ============================================================
+    //  2. Sync models (create missing tables only — no ALTER)
+    // ============================================================
+    await sequelize.sync({ alter: false, force: false });
     console.log('✅ Database synced successfully');
 
+    // ============================================================
+    //  3. IDEMPOTENT MIGRATIONS
+    //     Safe to run on every boot. Each block checks first,
+    //     then adds only what's missing.
+    // ============================================================
+    const queryInterface = sequelize.getQueryInterface();
+
+    // ---------- Helper: does a table exist? ----------
+    const tableExists = async (tableName) => {
+      const tables = await queryInterface.showAllTables();
+      const names = tables.map(t => (typeof t === 'string' ? t : t.tableName));
+      return names.includes(tableName);
+    };
+
+    // ---------- Helper: does a column exist? ----------
+    const columnExists = async (tableName, columnName) => {
+      try {
+        const desc = await queryInterface.describeTable(tableName);
+        return Object.prototype.hasOwnProperty.call(desc, columnName);
+      } catch (_) {
+        return false;
+      }
+    };
+
+    // ============================================================
+    //  3A. School — Unit Registration columns
+    // ============================================================
+    try {
+      const hasSchool = await tableExists('Schools');
+      if (hasSchool) {
+        if (!(await columnExists('Schools', 'paymentPercentageRequired'))) {
+          await queryInterface.addColumn('Schools', 'paymentPercentageRequired', {
+            type: DataTypes.INTEGER,
+            allowNull: false,
+            defaultValue: 30
+          });
+          console.log('✅ Migration: added Schools.paymentPercentageRequired');
+        }
+
+        if (!(await columnExists('Schools', 'requiresPaymentForUnits'))) {
+          await queryInterface.addColumn('Schools', 'requiresPaymentForUnits', {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: true
+          });
+          console.log('✅ Migration: added Schools.requiresPaymentForUnits');
+        }
+
+        if (!(await columnExists('Schools', 'unitApprovalRequired'))) {
+          await queryInterface.addColumn('Schools', 'unitApprovalRequired', {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: true
+          });
+          console.log('✅ Migration: added Schools.unitApprovalRequired');
+        }
+      } else {
+        console.log('ℹ️  Schools table not found yet — skipping School migrations');
+      }
+    } catch (err) {
+      console.error('⚠️  School migration failed:', err.message);
+    }
+
+    // ============================================================
+    //  3B. ExamCardOverrides table
+    // ============================================================
+    try {
+      if (!(await tableExists('ExamCardOverrides'))) {
+        await ExamCardOverride.sync();
+        console.log('✅ Migration: created ExamCardOverrides table');
+      }
+    } catch (err) {
+      console.error('⚠️  ExamCardOverrides migration failed:', err.message);
+    }
+
+    // ============================================================
+    //  3C. Homework tables
+    // ============================================================
+    try {
+      if (!(await tableExists('Homeworks'))) {
+        await Homework.sync();
+        console.log('✅ Migration: created Homeworks table');
+      }
+      if (!(await tableExists('HomeworkQuestions'))) {
+        await HomeworkQuestion.sync();
+        console.log('✅ Migration: created HomeworkQuestions table');
+      }
+      if (!(await tableExists('HomeworkSubmissions'))) {
+        await HomeworkSubmission.sync();
+        console.log('✅ Migration: created HomeworkSubmissions table');
+      }
+    } catch (err) {
+      console.error('⚠️  Homework migration failed:', err.message);
+    }
+
+    // ============================================================
+    //  4. Startup summary
+    // ============================================================
     console.log('📊 Grading Systems Loaded:');
     console.log('   - CBC (ECDE & Primary)');
     console.log('   - 8-4-4 (Secondary)');
@@ -26624,10 +26725,14 @@ await sequelize.sync(syncOptions);
     console.log('   - Cambridge IGCSE');
     console.log('   - American System');
 
+    // ============================================================
+    //  5. Boot the HTTP server
+    // ============================================================
     app.listen(PORT, () => {
       console.log(`🚀 Server running on http://localhost:${PORT}`);
       console.log(`📚 API Documentation: http://localhost:${PORT}/api`);
     });
+
   } catch (err) {
     console.error('❌ Startup error:', err);
     process.exit(1);
