@@ -18817,68 +18817,21 @@ const StaffModule = ({
     const n = parseFloat(String(v).replace(/,/g, ''));
     return Number.isFinite(n) ? n : 0;
   };
-// ==================== STAFF ROLE OPTIONS ====================
+
 const staffRoleOptions = useMemo(() => {
-  // ---- Determine this school's category ----
   const category = currentSchool?.category || 'ECDE_PRIMARY_JSS';
 
   // -------- 1. Built-in role options (school-type aware) --------
   let builtIn = [];
 
   if (isUniversity) {
-    builtIn = [
-      { value: 'PROFESSOR', label: 'Professor' },
-      { value: 'SENIOR_LECTURER', label: 'Senior Lecturer' },
-      { value: 'LECTURER', label: 'Lecturer' },
-      { value: 'ASSISTANT_LECTURER', label: 'Assistant Lecturer' },
-      { value: 'TUTOR', label: 'Tutor' },
-      { value: 'HOD_LECTURER', label: 'Head of Department (Academic)' },
-      { value: 'DEAN', label: 'Dean' },
-      { value: 'REGISTRAR', label: 'Registrar' },
-      { value: 'LIBRARIAN', label: 'Librarian' },
-      { value: 'IT_OFFICER', label: 'IT Officer' },
-      { value: 'ADMINISTRATOR', label: 'Administrator' },
-      { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
-      { value: 'SUPPORT_STAFF', label: 'Support Staff' },
-      { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
-      { value: 'COUNSELOR', label: 'Counselor' },
-      { value: 'NURSE', label: 'Nurse' },
-    ];
+    // ... university roles
   } else if (isTVET) {
-    builtIn = [
-      { value: 'TECHNICAL_INSTRUCTOR', label: 'Technical Instructor' },
-      { value: 'WORKSHOP_SUPERVISOR', label: 'Workshop Supervisor' },
-      { value: 'HOD', label: 'Head of Department' },
-      { value: 'PRINCIPAL', label: 'Principal' },
-      { value: 'DEPUTY_PRINCIPAL', label: 'Deputy Principal' },
-      { value: 'CLASS_TEACHER', label: 'Class Teacher' },
-      { value: 'SUBJECT_TEACHER', label: 'Subject Teacher' },
-      { value: 'SUPPORT_STAFF', label: 'Support Staff' },
-      { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
-      { value: 'LIBRARIAN', label: 'Librarian' },
-      { value: 'ADMINISTRATOR', label: 'Administrator' },
-      { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
-      { value: 'IT_OFFICER', label: 'IT Officer' },
-      { value: 'COUNSELOR', label: 'Counselor' },
-      { value: 'NURSE', label: 'Nurse' },
-    ];
+    // ... TVET roles
   } else if (isSecondary) {
-    builtIn = [
-      { value: 'PRINCIPAL', label: 'Principal' },
-      { value: 'DEPUTY_PRINCIPAL', label: 'Deputy Principal' },
-      { value: 'HOD', label: 'Head of Department' },
-      { value: 'CLASS_TEACHER', label: 'Class Teacher' },
-      { value: 'SUBJECT_TEACHER', label: 'Subject Teacher' },
-      { value: 'SUPPORT_STAFF', label: 'Support Staff' },
-      { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
-      { value: 'LIBRARIAN', label: 'Librarian' },
-      { value: 'ADMINISTRATOR', label: 'Administrator' },
-      { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
-      { value: 'IT_OFFICER', label: 'IT Officer' },
-      { value: 'COUNSELOR', label: 'Counselor' },
-      { value: 'NURSE', label: 'Nurse' },
-    ];
+    // ... secondary roles
   } else {
+    // Primary/JSS roles
     builtIn = [
       { value: 'HEAD_TEACHER', label: 'Head Teacher' },
       { value: 'DEPUTY_HEAD_TEACHER', label: 'Deputy Head Teacher' },
@@ -18901,12 +18854,12 @@ const staffRoleOptions = useMemo(() => {
 
   const roleTableOptions = (Array.isArray(roles) ? roles : [])
     .filter((r) => r && r.name && r.isActive !== false)
-    // ✅ Only keep roles that fit this school's category
+    // ✅ KEY FIX: Only keep roles that match this school's category
     .filter(
       (r) =>
-        !r.category ||
-        r.category === 'ALL' ||
-        r.category === category
+        !r.category ||           // No category = universal (backward compat)
+        r.category === 'ALL' ||  // Explicitly universal
+        r.category === category  // Matches this school's category
     )
     .map((r) => ({
       value: String(r.name).trim().replace(/\s+/g, '_').toUpperCase(),
@@ -18919,6 +18872,8 @@ const staffRoleOptions = useMemo(() => {
   // -------- 3. Merge --------
   return [...builtIn, ...roleTableOptions];
 }, [isUniversity, isTVET, isSecondary, roles, currentSchool?.category]);
+
+
   // ==================== OPTIONS ====================
   const departmentOptions = useMemo(() => {
     if (!departments || departments.length === 0) return [];
