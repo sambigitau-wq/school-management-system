@@ -64106,11 +64106,11 @@ const filteredHomeworks = useMemo(() => {
       h.courseId === filterScope
     );
   }
-  if (searchTerm.trim()) {
-    const t = searchTerm.toLowerCase();
+  if (String(searchTerm ?? '').trim()) {
+    const t = String(searchTerm).toLowerCase();
     list = list.filter(h =>
-      (h.title || '').toLowerCase().includes(t) ||   // ← here
-      (h.description || '').toLowerCase().includes(t) // ← and here
+      String(h.title ?? '').toLowerCase().includes(t) ||
+      String(h.description ?? '').toLowerCase().includes(t)
     );
   }
   return list;
@@ -65999,14 +65999,14 @@ const canAccessModule = (user, moduleId) => {
       'exams', 'results', 'timetable', 'attendance', 'promotion',
       'course-enrollment', 'unit-registration', 'card-management',
       'certificates', 'alumni', 'live-classroom', 'online-exams',
-      'receptionist', 'events', 'announcements', 'settings', 'labs'
+      'receptionist', 'events', 'announcements', 'settings', 'labs','exam-card-overrides' 
     ],
     'HOD': [
       'dashboard', 'courses', 'course-units', 'students', 'staff',
       'student-arrival', 'exams', 'results', 'timetable', 'attendance',
       'schemes-of-work', 'promotion', 'course-enrollment', 'unit-registration',
       'card-management', 'certificates', 'alumni', 'live-classroom',
-      'online-exams', 'receptionist', 'events', 'announcements', 'settings',
+      'online-exams', 'receptionist', 'events', 'announcements', 'settings','exam-card-overrides' ,
       'labs'
     ],
     'HEAD_OF_DEPARTMENT': [
@@ -66014,7 +66014,7 @@ const canAccessModule = (user, moduleId) => {
       'student-arrival', 'exams', 'results', 'timetable', 'attendance',
       'schemes-of-work', 'promotion', 'course-enrollment', 'unit-registration',
       'card-management', 'certificates', 'alumni', 'live-classroom',
-      'online-exams', 'receptionist', 'events', 'announcements', 'settings',
+      'online-exams', 'receptionist', 'events', 'announcements', 'settings','exam-card-overrides' ,
       'labs'
     ],
     'PRINCIPAL': [
@@ -66025,19 +66025,19 @@ const canAccessModule = (user, moduleId) => {
       'staff-attendance', 'payroll', 'card-management', 'certificates',
       'alumni', 'live-classroom', 'online-exams', 'receptionist', 'events',
       'announcements', 'messages', 'settings', 'course-enrollment',
-      'unit-registration', 'health', 'sickbay', 'labs','homework' 
+      'unit-registration', 'health', 'sickbay', 'labs','homework' ,'exam-card-overrides' 
     ],
     'DEPUTY_PRINCIPAL': [
       'dashboard', 'students', 'attendance', 'timetable', 'exams', 'results',
       'schemes-of-work', 'promotion', 'exam-cards', 'student-arrival',
       'card-management', 'certificates', 'alumni', 'live-classroom',
       'online-exams', 'receptionist', 'events', 'announcements', 'settings',
-      'course-enrollment', 'unit-registration', 'labs','homework' 
+      'course-enrollment', 'unit-registration', 'labs','homework' ,'exam-card-overrides' 
     ],
     'ACCOUNTANT': [
       'dashboard', 'fees', 'fee-allocation', 'fee-collection', 'receipt-history',
       'other-income', 'expenses', 'reports', 'fee-reminders',  'fee-transfers', 'payroll',
-      'receptionist', 'events', 'announcements', 'settings'
+      'receptionist', 'events', 'announcements', 'settings','exam-card-overrides' 
     ],
     'LIBRARIAN': [
       'dashboard', 'library', 'students', 'announcements', 'events',
@@ -66066,7 +66066,7 @@ const canAccessModule = (user, moduleId) => {
     'SCHOOL_ADMIN': [
       'dashboard', 'schools', 'users', 'roles', 'classes', 'subjects',
       'students', 'exams', 'results', 'attendance', 'timetable',
-      'schemes-of-work', 'course-units', 'promotion', 'exam-cards',
+      'schemes-of-work', 'course-units', 'promotion', 'exam-cards','exam-card-overrides' ,
       'student-arrival', 'fees', 'fee-allocation', 'fee-collection',
       'receipt-history', 'other-income', 'expenses', 'reports',
       'fee-reminders','fee-transfers', 'staff', 'staff-attendance', 'payroll',
@@ -66387,6 +66387,7 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
         title: "ACADEMICS",
         items: [
           { icon: "file-alt", label: "Exams", id: 'exams' },
+          { icon: "user-check", label: "Exam Card Overrides", id: 'exam-card-overrides' },
           { icon: "chart-line", label: "Results", id: 'results' },
           { icon: "clock", label: "Timetable", id: 'timetable' },
           { icon: "calendar-check", label: "Attendance", id: 'attendance' },
@@ -66450,6 +66451,7 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
         title: "ACADEMICS",
         items: [
           { icon: "file-alt", label: "Exams", id: 'exams' },
+          { icon: "user-check", label: "Exam Card Overrides", id: 'exam-card-overrides' },
           { icon: "chart-line", label: "Results", id: 'results' },
           { icon: "clock", label: "Timetable", id: 'timetable' },
           { icon: "calendar-check", label: "Attendance", id: 'attendance' },
@@ -66512,6 +66514,8 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
         items: [
           { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
           { icon: "book-open", label: "Homework", id: 'homework' },
+          
+{ icon: "user-check", label: "Exam Card Overrides", id: 'exam-card-overrides' },
           { icon: "stethoscope", label: "Health Records", id: 'health' },
           { icon: "bed", label: "Sick Bay", id: 'sickbay' }
         ]
@@ -66576,6 +66580,8 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
           { icon: "calendar-check", label: "Attendance", id: 'attendance' },
           { icon: "clock", label: "Timetable", id: 'timetable' },
           { icon: "id-card", label: "Exam Cards", id: 'exam-cards' },
+   
+{ icon: "user-check", label: "Exam Card Overrides", id: 'exam-card-overrides' },
           { icon: "book-open", label: "Homework", id: 'homework' },
           { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
           { icon: "microscope", label: "Labs", id: 'labs' }
@@ -66630,7 +66636,14 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
           { icon: "file-invoice", label: "Reports", id: 'reports' },
           { icon: "bell", label: "Fee Reminders", id: 'fee-reminders' },
              { icon: "exchange-alt", label: "Fee Transfers", id: 'fee-transfers' },
+             {
+  title: "EXAMS",
+  items: [
+    { icon: "id-card", label: "Exam Card Overrides", id: 'exam-card-overrides' }
+  ]
+},
           { icon: "money-bill-wave", label: "Payroll", id: 'payroll' }
+        
         ]
       },
       {
@@ -66877,6 +66890,7 @@ if (isTVET) {
         { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
         { icon: "calendar-check", label: "Attendance", id: 'attendance' },
         { icon: "id-card", label: "Exam Cards", id: 'exam-cards' },
+        { icon: "user-check", label: "Exam Card Overrides", id: 'exam-card-overrides' },
         { icon: "book-open", label: "Homework", id: 'homework' },
         { icon: "arrow-up", label: "Promotion", id: 'promotion' },
         { icon: "stethoscope", label: "Health Records", id: 'health' },
