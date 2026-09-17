@@ -692,6 +692,12 @@ const RolesManagementModule = ({
   const filteredRoles = useMemo(() => {
     let list = Array.isArray(roles) ? roles : [];
 
+    // ✅ Never show Super Admin to a school-scoped admin
+    if (user?.role !== 'SUPER_ADMIN') {
+      list = list.filter((r) => r.name !== 'Super Admin');
+    }
+
+    // Search by name or description
     if (roleSearchTerm.trim()) {
       const term = roleSearchTerm.toLowerCase();
       list = list.filter(
@@ -701,13 +707,14 @@ const RolesManagementModule = ({
       );
     }
 
+    // System vs Custom
     if (filterStatus === 'system') {
       list = list.filter((r) => r.isSystemRole === true);
     } else if (filterStatus === 'custom') {
       list = list.filter((r) => r.isSystemRole !== true);
     }
 
-    // ✅ Filter by school category
+    // School-category filter
     if (filterCategory !== 'all') {
       list = list.filter(
         (r) =>
@@ -718,7 +725,7 @@ const RolesManagementModule = ({
     }
 
     return list;
-  }, [roles, roleSearchTerm, filterStatus, filterCategory]);
+  }, [roles, roleSearchTerm, filterStatus, filterCategory, user?.role]);
 
   // ==================== ✅ NEW: GROUPED ROLES ====================
   const groupedRoles = useMemo(() => {
@@ -844,7 +851,9 @@ const RolesManagementModule = ({
     } catch (error) {
       console.error('Error creating role:', error);
       const msg =
-        error.response?.data?.message || error.message || 'Failed to create role';
+        error.response?.data?.message ||
+        error.message ||
+        'Failed to create role';
       setError(msg);
       setTimeout(() => setError(''), 5000);
     } finally {
@@ -906,7 +915,9 @@ const RolesManagementModule = ({
     } catch (error) {
       console.error('Error updating role:', error);
       const msg =
-        error.response?.data?.message || error.message || 'Failed to update role';
+        error.response?.data?.message ||
+        error.message ||
+        'Failed to update role';
       setError(msg);
       setTimeout(() => setError(''), 5000);
     } finally {
@@ -940,7 +951,9 @@ const RolesManagementModule = ({
     } catch (error) {
       console.error('Error deleting role:', error);
       const msg =
-        error.response?.data?.message || error.message || 'Failed to delete role';
+        error.response?.data?.message ||
+        error.message ||
+        'Failed to delete role';
       setError(msg);
       setTimeout(() => setError(''), 5000);
     } finally {
@@ -988,7 +1001,7 @@ const RolesManagementModule = ({
     }
   };
 
-  // ==================== ASSIGN ROLE TO USER ====================
+  // ==================== ASSIGN ROLE ====================
   const handleAssignRole = async () => {
     if (!selectedUser) {
       setError('Please select a user');
@@ -997,6 +1010,14 @@ const RolesManagementModule = ({
     }
     if (!assignRoleId) {
       setError('Please select a role');
+      setTimeout(() => setError(''), 3000);
+      return;
+    }
+
+    // ✅ Client-side guard: block non-super-admins from assigning Super Admin
+    const targetRole = (roles || []).find((r) => r.id === assignRoleId);
+    if (targetRole?.name === 'Super Admin' && user?.role !== 'SUPER_ADMIN') {
+      setError('You cannot assign the Super Admin role');
       setTimeout(() => setError(''), 3000);
       return;
     }
@@ -1010,73 +1031,38 @@ const RolesManagementModule = ({
         roleId: assignRoleId,
       });
 
-      const updatedUser = res.data?.user || res.data?.data?.user;
-      const updatedRole = res.data?.role || res.data?.data?.role;
-
-      if (!updatedUser) {
-        throw new Error('Server did not return the updated user');
-      }
-
+      // Update local users list if possible
       if (typeof setUsers === 'function') {
         setUsers((prev) =>
           prev.map((u) =>
             u.id === selectedUser.id
               ? {
                   ...u,
-                  roleId: updatedUser.roleId ?? assignRoleId,
-                  role: updatedUser.role ?? u.role,
-                  Role: updatedRole ?? updatedUser.Role ?? u.Role,
+                  roleId: assignRoleId,
+                  role: targetRole?.name || u.role,
                 }
               : u
           )
         );
       }
 
-      try {
-        const rolesRes = await api.get('/roles');
-        if (typeof setRoles === 'function') {
-          setRoles(rolesRes.data?.roles || []);
-        }
-      } catch (e) {
-        /* ignore */
-      }
-
-      try {
-        const usersRes = await api.get('/users');
-        if (typeof setUsers === 'function') {
-          setUsers(usersRes.data?.users || []);
-        }
-      } catch (e) {
-        /* ignore */
-      }
-
-      if (selectedUser.id === user?.id) {
-        try {
-          const meRes = await api.get('/auth/me');
-          if (meRes.data?.user?.permissions) {
-            localStorage.setItem(
-              'userPermissions',
-              JSON.stringify(meRes.data.user.permissions)
-            );
-          }
-        } catch (e) {
-          console.warn('Could not refresh own permissions:', e.message);
-        }
-      }
+      // Refresh roles to update userCount
+      await loadRoles();
 
       setShowAssignModal(false);
       setSelectedUser(null);
       setAssignRoleId('');
 
-      const roleName = updatedRole?.name || 'role';
       setSuccess(
-        `✅ Assigned ${roleName} to ${selectedUser.firstName} ${selectedUser.lastName}`
+        `✅ Role "${targetRole?.name || 'selected role'}" assigned successfully!`
       );
       setTimeout(() => setSuccess(''), 4000);
-    } catch (err) {
-      console.error('Assign role error:', err);
+    } catch (error) {
+      console.error('Error assigning role:', error);
       const msg =
-        err.response?.data?.message || err.message || 'Failed to assign role';
+        error.response?.data?.message ||
+        error.message ||
+        'Failed to assign role';
       setError(msg);
       setTimeout(() => setError(''), 5000);
     } finally {
@@ -1149,8 +1135,6 @@ const RolesManagementModule = ({
   const stats = getRoleStats();
 
   // ==================== ✅ ROLE CARD RENDERER ====================
-  // Extracted so both "System Roles" and "Custom Roles" sections use the
-  // same markup — just pass in the role.
   const renderRoleCard = (role) => {
     const isNewRole =
       !role.isSystemRole &&
@@ -1903,20 +1887,27 @@ const RolesManagementModule = ({
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Select Role
                 </label>
+                {/* ✅ FILTERED: non-super-admins cannot see or pick Super Admin */}
                 <select
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                   value={assignRoleId}
                   onChange={(e) => setAssignRoleId(e.target.value)}
                 >
                   <option value="">-- Select Role --</option>
-                  {(roles || []).map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name}
-                      {r.isSystemRole ? ' (System)' : ''}
-                      {r.isActive === false ? ' (Inactive)' : ''}
-                      {r.userCount ? ` • ${r.userCount} users` : ''}
-                    </option>
-                  ))}
+                  {(roles || [])
+                    .filter(
+                      (r) =>
+                        user?.role === 'SUPER_ADMIN' ||
+                        r.name !== 'Super Admin'
+                    )
+                    .map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name}
+                        {r.isSystemRole ? ' (System)' : ''}
+                        {r.isActive === false ? ' (Inactive)' : ''}
+                        {r.userCount ? ` • ${r.userCount} users` : ''}
+                      </option>
+                    ))}
                 </select>
               </div>
               {selectedUser && assignRoleId && (
