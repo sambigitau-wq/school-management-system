@@ -65314,44 +65314,27 @@ if (isTVET) {
     }
   ];
 };
-  // ===== 6. fetchUser =====
-  const fetchUser = async () => {
-    try {
-      const res = await api.get('/auth/me');
-      const userData = res.data.user;
-      
-      if (userData.roleId) {
-        try {
-          const roleRes = await api.get(`/roles/${userData.roleId}`);
-          if (roleRes.data.role) {
-            userData.roleObject = roleRes.data.role;
-            userData.permissions = roleRes.data.role.permissions || [];
-            localStorage.setItem('userPermissions', JSON.stringify(userData.permissions));
-          }
-        } catch (err) {
-          console.error('Error fetching user role:', err);
-        }
-      }
-      
-      const savedPermissions = localStorage.getItem('userPermissions');
-      if (savedPermissions) {
-        try {
-          const perms = JSON.parse(savedPermissions);
-          if (perms.length > 0 && !userData.permissions) {
-            userData.permissions = perms;
-          }
-        } catch {
-          // Ignore parse errors
-        }
-      }
-      
-      setUser(userData);
-    } catch (err) {
-      console.error('Fetch user error:', err);
-      if (err.response?.status === 401) handleLogout();
-    }
-  };
+const fetchUser = async () => {
+  try {
+    const res = await api.get('/auth/me');
+    const userData = res.data.user;
 
+    // ✅ Persist permissions for hasPermission() checks
+    if (Array.isArray(userData.permissions)) {
+      localStorage.setItem('userPermissions', JSON.stringify(userData.permissions));
+    } else {
+      localStorage.removeItem('userPermissions');
+    }
+
+    // ✅ Persist the effective role
+    localStorage.setItem('user', JSON.stringify(userData));
+
+    setUser(userData);
+  } catch (err) {
+    console.error('Fetch user error:', err);
+    if (err.response?.status === 401) handleLogout();
+  }
+};
   // ===== 7. fetchSchoolData, fetchAllData, fetchData =====
   const fetchSchoolData = async (schoolId) => {
     if (!schoolId) return;
