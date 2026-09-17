@@ -580,7 +580,6 @@ const GlobalLoadingIndicator = ({ loading }) => {
   );
 };
 
-
 // ============================================================
 //  COMPLETE ROLES MANAGEMENT MODULE
 // ============================================================
@@ -611,11 +610,12 @@ const RolesManagementModule = ({
   const [editingRole, setEditingRole] = useState(null);
   const [assignRoleId, setAssignRoleId] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [filterCategory, setFilterCategory] = useState('all'); // ✅ NEW
   const [expandedCategories, setExpandedCategories] = useState({});
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
 
-  // ✅ SEPARATE search terms to avoid the "same search term for both" bug
+  // ✅ SEPARATE search terms
   const [roleSearchTerm, setRoleSearchTerm] = useState('');
   const [permissionSearchTerm, setPermissionSearchTerm] = useState('');
 
@@ -658,6 +658,15 @@ const RolesManagementModule = ({
     fee_statement: '🧾 Fee Statement',
   };
 
+  // ✅ Category labels for the school-category badges
+  const schoolCategoryLabels = {
+    ECDE_PRIMARY_JSS: '🏫 Primary / JSS',
+    SENIOR_SECONDARY: '🎓 Secondary',
+    COLLEGE_TVET: '🔧 TVET',
+    UNIVERSITY: '🎓 University',
+    ALL: '🌍 Universal',
+  };
+
   const newFeatureModules = [
     'card_management',
     'certificates',
@@ -698,8 +707,25 @@ const RolesManagementModule = ({
       list = list.filter((r) => r.isSystemRole !== true);
     }
 
+    // ✅ Filter by school category
+    if (filterCategory !== 'all') {
+      list = list.filter(
+        (r) =>
+          r.category === filterCategory ||
+          r.category === 'ALL' ||
+          !r.category
+      );
+    }
+
     return list;
-  }, [roles, roleSearchTerm, filterStatus]);
+  }, [roles, roleSearchTerm, filterStatus, filterCategory]);
+
+  // ==================== ✅ NEW: GROUPED ROLES ====================
+  const groupedRoles = useMemo(() => {
+    const system = filteredRoles.filter((r) => r.isSystemRole);
+    const custom = filteredRoles.filter((r) => !r.isSystemRole);
+    return { system, custom };
+  }, [filteredRoles]);
 
   // ==================== LOAD FUNCTIONS ====================
   const loadRoles = async () => {
@@ -785,7 +811,6 @@ const RolesManagementModule = ({
           : [],
       };
 
-      // ✅ Pass schoolId for SUPER_ADMIN (needed if they're not bound to a school)
       if (user?.role === 'SUPER_ADMIN' && currentSchool?.id) {
         payload.schoolId = currentSchool.id;
       }
@@ -802,7 +827,6 @@ const RolesManagementModule = ({
         setRoles((prev) => [...prev, newRole]);
       }
 
-      // ✅ Refresh roles from server for userCount + consistency
       try {
         const rolesRes = await api.get('/roles');
         if (typeof setRoles === 'function') {
@@ -993,7 +1017,6 @@ const RolesManagementModule = ({
         throw new Error('Server did not return the updated user');
       }
 
-      // ✅ Update the users array immediately
       if (typeof setUsers === 'function') {
         setUsers((prev) =>
           prev.map((u) =>
@@ -1009,7 +1032,6 @@ const RolesManagementModule = ({
         );
       }
 
-      // ✅ Refresh roles to update userCount
       try {
         const rolesRes = await api.get('/roles');
         if (typeof setRoles === 'function') {
@@ -1019,7 +1041,6 @@ const RolesManagementModule = ({
         /* ignore */
       }
 
-      // ✅ Refresh users from server for consistency
       try {
         const usersRes = await api.get('/users');
         if (typeof setUsers === 'function') {
@@ -1029,7 +1050,6 @@ const RolesManagementModule = ({
         /* ignore */
       }
 
-      // ✅ If the admin just changed their OWN role, refresh permissions
       if (selectedUser.id === user?.id) {
         try {
           const meRes = await api.get('/auth/me');
@@ -1128,6 +1148,145 @@ const RolesManagementModule = ({
 
   const stats = getRoleStats();
 
+  // ==================== ✅ ROLE CARD RENDERER ====================
+  // Extracted so both "System Roles" and "Custom Roles" sections use the
+  // same markup — just pass in the role.
+  const renderRoleCard = (role) => {
+    const isNewRole =
+      !role.isSystemRole &&
+      role.createdAt &&
+      new Date(role.createdAt) >
+        new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const categoryLabel = schoolCategoryLabels[role.category] || null;
+    const isUniversal = role.category === 'ALL' || !role.category;
+
+    return (
+      <div
+        key={role.id}
+        className="bg-white rounded-xl shadow-sm p-6 hover:shadow-md transition-shadow border border-gray-200"
+      >
+        <div className="flex justify-between items-start">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-lg font-bold text-gray-800 truncate">
+                {role.name}
+              </h3>
+              {isNewRole && (
+                <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs animate-pulse">
+                  New
+                </span>
+              )}
+            </div>
+            {role.description && (
+              <p className="text-sm text-gray-600 mt-1 line-clamp-2">
+                {role.description}
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2 mt-2">
+              {role.isSystemRole ? (
+                <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
+                  <i className="fas fa-crown mr-1"></i>System
+                </span>
+              ) : (
+                <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs">
+                  <i className="fas fa-user-cog mr-1"></i>Custom
+                </span>
+              )}
+
+              {/* ✅ School-category badge */}
+              {categoryLabel && (
+                <span
+                  className={`px-2 py-1 rounded-full text-xs ${
+                    isUniversal
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : 'bg-amber-100 text-amber-800'
+                  }`}
+                >
+                  {categoryLabel}
+                </span>
+              )}
+
+              {role.isActive === false && (
+                <span className="px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs">
+                  Inactive
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex space-x-1 flex-shrink-0 ml-2">
+            <button
+              onClick={() => {
+                setSelectedRole(role);
+                setSelectedPermissions(role.permissions || []);
+                setPermissionSearchTerm('');
+                setShowPermissionsModal(true);
+              }}
+              className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+              title="Manage Permissions"
+            >
+              <i className="fas fa-shield-alt"></i>
+            </button>
+            {!role.isSystemRole && (
+              <>
+                <button
+                  onClick={() => {
+                    setEditingRole(role);
+                    setSelectedRole(role);
+                    setRoleForm({
+                      name: role.name,
+                      description: role.description || '',
+                      permissions: role.permissions || [],
+                    });
+                    setShowEditModal(true);
+                  }}
+                  className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                  title="Edit Role"
+                >
+                  <i className="fas fa-edit"></i>
+                </button>
+                <button
+                  onClick={() => handleDeleteRole(role)}
+                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                  title="Delete Role"
+                >
+                  <i className="fas fa-trash"></i>
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <div className="bg-gray-50 p-2 rounded-lg text-center">
+            <p className="text-xs text-gray-500">Users</p>
+            <p className="text-lg font-bold text-gray-700">
+              {role.userCount || 0}
+            </p>
+          </div>
+          <div className="bg-gray-50 p-2 rounded-lg text-center">
+            <p className="text-xs text-gray-500">Permissions</p>
+            <p className="text-lg font-bold text-gray-700">
+              {role.permissions?.length || 0}
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={() => {
+            setSelectedUser(null);
+            setAssignRoleId(role.id);
+            setShowAssignModal(true);
+          }}
+          className="mt-4 w-full bg-gray-100 text-gray-700 py-2 rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium flex items-center justify-center gap-2"
+        >
+          <i className="fas fa-user-plus"></i> Assign Users
+        </button>
+      </div>
+    );
+  };
+
   // ==================== RENDER ====================
   return (
     <div className="space-y-6">
@@ -1208,7 +1367,7 @@ const RolesManagementModule = ({
       {/* Search and Filter */}
       <div className="bg-white p-4 rounded-xl shadow-sm">
         <div className="flex flex-wrap gap-4 items-center">
-          <div className="flex-1 relative">
+          <div className="flex-1 min-w-[200px] relative">
             <i className="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
             <input
               type="text"
@@ -1227,151 +1386,80 @@ const RolesManagementModule = ({
             <option value="system">System Roles</option>
             <option value="custom">Custom Roles</option>
           </select>
+
+          {/* ✅ NEW: Filter by school category */}
+          <select
+            value={filterCategory}
+            onChange={(e) => setFilterCategory(e.target.value)}
+            className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+          >
+            <option value="all">All Categories</option>
+            <option value="ECDE_PRIMARY_JSS">Primary / JSS</option>
+            <option value="SENIOR_SECONDARY">Secondary</option>
+            <option value="COLLEGE_TVET">TVET</option>
+            <option value="UNIVERSITY">University</option>
+            <option value="ALL">Universal</option>
+          </select>
+
           <span className="text-sm text-gray-500">
             Showing {filteredRoles.length} of {(roles || []).length} roles
           </span>
         </div>
       </div>
 
-      {/* Roles Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredRoles.length === 0 ? (
-          <div className="col-span-3 text-center py-12 text-gray-500">
-            <i className="fas fa-users-cog text-5xl text-gray-300 mb-3 block"></i>
-            <p>
-              {roleSearchTerm
-                ? 'No roles match your search'
-                : 'No roles created yet'}
-            </p>
-            {!roleSearchTerm && (
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="mt-3 text-indigo-600 hover:text-indigo-800"
-              >
-                Click here to create your first role
-              </button>
-            )}
-          </div>
-        ) : (
-          filteredRoles.map((role) => {
-            const isNewRole =
-              !role.isSystemRole &&
-              role.createdAt &&
-              new Date(role.createdAt) >
-                new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-
-            return (
-              <div
-                key={role.id}
-                className="bg-white rounded-xl shadow-sm p-6 hover:shadow-md transition-shadow border border-gray-200"
-              >
-                <div className="flex justify-between items-start">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-lg font-bold text-gray-800">
-                        {role.name}
-                      </h3>
-                      {isNewRole && (
-                        <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs animate-pulse">
-                          New
-                        </span>
-                      )}
-                    </div>
-                    {role.description && (
-                      <p className="text-sm text-gray-600 mt-1">
-                        {role.description}
-                      </p>
-                    )}
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {role.isSystemRole ? (
-                        <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
-                          <i className="fas fa-crown mr-1"></i>System Role
-                        </span>
-                      ) : (
-                        <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs">
-                          <i className="fas fa-user-cog mr-1"></i>Custom Role
-                        </span>
-                      )}
-                      {role.isActive === false && (
-                        <span className="px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs">
-                          Inactive
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex space-x-1 flex-shrink-0 ml-2">
-                    <button
-                      onClick={() => {
-                        setSelectedRole(role);
-                        setSelectedPermissions(role.permissions || []);
-                        setPermissionSearchTerm('');
-                        setShowPermissionsModal(true);
-                      }}
-                      className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                      title="Manage Permissions"
-                    >
-                      <i className="fas fa-shield-alt"></i>
-                    </button>
-                    {!role.isSystemRole && (
-                      <>
-                        <button
-                          onClick={() => {
-                            setEditingRole(role);
-                            setSelectedRole(role);
-                            setRoleForm({
-                              name: role.name,
-                              description: role.description || '',
-                              permissions: role.permissions || [],
-                            });
-                            setShowEditModal(true);
-                          }}
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="Edit Role"
-                        >
-                          <i className="fas fa-edit"></i>
-                        </button>
-                        <button
-                          onClick={() => handleDeleteRole(role)}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Delete Role"
-                        >
-                          <i className="fas fa-trash"></i>
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                  <div className="bg-gray-50 p-2 rounded-lg text-center">
-                    <p className="text-xs text-gray-500">Users</p>
-                    <p className="text-lg font-bold text-gray-700">
-                      {role.userCount || 0}
-                    </p>
-                  </div>
-                  <div className="bg-gray-50 p-2 rounded-lg text-center">
-                    <p className="text-xs text-gray-500">Permissions</p>
-                    <p className="text-lg font-bold text-gray-700">
-                      {role.permissions?.length || 0}
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => {
-                    setSelectedUser(null);
-                    setAssignRoleId(role.id);
-                    setShowAssignModal(true);
-                  }}
-                  className="mt-4 w-full bg-gray-100 text-gray-700 py-2 rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium flex items-center justify-center gap-2"
-                >
-                  <i className="fas fa-user-plus"></i> Assign Users
-                </button>
+      {/* ==================== ROLES GRID (GROUPED) ==================== */}
+      {filteredRoles.length === 0 ? (
+        <div className="text-center py-12 text-gray-500 bg-white rounded-xl shadow-sm">
+          <i className="fas fa-users-cog text-5xl text-gray-300 mb-3 block"></i>
+          <p>
+            {roleSearchTerm
+              ? 'No roles match your search'
+              : 'No roles created yet'}
+          </p>
+          {!roleSearchTerm && (
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="mt-3 text-indigo-600 hover:text-indigo-800"
+            >
+              Click here to create your first role
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-8">
+          {/* ---------- SYSTEM ROLES ---------- */}
+          {groupedRoles.system.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">
+                  <i className="fas fa-crown text-blue-500 mr-2"></i>
+                  System Roles ({groupedRoles.system.length})
+                </h3>
+                <div className="flex-1 h-px bg-gray-200"></div>
               </div>
-            );
-          })
-        )}
-      </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {groupedRoles.system.map((role) => renderRoleCard(role))}
+              </div>
+            </div>
+          )}
+
+          {/* ---------- CUSTOM ROLES ---------- */}
+          {groupedRoles.custom.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">
+                  <i className="fas fa-user-cog text-purple-500 mr-2"></i>
+                  Custom Roles ({groupedRoles.custom.length})
+                </h3>
+                <div className="flex-1 h-px bg-gray-200"></div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {groupedRoles.custom.map((role) => renderRoleCard(role))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ==================== CREATE ROLE MODAL ==================== */}
       {showCreateModal && (
@@ -1509,7 +1597,7 @@ const RolesManagementModule = ({
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl p-6 max-h-[90vh] overflow-auto">
             <div className="flex justify-between items-center mb-4 sticky top-0 bg-white z-10 pb-3 border-b">
               <div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
                   <h3 className="text-xl font-bold">Manage Permissions</h3>
                   <span className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm">
                     {selectedRole.name}
@@ -1517,6 +1605,11 @@ const RolesManagementModule = ({
                   {selectedRole.isSystemRole && (
                     <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
                       System Role
+                    </span>
+                  )}
+                  {schoolCategoryLabels[selectedRole.category] && (
+                    <span className="px-2 py-1 bg-amber-100 text-amber-800 rounded-full text-xs">
+                      {schoolCategoryLabels[selectedRole.category]}
                     </span>
                   )}
                 </div>
@@ -1536,7 +1629,6 @@ const RolesManagementModule = ({
               </button>
             </div>
 
-            {/* Permission Search */}
             <div className="mb-4">
               <div className="relative">
                 <i className="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
@@ -1693,7 +1785,6 @@ const RolesManagementModule = ({
               })}
             </div>
 
-            {/* Permission Summary */}
             <div className="mt-4 p-3 bg-gray-50 rounded-lg border">
               <div className="flex flex-wrap justify-between items-center gap-2">
                 <div>
@@ -18726,100 +18817,108 @@ const StaffModule = ({
     const n = parseFloat(String(v).replace(/,/g, ''));
     return Number.isFinite(n) ? n : 0;
   };
+// ==================== STAFF ROLE OPTIONS ====================
+const staffRoleOptions = useMemo(() => {
+  // ---- Determine this school's category ----
+  const category = currentSchool?.category || 'ECDE_PRIMARY_JSS';
 
-  // ==================== STAFF ROLE OPTIONS ====================
-  const staffRoleOptions = useMemo(() => {
-    // -------- 1. Built-in role options (school-type aware) --------
-    let builtIn = [];
+  // -------- 1. Built-in role options (school-type aware) --------
+  let builtIn = [];
 
-    if (isUniversity) {
-      builtIn = [
-        { value: 'PROFESSOR', label: 'Professor' },
-        { value: 'SENIOR_LECTURER', label: 'Senior Lecturer' },
-        { value: 'LECTURER', label: 'Lecturer' },
-        { value: 'ASSISTANT_LECTURER', label: 'Assistant Lecturer' },
-        { value: 'TUTOR', label: 'Tutor' },
-        { value: 'HOD_LECTURER', label: 'Head of Department (Academic)' },
-        { value: 'DEAN', label: 'Dean' },
-        { value: 'REGISTRAR', label: 'Registrar' },
-        { value: 'LIBRARIAN', label: 'Librarian' },
-        { value: 'IT_OFFICER', label: 'IT Officer' },
-        { value: 'ADMINISTRATOR', label: 'Administrator' },
-        { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
-        { value: 'SUPPORT_STAFF', label: 'Support Staff' },
-        { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
-        { value: 'COUNSELOR', label: 'Counselor' },
-        { value: 'NURSE', label: 'Nurse' },
-      ];
-    } else if (isTVET) {
-      builtIn = [
-        { value: 'TECHNICAL_INSTRUCTOR', label: 'Technical Instructor' },
-        { value: 'WORKSHOP_SUPERVISOR', label: 'Workshop Supervisor' },
-        { value: 'HOD', label: 'Head of Department' },
-        { value: 'PRINCIPAL', label: 'Principal' },
-        { value: 'DEPUTY_PRINCIPAL', label: 'Deputy Principal' },
-        { value: 'CLASS_TEACHER', label: 'Class Teacher' },
-        { value: 'SUBJECT_TEACHER', label: 'Subject Teacher' },
-        { value: 'SUPPORT_STAFF', label: 'Support Staff' },
-        { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
-        { value: 'LIBRARIAN', label: 'Librarian' },
-        { value: 'ADMINISTRATOR', label: 'Administrator' },
-        { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
-        { value: 'IT_OFFICER', label: 'IT Officer' },
-        { value: 'COUNSELOR', label: 'Counselor' },
-        { value: 'NURSE', label: 'Nurse' },
-      ];
-    } else if (isSecondary) {
-      builtIn = [
-        { value: 'PRINCIPAL', label: 'Principal' },
-        { value: 'DEPUTY_PRINCIPAL', label: 'Deputy Principal' },
-        { value: 'HOD', label: 'Head of Department' },
-        { value: 'CLASS_TEACHER', label: 'Class Teacher' },
-        { value: 'SUBJECT_TEACHER', label: 'Subject Teacher' },
-        { value: 'SUPPORT_STAFF', label: 'Support Staff' },
-        { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
-        { value: 'LIBRARIAN', label: 'Librarian' },
-        { value: 'ADMINISTRATOR', label: 'Administrator' },
-        { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
-        { value: 'IT_OFFICER', label: 'IT Officer' },
-        { value: 'COUNSELOR', label: 'Counselor' },
-        { value: 'NURSE', label: 'Nurse' },
-      ];
-    } else {
-      builtIn = [
-        { value: 'HEAD_TEACHER', label: 'Head Teacher' },
-        { value: 'DEPUTY_HEAD_TEACHER', label: 'Deputy Head Teacher' },
-        { value: 'SENIOR_TEACHER', label: 'Senior Teacher' },
-        { value: 'CLASS_TEACHER', label: 'Class Teacher' },
-        { value: 'SUBJECT_TEACHER', label: 'Subject Teacher' },
-        { value: 'SUPPORT_STAFF', label: 'Support Staff' },
-        { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
-        { value: 'LIBRARIAN', label: 'Librarian' },
-        { value: 'ADMINISTRATOR', label: 'Administrator' },
-        { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
-        { value: 'IT_OFFICER', label: 'IT Officer' },
-        { value: 'COUNSELOR', label: 'Counselor' },
-        { value: 'NURSE', label: 'Nurse' },
-      ];
-    }
+  if (isUniversity) {
+    builtIn = [
+      { value: 'PROFESSOR', label: 'Professor' },
+      { value: 'SENIOR_LECTURER', label: 'Senior Lecturer' },
+      { value: 'LECTURER', label: 'Lecturer' },
+      { value: 'ASSISTANT_LECTURER', label: 'Assistant Lecturer' },
+      { value: 'TUTOR', label: 'Tutor' },
+      { value: 'HOD_LECTURER', label: 'Head of Department (Academic)' },
+      { value: 'DEAN', label: 'Dean' },
+      { value: 'REGISTRAR', label: 'Registrar' },
+      { value: 'LIBRARIAN', label: 'Librarian' },
+      { value: 'IT_OFFICER', label: 'IT Officer' },
+      { value: 'ADMINISTRATOR', label: 'Administrator' },
+      { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
+      { value: 'SUPPORT_STAFF', label: 'Support Staff' },
+      { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
+      { value: 'COUNSELOR', label: 'Counselor' },
+      { value: 'NURSE', label: 'Nurse' },
+    ];
+  } else if (isTVET) {
+    builtIn = [
+      { value: 'TECHNICAL_INSTRUCTOR', label: 'Technical Instructor' },
+      { value: 'WORKSHOP_SUPERVISOR', label: 'Workshop Supervisor' },
+      { value: 'HOD', label: 'Head of Department' },
+      { value: 'PRINCIPAL', label: 'Principal' },
+      { value: 'DEPUTY_PRINCIPAL', label: 'Deputy Principal' },
+      { value: 'CLASS_TEACHER', label: 'Class Teacher' },
+      { value: 'SUBJECT_TEACHER', label: 'Subject Teacher' },
+      { value: 'SUPPORT_STAFF', label: 'Support Staff' },
+      { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
+      { value: 'LIBRARIAN', label: 'Librarian' },
+      { value: 'ADMINISTRATOR', label: 'Administrator' },
+      { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
+      { value: 'IT_OFFICER', label: 'IT Officer' },
+      { value: 'COUNSELOR', label: 'Counselor' },
+      { value: 'NURSE', label: 'Nurse' },
+    ];
+  } else if (isSecondary) {
+    builtIn = [
+      { value: 'PRINCIPAL', label: 'Principal' },
+      { value: 'DEPUTY_PRINCIPAL', label: 'Deputy Principal' },
+      { value: 'HOD', label: 'Head of Department' },
+      { value: 'CLASS_TEACHER', label: 'Class Teacher' },
+      { value: 'SUBJECT_TEACHER', label: 'Subject Teacher' },
+      { value: 'SUPPORT_STAFF', label: 'Support Staff' },
+      { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
+      { value: 'LIBRARIAN', label: 'Librarian' },
+      { value: 'ADMINISTRATOR', label: 'Administrator' },
+      { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
+      { value: 'IT_OFFICER', label: 'IT Officer' },
+      { value: 'COUNSELOR', label: 'Counselor' },
+      { value: 'NURSE', label: 'Nurse' },
+    ];
+  } else {
+    builtIn = [
+      { value: 'HEAD_TEACHER', label: 'Head Teacher' },
+      { value: 'DEPUTY_HEAD_TEACHER', label: 'Deputy Head Teacher' },
+      { value: 'SENIOR_TEACHER', label: 'Senior Teacher' },
+      { value: 'CLASS_TEACHER', label: 'Class Teacher' },
+      { value: 'SUBJECT_TEACHER', label: 'Subject Teacher' },
+      { value: 'SUPPORT_STAFF', label: 'Support Staff' },
+      { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
+      { value: 'LIBRARIAN', label: 'Librarian' },
+      { value: 'ADMINISTRATOR', label: 'Administrator' },
+      { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
+      { value: 'IT_OFFICER', label: 'IT Officer' },
+      { value: 'COUNSELOR', label: 'Counselor' },
+      { value: 'NURSE', label: 'Nurse' },
+    ];
+  }
 
-    // -------- 2. Custom roles from Roles Management --------
-    const existingValues = new Set(builtIn.map((o) => o.value));
+  // -------- 2. Custom + system roles from Roles Management --------
+  const existingValues = new Set(builtIn.map((o) => o.value));
 
-    const customRoleOptions = (Array.isArray(roles) ? roles : [])
-      .filter((r) => r && r.name && r.isActive !== false)
-      .map((r) => ({
-        value: String(r.name).trim().replace(/\s+/g, '_').toUpperCase(),
-        label: r.name,
-        subLabel: r.isSystemRole ? 'System role' : 'Custom role',
-        isSystemRole: !!r.isSystemRole,
-      }))
-      .filter((o) => !existingValues.has(o.value));
+  const roleTableOptions = (Array.isArray(roles) ? roles : [])
+    .filter((r) => r && r.name && r.isActive !== false)
+    // ✅ Only keep roles that fit this school's category
+    .filter(
+      (r) =>
+        !r.category ||
+        r.category === 'ALL' ||
+        r.category === category
+    )
+    .map((r) => ({
+      value: String(r.name).trim().replace(/\s+/g, '_').toUpperCase(),
+      label: r.name,
+      subLabel: r.isSystemRole ? 'System role' : 'Custom role',
+      isSystemRole: !!r.isSystemRole,
+    }))
+    .filter((o) => !existingValues.has(o.value));
 
-    // -------- 3. Merge --------
-    return [...builtIn, ...customRoleOptions];
-  }, [isUniversity, isTVET, isSecondary, roles]);
-
+  // -------- 3. Merge --------
+  return [...builtIn, ...roleTableOptions];
+}, [isUniversity, isTVET, isSecondary, roles, currentSchool?.category]);
   // ==================== OPTIONS ====================
   const departmentOptions = useMemo(() => {
     if (!departments || departments.length === 0) return [];
