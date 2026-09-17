@@ -38871,7 +38871,7 @@ const ExamCardsPrintModalComponent = ({
   );
 };
 
-// ==================== COMPLETE SETTINGS MODULE WITH SEARCHABLE SELECT (EMPTY BY DEFAULT) ====================
+// ==================== COMPLETE SETTINGS MODULE ====================
 const SettingsModule = ({ 
   user, 
   school, 
@@ -38903,7 +38903,6 @@ const SettingsModule = ({
   const [testEmailLoading, setTestEmailLoading] = useState(false);
   const [testSMSLoading, setTestSMSLoading] = useState(false);
 
-
   // ==================== PERMISSIONS ====================
   const canViewAudit = user?.role === 'SUPER_ADMIN' || user?.role === 'SCHOOL_ADMIN';
   const canEditSchool = user?.role === 'SUPER_ADMIN' || user?.role === 'SCHOOL_ADMIN';
@@ -38912,18 +38911,12 @@ const SettingsModule = ({
   const canManageNotifications = user?.role === 'SUPER_ADMIN' || user?.role === 'SCHOOL_ADMIN' || user?.role === 'PRINCIPAL';
   const canExportData = user?.role === 'SUPER_ADMIN' || user?.role === 'SCHOOL_ADMIN' || user?.role === 'PRINCIPAL' || user?.role === 'ACCOUNTANT';
 
-  // ==================== SEARCHABLE SELECT COMPONENT ====================
-  const SearchableSelect = ({ 
-    label, 
-    value, 
-    onChange, 
-    options, 
-    placeholder, 
-    disabled, 
-    required, 
-    className,
-    showClear = true 
-  }) => {
+  // ✅ Only show unit-registration settings for TVET & University
+  const schoolCategory = school?.category || '';
+  const showUnitSettings = schoolCategory === 'COLLEGE_TVET' || schoolCategory === 'UNIVERSITY';
+
+  // ==================== SEARCHABLE SELECT ====================
+  const SearchableSelect = ({ label, value, onChange, options, placeholder, disabled, required, className, showClear = true }) => {
     const [search, setSearch] = useState('');
     const [isOpen, setIsOpen] = useState(false);
     const [isFocused, setIsFocused] = useState(false);
@@ -38960,11 +38953,8 @@ const SettingsModule = ({
     }, []);
 
     useEffect(() => {
-      if (selectedOption && !isFocused) {
-        setSearch(selectedOption.label);
-      } else if (!selectedOption && !isFocused) {
-        setSearch('');
-      }
+      if (selectedOption && !isFocused) setSearch(selectedOption.label);
+      else if (!selectedOption && !isFocused) setSearch('');
     }, [value, selectedOption, isFocused]);
 
     const handleSelect = (selectedValue) => {
@@ -38973,9 +38963,7 @@ const SettingsModule = ({
       setSearch(selected ? selected.label : '');
       setIsOpen(false);
       setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
+      inputRef.current?.focus();
     };
 
     const handleInputChange = (e) => {
@@ -38983,30 +38971,15 @@ const SettingsModule = ({
       setSearch(newValue);
       setIsOpen(true);
       setIsFocused(true);
-      if (newValue === '') {
-        onChange({ target: { value: '' } });
-      }
+      if (newValue === '') onChange({ target: { value: '' } });
     };
 
-    const handleFocus = () => {
-      setIsFocused(true);
-      setIsOpen(true);
-    };
-
-    const handleBlur = (e) => {
-      const relatedTarget = e.relatedTarget;
-      if (dropdownRef.current && dropdownRef.current.contains(relatedTarget)) {
-        return;
-      }
+    const handleBlur = () => {
       setTimeout(() => {
         if (document.activeElement !== inputRef.current) {
           setIsOpen(false);
           setIsFocused(false);
-          if (selectedOption) {
-            setSearch(selectedOption.label);
-          } else {
-            setSearch('');
-          }
+          setSearch(selectedOption ? selectedOption.label : '');
         }
       }, 150);
     };
@@ -39017,66 +38990,49 @@ const SettingsModule = ({
       setSearch('');
       setIsOpen(false);
       setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
+      inputRef.current?.focus();
     };
 
-    const getDisplayValue = () => {
-      if (isFocused) return search;
-      if (selectedOption) return selectedOption.label;
-      return placeholder || '';
-    };
+    const getDisplayValue = () => isFocused ? search : (selectedOption?.label || placeholder || '');
 
     return (
       <div className="relative" ref={dropdownRef}>
         {label && (
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
+            {label}{required && <span className="text-red-500 ml-1">*</span>}
           </label>
         )}
         <div className="relative">
           <input
             ref={inputRef}
             type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
+            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
             } ${className || ''}`}
             value={getDisplayValue()}
             onChange={handleInputChange}
-            onFocus={handleFocus}
+            onFocus={() => { setIsFocused(true); setIsOpen(true); }}
             onBlur={handleBlur}
-            placeholder={placeholder || "Search and select..."}
+            placeholder={placeholder || 'Search and select...'}
             disabled={disabled}
             autoComplete="off"
           />
           {value && showClear && !disabled && (
-            <button
-              type="button"
-              onClick={handleClear}
-              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-red-500 z-10"
-              title="Clear selection"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
+            <button type="button" onClick={handleClear}
+              className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 z-10">
+              ✕
             </button>
           )}
-          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">▾</div>
         </div>
         {isOpen && !disabled && (
           <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
             {filteredOptions.length > 0 ? (
-              filteredOptions.map((opt) => (
+              filteredOptions.map(opt => (
                 <div
                   key={opt.value || Math.random().toString()}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
-                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
+                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 ${
+                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : ''
                   }`}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => handleSelect(opt.value)}
@@ -39086,9 +39042,7 @@ const SettingsModule = ({
                 </div>
               ))
             ) : (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {search.trim() ? 'No results found' : 'Type to search...'}
-              </div>
+              <div className="px-3 py-4 text-center text-gray-500 text-sm">No results</div>
             )}
           </div>
         )}
@@ -39096,7 +39050,7 @@ const SettingsModule = ({
     );
   };
 
-  // ==================== INPUT FIELD COMPONENT ====================
+  // ==================== INPUT FIELD ====================
   const InputField = ({ label, type = 'text', value, onChange, required, placeholder, disabled, helperText, rows, textarea }) => {
     if (textarea) {
       return (
@@ -39104,52 +39058,34 @@ const SettingsModule = ({
           {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
           <textarea
             className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-            value={value}
-            onChange={onChange}
-            required={required}
-            placeholder={placeholder}
-            disabled={disabled}
-            rows={rows || 3}
+            value={value} onChange={onChange} required={required} placeholder={placeholder}
+            disabled={disabled} rows={rows || 3}
           />
           {helperText && <p className="text-xs text-gray-500 mt-1">{helperText}</p>}
         </div>
       );
     }
-    
     return (
       <div>
         {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
         <input
-          type={type}
-          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-          value={value}
-          onChange={onChange}
-          required={required}
-          placeholder={placeholder}
-          disabled={disabled}
+          type={type} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+          value={value} onChange={onChange} required={required} placeholder={placeholder} disabled={disabled}
         />
         {helperText && <p className="text-xs text-gray-500 mt-1">{helperText}</p>}
       </div>
     );
   };
 
-  // ==================== SCHOOL FORM STATE (EMPTY BY DEFAULT) ====================
+  // ==================== SCHOOL FORM STATE ====================
+  // ✅ NOTE: All numeric defaults use `??` not `||`, so 0 stays 0.
   const [schoolForm, setSchoolForm] = useState({
     name: school?.name || '',
     motto: school?.motto || '',
     contact: school?.contact || { 
-      email: '', 
-      phone: '', 
-      address: '', 
-      logo: '',
-      county: '',
-      constituency: '',
-      ward: '',
-      postalAddress: '',
-      website: ''
+      email: '', phone: '', address: '', logo: '',
+      county: '', constituency: '', ward: '', postalAddress: '', website: ''
     },
-    
-    // ✅ EMPTY by default - no defaults!
     emailProvider: school?.emailProvider || '',
     emailConfig: school?.emailConfig || {
       smtp: { host: '', port: 587, secure: false, username: '', password: '', fromEmail: '', replyTo: '' },
@@ -39157,18 +39093,10 @@ const SettingsModule = ({
       resend: { apiKey: '', fromEmail: '', replyTo: '' },
       mailgun: { apiKey: '', domain: '', fromEmail: '', replyTo: '', apiUrl: 'https://api.mailgun.net' },
       ses: { accessKeyId: '', secretAccessKey: '', region: 'us-east-1', fromEmail: '', replyTo: '' },
-      enabled: false,
-      testMode: false,
-      testEmail: '',
-      sendLimit: 1000,
-      sendLimitPerHour: 100,
-      batchSize: 50,
-      delayBetweenBatches: 1000,
-      retryAttempts: 3,
-      retryDelay: 5000
+      enabled: false, testMode: false, testEmail: '',
+      sendLimit: 1000, sendLimitPerHour: 100, batchSize: 50,
+      delayBetweenBatches: 1000, retryAttempts: 3, retryDelay: 5000
     },
-    
-    // ✅ EMPTY by default - no defaults!
     smsProvider: school?.smsProvider || '',
     smsConfig: school?.smsConfig || {
       africastalking: { apiKey: '', username: '', senderId: '', shortCode: '' },
@@ -39179,30 +39107,22 @@ const SettingsModule = ({
       twilio: { accountSid: '', authToken: '', fromNumber: '', messagingServiceSid: '' },
       bulksms: { username: '', password: '', from: '' },
       smscountry: { username: '', password: '', senderId: '', route: 'default' },
-      enabled: false,
-      testMode: false,
-      testPhone: '',
-      sendLimit: 500,
-      sendLimitPerHour: 50,
-      batchSize: 100,
-      delayBetweenBatches: 2000,
-      defaultCountryCode: '254'
+      enabled: false, testMode: false, testPhone: '',
+      sendLimit: 500, sendLimitPerHour: 50, batchSize: 100,
+      delayBetweenBatches: 2000, defaultCountryCode: '254'
     },
-    
-    // ✅ EMPTY by default - no defaults!
     financialSettings: {
       currency: school?.financialSettings?.currency || '',
       enableLateFees: school?.financialSettings?.enableLateFees || false,
-      lateFeePercentage: school?.financialSettings?.lateFeePercentage || 5,
-      enableDiscounts: school?.financialSettings?.enableDiscounts || true
+      lateFeePercentage: school?.financialSettings?.lateFeePercentage ?? 5,
+      enableDiscounts: school?.financialSettings?.enableDiscounts ?? true
     },
-    
     startTime: school?.startTime || '08:00',
     endTime: school?.endTime || '17:00',
-    lateThreshold: school?.lateThreshold || 30,
-    earlyDepartureThreshold: school?.earlyDepartureThreshold || 30,
+    lateThreshold: school?.lateThreshold ?? 30,
+    earlyDepartureThreshold: school?.earlyDepartureThreshold ?? 30,
 
-    // ✅ NEW: Unit Registration Settings
+    // ✅ Numeric — use `??` so 0 stays 0
     paymentPercentageRequired: school?.paymentPercentageRequired ?? 30,
     requiresPaymentForUnits: school?.requiresPaymentForUnits ?? true,
     unitApprovalRequired: school?.unitApprovalRequired ?? true,
@@ -39210,14 +39130,12 @@ const SettingsModule = ({
     settings: school?.settings || {
       academicYear: new Date().getFullYear().toString(),
       terms: ['Term 1', 'Term 2', 'Term 3'],
-      gradingSystem: {},
-      currency: 'KES',
-      timezone: 'Africa/Nairobi',
-      dateFormat: 'DD/MM/YYYY'
+      gradingSystem: {}, currency: 'KES',
+      timezone: 'Africa/Nairobi', dateFormat: 'DD/MM/YYYY'
     }
   });
 
-  // ==================== OPTIONS GENERATORS (WITH EMPTY OPTION) ====================
+  // ==================== OPTIONS ====================
   const currencyOptions = useMemo(() => [
     { value: '', label: '' },
     { value: 'KES', label: 'KES - Kenyan Shilling', subLabel: '🇰🇪 Kenya' },
@@ -39259,57 +39177,28 @@ const SettingsModule = ({
     { value: 'all', label: '📶 All Networks', subLabel: 'All networks' }
   ], []);
 
-  // ==================== CHANGE PASSWORD HANDLER ====================
+  // ==================== CHANGE PASSWORD ====================
   const handleChangePasswordSubmit = async (e) => {
     e.preventDefault();
+    if (!localChangePasswordForm.currentPassword) { setError('Current password is required'); setTimeout(() => setError(''), 3000); return; }
+    if (!localChangePasswordForm.newPassword) { setError('New password is required'); setTimeout(() => setError(''), 3000); return; }
+    if (localChangePasswordForm.newPassword.length < 6) { setError('New password must be at least 6 characters'); setTimeout(() => setError(''), 3000); return; }
+    if (localChangePasswordForm.newPassword !== localChangePasswordForm.confirmPassword) { setError('New passwords do not match'); setTimeout(() => setError(''), 3000); return; }
     
-    if (!localChangePasswordForm.currentPassword) {
-      setError('Current password is required');
-      setTimeout(() => setError(''), 3000);
-      return;
-    }
-    
-    if (!localChangePasswordForm.newPassword) {
-      setError('New password is required');
-      setTimeout(() => setError(''), 3000);
-      return;
-    }
-    
-    if (localChangePasswordForm.newPassword.length < 6) {
-      setError('New password must be at least 6 characters');
-      setTimeout(() => setError(''), 3000);
-      return;
-    }
-    
-    if (localChangePasswordForm.newPassword !== localChangePasswordForm.confirmPassword) {
-      setError('New passwords do not match');
-      setTimeout(() => setError(''), 3000);
-      return;
-    }
-    
-    setLoading(true);
-    setError('');
-    setSuccess('');
-    
-  try {
-  const response = await fetchApi('/auth/change-password', {
-    method: 'POST',
-    body: JSON.stringify({
-      currentPassword: localChangePasswordForm.currentPassword,
-      newPassword: localChangePasswordForm.newPassword
-    })
-  });
-      
+    setLoading(true); setError(''); setSuccess('');
+    try {
+      const response = await fetchApi('/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify({
+          currentPassword: localChangePasswordForm.currentPassword,
+          newPassword: localChangePasswordForm.newPassword
+        })
+      });
       const data = await response.json();
-      
       if (data.success) {
         setSuccess('Password changed successfully! Please log in again.');
         setTimeout(() => {
-          setLocalChangePasswordForm({
-            currentPassword: '',
-            newPassword: '',
-            confirmPassword: ''
-          });
+          setLocalChangePasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
           setTimeout(() => {
             localStorage.removeItem('token');
             localStorage.removeItem('user');
@@ -39322,161 +39211,75 @@ const SettingsModule = ({
     } catch (err) {
       console.error('Change password error:', err);
       setError(err.message || 'Failed to change password');
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
-  // ==================== TEST EMAIL HANDLER ====================
+  // ==================== TEST EMAIL ====================
   const handleTestEmail = async () => {
-    if (!school?.id) {
-      setError('No school selected');
-      setTimeout(() => setError(''), 3000);
-      return;
-    }
-
-    if (!schoolForm.emailConfig?.enabled) {
-      setError('Please enable email sending first');
-      setTimeout(() => setError(''), 3000);
-      return;
-    }
-
+    if (!school?.id) { setError('No school selected'); setTimeout(() => setError(''), 3000); return; }
+    if (!schoolForm.emailConfig?.enabled) { setError('Please enable email sending first'); setTimeout(() => setError(''), 3000); return; }
     const provider = schoolForm.emailProvider || 'SMTP';
     let isConfigured = false;
-    
     if (provider === 'SMTP') {
       const smtp = schoolForm.emailConfig?.smtp || schoolForm.emailConfig;
       isConfigured = !!(smtp.host && smtp.username && smtp.password && smtp.fromEmail);
-    } else if (provider === 'SENDGRID') {
-      isConfigured = !!(schoolForm.emailConfig?.sendgrid?.apiKey && schoolForm.emailConfig?.sendgrid?.fromEmail);
-    } else if (provider === 'RESEND') {
-      isConfigured = !!(schoolForm.emailConfig?.resend?.apiKey && schoolForm.emailConfig?.resend?.fromEmail);
-    } else if (provider === 'MAILGUN') {
-      isConfigured = !!(schoolForm.emailConfig?.mailgun?.apiKey && schoolForm.emailConfig?.mailgun?.domain && schoolForm.emailConfig?.mailgun?.fromEmail);
-    } else if (provider === 'AWS_SES') {
-      isConfigured = !!(schoolForm.emailConfig?.ses?.accessKeyId && schoolForm.emailConfig?.ses?.secretAccessKey && schoolForm.emailConfig?.ses?.fromEmail);
-    }
-
-    if (!isConfigured) {
-      setError(`Please fill in all required ${provider} configuration fields`);
-      setTimeout(() => setError(''), 3000);
-      return;
-    }
-
-    setTestEmailLoading(true);
-    setError('');
-    setSuccess('');
-
+    } else if (provider === 'SENDGRID') isConfigured = !!(schoolForm.emailConfig?.sendgrid?.apiKey && schoolForm.emailConfig?.sendgrid?.fromEmail);
+    else if (provider === 'RESEND') isConfigured = !!(schoolForm.emailConfig?.resend?.apiKey && schoolForm.emailConfig?.resend?.fromEmail);
+    else if (provider === 'MAILGUN') isConfigured = !!(schoolForm.emailConfig?.mailgun?.apiKey && schoolForm.emailConfig?.mailgun?.domain && schoolForm.emailConfig?.mailgun?.fromEmail);
+    else if (provider === 'AWS_SES') isConfigured = !!(schoolForm.emailConfig?.ses?.accessKeyId && schoolForm.emailConfig?.ses?.secretAccessKey && schoolForm.emailConfig?.ses?.fromEmail);
+    if (!isConfigured) { setError(`Please fill in all required ${provider} configuration fields`); setTimeout(() => setError(''), 3000); return; }
+    setTestEmailLoading(true); setError(''); setSuccess('');
     try {
-      const res = await api.post(`/schools/${school.id}/test-email`, {
-        testEmail: user?.email
-      });
-
-      if (res.data.success) {
-        setSuccess(res.data.message);
-      } else {
-        setError(res.data.message || 'Test failed');
-      }
+      const res = await api.post(`/schools/${school.id}/test-email`, { testEmail: user?.email });
+      if (res.data.success) setSuccess(res.data.message);
+      else setError(res.data.message || 'Test failed');
     } catch (err) {
-      console.error('❌ Test email error:', err);
       const errorMessage = err.response?.data?.message || err.response?.data?.error || 'Failed to send test email';
       setError(`❌ ${errorMessage}`);
-    } finally {
-      setTestEmailLoading(false);
-    }
+    } finally { setTestEmailLoading(false); }
   };
 
-  // ==================== TEST SMS HANDLER ====================
+  // ==================== TEST SMS ====================
   const handleTestSMS = async () => {
-    if (!school?.id) {
-      setError('No school selected');
-      setTimeout(() => setError(''), 3000);
-      return;
-    }
-
-    if (!schoolForm.smsConfig?.enabled) {
-      setError('Please enable SMS sending first');
-      setTimeout(() => setError(''), 3000);
-      return;
-    }
-
+    if (!school?.id) { setError('No school selected'); setTimeout(() => setError(''), 3000); return; }
+    if (!schoolForm.smsConfig?.enabled) { setError('Please enable SMS sending first'); setTimeout(() => setError(''), 3000); return; }
     const provider = schoolForm.smsProvider || 'NONE';
-    if (provider === 'NONE') {
-      setError('Please select an SMS provider');
-      setTimeout(() => setError(''), 3000);
-      return;
-    }
-
+    if (provider === 'NONE') { setError('Please select an SMS provider'); setTimeout(() => setError(''), 3000); return; }
     let isConfigured = false;
-    if (provider === 'AFRICASTALKING') {
-      isConfigured = !!(schoolForm.smsConfig?.africastalking?.apiKey && schoolForm.smsConfig?.africastalking?.username);
-    } else if (provider === 'CELCOM') {
-      isConfigured = !!(schoolForm.smsConfig?.celcom?.apiKey);
-    } else if (provider === 'SMSLEOPARD') {
-      isConfigured = !!(schoolForm.smsConfig?.smsleopard?.apiKey);
-    } else if (provider === 'ADVANTA') {
-      isConfigured = !!(schoolForm.smsConfig?.advanta?.apiKey && schoolForm.smsConfig?.advanta?.username);
-    } else if (provider === 'PAWATALK') {
-      isConfigured = !!(schoolForm.smsConfig?.pawatalk?.apiKey && schoolForm.smsConfig?.pawatalk?.merchantId);
-    } else if (provider === 'TWILIO') {
-      isConfigured = !!(schoolForm.smsConfig?.twilio?.accountSid && schoolForm.smsConfig?.twilio?.authToken);
-    } else if (provider === 'BULKSMS') {
-      isConfigured = !!(schoolForm.smsConfig?.bulksms?.username && schoolForm.smsConfig?.bulksms?.password);
-    } else if (provider === 'SMSCOUNTRY') {
-      isConfigured = !!(schoolForm.smsConfig?.smscountry?.username && schoolForm.smsConfig?.smscountry?.password);
-    }
-
-    if (!isConfigured) {
-      setError(`Please fill in all required ${provider} configuration fields`);
-      setTimeout(() => setError(''), 3000);
-      return;
-    }
-
-    setTestSMSLoading(true);
-    setError('');
-    setSuccess('');
-
+    if (provider === 'AFRICASTALKING') isConfigured = !!(schoolForm.smsConfig?.africastalking?.apiKey && schoolForm.smsConfig?.africastalking?.username);
+    else if (provider === 'CELCOM') isConfigured = !!(schoolForm.smsConfig?.celcom?.apiKey);
+    else if (provider === 'SMSLEOPARD') isConfigured = !!(schoolForm.smsConfig?.smsleopard?.apiKey);
+    else if (provider === 'ADVANTA') isConfigured = !!(schoolForm.smsConfig?.advanta?.apiKey && schoolForm.smsConfig?.advanta?.username);
+    else if (provider === 'PAWATALK') isConfigured = !!(schoolForm.smsConfig?.pawatalk?.apiKey && schoolForm.smsConfig?.pawatalk?.merchantId);
+    else if (provider === 'TWILIO') isConfigured = !!(schoolForm.smsConfig?.twilio?.accountSid && schoolForm.smsConfig?.twilio?.authToken);
+    else if (provider === 'BULKSMS') isConfigured = !!(schoolForm.smsConfig?.bulksms?.username && schoolForm.smsConfig?.bulksms?.password);
+    else if (provider === 'SMSCOUNTRY') isConfigured = !!(schoolForm.smsConfig?.smscountry?.username && schoolForm.smsConfig?.smscountry?.password);
+    if (!isConfigured) { setError(`Please fill in all required ${provider} configuration fields`); setTimeout(() => setError(''), 3000); return; }
+    setTestSMSLoading(true); setError(''); setSuccess('');
     try {
-      const res = await api.post(`/schools/${school.id}/test-sms`, {
-        testPhone: user?.phone || '0712345678'
-      });
-
-      if (res.data.success) {
-        setSuccess(res.data.message);
-      } else {
-        setError(res.data.message || 'SMS test failed');
-      }
+      const res = await api.post(`/schools/${school.id}/test-sms`, { testPhone: user?.phone || '0712345678' });
+      if (res.data.success) setSuccess(res.data.message);
+      else setError(res.data.message || 'SMS test failed');
     } catch (err) {
-      console.error('❌ Test SMS error:', err);
       const errorMessage = err.response?.data?.message || err.response?.data?.error || 'Failed to send test SMS';
       setError(`❌ ${errorMessage}`);
-    } finally {
-      setTestSMSLoading(false);
-    }
+    } finally { setTestSMSLoading(false); }
   };
 
   // ==================== NOTIFICATIONS ====================
-  useEffect(() => {
-    if (canManageNotifications) {
-      loadNotifications();
-    }
-  }, []);
+  useEffect(() => { if (canManageNotifications) loadNotifications(); }, []);
 
   const loadNotifications = async () => {
     try {
       const res = await api.get('/settings/notifications');
       setNotifications(res.data.notifications || []);
-    } catch (error) {
-      console.error('Error loading notifications:', error);
-    }
+    } catch (error) { console.error('Error loading notifications:', error); }
   };
 
   const handleToggleNotification = async (notificationId) => {
     try {
       await api.patch(`/settings/notifications/${notificationId}/toggle`);
-      setNotifications(notifications.map(n => 
-        n.id === notificationId ? { ...n, enabled: !n.enabled } : n
-      ));
+      setNotifications(notifications.map(n => n.id === notificationId ? { ...n, enabled: !n.enabled } : n));
       setSuccess('Notification setting updated');
       setTimeout(() => setSuccess(''), 3000);
     } catch (error) {
@@ -39487,55 +39290,33 @@ const SettingsModule = ({
 
   // ==================== LOGO UPLOAD ====================
   const handleLogoUpload = async (e) => {
-    if (!canEditSchool) {
-      alert('You do not have permission to upload a logo');
-      return;
-    }
+    if (!canEditSchool) { alert('You do not have permission to upload a logo'); return; }
     const file = e.target.files[0];
     if (!file) return;
-
     const formData = new FormData();
     formData.append('logo', file);
-    if (school?.id) {
-      formData.append('schoolId', school.id);
-    }
-
+    if (school?.id) formData.append('schoolId', school.id);
     setLoading(true);
     try {
-      const res = await api.post('/schools/upload-logo', formData, { 
-        headers: { 'Content-Type': 'multipart/form-data' } 
-      });
-      setSchoolForm(prev => ({ 
-        ...prev, 
-        contact: { ...prev.contact, logo: res.data.logoUrl } 
-      }));
+      const res = await api.post('/schools/upload-logo', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setSchoolForm(prev => ({ ...prev, contact: { ...prev.contact, logo: res.data.logoUrl } }));
       setSuccess('Logo uploaded successfully');
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to upload logo');
       setTimeout(() => setError(''), 3000);
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   // ==================== SAVE SCHOOL ====================
   const handleSaveSchool = async () => {
-    if (!canEditSchool) {
-      alert('You do not have permission to edit school settings');
-      return;
-    }
-    
-    setLoading(true);
-    setError('');
-    setSuccess('');
-
+    if (!canEditSchool) { alert('You do not have permission to edit school settings'); return; }
+    setLoading(true); setError(''); setSuccess('');
     try {
       const schoolData = {
         name: schoolForm.name,
         motto: schoolForm.motto,
         contact: schoolForm.contact,
-        
         emailProvider: schoolForm.emailProvider || 'SMTP',
         emailConfig: {
           ...schoolForm.emailConfig,
@@ -39554,7 +39335,6 @@ const SettingsModule = ({
           retryAttempts: schoolForm.emailConfig?.retryAttempts || 3,
           retryDelay: schoolForm.emailConfig?.retryDelay || 5000
         },
-        
         smsProvider: schoolForm.smsProvider || 'NONE',
         smsConfig: {
           africastalking: schoolForm.smsConfig?.africastalking || { apiKey: '', username: '', senderId: '', shortCode: '' },
@@ -39574,63 +39354,51 @@ const SettingsModule = ({
           delayBetweenBatches: schoolForm.smsConfig?.delayBetweenBatches || 2000,
           defaultCountryCode: schoolForm.smsConfig?.defaultCountryCode || '254'
         },
-        
         startTime: schoolForm.startTime,
         endTime: schoolForm.endTime,
         lateThreshold: schoolForm.lateThreshold,
         earlyDepartureThreshold: schoolForm.earlyDepartureThreshold,
 
-        // ✅ NEW: Unit Registration settings
-        paymentPercentageRequired: schoolForm.paymentPercentageRequired,
-        requiresPaymentForUnits: schoolForm.requiresPaymentForUnits,
-        unitApprovalRequired: schoolForm.unitApprovalRequired,
+        // ✅ Only send unit-registration settings for TVET / University
+        ...(showUnitSettings && {
+          paymentPercentageRequired: schoolForm.paymentPercentageRequired,
+          requiresPaymentForUnits: schoolForm.requiresPaymentForUnits,
+          unitApprovalRequired: schoolForm.unitApprovalRequired
+        }),
 
         settings: schoolForm.settings,
         financialSettings: schoolForm.financialSettings
       };
 
       const res = await api.put(`/schools/${school?.id}`, schoolData);
-      
       setSchool(res.data.school);
       setSuccess('✅ School settings updated successfully!');
       setTimeout(() => setSuccess(''), 3000);
-      
     } catch (err) {
       console.error('Save school error:', err);
       setError(err.response?.data?.message || 'Failed to update school settings');
       setTimeout(() => setError(''), 3000);
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
-  // ==================== BACKUP FUNCTIONS ====================
+  // ==================== BACKUP ====================
   const handleCreateBackup = async () => {
-    if (!canManageBackup) {
-      alert('You do not have permission to create backups');
-      return;
-    }
+    if (!canManageBackup) { alert('You do not have permission to create backups'); return; }
     setBackupInProgress(true);
     try {
       const res = await api.post('/backup/create');
       setSuccess(`Backup created successfully! File: ${res.data.filename}`);
       loadBackupHistory();
       setTimeout(() => setSuccess(''), 5000);
-    } catch (error) {
-      setError('Failed to create backup');
-      setTimeout(() => setError(''), 3000);
-    } finally {
-      setBackupInProgress(false);
-    }
+    } catch (error) { setError('Failed to create backup'); setTimeout(() => setError(''), 3000); }
+    finally { setBackupInProgress(false); }
   };
 
   const loadBackupHistory = async () => {
     try {
       const res = await api.get('/backup/history');
       setBackupHistory(res.data.backups || []);
-    } catch (error) {
-      console.error('Error loading backup history:', error);
-    }
+    } catch (error) { console.error('Error loading backup history:', error); }
   };
 
   const handleRestoreBackup = async (filename) => {
@@ -39640,12 +39408,8 @@ const SettingsModule = ({
       await api.post('/backup/restore', { filename });
       setSuccess('Backup restored successfully!');
       setTimeout(() => setSuccess(''), 3000);
-    } catch (error) {
-      setError('Failed to restore backup');
-      setTimeout(() => setError(''), 3000);
-    } finally {
-      setLoading(false);
-    }
+    } catch (error) { setError('Failed to restore backup'); setTimeout(() => setError(''), 3000); }
+    finally { setLoading(false); }
   };
 
   const handleDownloadBackup = async (filename) => {
@@ -39658,13 +39422,10 @@ const SettingsModule = ({
       document.body.appendChild(link);
       link.click();
       link.remove();
-    } catch (error) {
-      setError('Failed to download backup');
-      setTimeout(() => setError(''), 3000);
-    }
+    } catch (error) { setError('Failed to download backup'); setTimeout(() => setError(''), 3000); }
   };
 
-  // ==================== EXPORT DATA ====================
+  // ==================== EXPORT ====================
   const handleExportData = async (type) => {
     if (!canExportData) return;
     try {
@@ -39678,10 +39439,7 @@ const SettingsModule = ({
       link.remove();
       setSuccess(`${type} exported successfully!`);
       setTimeout(() => setSuccess(''), 3000);
-    } catch (error) {
-      setError(`Failed to export ${type}`);
-      setTimeout(() => setError(''), 3000);
-    }
+    } catch (error) { setError(`Failed to export ${type}`); setTimeout(() => setError(''), 3000); }
   };
 
   // ==================== RENDER ====================
@@ -39694,303 +39452,129 @@ const SettingsModule = ({
       {success && (
         <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center justify-between">
           <span><i className="fas fa-check-circle mr-2"></i>{success}</span>
-          <button onClick={() => setSuccess('')} className="text-green-500 hover:text-green-700">
-            <i className="fas fa-times"></i>
-          </button>
+          <button onClick={() => setSuccess('')} className="text-green-500 hover:text-green-700"><i className="fas fa-times"></i></button>
         </div>
       )}
-      
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
           <span><i className="fas fa-exclamation-circle mr-2"></i>{error}</span>
-          <button onClick={() => setError('')} className="text-red-500 hover:text-red-700">
-            <i className="fas fa-times"></i>
-          </button>
+          <button onClick={() => setError('')} className="text-red-500 hover:text-red-700"><i className="fas fa-times"></i></button>
         </div>
       )}
 
-      {/* ==================== TABS ==================== */}
+      {/* TABS */}
       <div className="flex space-x-2 border-b overflow-x-auto pb-1">
-        <button 
-          onClick={() => setActiveTab('profile')} 
-          className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${
-            activeTab === 'profile' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
+        <button onClick={() => setActiveTab('profile')} className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${activeTab === 'profile' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
           <i className="fas fa-user mr-2"></i>My Profile
         </button>
-        
-        <button 
-          onClick={() => setActiveTab('security')} 
-          className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${
-            activeTab === 'security' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
+        <button onClick={() => setActiveTab('security')} className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${activeTab === 'security' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
           <i className="fas fa-lock mr-2"></i>Security
         </button>
-        
         {canEditSchool && (
-          <button 
-            onClick={() => setActiveTab('school')} 
-            className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${
-              activeTab === 'school' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
+          <button onClick={() => setActiveTab('school')} className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${activeTab === 'school' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
             <i className="fas fa-school mr-2"></i>School Settings
           </button>
         )}
-        
         {canEditSchool && (
-          <button 
-            onClick={() => setActiveTab('financial')} 
-            className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${
-              activeTab === 'financial' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
+          <button onClick={() => setActiveTab('financial')} className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${activeTab === 'financial' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
             <i className="fas fa-coins mr-2"></i>Financial Settings
           </button>
         )}
-        
         {canEditSchool && (
-          <button 
-            onClick={() => setActiveTab('communications')} 
-            className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${
-              activeTab === 'communications' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
+          <button onClick={() => setActiveTab('communications')} className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${activeTab === 'communications' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
             <i className="fas fa-envelope mr-2"></i>SMS & Email
           </button>
         )}
-        
         {canToggleFeatures && (
-          <button 
-            onClick={() => setActiveTab('features')} 
-            className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${
-              activeTab === 'features' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
+          <button onClick={() => setActiveTab('features')} className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${activeTab === 'features' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
             <i className="fas fa-toggle-on mr-2"></i>Features
           </button>
         )}
-        
         {canManageNotifications && (
-          <button 
-            onClick={() => setActiveTab('notifications')} 
-            className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${
-              activeTab === 'notifications' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
+          <button onClick={() => setActiveTab('notifications')} className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${activeTab === 'notifications' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
             <i className="fas fa-bell mr-2"></i>Notifications
           </button>
         )}
-        
         {canManageBackup && (
-          <button 
-            onClick={() => setActiveTab('backup')} 
-            className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${
-              activeTab === 'backup' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
+          <button onClick={() => setActiveTab('backup')} className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${activeTab === 'backup' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
             <i className="fas fa-database mr-2"></i>Backup
           </button>
         )}
-        
         {canExportData && (
-          <button 
-            onClick={() => setActiveTab('export')} 
-            className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${
-              activeTab === 'export' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
+          <button onClick={() => setActiveTab('export')} className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${activeTab === 'export' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
             <i className="fas fa-download mr-2"></i>Export Data
           </button>
         )}
-        
         {canViewAudit && (
-          <button 
-            onClick={() => setActiveTab('audit')} 
-            className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${
-              activeTab === 'audit' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
+          <button onClick={() => setActiveTab('audit')} className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${activeTab === 'audit' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
             <i className="fas fa-history mr-2"></i>Audit Logs
           </button>
         )}
       </div>
 
-      {/* ==================== PROFILE TAB ==================== */}
+      {/* PROFILE */}
       {activeTab === 'profile' && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">Profile Information</h3>
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-sm text-gray-600">Name</label>
-              <p className="text-lg font-medium">{user?.firstName} {user?.lastName}</p>
-            </div>
-            <div>
-              <label className="text-sm text-gray-600">Email</label>
-              <p className="text-lg font-medium">{user?.email}</p>
-            </div>
-            <div>
-              <label className="text-sm text-gray-600">Role</label>
-              <p className="text-lg font-medium">{user?.role}</p>
-            </div>
-            <div>
-              <label className="text-sm text-gray-600">Phone</label>
-              <p className="text-lg font-medium">{user?.phone || 'Not provided'}</p>
-            </div>
+            <div><label className="text-sm text-gray-600">Name</label><p className="text-lg font-medium">{user?.firstName} {user?.lastName}</p></div>
+            <div><label className="text-sm text-gray-600">Email</label><p className="text-lg font-medium">{user?.email}</p></div>
+            <div><label className="text-sm text-gray-600">Role</label><p className="text-lg font-medium">{user?.role}</p></div>
+            <div><label className="text-sm text-gray-600">Phone</label><p className="text-lg font-medium">{user?.phone || 'Not provided'}</p></div>
           </div>
         </div>
       )}
 
-      {/* ==================== SECURITY TAB ==================== */}
+      {/* SECURITY */}
       {activeTab === 'security' && (
         <div className="bg-white p-6 rounded-xl shadow-sm max-w-md">
           <h3 className="text-lg font-semibold mb-4">🔑 Change Password</h3>
-          <p className="text-sm text-gray-500 mb-4">
-            Update your password to keep your account secure. Passwords must be at least 6 characters.
-          </p>
+          <p className="text-sm text-gray-500 mb-4">Update your password to keep your account secure. Passwords must be at least 6 characters.</p>
           <form onSubmit={handleChangePasswordSubmit} className="space-y-4">
-            <InputField 
-              label="Current Password" 
-              type="password" 
-              value={localChangePasswordForm.currentPassword} 
-              onChange={(e) => setLocalChangePasswordForm({ 
-                ...localChangePasswordForm, 
-                currentPassword: e.target.value 
-              })} 
-              required 
-              disabled={loading} 
-            />
-            <InputField 
-              label="New Password" 
-              type="password" 
-              value={localChangePasswordForm.newPassword} 
-              onChange={(e) => setLocalChangePasswordForm({ 
-                ...localChangePasswordForm, 
-                newPassword: e.target.value 
-              })} 
-              required 
-              disabled={loading} 
-              helperText="Minimum 6 characters"
-            />
-            <InputField 
-              label="Confirm New Password" 
-              type="password" 
-              value={localChangePasswordForm.confirmPassword} 
-              onChange={(e) => setLocalChangePasswordForm({ 
-                ...localChangePasswordForm, 
-                confirmPassword: e.target.value 
-              })} 
-              required 
-              disabled={loading} 
-            />
-            <button 
-              type="submit" 
-              className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-              disabled={loading}
-            >
+            <InputField label="Current Password" type="password" value={localChangePasswordForm.currentPassword} onChange={(e) => setLocalChangePasswordForm({ ...localChangePasswordForm, currentPassword: e.target.value })} required disabled={loading} />
+            <InputField label="New Password" type="password" value={localChangePasswordForm.newPassword} onChange={(e) => setLocalChangePasswordForm({ ...localChangePasswordForm, newPassword: e.target.value })} required disabled={loading} helperText="Minimum 6 characters" />
+            <InputField label="Confirm New Password" type="password" value={localChangePasswordForm.confirmPassword} onChange={(e) => setLocalChangePasswordForm({ ...localChangePasswordForm, confirmPassword: e.target.value })} required disabled={loading} />
+            <button type="submit" className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50" disabled={loading}>
               {loading ? 'Changing...' : 'Change Password'}
             </button>
           </form>
           <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-            <p className="text-xs text-blue-600">
-              <i className="fas fa-info-circle mr-1"></i>
-              For security reasons, you will be logged out after changing your password and will need to log in again.
-            </p>
+            <p className="text-xs text-blue-600"><i className="fas fa-info-circle mr-1"></i>For security reasons, you will be logged out after changing your password and will need to log in again.</p>
           </div>
         </div>
       )}
 
-      {/* ==================== SCHOOL SETTINGS TAB ==================== */}
+      {/* SCHOOL SETTINGS */}
       {activeTab === 'school' && canEditSchool && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">🏫 School Settings</h3>
-          
           <div className="mb-6">
             <label className="block text-sm font-medium mb-2">School Logo</label>
             <div className="flex items-center space-x-4">
               {schoolForm.contact.logo ? (
-                <img 
-                  src={schoolForm.contact.logo} 
-                  alt="School Logo" 
-                  className="h-20 w-20 rounded-lg object-cover border"
-                  onError={(e) => {
-                    e.target.onerror = null;
-                    e.target.style.display = 'none';
-                  }}
-                />
+                <img src={schoolForm.contact.logo} alt="School Logo" className="h-20 w-20 rounded-lg object-cover border" onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; }} />
               ) : (
-                <div className="h-20 w-20 bg-indigo-100 rounded-lg flex items-center justify-center text-indigo-600 text-2xl font-bold">
-                  {schoolForm.name?.charAt(0) || 'S'}
-                </div>
+                <div className="h-20 w-20 bg-indigo-100 rounded-lg flex items-center justify-center text-indigo-600 text-2xl font-bold">{schoolForm.name?.charAt(0) || 'S'}</div>
               )}
-              <input 
-                type="file" 
-                accept="image/*" 
-                onChange={handleLogoUpload} 
-                className="text-sm" 
-                disabled={loading} 
-              />
+              <input type="file" accept="image/*" onChange={handleLogoUpload} className="text-sm" disabled={loading} />
             </div>
           </div>
-
           <div className="grid grid-cols-2 gap-4 mb-4">
-            <InputField 
-              label="School Name" 
-              value={schoolForm.name} 
-              onChange={(e) => setSchoolForm({ ...schoolForm, name: e.target.value })} 
-              disabled={loading} 
-            />
-            <InputField 
-              label="Motto" 
-              value={schoolForm.motto} 
-              onChange={(e) => setSchoolForm({ ...schoolForm, motto: e.target.value })} 
-              disabled={loading} 
-            />
-            <InputField 
-              label="Email" 
-              type="email" 
-              value={schoolForm.contact.email} 
-              onChange={(e) => setSchoolForm({ 
-                ...schoolForm, 
-                contact: { ...schoolForm.contact, email: e.target.value }
-              })} 
-              disabled={loading} 
-            />
-            <InputField 
-              label="Phone" 
-              value={schoolForm.contact.phone} 
-              onChange={(e) => setSchoolForm({ 
-                ...schoolForm, 
-                contact: { ...schoolForm.contact, phone: e.target.value }
-              })} 
-              disabled={loading} 
-            />
+            <InputField label="School Name" value={schoolForm.name} onChange={(e) => setSchoolForm({ ...schoolForm, name: e.target.value })} disabled={loading} />
+            <InputField label="Motto" value={schoolForm.motto} onChange={(e) => setSchoolForm({ ...schoolForm, motto: e.target.value })} disabled={loading} />
+            <InputField label="Email" type="email" value={schoolForm.contact.email} onChange={(e) => setSchoolForm({ ...schoolForm, contact: { ...schoolForm.contact, email: e.target.value } })} disabled={loading} />
+            <InputField label="Phone" value={schoolForm.contact.phone} onChange={(e) => setSchoolForm({ ...schoolForm, contact: { ...schoolForm.contact, phone: e.target.value } })} disabled={loading} />
             <div className="col-span-2">
-              <InputField 
-                label="Address" 
-                value={schoolForm.contact.address} 
-                onChange={(e) => setSchoolForm({ 
-                  ...schoolForm, 
-                  contact: { ...schoolForm.contact, address: e.target.value }
-                })} 
-                disabled={loading} 
-              />
+              <InputField label="Address" value={schoolForm.contact.address} onChange={(e) => setSchoolForm({ ...schoolForm, contact: { ...schoolForm.contact, address: e.target.value } })} disabled={loading} />
             </div>
           </div>
-
-          <button 
-            onClick={handleSaveSchool} 
-            className="mt-4 bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700"
-            disabled={loading}
-          >
+          <button onClick={handleSaveSchool} className="mt-4 bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700" disabled={loading}>
             {loading ? 'Saving...' : 'Save Changes'}
           </button>
         </div>
       )}
 
-      {/* ==================== FINANCIAL SETTINGS TAB ==================== */}
+      {/* FINANCIAL SETTINGS */}
       {activeTab === 'financial' && canEditSchool && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">💰 Financial Settings</h3>
@@ -39999,233 +39583,154 @@ const SettingsModule = ({
             <SearchableSelect
               label="Currency"
               value={schoolForm.financialSettings.currency}
-              onChange={(e) => setSchoolForm({
-                ...schoolForm,
-                financialSettings: {
-                  ...schoolForm.financialSettings,
-                  currency: e.target.value
-                }
-              })}
+              onChange={(e) => setSchoolForm({ ...schoolForm, financialSettings: { ...schoolForm.financialSettings, currency: e.target.value } })}
               options={currencyOptions}
               placeholder="Select currency..."
             />
 
             <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="enableLateFees"
-                checked={schoolForm.financialSettings.enableLateFees}
-                onChange={(e) => setSchoolForm({
-                  ...schoolForm,
-                  financialSettings: {
-                    ...schoolForm.financialSettings,
-                    enableLateFees: e.target.checked
-                  }
-                })}
-                className="rounded"
-              />
+              <input type="checkbox" id="enableLateFees" checked={schoolForm.financialSettings.enableLateFees}
+                onChange={(e) => setSchoolForm({ ...schoolForm, financialSettings: { ...schoolForm.financialSettings, enableLateFees: e.target.checked } })} className="rounded" />
               <label htmlFor="enableLateFees" className="text-sm">Enable Late Fees</label>
             </div>
 
             {schoolForm.financialSettings.enableLateFees && (
-              <InputField
-                label="Late Fee Percentage"
-                type="number"
-                value={schoolForm.financialSettings.lateFeePercentage}
-                onChange={(e) => setSchoolForm({
-                  ...schoolForm,
-                  financialSettings: {
-                    ...schoolForm.financialSettings,
-                    lateFeePercentage: parseFloat(e.target.value)
-                  }
-                })}
-                min="0"
-                max="100"
-                step="0.1"
-              />
+              <InputField label="Late Fee Percentage" type="number" value={schoolForm.financialSettings.lateFeePercentage}
+                onChange={(e) => setSchoolForm({ ...schoolForm, financialSettings: { ...schoolForm.financialSettings, lateFeePercentage: parseFloat(e.target.value) } })}
+                min="0" max="100" step="0.1" />
             )}
 
             <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="enableDiscounts"
-                checked={schoolForm.financialSettings.enableDiscounts}
-                onChange={(e) => setSchoolForm({
-                  ...schoolForm,
-                  financialSettings: {
-                    ...schoolForm.financialSettings,
-                    enableDiscounts: e.target.checked
-                  }
-                })}
-                className="rounded"
-              />
+              <input type="checkbox" id="enableDiscounts" checked={schoolForm.financialSettings.enableDiscounts}
+                onChange={(e) => setSchoolForm({ ...schoolForm, financialSettings: { ...schoolForm.financialSettings, enableDiscounts: e.target.checked } })} className="rounded" />
               <label htmlFor="enableDiscounts" className="text-sm">Enable Discounts</label>
             </div>
           </div>
 
-          {/* ✅ NEW: UNIT REGISTRATION SETTINGS */}
-          <div className="border-t pt-6 mt-6">
-            <h4 className="font-medium text-lg mb-3 flex items-center gap-2">
-              <i className="fas fa-book text-indigo-600"></i>
-              Unit Registration Settings
-            </h4>
+          {/* ✅ UNIT REGISTRATION SETTINGS — ONLY FOR TVET / UNIVERSITY */}
+          {showUnitSettings && (
+            <div className="border-t pt-6 mt-6">
+              <h4 className="font-medium text-lg mb-3 flex items-center gap-2">
+                <i className="fas fa-book text-indigo-600"></i>
+                Unit Registration Settings
+              </h4>
 
-            <div className="space-y-4">
-              {/* Enable/disable payment requirement */}
-              <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  id="requiresPaymentForUnits"
-                  checked={schoolForm.requiresPaymentForUnits !== false}
-                  onChange={(e) => setSchoolForm({
-                    ...schoolForm,
-                    requiresPaymentForUnits: e.target.checked
-                  })}
-                  className="rounded"
-                />
-                <label htmlFor="requiresPaymentForUnits" className="text-sm font-medium text-gray-700">
-                  Require payment before unit registration
-                </label>
-              </div>
-
-              {/* Payment % — only shown when enabled */}
-              {schoolForm.requiresPaymentForUnits !== false && (
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Minimum Payment % Required
+              <div className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <input type="checkbox" id="requiresPaymentForUnits"
+                    checked={schoolForm.requiresPaymentForUnits !== false}
+                    onChange={(e) => setSchoolForm({ ...schoolForm, requiresPaymentForUnits: e.target.checked })}
+                    className="rounded" />
+                  <label htmlFor="requiresPaymentForUnits" className="text-sm font-medium text-gray-700">
+                    Require payment before unit registration
                   </label>
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      step="5"
-                      value={schoolForm.paymentPercentageRequired || 30}
-                      onChange={(e) => setSchoolForm({
-                        ...schoolForm,
-                        paymentPercentageRequired: parseInt(e.target.value)
-                      })}
-                      className="flex-1"
-                    />
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      value={schoolForm.paymentPercentageRequired || 30}
-                      onChange={(e) => setSchoolForm({
-                        ...schoolForm,
-                        paymentPercentageRequired: Math.max(0, Math.min(100, parseInt(e.target.value) || 0))
-                      })}
-                      className="w-20 px-3 py-2 border rounded-lg text-center"
-                    />
-                    <span className="text-sm text-gray-600">%</span>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-2">
-                    Students must have paid at least this percentage of their fees before registering units.
-                    Set to 0 to allow registration with no payment.
-                  </p>
-                  {/* Quick presets */}
-                  <div className="flex flex-wrap gap-2 mt-3">
-                    {[0, 30, 40, 50, 60, 100].map(pct => (
-                      <button
-                        key={pct}
-                        type="button"
-                        onClick={() => setSchoolForm({ ...schoolForm, paymentPercentageRequired: pct })}
-                        className={`text-xs px-3 py-1 rounded transition-colors ${
-                          (schoolForm.paymentPercentageRequired || 30) === pct
-                            ? 'bg-indigo-600 text-white'
-                            : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-100'
-                        }`}
-                      >
-                        {pct}%
-                      </button>
-                    ))}
-                  </div>
                 </div>
-              )}
 
-              {/* Unit approval required */}
-              <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  id="unitApprovalRequired"
-                  checked={schoolForm.unitApprovalRequired !== false}
-                  onChange={(e) => setSchoolForm({
-                    ...schoolForm,
-                    unitApprovalRequired: e.target.checked
-                  })}
-                  className="rounded"
-                />
-                <label htmlFor="unitApprovalRequired" className="text-sm font-medium text-gray-700">
-                  Require admin/HOD approval for unit registrations
-                </label>
+                {schoolForm.requiresPaymentForUnits !== false && (
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Minimum Payment % Required
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="5"
+                        value={schoolForm.paymentPercentageRequired ?? 30}
+                        onChange={(e) => setSchoolForm({ ...schoolForm, paymentPercentageRequired: parseInt(e.target.value) })}
+                        className="flex-1"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={schoolForm.paymentPercentageRequired ?? 30}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setSchoolForm({
+                            ...schoolForm,
+                            paymentPercentageRequired: v === '' ? 0 : Math.max(0, Math.min(100, parseInt(v) || 0))
+                          });
+                        }}
+                        className="w-20 px-3 py-2 border rounded-lg text-center"
+                      />
+                      <span className="text-sm text-gray-600">%</span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">
+                      Students must have paid at least this percentage of their fees before registering units.
+                      Set to 0 to allow registration with no payment.
+                    </p>
+                    {/* Quick presets */}
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {[0, 30, 40, 50, 60, 100].map(pct => (
+                        <button
+                          key={pct}
+                          type="button"
+                          onClick={() => setSchoolForm({ ...schoolForm, paymentPercentageRequired: pct })}
+                          className={`text-xs px-3 py-1 rounded transition-colors ${
+                            (schoolForm.paymentPercentageRequired ?? 30) === pct
+                              ? 'bg-indigo-600 text-white'
+                              : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          {pct}%
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center space-x-2">
+                  <input type="checkbox" id="unitApprovalRequired"
+                    checked={schoolForm.unitApprovalRequired !== false}
+                    onChange={(e) => setSchoolForm({ ...schoolForm, unitApprovalRequired: e.target.checked })}
+                    className="rounded" />
+                  <label htmlFor="unitApprovalRequired" className="text-sm font-medium text-gray-700">
+                    Require admin/HOD approval for unit registrations
+                  </label>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
-          <button 
-            onClick={handleSaveSchool} 
-            className="mt-6 bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700"
-            disabled={loading}
-          >
+          <button onClick={handleSaveSchool} className="mt-6 bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700" disabled={loading}>
             {loading ? 'Saving...' : 'Save Financial Settings'}
           </button>
         </div>
       )}
 
-      {/* ==================== COMMUNICATIONS TAB ==================== */}
+      {/* COMMUNICATIONS */}
       {activeTab === 'communications' && canEditSchool && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">📧 Email & SMS Configuration</h3>
           
           <div className="space-y-6">
-            {/* ===== EMAIL SECTION ===== */}
+            {/* EMAIL */}
             <div>
               <h4 className="font-medium text-lg mb-3 flex items-center gap-2">
                 <i className="fas fa-envelope text-indigo-600"></i>
                 Email Configuration
               </h4>
-              
               <div className="space-y-4">
-                <div>
-                  <SearchableSelect
-                    label="Email Provider"
-                    value={schoolForm.emailProvider}
-                    onChange={(e) => {
-                      const provider = e.target.value;
-                      setSchoolForm({ ...schoolForm, emailProvider: provider });
-                    }}
-                    options={emailProviderOptions}
-                    placeholder="Select email provider..."
-                  />
-                </div>
-
+                <SearchableSelect
+                  label="Email Provider"
+                  value={schoolForm.emailProvider}
+                  onChange={(e) => setSchoolForm({ ...schoolForm, emailProvider: e.target.value })}
+                  options={emailProviderOptions}
+                  placeholder="Select email provider..."
+                />
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id="enableEmail"
-                      checked={schoolForm.emailConfig?.enabled || false}
-                      onChange={(e) => setSchoolForm({
-                        ...schoolForm,
-                        emailConfig: { ...schoolForm.emailConfig, enabled: e.target.checked }
-                      })}
-                      className="rounded"
-                    />
+                    <input type="checkbox" id="enableEmail" checked={schoolForm.emailConfig?.enabled || false}
+                      onChange={(e) => setSchoolForm({ ...schoolForm, emailConfig: { ...schoolForm.emailConfig, enabled: e.target.checked } })} className="rounded" />
                     <label htmlFor="enableEmail" className="text-sm font-medium text-gray-700">Enable Email Sending</label>
                   </div>
-                  
-                  <button
-                    onClick={handleTestEmail}
-                    disabled={testEmailLoading}
-                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
-                  >
-                    <i className="fas fa-paper-plane"></i>
-                    {testEmailLoading ? 'Sending...' : 'Test Configuration'}
+                  <button onClick={handleTestEmail} disabled={testEmailLoading}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+                    <i className="fas fa-paper-plane"></i>{testEmailLoading ? 'Sending...' : 'Test Configuration'}
                   </button>
                 </div>
-
-                {/* SMTP Configuration */}
                 {schoolForm.emailProvider === 'SMTP' && (
                   <div className="border rounded-lg p-4 bg-gray-50">
                     <h4 className="font-medium text-sm text-gray-700 mb-3">SMTP Settings</h4>
@@ -40240,61 +39745,39 @@ const SettingsModule = ({
                     </div>
                   </div>
                 )}
-
-                {/* SendGrid Configuration */}
                 {schoolForm.emailProvider === 'SENDGRID' && (
                   <div className="border rounded-lg p-4 bg-gray-50">
                     <h4 className="font-medium text-sm text-gray-700 mb-3">SendGrid Settings</h4>
                     <div className="grid grid-cols-2 gap-4">
-                      <div className="col-span-2">
-                        <InputField label="SendGrid API Key" type="password" value={schoolForm.emailConfig?.sendgrid?.apiKey || ''} onChange={(e) => setSchoolForm({ ...schoolForm, emailConfig: { ...schoolForm.emailConfig, sendgrid: { ...schoolForm.emailConfig?.sendgrid, apiKey: e.target.value } } })} placeholder="SG.xxxxxxxxxx" disabled={loading} />
-                      </div>
-                      <div className="col-span-2">
-                        <InputField label="From Email" type="email" value={schoolForm.emailConfig?.sendgrid?.fromEmail || ''} onChange={(e) => setSchoolForm({ ...schoolForm, emailConfig: { ...schoolForm.emailConfig, sendgrid: { ...schoolForm.emailConfig?.sendgrid, fromEmail: e.target.value } } })} placeholder="noreply@school.com" disabled={loading} />
-                      </div>
+                      <div className="col-span-2"><InputField label="SendGrid API Key" type="password" value={schoolForm.emailConfig?.sendgrid?.apiKey || ''} onChange={(e) => setSchoolForm({ ...schoolForm, emailConfig: { ...schoolForm.emailConfig, sendgrid: { ...schoolForm.emailConfig?.sendgrid, apiKey: e.target.value } } })} placeholder="SG.xxxxxxxxxx" disabled={loading} /></div>
+                      <div className="col-span-2"><InputField label="From Email" type="email" value={schoolForm.emailConfig?.sendgrid?.fromEmail || ''} onChange={(e) => setSchoolForm({ ...schoolForm, emailConfig: { ...schoolForm.emailConfig, sendgrid: { ...schoolForm.emailConfig?.sendgrid, fromEmail: e.target.value } } })} placeholder="noreply@school.com" disabled={loading} /></div>
                     </div>
                   </div>
                 )}
-
                 <button onClick={handleSaveSchool} className="mt-4 bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50" disabled={loading}>
                   {loading ? 'Saving...' : 'Save Email Settings'}
                 </button>
               </div>
             </div>
 
-            {/* ===== SMS SECTION ===== */}
+            {/* SMS */}
             <div className="border-t pt-6">
               <h4 className="font-medium text-lg mb-3 flex items-center gap-2">
                 <i className="fas fa-sms text-green-600"></i>
                 SMS Configuration
               </h4>
-              
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id="enableSMS"
-                      checked={schoolForm.smsConfig?.enabled || false}
-                      onChange={(e) => setSchoolForm({
-                        ...schoolForm,
-                        smsConfig: { ...schoolForm.smsConfig, enabled: e.target.checked }
-                      })}
-                      className="rounded"
-                    />
+                    <input type="checkbox" id="enableSMS" checked={schoolForm.smsConfig?.enabled || false}
+                      onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, enabled: e.target.checked } })} className="rounded" />
                     <label htmlFor="enableSMS" className="text-sm font-medium text-gray-700">Enable SMS Sending</label>
                   </div>
-                  
-                  <button
-                    onClick={handleTestSMS}
-                    disabled={testSMSLoading}
-                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center gap-2"
-                  >
-                    <i className="fas fa-paper-plane"></i>
-                    {testSMSLoading ? 'Sending...' : 'Test SMS'}
+                  <button onClick={handleTestSMS} disabled={testSMSLoading}
+                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center gap-2">
+                    <i className="fas fa-paper-plane"></i>{testSMSLoading ? 'Sending...' : 'Test SMS'}
                   </button>
                 </div>
-
                 <div className="grid grid-cols-2 gap-4">
                   <SearchableSelect
                     label="SMS Provider"
@@ -40304,21 +39787,10 @@ const SettingsModule = ({
                     placeholder="Select SMS provider..."
                     disabled={loading}
                   />
-
-                  <InputField
-                    label="Default Country Code"
-                    value={schoolForm.smsConfig?.defaultCountryCode || '254'}
-                    onChange={(e) => setSchoolForm({
-                      ...schoolForm,
-                      smsConfig: { ...schoolForm.smsConfig, defaultCountryCode: e.target.value }
-                    })}
-                    placeholder="254"
-                    disabled={loading}
-                    helperText="Default country code for phone numbers"
-                  />
+                  <InputField label="Default Country Code" value={schoolForm.smsConfig?.defaultCountryCode || '254'}
+                    onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, defaultCountryCode: e.target.value } })}
+                    placeholder="254" disabled={loading} helperText="Default country code for phone numbers" />
                 </div>
-
-                {/* Africa's Talking Configuration */}
                 {schoolForm.smsProvider === 'AFRICASTALKING' && (
                   <div className="border rounded-lg p-4 bg-gray-50 mt-2">
                     <h4 className="font-medium text-sm text-gray-700 mb-2">Africa's Talking Settings</h4>
@@ -40330,66 +39802,32 @@ const SettingsModule = ({
                     </div>
                   </div>
                 )}
-
-                {/* Celcom Configuration */}
                 {schoolForm.smsProvider === 'CELCOM' && (
                   <div className="border rounded-lg p-4 bg-gray-50 mt-2">
                     <h4 className="font-medium text-sm text-gray-700 mb-2">Celcom Africa Settings</h4>
                     <div className="grid grid-cols-2 gap-4">
                       <InputField label="API Key" type="password" value={schoolForm.smsConfig?.celcom?.apiKey || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, celcom: { ...schoolForm.smsConfig?.celcom, apiKey: e.target.value } } })} placeholder="Enter API key" disabled={loading} />
                       <InputField label="Sender ID" value={schoolForm.smsConfig?.celcom?.senderId || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, celcom: { ...schoolForm.smsConfig?.celcom, senderId: e.target.value } } })} placeholder="SchoolAid" disabled={loading} />
-                      <SearchableSelect
-                        label="Route"
-                        value={schoolForm.smsConfig?.celcom?.route || ''}
-                        onChange={(e) => setSchoolForm({ 
-                          ...schoolForm, 
-                          smsConfig: { 
-                            ...schoolForm.smsConfig, 
-                            celcom: { 
-                              ...schoolForm.smsConfig?.celcom, 
-                              route: e.target.value 
-                            } 
-                          } 
-                        })}
-                        options={routeOptions}
-                        placeholder="Select route..."
-                        disabled={loading}
-                      />
+                      <SearchableSelect label="Route" value={schoolForm.smsConfig?.celcom?.route || ''}
+                        onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, celcom: { ...schoolForm.smsConfig?.celcom, route: e.target.value } } })}
+                        options={routeOptions} placeholder="Select route..." disabled={loading} />
                       <InputField label="Callback URL" value={schoolForm.smsConfig?.celcom?.callbackUrl || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, celcom: { ...schoolForm.smsConfig?.celcom, callbackUrl: e.target.value } } })} placeholder="https://your-school.com/sms/callback" disabled={loading} />
                     </div>
                   </div>
                 )}
-
-                {/* SMSLeopard Configuration */}
                 {schoolForm.smsProvider === 'SMSLEOPARD' && (
                   <div className="border rounded-lg p-4 bg-gray-50 mt-2">
                     <h4 className="font-medium text-sm text-gray-700 mb-2">SMSLeopard Settings</h4>
                     <div className="grid grid-cols-2 gap-4">
                       <InputField label="API Key" type="password" value={schoolForm.smsConfig?.smsleopard?.apiKey || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, smsleopard: { ...schoolForm.smsConfig?.smsleopard, apiKey: e.target.value } } })} placeholder="Enter API key" disabled={loading} />
                       <InputField label="Sender ID" value={schoolForm.smsConfig?.smsleopard?.senderId || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, smsleopard: { ...schoolForm.smsConfig?.smsleopard, senderId: e.target.value } } })} placeholder="SchoolAid" disabled={loading} />
-                      <SearchableSelect
-                        label="Route"
-                        value={schoolForm.smsConfig?.smsleopard?.route || ''}
-                        onChange={(e) => setSchoolForm({ 
-                          ...schoolForm, 
-                          smsConfig: { 
-                            ...schoolForm.smsConfig, 
-                            smsleopard: { 
-                              ...schoolForm.smsConfig?.smsleopard, 
-                              route: e.target.value 
-                            } 
-                          } 
-                        })}
-                        options={routeOptions}
-                        placeholder="Select route..."
-                        disabled={loading}
-                      />
+                      <SearchableSelect label="Route" value={schoolForm.smsConfig?.smsleopard?.route || ''}
+                        onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, smsleopard: { ...schoolForm.smsConfig?.smsleopard, route: e.target.value } } })}
+                        options={routeOptions} placeholder="Select route..." disabled={loading} />
                       <InputField label="User ID" value={schoolForm.smsConfig?.smsleopard?.userId || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, smsleopard: { ...schoolForm.smsConfig?.smsleopard, userId: e.target.value } } })} placeholder="Optional" disabled={loading} />
                     </div>
                   </div>
                 )}
-
-                {/* Advanta Configuration */}
                 {schoolForm.smsProvider === 'ADVANTA' && (
                   <div className="border rounded-lg p-4 bg-gray-50 mt-2">
                     <h4 className="font-medium text-sm text-gray-700 mb-2">Advanta Africa Settings</h4>
@@ -40401,8 +39839,6 @@ const SettingsModule = ({
                     </div>
                   </div>
                 )}
-
-                {/* PawaTalk Configuration */}
                 {schoolForm.smsProvider === 'PAWATALK' && (
                   <div className="border rounded-lg p-4 bg-gray-50 mt-2">
                     <h4 className="font-medium text-sm text-gray-700 mb-2">PawaTalk Settings</h4>
@@ -40414,7 +39850,6 @@ const SettingsModule = ({
                     </div>
                   </div>
                 )}
-
                 <button onClick={handleSaveSchool} className="mt-4 bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50" disabled={loading}>
                   {loading ? 'Saving...' : 'Save SMS Settings'}
                 </button>
@@ -40424,7 +39859,7 @@ const SettingsModule = ({
         </div>
       )}
 
-      {/* ==================== FEATURES TAB ==================== */}
+      {/* FEATURES */}
       {activeTab === 'features' && canToggleFeatures && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <div className="flex justify-between mb-4">
@@ -40442,10 +39877,7 @@ const SettingsModule = ({
             <div className="space-y-2">
               {features.map(f => (
                 <div key={f.id} className="flex justify-between items-center p-3 bg-gray-50 rounded hover:bg-gray-100">
-                  <div>
-                    <span className="font-medium">{f.name}</span>
-                    <span className="text-sm text-gray-500 ml-2">({f.code})</span>
-                  </div>
+                  <div><span className="font-medium">{f.name}</span><span className="text-sm text-gray-500 ml-2">({f.code})</span></div>
                   <button onClick={() => toggleFeature(f.code)} className={`px-3 py-1 rounded text-sm font-medium transition-colors ${f.isEnabled ? 'bg-green-500 text-white hover:bg-green-600' : 'bg-gray-500 text-white hover:bg-gray-600'}`} disabled={loading}>
                     {f.isEnabled ? 'ON' : 'OFF'}
                   </button>
@@ -40456,11 +39888,10 @@ const SettingsModule = ({
         </div>
       )}
 
-      {/* ==================== NOTIFICATIONS TAB ==================== */}
+      {/* NOTIFICATIONS */}
       {activeTab === 'notifications' && canManageNotifications && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">🔔 Notification Settings</h3>
-          
           {!notifications || notifications.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               <i className="fas fa-bell-slash text-4xl text-gray-300 mb-2"></i>
@@ -40470,10 +39901,7 @@ const SettingsModule = ({
             <div className="space-y-4">
               {notifications.map(notification => (
                 <div key={notification.id} className="flex justify-between items-center p-4 border rounded-lg hover:bg-gray-50">
-                  <div>
-                    <h4 className="font-medium">{notification.name}</h4>
-                    <p className="text-sm text-gray-600">{notification.description}</p>
-                  </div>
+                  <div><h4 className="font-medium">{notification.name}</h4><p className="text-sm text-gray-600">{notification.description}</p></div>
                   <button onClick={() => handleToggleNotification(notification.id)} className={`px-4 py-2 rounded-lg font-medium transition-colors ${notification.enabled ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
                     {notification.enabled ? 'Enabled' : 'Disabled'}
                   </button>
@@ -40484,11 +39912,10 @@ const SettingsModule = ({
         </div>
       )}
 
-      {/* ==================== BACKUP TAB ==================== */}
+      {/* BACKUP */}
       {activeTab === 'backup' && canManageBackup && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">💾 Backup & Restore</h3>
-          
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="border rounded-lg p-6">
               <h4 className="font-medium text-lg mb-3">Create Backup</h4>
@@ -40497,7 +39924,6 @@ const SettingsModule = ({
                 {backupInProgress ? 'Creating...' : 'Create Backup Now'}
               </button>
             </div>
-
             <div className="border rounded-lg p-6">
               <h4 className="font-medium text-lg mb-3">Backup History</h4>
               {!backupHistory || backupHistory.length === 0 ? (
@@ -40520,11 +39946,10 @@ const SettingsModule = ({
         </div>
       )}
 
-      {/* ==================== EXPORT DATA TAB ==================== */}
+      {/* EXPORT */}
       {activeTab === 'export' && canExportData && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">📤 Export Data</h3>
-          
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <button onClick={() => handleExportData('students')} className="p-4 border rounded-lg hover:bg-indigo-50 transition-colors text-left">
               <i className="fas fa-user-graduate text-2xl text-indigo-600 mb-2"></i>
@@ -40560,20 +39985,17 @@ const SettingsModule = ({
         </div>
       )}
 
-      {/* ==================== AUDIT LOGS TAB ==================== */}
+      {/* AUDIT LOGS */}
       {activeTab === 'audit' && canViewAudit && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">📋 Audit Logs</h3>
-          
           <div className="grid grid-cols-2 gap-4 mb-4 max-w-md">
             <InputField label="Start Date" type="date" value={dateRange.start} onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })} />
             <InputField label="End Date" type="date" value={dateRange.end} onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })} />
           </div>
-
           <button onClick={loadAuditLogs} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 mb-4 flex items-center" disabled={loading}>
             {loading ? <><i className="fas fa-spinner fa-spin mr-2"></i>Fetching...</> : <><i className="fas fa-search mr-2"></i>Fetch Logs</>}
           </button>
-
           {!auditLogs || auditLogs.length === 0 ? (
             <div className="text-center py-8 bg-gray-50 rounded-lg">
               <i className="fas fa-history text-4xl text-gray-400 mb-2"></i>
@@ -64673,27 +64095,25 @@ const HomeworkModule = ({
     // eslint-disable-next-line
   }, [selectedChild?.id]);
 
-  // ==================== FILTERED + STATS ====================
-  const filteredHomeworks = useMemo(() => {
-    let list = [...homeworks];
-    if (filterStatus !== 'all') list = list.filter(h => h.status === filterStatus);
-    if (filterScope) {
-      list = list.filter(h =>
-        h.classId === filterScope ||
-        h.programId === filterScope ||
-        h.courseId === filterScope
-      );
-    }
-    if (searchTerm.trim()) {
-      const t = searchTerm.toLowerCase();
-      list = list.filter(h =>
-        (h.title || '').toLowerCase().includes(t) ||
-        (h.description || '').toLowerCase().includes(t)
-      );
-    }
-    return list;
-  }, [homeworks, filterStatus, filterScope, searchTerm]);
-
+const filteredHomeworks = useMemo(() => {
+  let list = [...homeworks];
+  if (filterStatus !== 'all') list = list.filter(h => h.status === filterStatus);
+  if (filterScope) {
+    list = list.filter(h =>
+      h.classId === filterScope ||
+      h.programId === filterScope ||
+      h.courseId === filterScope
+    );
+  }
+  if (searchTerm.trim()) {
+    const t = searchTerm.toLowerCase();
+    list = list.filter(h =>
+      (h.title || '').toLowerCase().includes(t) ||   // ← here
+      (h.description || '').toLowerCase().includes(t) // ← and here
+    );
+  }
+  return list;
+}, [homeworks, filterStatus, filterScope, searchTerm]);
   const stats = useMemo(() => {
     const total = homeworks.length;
     const published = homeworks.filter(h => h.status === 'PUBLISHED').length;
