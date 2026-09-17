@@ -14993,7 +14993,7 @@ const ReportsModule = ({
   const [hostels, setHostels] = useState([]);
   const [books, setBooks] = useState([]);
   const [borrows, setBorrows] = useState([]);
-  const [feeTransfers, setFeeTransfers] = useState([]);   // ← NEW
+  const [feeTransfers, setFeeTransfers] = useState([]);
   const [fetchedOnce, setFetchedOnce] = useState({});
 
   // Student
@@ -15020,7 +15020,7 @@ const ReportsModule = ({
   const [outstandingCourseId, setOutstandingCourseId] = useState('');
   const [outstandingProgramId, setOutstandingProgramId] = useState('');
 
-  // Fee Transfers (NEW)
+  // Fee Transfers
   const [transferSearch, setTransferSearch] = useState('');
   const [transferStatus, setTransferStatus] = useState('');
   const [transferStudentId, setTransferStudentId] = useState('');
@@ -15073,36 +15073,94 @@ const ReportsModule = ({
   const todayStr = () => new Date().toISOString().split('T')[0];
   const firstOfMonthStr = () => new Date(new Date().setDate(1)).toISOString().split('T')[0];
 
-  // ==================== PRINT STYLES ====================
+  // ==================== PRINT STYLES — ONLY THE TABLE PRINTS ====================
   useEffect(() => {
     const style = document.createElement('style');
     style.innerHTML = `
+      /* Screen: print-area is invisible as a wrapper, its children display normally */
+      .print-area { display: block; }
+
       @media print {
+        /* Hide EVERYTHING by default */
         body * { visibility: hidden !important; }
-        .reports-module, .reports-module * { visibility: visible !important; }
-        .reports-module {
+        html, body {
+          background: white !important;
+          margin: 0 !important;
+          padding: 0 !important;
+        }
+
+        /* Show only the print-area and everything inside it */
+        .print-area,
+        .print-area * { visibility: visible !important; }
+
+        /* Pull the print-area up to the top-left of the page */
+        .print-area {
           position: absolute !important;
           left: 0 !important;
           top: 0 !important;
           width: 100% !important;
-          padding: 0 !important;
+          padding: 12px !important;
           margin: 0 !important;
           background: white !important;
+          box-shadow: none !important;
+          border: none !important;
+          border-radius: 0 !important;
         }
-        .no-print, button, .reports-module button { display: none !important; }
-        .bg-gray-50 { background-color: #f9fafb !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        .bg-indigo-600 { background-color: #4f46e5 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        .text-indigo-600 { color: #4f46e5 !important; }
-        .recharts-wrapper, .recharts-responsive-container { width: 100% !important; height: auto !important; }
-        table { border-collapse: collapse !important; width: 100% !important; }
-        tr { page-break-inside: avoid; }
-        th, td { border: 1px solid #e5e7eb !important; padding: 5px !important; font-size: 10px !important; }
+
+        /* Hide interactions and charts even if somehow inside print-area */
+        .no-print,
+        button,
+        input,
+        select,
+        textarea,
+        .recharts-wrapper,
+        .recharts-responsive-container,
+        .recharts-legend-wrapper,
+        .recharts-tooltip-wrapper { display: none !important; }
+
+        /* Print title from data-print-title attribute */
+        .print-area::before {
+          content: attr(data-print-title);
+          display: block;
+          font-size: 15px;
+          font-weight: bold;
+          color: #111;
+          margin-bottom: 10px;
+          padding-bottom: 6px;
+          border-bottom: 1px solid #d1d5db;
+        }
+
+        /* Table styling for print */
+        table {
+          border-collapse: collapse !important;
+          width: 100% !important;
+        }
         thead { display: table-header-group; }
-        .rounded-xl, .shadow-sm { box-shadow: none !important; border: 1px solid #e5e7eb; }
-        html, body { background: white !important; }
-        .print-title { display: block !important; margin-bottom: 12px; font-size: 16px; font-weight: bold; }
+        tr { page-break-inside: avoid; }
+        th, td {
+          border: 1px solid #d1d5db !important;
+          padding: 6px 8px !important;
+          font-size: 11px !important;
+          color: #111 !important;
+          background: white !important;
+        }
+        th {
+          background: #f3f4f6 !important;
+          font-weight: bold !important;
+          text-transform: uppercase !important;
+        }
+
+        /* Strip card chrome in print */
+        .print-area .bg-white,
+        .print-area .rounded-xl,
+        .print-area .shadow-sm {
+          box-shadow: none !important;
+          border: none !important;
+          border-radius: 0 !important;
+          padding: 0 !important;
+          margin: 0 !important;
+        }
       }
-      .print-title { display: none; }
     `;
     document.head.appendChild(style);
     return () => document.head.removeChild(style);
@@ -15124,7 +15182,7 @@ const ReportsModule = ({
       if (key === 'hostels')         { res = await api.get('/hostels');                                  setHostels(res.data.hostels || []); }
       if (key === 'books')           { res = await api.get('/books');                                    setBooks(res.data.books || []); }
       if (key === 'borrows')         { res = await api.get('/borrows');                                  setBorrows(res.data.borrows || []); }
-      if (key === 'feeTransfers')    { res = await api.get('/fee-transfers');                            setFeeTransfers(res.data.transfers || []); }   // ← NEW
+      if (key === 'feeTransfers')    { res = await api.get('/fee-transfers');                            setFeeTransfers(res.data.transfers || []); }
       setFetchedOnce(prev => ({ ...prev, [key]: true }));
     } catch (err) {
       console.warn(`Optional data fetch failed (${key}):`, err?.response?.data || err.message);
@@ -15260,7 +15318,6 @@ const ReportsModule = ({
   const yearOptions = useMemo(() => ['1','2','3','4','5','6'].map(y => ({ value: y, label: `Year ${y}` })), []);
   const moduleOptions = useMemo(() => ['1','2','3','4'].map(m => ({ value: m, label: `Module ${m}` })), []);
 
-  // NEW: student options for the transfers filter
   const studentOptionsForTransfers = useMemo(() => [
     { value: '', label: 'All students' },
     ...students.map(s => ({
@@ -15632,13 +15689,12 @@ const ReportsModule = ({
     finally { setLoading(false); }
   };
 
-  // ==================== FEE TRANSFERS (NEW) ====================
+  // ==================== FEE TRANSFERS ====================
   const generateFeeTransferReport = async () => {
     setLoading(true);
     try {
       await fetchOnce('feeTransfers');
 
-      // Local filters on top of the fetched list
       let rows = feeTransfers;
 
       if (transferStatus) {
@@ -15666,14 +15722,12 @@ const ReportsModule = ({
         });
       }
 
-      // Server-side global stats (authoritative totals — ignore filters)
       let serverStats = null;
       try {
         const statsRes = await api.get('/fee-transfers/stats');
         serverStats = statsRes.data.stats;
-      } catch (_) { /* ignore, fall back to filtered */ }
+      } catch (_) { /* ignore */ }
 
-      // Filtered counts
       const byStatus = {
         PENDING:   rows.filter(t => t.status === 'PENDING').length,
         APPROVED:  rows.filter(t => t.status === 'APPROVED').length,
@@ -15681,17 +15735,14 @@ const ReportsModule = ({
         CANCELLED: rows.filter(t => t.status === 'CANCELLED').length
       };
 
-      // Approved transfer total (from filtered rows)
       const approvedTotal = rows
         .filter(t => t.status === 'APPROVED')
         .reduce((s, t) => s + parseFloat(t.amount || 0), 0);
 
-      // Chart: status distribution
       const statusChart = Object.entries(byStatus)
         .filter(([_, v]) => v > 0)
         .map(([name, value]) => ({ name, value }));
 
-      // Chart: monthly approved transfer volume
       const monthly = {};
       rows.filter(t => t.status === 'APPROVED').forEach(t => {
         const d = new Date(t.approvedAt || t.createdAt);
@@ -15701,7 +15752,6 @@ const ReportsModule = ({
       });
       const monthlyChart = Object.keys(monthly).map(m => ({ month: m, amount: monthly[m] }));
 
-      // Table rows
       const tableRows = rows.map(t => {
         const from = t.fromStudent || {};
         const to = t.toStudent || {};
@@ -16334,7 +16384,7 @@ const ReportsModule = ({
     setReportData(null);
     if (activeTab === 'fee')         generateFeeReport();
     if (activeTab === 'outstanding') generateOutstandingReport();
-    if (activeTab === 'feeTransfer') generateFeeTransferReport();  // ← NEW
+    if (activeTab === 'feeTransfer') generateFeeTransferReport();
     if (activeTab === 'admission')   generateAdmissionReport();
     if (activeTab === 'financial')   generateFinancialReport();
     if (activeTab === 'attendance')  generateAttendanceReport();
@@ -16455,7 +16505,7 @@ const ReportsModule = ({
 
           {reportData?.type === 'student' && (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 no-print">
                 <StatCard label="Exams Taken" value={reportData.summary.totalExams} color="blue" />
                 <StatCard label="Average" value={`${reportData.summary.average}%`} color="green" />
                 <StatCard label="Highest" value={`${reportData.summary.highest}%`} color="yellow" />
@@ -16464,7 +16514,7 @@ const ReportsModule = ({
               </div>
 
               {showCharts && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 no-print">
                   {reportData.charts.trend.length > 0 && (
                     <ChartCard title="Performance Trend" span>
                       <LineChart data={reportData.charts.trend}>
@@ -16499,24 +16549,26 @@ const ReportsModule = ({
               )}
 
               {reportData.results.length > 0 && (
-                <Card>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold">Detailed Results ({reportData.results.length})</h3>
-                    <ExportBtn onClick={() => exportCSV(reportData.results, 'student_report.csv')} />
-                  </div>
-                  <TableWrap headers={['Date','Exam','Subject/Unit','Marks','Grade','Points']}>
-                    {reportData.results.map((r, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-3 py-2">{r.examDate ? new Date(r.examDate).toLocaleDateString() : '—'}</td>
-                        <td className="px-3 py-2 font-medium">{r.examName}</td>
-                        <td className="px-3 py-2">{r.itemName}{r.itemCode && <span className="text-xs text-gray-500 ml-1">({r.itemCode})</span>}</td>
-                        <td className="px-3 py-2 font-bold">{r.marks}</td>
-                        <td className="px-3 py-2"><span className="px-2 py-0.5 rounded-full text-xs bg-gray-100">{r.grade}</span></td>
-                        <td className="px-3 py-2">{r.points}</td>
-                      </tr>
-                    ))}
-                  </TableWrap>
-                </Card>
+                <div className="print-area" data-print-title={`Student Report — ${reportData.student.firstName} ${reportData.student.lastName} (${reportData.student.admissionNumber})`}>
+                  <Card>
+                    <div className="flex justify-between items-center mb-3">
+                      <h3 className="font-semibold">Detailed Results ({reportData.results.length})</h3>
+                      <ExportBtn onClick={() => exportCSV(reportData.results, 'student_report.csv')} />
+                    </div>
+                    <TableWrap headers={['Date','Exam','Subject/Unit','Marks','Grade','Points']}>
+                      {reportData.results.map((r, i) => (
+                        <tr key={i} className="hover:bg-gray-50">
+                          <td className="px-3 py-2">{r.examDate ? new Date(r.examDate).toLocaleDateString() : '—'}</td>
+                          <td className="px-3 py-2 font-medium">{r.examName}</td>
+                          <td className="px-3 py-2">{r.itemName}{r.itemCode && <span className="text-xs text-gray-500 ml-1">({r.itemCode})</span>}</td>
+                          <td className="px-3 py-2 font-bold">{r.marks}</td>
+                          <td className="px-3 py-2"><span className="px-2 py-0.5 rounded-full text-xs bg-gray-100">{r.grade}</span></td>
+                          <td className="px-3 py-2">{r.points}</td>
+                        </tr>
+                      ))}
+                    </TableWrap>
+                  </Card>
+                </div>
               )}
             </>
           )}
@@ -16549,7 +16601,7 @@ const ReportsModule = ({
 
           {reportData?.type === 'class' && (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 no-print">
                 <StatCard label="Total Students" value={reportData.summary.totalStudents} color="blue" />
                 <StatCard label="With Results" value={reportData.summary.studentsWithResults} color="green" />
                 <StatCard label="Average" value={`${reportData.summary.classAverage}%`} color="purple" />
@@ -16557,7 +16609,7 @@ const ReportsModule = ({
               </div>
 
               {showCharts && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 no-print">
                   {reportData.charts.topStudents.length > 0 && (
                     <ChartCard title="Top 10 Students">
                       <BarChart data={reportData.charts.topStudents} layout="vertical">
@@ -16580,27 +16632,29 @@ const ReportsModule = ({
                 </div>
               )}
 
-              <Card>
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-semibold">Student Performance ({reportData.studentPerformance.length})</h3>
-                  <ExportBtn onClick={() => exportCSV(reportData.studentPerformance.map(p => ({
-                    admissionNumber: p.student?.admissionNumber,
-                    name: `${p.student?.firstName || ''} ${p.student?.lastName || ''}`.trim(),
-                    exams: p.examCount, total: p.totalMarks, average: p.average
-                  })), 'class_report.csv')} />
-                </div>
-                <TableWrap headers={['Admission','Student','Exams','Total Marks','Average']}>
-                  {[...reportData.studentPerformance].sort((a,b)=>b.average-a.average).map((p, i) => (
-                    <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 font-mono text-xs">{p.student?.admissionNumber || '—'}</td>
-                      <td className="px-3 py-2">{p.student?.firstName} {p.student?.lastName}</td>
-                      <td className="px-3 py-2">{p.examCount}</td>
-                      <td className="px-3 py-2">{p.totalMarks}</td>
-                      <td className="px-3 py-2 font-bold">{p.average.toFixed(2)}%</td>
-                    </tr>
-                  ))}
-                </TableWrap>
-              </Card>
+              <div className="print-area" data-print-title={`${reportData.entityName} — Student Performance`}>
+                <Card>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold">Student Performance ({reportData.studentPerformance.length})</h3>
+                    <ExportBtn onClick={() => exportCSV(reportData.studentPerformance.map(p => ({
+                      admissionNumber: p.student?.admissionNumber,
+                      name: `${p.student?.firstName || ''} ${p.student?.lastName || ''}`.trim(),
+                      exams: p.examCount, total: p.totalMarks, average: p.average
+                    })), 'class_report.csv')} />
+                  </div>
+                  <TableWrap headers={['Admission','Student','Exams','Total Marks','Average']}>
+                    {[...reportData.studentPerformance].sort((a,b)=>b.average-a.average).map((p, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-mono text-xs">{p.student?.admissionNumber || '—'}</td>
+                        <td className="px-3 py-2">{p.student?.firstName} {p.student?.lastName}</td>
+                        <td className="px-3 py-2">{p.examCount}</td>
+                        <td className="px-3 py-2">{p.totalMarks}</td>
+                        <td className="px-3 py-2 font-bold">{p.average.toFixed(2)}%</td>
+                      </tr>
+                    ))}
+                  </TableWrap>
+                </Card>
+              </div>
             </>
           )}
         </div>
@@ -16619,7 +16673,7 @@ const ReportsModule = ({
 
           {reportData?.type === 'academic' && (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-4 no-print">
                 <StatCard label="Overall Avg" value={`${reportData.summary.overallAvg}%`} color="blue" />
                 <StatCard label="Subjects" value={reportData.summary.totalSubjects} color="green" />
                 <StatCard label="Exams" value={reportData.summary.totalExams} color="yellow" />
@@ -16629,7 +16683,7 @@ const ReportsModule = ({
               </div>
 
               {showCharts && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 no-print">
                   {reportData.charts.radarData.length > 0 && (
                     <ChartCard title="Subject Performance Radar">
                       <RadarChart data={reportData.charts.radarData}>
@@ -16653,27 +16707,29 @@ const ReportsModule = ({
                 </div>
               )}
 
-              <Card>
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-semibold">Subject Breakdown ({reportData.subjectRows.length})</h3>
-                  <ExportBtn onClick={() => exportCSV(reportData.subjectRows.map(s => ({
-                    subject: s.subject, exams: s.examCount, total: s.totalMarks, average: s.average,
-                    bestExam: s.bestExam, worstExam: s.worstExam
-                  })), 'academic_detailed.csv')} />
-                </div>
-                <TableWrap headers={['Subject/Unit','Exams','Total Marks','Average','Best Exam','Weakest Exam']}>
-                  {reportData.subjectRows.map((s, i) => (
-                    <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 font-medium">{s.subject}</td>
-                      <td className="px-3 py-2">{s.examCount}</td>
-                      <td className="px-3 py-2">{s.totalMarks}</td>
-                      <td className="px-3 py-2 font-bold">{s.average}%</td>
-                      <td className="px-3 py-2 text-xs">{s.bestExam}</td>
-                      <td className="px-3 py-2 text-xs">{s.worstExam}</td>
-                    </tr>
-                  ))}
-                </TableWrap>
-              </Card>
+              <div className="print-area" data-print-title={`Detailed Academic — ${reportData.student.firstName} ${reportData.student.lastName}`}>
+                <Card>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold">Subject Breakdown ({reportData.subjectRows.length})</h3>
+                    <ExportBtn onClick={() => exportCSV(reportData.subjectRows.map(s => ({
+                      subject: s.subject, exams: s.examCount, total: s.totalMarks, average: s.average,
+                      bestExam: s.bestExam, worstExam: s.worstExam
+                    })), 'academic_detailed.csv')} />
+                  </div>
+                  <TableWrap headers={['Subject/Unit','Exams','Total Marks','Average','Best Exam','Weakest Exam']}>
+                    {reportData.subjectRows.map((s, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-medium">{s.subject}</td>
+                        <td className="px-3 py-2">{s.examCount}</td>
+                        <td className="px-3 py-2">{s.totalMarks}</td>
+                        <td className="px-3 py-2 font-bold">{s.average}%</td>
+                        <td className="px-3 py-2 text-xs">{s.bestExam}</td>
+                        <td className="px-3 py-2 text-xs">{s.worstExam}</td>
+                      </tr>
+                    ))}
+                  </TableWrap>
+                </Card>
+              </div>
             </>
           )}
         </div>
@@ -16696,7 +16752,7 @@ const ReportsModule = ({
 
           {reportData?.type === 'fee' && (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 no-print">
                 <StatCard label="Billed" value={formatCurrency(reportData.summary.totalBilled)} color="blue" />
                 <StatCard label="Collected" value={formatCurrency(reportData.summary.totalCollected)} color="green" />
                 <StatCard label="Outstanding" value={formatCurrency(reportData.summary.totalOutstanding)} color="red" />
@@ -16705,7 +16761,7 @@ const ReportsModule = ({
               </div>
 
               {showCharts && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 no-print">
                   {reportData.charts.monthlyChart.length > 0 && (
                     <ChartCard title="Monthly Collection" span>
                       <AreaChart data={reportData.charts.monthlyChart}>
@@ -16728,27 +16784,29 @@ const ReportsModule = ({
                 </div>
               )}
 
-              <Card>
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-semibold">Per-Student Fee Status ({reportData.rows.length})</h3>
-                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'fee_report.csv')} />
-                </div>
-                <TableWrap headers={['Admission','Student','Class/Course','Billed','Paid','Balance','Status']}>
-                  {reportData.rows.map((r, i) => (
-                    <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
-                      <td className="px-3 py-2">{r.name}</td>
-                      <td className="px-3 py-2 text-xs">{r.entity}</td>
-                      <td className="px-3 py-2">{formatCurrency(r.billed)}</td>
-                      <td className="px-3 py-2 text-green-700">{formatCurrency(r.paid)}</td>
-                      <td className="px-3 py-2 text-red-700 font-medium">{formatCurrency(r.balance)}</td>
-                      <td className="px-3 py-2">
-                        <span className={`px-2 py-0.5 rounded-full text-xs ${r.status === 'Cleared' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{r.status}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </TableWrap>
-              </Card>
+              <div className="print-area" data-print-title={`Fee Collection Report — ${reportData.period?.start || ''} to ${reportData.period?.end || ''}`}>
+                <Card>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold">Per-Student Fee Status ({reportData.rows.length})</h3>
+                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'fee_report.csv')} />
+                  </div>
+                  <TableWrap headers={['Admission','Student','Class/Course','Billed','Paid','Balance','Status']}>
+                    {reportData.rows.map((r, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
+                        <td className="px-3 py-2">{r.name}</td>
+                        <td className="px-3 py-2 text-xs">{r.entity}</td>
+                        <td className="px-3 py-2">{formatCurrency(r.billed)}</td>
+                        <td className="px-3 py-2 text-green-700">{formatCurrency(r.paid)}</td>
+                        <td className="px-3 py-2 text-red-700 font-medium">{formatCurrency(r.balance)}</td>
+                        <td className="px-3 py-2">
+                          <span className={`px-2 py-0.5 rounded-full text-xs ${r.status === 'Cleared' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{r.status}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </TableWrap>
+                </Card>
+              </div>
             </>
           )}
         </div>
@@ -16773,7 +16831,7 @@ const ReportsModule = ({
 
           {reportData?.type === 'outstanding' && (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 no-print">
                 <StatCard label="Total Outstanding" value={formatCurrency(reportData.summary.totalOutstanding)} color="red" />
                 <StatCard label="Students" value={reportData.summary.studentsWithBalance} color="blue" />
                 <StatCard label="Average Balance" value={formatCurrency(reportData.summary.averageBalance)} color="yellow" />
@@ -16781,40 +16839,44 @@ const ReportsModule = ({
               </div>
 
               {showCharts && reportData.charts.agingChart.length > 0 && (
-                <ChartCard title="Aging Buckets">
-                  <BarChart data={reportData.charts.agingChart}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" /><YAxis /><Tooltip formatter={formatCurrency} />
-                    <Bar dataKey="amount" fill="#ef4444" />
-                  </BarChart>
-                </ChartCard>
+                <div className="no-print">
+                  <ChartCard title="Aging Buckets">
+                    <BarChart data={reportData.charts.agingChart}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" /><YAxis /><Tooltip formatter={formatCurrency} />
+                      <Bar dataKey="amount" fill="#ef4444" />
+                    </BarChart>
+                  </ChartCard>
+                </div>
               )}
 
-              <Card>
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-semibold">Students with Balances ({reportData.rows.length})</h3>
-                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'outstanding.csv')} />
-                </div>
-                <TableWrap headers={['Admission','Student','Class/Course','Billed','Paid','Balance','Last Payment']}>
-                  {reportData.rows.map((r, i) => (
-                    <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
-                      <td className="px-3 py-2">{r.name}</td>
-                      <td className="px-3 py-2 text-xs">{r.entity}</td>
-                      <td className="px-3 py-2">{formatCurrency(r.billed)}</td>
-                      <td className="px-3 py-2 text-green-700">{formatCurrency(r.paid)}</td>
-                      <td className="px-3 py-2 text-red-700 font-bold">{formatCurrency(r.balance)}</td>
-                      <td className="px-3 py-2 text-xs">{r.lastPaymentDate}</td>
-                    </tr>
-                  ))}
-                </TableWrap>
-              </Card>
+              <div className="print-area" data-print-title="Outstanding Balances">
+                <Card>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold">Students with Balances ({reportData.rows.length})</h3>
+                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'outstanding.csv')} />
+                  </div>
+                  <TableWrap headers={['Admission','Student','Class/Course','Billed','Paid','Balance','Last Payment']}>
+                    {reportData.rows.map((r, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
+                        <td className="px-3 py-2">{r.name}</td>
+                        <td className="px-3 py-2 text-xs">{r.entity}</td>
+                        <td className="px-3 py-2">{formatCurrency(r.billed)}</td>
+                        <td className="px-3 py-2 text-green-700">{formatCurrency(r.paid)}</td>
+                        <td className="px-3 py-2 text-red-700 font-bold">{formatCurrency(r.balance)}</td>
+                        <td className="px-3 py-2 text-xs">{r.lastPaymentDate}</td>
+                      </tr>
+                    ))}
+                  </TableWrap>
+                </Card>
+              </div>
             </>
           )}
         </div>
       )}
 
-      {/* ==================== TAB: FEE TRANSFERS (NEW) ==================== */}
+      {/* ==================== TAB: FEE TRANSFERS ==================== */}
       {activeTab === 'feeTransfer' && (
         <div className="space-y-6">
           <Card className="no-print">
@@ -16856,13 +16918,12 @@ const ReportsModule = ({
               >
                 Generate Report
               </button>
-              <PrintBtn />
             </div>
           </Card>
 
           {reportData?.type === 'feeTransfer' && (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 no-print">
                 <StatCard label="Total Transfers" value={reportData.summary.total}       color="blue" />
                 <StatCard label="Pending"          value={reportData.summary.pending}     color="yellow" />
                 <StatCard label="Approved"         value={reportData.summary.approved}    color="green" />
@@ -16875,7 +16936,7 @@ const ReportsModule = ({
               </div>
 
               {showCharts && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 no-print">
                   {reportData.charts.statusChart.length > 0 && (
                     <ChartCard title="By Status">
                       <PieChart>
@@ -16910,60 +16971,62 @@ const ReportsModule = ({
                 </div>
               )}
 
-              <Card>
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-semibold">
-                    Transfers ({reportData.rows.length})
-                  </h3>
-                  <ExportBtn
-                    onClick={() => exportCSV(reportData.rows, 'fee_transfers.csv')}
-                  />
-                </div>
-                <TableWrap
-                  headers={[
-                    'Status', 'Amount',
-                    'From Student', 'From Adm.',
-                    'To Student', 'To Adm.',
-                    'Reason',
-                    'Requested By', 'Requested At',
-                    'Approved By', 'Approved At',
-                    'Rejected By', 'Rejected At', 'Reject Reason'
-                  ]}
-                >
-                  {reportData.rows.map((r, i) => (
-                    <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-3 py-2">
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-xs ${
-                            r.status === 'APPROVED'
-                              ? 'bg-green-100 text-green-800'
-                              : r.status === 'PENDING'
-                              ? 'bg-yellow-100 text-yellow-800'
-                              : r.status === 'REJECTED'
-                              ? 'bg-red-100 text-red-800'
-                              : 'bg-gray-100 text-gray-700'
-                          }`}
-                        >
-                          {r.status}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 font-bold">{formatCurrency(r.amount)}</td>
-                      <td className="px-3 py-2">{r.fromStudent}</td>
-                      <td className="px-3 py-2 font-mono text-xs">{r.fromAdmission}</td>
-                      <td className="px-3 py-2">{r.toStudent}</td>
-                      <td className="px-3 py-2 font-mono text-xs">{r.toAdmission}</td>
-                      <td className="px-3 py-2 text-xs">{r.reason}</td>
-                      <td className="px-3 py-2 text-xs">{r.requestedBy}</td>
-                      <td className="px-3 py-2 text-xs">{r.requestedAt}</td>
-                      <td className="px-3 py-2 text-xs">{r.approvedBy}</td>
-                      <td className="px-3 py-2 text-xs">{r.approvedAt}</td>
-                      <td className="px-3 py-2 text-xs">{r.rejectedBy}</td>
-                      <td className="px-3 py-2 text-xs">{r.rejectedAt}</td>
-                      <td className="px-3 py-2 text-xs">{r.rejectReason}</td>
-                    </tr>
-                  ))}
-                </TableWrap>
-              </Card>
+              <div className="print-area" data-print-title="Fee Transfers Report">
+                <Card>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold">
+                      Transfers ({reportData.rows.length})
+                    </h3>
+                    <ExportBtn
+                      onClick={() => exportCSV(reportData.rows, 'fee_transfers.csv')}
+                    />
+                  </div>
+                  <TableWrap
+                    headers={[
+                      'Status', 'Amount',
+                      'From Student', 'From Adm.',
+                      'To Student', 'To Adm.',
+                      'Reason',
+                      'Requested By', 'Requested At',
+                      'Approved By', 'Approved At',
+                      'Rejected By', 'Rejected At', 'Reject Reason'
+                    ]}
+                  >
+                    {reportData.rows.map((r, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-3 py-2">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-xs ${
+                              r.status === 'APPROVED'
+                                ? 'bg-green-100 text-green-800'
+                                : r.status === 'PENDING'
+                                ? 'bg-yellow-100 text-yellow-800'
+                                : r.status === 'REJECTED'
+                                ? 'bg-red-100 text-red-800'
+                                : 'bg-gray-100 text-gray-700'
+                            }`}
+                          >
+                            {r.status}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 font-bold">{formatCurrency(r.amount)}</td>
+                        <td className="px-3 py-2">{r.fromStudent}</td>
+                        <td className="px-3 py-2 font-mono text-xs">{r.fromAdmission}</td>
+                        <td className="px-3 py-2">{r.toStudent}</td>
+                        <td className="px-3 py-2 font-mono text-xs">{r.toAdmission}</td>
+                        <td className="px-3 py-2 text-xs">{r.reason}</td>
+                        <td className="px-3 py-2 text-xs">{r.requestedBy}</td>
+                        <td className="px-3 py-2 text-xs">{r.requestedAt}</td>
+                        <td className="px-3 py-2 text-xs">{r.approvedBy}</td>
+                        <td className="px-3 py-2 text-xs">{r.approvedAt}</td>
+                        <td className="px-3 py-2 text-xs">{r.rejectedBy}</td>
+                        <td className="px-3 py-2 text-xs">{r.rejectedAt}</td>
+                        <td className="px-3 py-2 text-xs">{r.rejectReason}</td>
+                      </tr>
+                    ))}
+                  </TableWrap>
+                </Card>
+              </div>
             </>
           )}
         </div>
@@ -16987,7 +17050,7 @@ const ReportsModule = ({
 
           {reportData?.type === 'admission' && (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-4 no-print">
                 <StatCard label="Total" value={reportData.summary.total} color="blue" />
                 <StatCard label="This Month" value={reportData.summary.thisMonth} color="green" />
                 <StatCard label="Male" value={reportData.summary.males} color="indigo" />
@@ -16997,7 +17060,7 @@ const ReportsModule = ({
               </div>
 
               {showCharts && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 no-print">
                   {reportData.charts.monthly.length > 0 && (
                     <ChartCard title="Monthly Admissions" span>
                       <BarChart data={reportData.charts.monthly}>
@@ -17029,25 +17092,27 @@ const ReportsModule = ({
                 </div>
               )}
 
-              <Card>
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-semibold">Admitted Students ({reportData.rows.length})</h3>
-                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'admissions.csv')} />
-                </div>
-                <TableWrap headers={['Admission','Name','Gender','Class/Course','Boarding','Admission Date','Phone']}>
-                  {reportData.rows.map((r, i) => (
-                    <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
-                      <td className="px-3 py-2">{r.name}</td>
-                      <td className="px-3 py-2">{r.gender}</td>
-                      <td className="px-3 py-2 text-xs">{r.entity}</td>
-                      <td className="px-3 py-2">{r.boardingStatus}</td>
-                      <td className="px-3 py-2">{r.admissionDate}</td>
-                      <td className="px-3 py-2 text-xs">{r.phone}</td>
-                    </tr>
-                  ))}
-                </TableWrap>
-              </Card>
+              <div className="print-area" data-print-title={`Admissions Report — ${admissionYear}`}>
+                <Card>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold">Admitted Students ({reportData.rows.length})</h3>
+                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'admissions.csv')} />
+                  </div>
+                  <TableWrap headers={['Admission','Name','Gender','Class/Course','Boarding','Admission Date','Phone']}>
+                    {reportData.rows.map((r, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
+                        <td className="px-3 py-2">{r.name}</td>
+                        <td className="px-3 py-2">{r.gender}</td>
+                        <td className="px-3 py-2 text-xs">{r.entity}</td>
+                        <td className="px-3 py-2">{r.boardingStatus}</td>
+                        <td className="px-3 py-2">{r.admissionDate}</td>
+                        <td className="px-3 py-2 text-xs">{r.phone}</td>
+                      </tr>
+                    ))}
+                  </TableWrap>
+                </Card>
+              </div>
             </>
           )}
         </div>
@@ -17067,14 +17132,14 @@ const ReportsModule = ({
 
           {reportData?.type === 'financial' && (
             <>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 no-print">
                 <StatCard label="Income" value={formatCurrency(reportData.summary.totalIncome)} color="green" />
                 <StatCard label="Expenses" value={formatCurrency(reportData.summary.totalExpenses)} color="red" />
                 <StatCard label="Net" value={formatCurrency(reportData.summary.netIncome)} color={reportData.summary.netIncome >= 0 ? 'blue' : 'orange'} />
               </div>
 
               {showCharts && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 no-print">
                   {reportData.charts.monthlyChart.length > 0 && (
                     <ChartCard title="Monthly Trend" span>
                       <ComposedChart data={reportData.charts.monthlyChart}>
@@ -17110,7 +17175,7 @@ const ReportsModule = ({
 
           {reportData?.type === 'attendance' && (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 no-print">
                 <StatCard label="Total Records" value={reportData.summary.total} color="blue" />
                 <StatCard label="Present" value={reportData.summary.present} sub={`${reportData.summary.presentRate}%`} color="green" />
                 <StatCard label="Absent" value={reportData.summary.absent} sub={`${reportData.summary.absentRate}%`} color="red" />
@@ -17119,39 +17184,43 @@ const ReportsModule = ({
               </div>
 
               {showCharts && reportData.charts.dailyChart.length > 0 && (
-                <ChartCard title="Daily Attendance Trend" span>
-                  <LineChart data={reportData.charts.dailyChart}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="day" angle={-30} textAnchor="end" height={60} interval={0} />
-                    <YAxis /><Tooltip /><Legend />
-                    <Line type="monotone" dataKey="present" stroke="#10b981" name="Present" />
-                    <Line type="monotone" dataKey="absent" stroke="#ef4444" name="Absent" />
-                    <Line type="monotone" dataKey="late" stroke="#f59e0b" name="Late" />
-                  </LineChart>
-                </ChartCard>
+                <div className="no-print">
+                  <ChartCard title="Daily Attendance Trend" span>
+                    <LineChart data={reportData.charts.dailyChart}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="day" angle={-30} textAnchor="end" height={60} interval={0} />
+                      <YAxis /><Tooltip /><Legend />
+                      <Line type="monotone" dataKey="present" stroke="#10b981" name="Present" />
+                      <Line type="monotone" dataKey="absent" stroke="#ef4444" name="Absent" />
+                      <Line type="monotone" dataKey="late" stroke="#f59e0b" name="Late" />
+                    </LineChart>
+                  </ChartCard>
+                </div>
               )}
 
-              <Card>
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-semibold">Per-Student Attendance ({reportData.rows.length})</h3>
-                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'attendance_report.csv')} />
-                </div>
-                <TableWrap headers={['Admission','Student','Class/Course','Present','Absent','Late','Leave','Total','Rate']}>
-                  {reportData.rows.map((r, i) => (
-                    <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
-                      <td className="px-3 py-2">{r.name}</td>
-                      <td className="px-3 py-2 text-xs">{r.entity}</td>
-                      <td className="px-3 py-2 text-green-700">{r.present}</td>
-                      <td className="px-3 py-2 text-red-700">{r.absent}</td>
-                      <td className="px-3 py-2 text-yellow-700">{r.late}</td>
-                      <td className="px-3 py-2 text-blue-700">{r.leave}</td>
-                      <td className="px-3 py-2">{r.total}</td>
-                      <td className="px-3 py-2 font-bold">{r.rate}%</td>
-                    </tr>
-                  ))}
-                </TableWrap>
-              </Card>
+              <div className="print-area" data-print-title="Attendance Report">
+                <Card>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold">Per-Student Attendance ({reportData.rows.length})</h3>
+                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'attendance_report.csv')} />
+                  </div>
+                  <TableWrap headers={['Admission','Student','Class/Course','Present','Absent','Late','Leave','Total','Rate']}>
+                    {reportData.rows.map((r, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
+                        <td className="px-3 py-2">{r.name}</td>
+                        <td className="px-3 py-2 text-xs">{r.entity}</td>
+                        <td className="px-3 py-2 text-green-700">{r.present}</td>
+                        <td className="px-3 py-2 text-red-700">{r.absent}</td>
+                        <td className="px-3 py-2 text-yellow-700">{r.late}</td>
+                        <td className="px-3 py-2 text-blue-700">{r.leave}</td>
+                        <td className="px-3 py-2">{r.total}</td>
+                        <td className="px-3 py-2 font-bold">{r.rate}%</td>
+                      </tr>
+                    ))}
+                  </TableWrap>
+                </Card>
+              </div>
             </>
           )}
         </div>
@@ -17171,7 +17240,7 @@ const ReportsModule = ({
 
           {reportData?.type === 'staff' && (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 no-print">
                 <StatCard label="Total Staff" value={reportData.summary.total} color="blue" />
                 <StatCard label="Teaching" value={reportData.summary.teaching} color="green" />
                 <StatCard label="Non-Teaching" value={reportData.summary.nonTeaching} color="yellow" />
@@ -17180,7 +17249,7 @@ const ReportsModule = ({
               </div>
 
               {showCharts && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 no-print">
                   {reportData.charts.deptChart.length > 0 && (
                     <ChartCard title="By Department">
                       <BarChart data={reportData.charts.deptChart} layout="vertical">
@@ -17203,27 +17272,29 @@ const ReportsModule = ({
                 </div>
               )}
 
-              <Card>
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-semibold">Staff List ({reportData.rows.length})</h3>
-                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'staff_report.csv')} />
-                </div>
-                <TableWrap headers={['Employee ID','Name','Email','Phone','Department','Job Title','Staff Type','Employment','Joined']}>
-                  {reportData.rows.map((r, i) => (
-                    <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 font-mono text-xs">{r.employeeId}</td>
-                      <td className="px-3 py-2">{r.name}</td>
-                      <td className="px-3 py-2 text-xs">{r.email}</td>
-                      <td className="px-3 py-2 text-xs">{r.phone}</td>
-                      <td className="px-3 py-2">{r.department}</td>
-                      <td className="px-3 py-2">{r.jobTitle}</td>
-                      <td className="px-3 py-2 text-xs">{r.staffType}</td>
-                      <td className="px-3 py-2 text-xs">{r.employmentType}</td>
-                      <td className="px-3 py-2 text-xs">{r.employmentDate}</td>
-                    </tr>
-                  ))}
-                </TableWrap>
-              </Card>
+              <div className="print-area" data-print-title="Staff Report">
+                <Card>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold">Staff List ({reportData.rows.length})</h3>
+                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'staff_report.csv')} />
+                  </div>
+                  <TableWrap headers={['Employee ID','Name','Email','Phone','Department','Job Title','Staff Type','Employment','Joined']}>
+                    {reportData.rows.map((r, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-mono text-xs">{r.employeeId}</td>
+                        <td className="px-3 py-2">{r.name}</td>
+                        <td className="px-3 py-2 text-xs">{r.email}</td>
+                        <td className="px-3 py-2 text-xs">{r.phone}</td>
+                        <td className="px-3 py-2">{r.department}</td>
+                        <td className="px-3 py-2">{r.jobTitle}</td>
+                        <td className="px-3 py-2 text-xs">{r.staffType}</td>
+                        <td className="px-3 py-2 text-xs">{r.employmentType}</td>
+                        <td className="px-3 py-2 text-xs">{r.employmentDate}</td>
+                      </tr>
+                    ))}
+                  </TableWrap>
+                </Card>
+              </div>
             </>
           )}
         </div>
@@ -17245,44 +17316,48 @@ const ReportsModule = ({
 
           {reportData?.type === 'discount' && (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 no-print">
                 <StatCard label="Total Discounts" value={reportData.summary.count} color="blue" />
                 <StatCard label="Total Value" value={formatCurrency(reportData.summary.totalValue)} color="green" />
                 <StatCard label="Average" value={formatCurrency(reportData.summary.avg)} color="purple" />
               </div>
 
               {showCharts && reportData.charts.typeChart.length > 0 && (
-                <ChartCard title="By Type (Amount vs Percent)">
-                  <PieChart>
-                    <Pie data={reportData.charts.typeChart} cx="50%" cy="50%" label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} dataKey="value">
-                      {reportData.charts.typeChart.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ChartCard>
+                <div className="no-print">
+                  <ChartCard title="By Type (Amount vs Percent)">
+                    <PieChart>
+                      <Pie data={reportData.charts.typeChart} cx="50%" cy="50%" label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} dataKey="value">
+                        {reportData.charts.typeChart.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ChartCard>
+                </div>
               )}
 
-              <Card>
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-semibold">Discount Records ({reportData.rows.length})</h3>
-                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'discounts.csv')} />
-                </div>
-                <TableWrap headers={['Student','Admission','Fee','Type','Value','Reason','Status']}>
-                  {reportData.rows.map((r, i) => (
-                    <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-3 py-2">{r.student}</td>
-                      <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
-                      <td className="px-3 py-2 text-xs">{r.fee}</td>
-                      <td className="px-3 py-2">{r.type}</td>
-                      <td className="px-3 py-2 font-bold">{r.value}</td>
-                      <td className="px-3 py-2 text-xs">{r.reason}</td>
-                      <td className="px-3 py-2">
-                        <span className={`px-2 py-0.5 rounded-full text-xs ${r.isActive === 'Active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700'}`}>{r.isActive}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </TableWrap>
-              </Card>
+              <div className="print-area" data-print-title="Discounts Report">
+                <Card>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold">Discount Records ({reportData.rows.length})</h3>
+                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'discounts.csv')} />
+                  </div>
+                  <TableWrap headers={['Student','Admission','Fee','Type','Value','Reason','Status']}>
+                    {reportData.rows.map((r, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-3 py-2">{r.student}</td>
+                        <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
+                        <td className="px-3 py-2 text-xs">{r.fee}</td>
+                        <td className="px-3 py-2">{r.type}</td>
+                        <td className="px-3 py-2 font-bold">{r.value}</td>
+                        <td className="px-3 py-2 text-xs">{r.reason}</td>
+                        <td className="px-3 py-2">
+                          <span className={`px-2 py-0.5 rounded-full text-xs ${r.isActive === 'Active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700'}`}>{r.isActive}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </TableWrap>
+                </Card>
+              </div>
             </>
           )}
         </div>
@@ -17301,7 +17376,7 @@ const ReportsModule = ({
 
           {reportData?.type === 'allocation' && (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 no-print">
                 <StatCard label="Allocations" value={reportData.summary.allocatedCount} color="blue" />
                 <StatCard label="Allocated" value={formatCurrency(reportData.summary.totalAllocated)} color="purple" />
                 <StatCard label="Paid" value={formatCurrency(reportData.summary.totalPaid)} color="green" />
@@ -17309,27 +17384,29 @@ const ReportsModule = ({
                 <StatCard label="Collection Rate" value={`${reportData.summary.collectionRate}%`} color="yellow" />
               </div>
 
-              <Card>
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-semibold">Allocation Records ({reportData.rows.length})</h3>
-                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'fee_allocations.csv')} />
-                </div>
-                <TableWrap headers={['Student','Admission','Fee','Allocated','Paid','Balance','Status']}>
-                  {reportData.rows.map((r, i) => (
-                    <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-3 py-2">{r.student}</td>
-                      <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
-                      <td className="px-3 py-2 text-xs">{r.fee}</td>
-                      <td className="px-3 py-2">{formatCurrency(r.allocated)}</td>
-                      <td className="px-3 py-2 text-green-700">{formatCurrency(r.paid)}</td>
-                      <td className="px-3 py-2 text-red-700 font-medium">{formatCurrency(r.balance)}</td>
-                      <td className="px-3 py-2">
-                        <span className={`px-2 py-0.5 rounded-full text-xs ${r.status === 'Cleared' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{r.status}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </TableWrap>
-              </Card>
+              <div className="print-area" data-print-title="Fee Allocation Report">
+                <Card>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold">Allocation Records ({reportData.rows.length})</h3>
+                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'fee_allocations.csv')} />
+                  </div>
+                  <TableWrap headers={['Student','Admission','Fee','Allocated','Paid','Balance','Status']}>
+                    {reportData.rows.map((r, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-3 py-2">{r.student}</td>
+                        <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
+                        <td className="px-3 py-2 text-xs">{r.fee}</td>
+                        <td className="px-3 py-2">{formatCurrency(r.allocated)}</td>
+                        <td className="px-3 py-2 text-green-700">{formatCurrency(r.paid)}</td>
+                        <td className="px-3 py-2 text-red-700 font-medium">{formatCurrency(r.balance)}</td>
+                        <td className="px-3 py-2">
+                          <span className={`px-2 py-0.5 rounded-full text-xs ${r.status === 'Cleared' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{r.status}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </TableWrap>
+                </Card>
+              </div>
             </>
           )}
         </div>
@@ -17354,7 +17431,7 @@ const ReportsModule = ({
 
           {reportData?.type === 'inventory' && (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 no-print">
                 <StatCard label="Total Items" value={reportData.summary.totalItems} color="blue" />
                 <StatCard label="Total Quantity" value={reportData.summary.totalQuantity} color="purple" />
                 <StatCard label="Total Value" value={formatCurrency(reportData.summary.totalValue)} color="green" />
@@ -17362,32 +17439,34 @@ const ReportsModule = ({
                 <StatCard label="Out of Stock" value={reportData.summary.outOfStock} color="red" />
               </div>
 
-              <Card>
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-semibold">Inventory Items ({reportData.rows.length})</h3>
-                  <ExportBtn onClick={() => exportCSV(reportData.rows, 'inventory.csv')} />
-                </div>
-                <TableWrap headers={['Item','Category','Quantity','Unit','Unit Price','Total Value','Reorder Level','Status']}>
-                  {reportData.rows.map((r, i) => (
-                    <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-3 py-2 font-medium">{r.name}</td>
-                      <td className="px-3 py-2">{r.category}</td>
-                      <td className="px-3 py-2">{r.quantity}</td>
-                      <td className="px-3 py-2">{r.unit}</td>
-                      <td className="px-3 py-2">{formatCurrency(r.unitPrice)}</td>
-                      <td className="px-3 py-2 font-bold">{formatCurrency(r.totalValue)}</td>
-                      <td className="px-3 py-2">{r.reorderLevel}</td>
-                      <td className="px-3 py-2">
-                        <span className={`px-2 py-0.5 rounded-full text-xs ${
-                          r.status === 'In Stock' ? 'bg-green-100 text-green-800' :
-                          r.status === 'Low Stock' ? 'bg-yellow-100 text-yellow-800' :
-                          'bg-red-100 text-red-800'
-                        }`}>{r.status}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </TableWrap>
-              </Card>
+              <div className="print-area" data-print-title="Inventory Report">
+                <Card>
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-semibold">Inventory Items ({reportData.rows.length})</h3>
+                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'inventory.csv')} />
+                  </div>
+                  <TableWrap headers={['Item','Category','Quantity','Unit','Unit Price','Total Value','Reorder Level','Status']}>
+                    {reportData.rows.map((r, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-medium">{r.name}</td>
+                        <td className="px-3 py-2">{r.category}</td>
+                        <td className="px-3 py-2">{r.quantity}</td>
+                        <td className="px-3 py-2">{r.unit}</td>
+                        <td className="px-3 py-2">{formatCurrency(r.unitPrice)}</td>
+                        <td className="px-3 py-2 font-bold">{formatCurrency(r.totalValue)}</td>
+                        <td className="px-3 py-2">{r.reorderLevel}</td>
+                        <td className="px-3 py-2">
+                          <span className={`px-2 py-0.5 rounded-full text-xs ${
+                            r.status === 'In Stock' ? 'bg-green-100 text-green-800' :
+                            r.status === 'Low Stock' ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-red-100 text-red-800'
+                          }`}>{r.status}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </TableWrap>
+                </Card>
+              </div>
             </>
           )}
         </div>
@@ -17416,13 +17495,12 @@ const ReportsModule = ({
             </div>
             <div className="flex gap-2">
               <button onClick={generateTransportReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
-              <PrintBtn />
             </div>
           </Card>
 
           {reportData?.type === 'transport' && (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 no-print">
                 <StatCard label="Total Routes" value={reportData.summary.totalRoutes} color="blue" />
                 <StatCard label="Vehicles" value={reportData.summary.totalVehicles} color="purple" />
                 <StatCard label="Students" value={reportData.summary.totalStudents} color="green" />
@@ -17430,7 +17508,7 @@ const ReportsModule = ({
               </div>
 
               {showCharts && transportView === 'routes' && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 no-print">
                   {reportData.charts.routeChart.length > 0 && (
                     <ChartCard title="Students per Route">
                       <BarChart data={reportData.charts.routeChart}>
@@ -17456,51 +17534,55 @@ const ReportsModule = ({
               )}
 
               {transportView === 'routes' && (
-                <Card>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold">Transport Routes ({reportData.rows.length})</h3>
-                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'transport_routes.csv')} />
-                  </div>
-                  <TableWrap headers={['Route','Vehicle','Driver','Phone','Capacity','Students','Utilization','Fee/Student','Monthly Revenue']}>
-                    {reportData.rows.map((r, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 font-medium">{r.route}</td>
-                        <td className="px-3 py-2 font-mono text-xs">{r.vehicle}</td>
-                        <td className="px-3 py-2">{r.driver}</td>
-                        <td className="px-3 py-2 text-xs">{r.driverPhone}</td>
-                        <td className="px-3 py-2">{r.capacity}</td>
-                        <td className="px-3 py-2">{r.students}</td>
-                        <td className="px-3 py-2">{r.utilization}</td>
-                        <td className="px-3 py-2">{formatCurrency(r.feePerStudent)}</td>
-                        <td className="px-3 py-2 font-bold text-green-700">{formatCurrency(r.monthlyRevenue)}</td>
-                      </tr>
-                    ))}
-                  </TableWrap>
-                </Card>
+                <div className="print-area" data-print-title="Transport Routes Report">
+                  <Card>
+                    <div className="flex justify-between items-center mb-3">
+                      <h3 className="font-semibold">Transport Routes ({reportData.rows.length})</h3>
+                      <ExportBtn onClick={() => exportCSV(reportData.rows, 'transport_routes.csv')} />
+                    </div>
+                    <TableWrap headers={['Route','Vehicle','Driver','Phone','Capacity','Students','Utilization','Fee/Student','Monthly Revenue']}>
+                      {reportData.rows.map((r, i) => (
+                        <tr key={i} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 font-medium">{r.route}</td>
+                          <td className="px-3 py-2 font-mono text-xs">{r.vehicle}</td>
+                          <td className="px-3 py-2">{r.driver}</td>
+                          <td className="px-3 py-2 text-xs">{r.driverPhone}</td>
+                          <td className="px-3 py-2">{r.capacity}</td>
+                          <td className="px-3 py-2">{r.students}</td>
+                          <td className="px-3 py-2">{r.utilization}</td>
+                          <td className="px-3 py-2">{formatCurrency(r.feePerStudent)}</td>
+                          <td className="px-3 py-2 font-bold text-green-700">{formatCurrency(r.monthlyRevenue)}</td>
+                        </tr>
+                      ))}
+                    </TableWrap>
+                  </Card>
+                </div>
               )}
 
               {transportView === 'students' && (
-                <Card>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold">Students on Transport ({reportData.studentRows.length})</h3>
-                    <ExportBtn onClick={() => exportCSV(reportData.studentRows, 'transport_students.csv')} />
-                  </div>
-                  <TableWrap headers={['Student','Admission','Class/Course','Route','Vehicle','Driver','Phone','Fee','Pickup']}>
-                    {reportData.studentRows.map((r, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 font-medium">{r.student}</td>
-                        <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
-                        <td className="px-3 py-2 text-xs">{r.entity}</td>
-                        <td className="px-3 py-2">{r.route}</td>
-                        <td className="px-3 py-2 font-mono text-xs">{r.vehicle}</td>
-                        <td className="px-3 py-2">{r.driver}</td>
-                        <td className="px-3 py-2 text-xs">{r.driverPhone}</td>
-                        <td className="px-3 py-2">{formatCurrency(r.fee)}</td>
-                        <td className="px-3 py-2 text-xs">{r.pickupPoint}</td>
-                      </tr>
-                    ))}
-                  </TableWrap>
-                </Card>
+                <div className="print-area" data-print-title="Students on Transport">
+                  <Card>
+                    <div className="flex justify-between items-center mb-3">
+                      <h3 className="font-semibold">Students on Transport ({reportData.studentRows.length})</h3>
+                      <ExportBtn onClick={() => exportCSV(reportData.studentRows, 'transport_students.csv')} />
+                    </div>
+                    <TableWrap headers={['Student','Admission','Class/Course','Route','Vehicle','Driver','Phone','Fee','Pickup']}>
+                      {reportData.studentRows.map((r, i) => (
+                        <tr key={i} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 font-medium">{r.student}</td>
+                          <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
+                          <td className="px-3 py-2 text-xs">{r.entity}</td>
+                          <td className="px-3 py-2">{r.route}</td>
+                          <td className="px-3 py-2 font-mono text-xs">{r.vehicle}</td>
+                          <td className="px-3 py-2">{r.driver}</td>
+                          <td className="px-3 py-2 text-xs">{r.driverPhone}</td>
+                          <td className="px-3 py-2">{formatCurrency(r.fee)}</td>
+                          <td className="px-3 py-2 text-xs">{r.pickupPoint}</td>
+                        </tr>
+                      ))}
+                    </TableWrap>
+                  </Card>
+                </div>
               )}
             </>
           )}
@@ -17527,13 +17609,12 @@ const ReportsModule = ({
             </div>
             <div className="flex gap-2">
               <button onClick={generateHostelReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
-              <PrintBtn />
             </div>
           </Card>
 
           {reportData?.type === 'hostel' && (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 no-print">
                 <StatCard label="Hostels" value={reportData.summary.totalHostels} color="blue" />
                 <StatCard label="Total Beds" value={reportData.summary.totalBeds} color="purple" />
                 <StatCard label="Occupied" value={reportData.summary.totalOccupied} color="green" />
@@ -17542,62 +17623,68 @@ const ReportsModule = ({
               </div>
 
               {showCharts && hostelView === 'hostels' && reportData.charts.hostelChart.length > 0 && (
-                <ChartCard title="Beds vs Occupied by Hostel" span>
-                  <BarChart data={reportData.charts.hostelChart}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" /><YAxis /><Tooltip /><Legend />
-                    <Bar dataKey="beds" fill="#94a3b8" name="Total Beds" />
-                    <Bar dataKey="occupied" fill="#4f46e5" name="Occupied" />
-                    <Bar dataKey="empty" fill="#10b981" name="Empty" />
-                  </BarChart>
-                </ChartCard>
+                <div className="no-print">
+                  <ChartCard title="Beds vs Occupied by Hostel" span>
+                    <BarChart data={reportData.charts.hostelChart}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" /><YAxis /><Tooltip /><Legend />
+                      <Bar dataKey="beds" fill="#94a3b8" name="Total Beds" />
+                      <Bar dataKey="occupied" fill="#4f46e5" name="Occupied" />
+                      <Bar dataKey="empty" fill="#10b981" name="Empty" />
+                    </BarChart>
+                  </ChartCard>
+                </div>
               )}
 
               {hostelView === 'hostels' && (
-                <Card>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold">Hostels ({reportData.rows.length})</h3>
-                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'hostels.csv')} />
-                  </div>
-                  <TableWrap headers={['Hostel','Gender','Warden','Phone','Capacity','Beds','Occupied','Empty','Occupancy']}>
-                    {reportData.rows.map((r, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 font-medium">{r.hostel}</td>
-                        <td className="px-3 py-2">{r.gender}</td>
-                        <td className="px-3 py-2">{r.warden}</td>
-                        <td className="px-3 py-2 text-xs">{r.wardenPhone}</td>
-                        <td className="px-3 py-2">{r.capacity}</td>
-                        <td className="px-3 py-2">{r.beds}</td>
-                        <td className="px-3 py-2 text-green-700">{r.occupied}</td>
-                        <td className="px-3 py-2 text-yellow-700">{r.empty}</td>
-                        <td className="px-3 py-2 font-bold">{r.occupancyRate}</td>
-                      </tr>
-                    ))}
-                  </TableWrap>
-                </Card>
+                <div className="print-area" data-print-title="Hostel Report">
+                  <Card>
+                    <div className="flex justify-between items-center mb-3">
+                      <h3 className="font-semibold">Hostels ({reportData.rows.length})</h3>
+                      <ExportBtn onClick={() => exportCSV(reportData.rows, 'hostels.csv')} />
+                    </div>
+                    <TableWrap headers={['Hostel','Gender','Warden','Phone','Capacity','Beds','Occupied','Empty','Occupancy']}>
+                      {reportData.rows.map((r, i) => (
+                        <tr key={i} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 font-medium">{r.hostel}</td>
+                          <td className="px-3 py-2">{r.gender}</td>
+                          <td className="px-3 py-2">{r.warden}</td>
+                          <td className="px-3 py-2 text-xs">{r.wardenPhone}</td>
+                          <td className="px-3 py-2">{r.capacity}</td>
+                          <td className="px-3 py-2">{r.beds}</td>
+                          <td className="px-3 py-2 text-green-700">{r.occupied}</td>
+                          <td className="px-3 py-2 text-yellow-700">{r.empty}</td>
+                          <td className="px-3 py-2 font-bold">{r.occupancyRate}</td>
+                        </tr>
+                      ))}
+                    </TableWrap>
+                  </Card>
+                </div>
               )}
 
               {hostelView === 'students' && (
-                <Card>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold">Students in Hostels ({reportData.studentRows.length})</h3>
-                    <ExportBtn onClick={() => exportCSV(reportData.studentRows, 'hostel_students.csv')} />
-                  </div>
-                  <TableWrap headers={['Student','Admission','Class/Course','Hostel','Gender','Room','Warden','Phone']}>
-                    {reportData.studentRows.map((r, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 font-medium">{r.student}</td>
-                        <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
-                        <td className="px-3 py-2 text-xs">{r.entity}</td>
-                        <td className="px-3 py-2">{r.hostel}</td>
-                        <td className="px-3 py-2">{r.hostelGender}</td>
-                        <td className="px-3 py-2 font-medium">{r.room}</td>
-                        <td className="px-3 py-2">{r.warden}</td>
-                        <td className="px-3 py-2 text-xs">{r.wardenPhone}</td>
-                      </tr>
-                    ))}
-                  </TableWrap>
-                </Card>
+                <div className="print-area" data-print-title="Students in Hostels">
+                  <Card>
+                    <div className="flex justify-between items-center mb-3">
+                      <h3 className="font-semibold">Students in Hostels ({reportData.studentRows.length})</h3>
+                      <ExportBtn onClick={() => exportCSV(reportData.studentRows, 'hostel_students.csv')} />
+                    </div>
+                    <TableWrap headers={['Student','Admission','Class/Course','Hostel','Gender','Room','Warden','Phone']}>
+                      {reportData.studentRows.map((r, i) => (
+                        <tr key={i} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 font-medium">{r.student}</td>
+                          <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
+                          <td className="px-3 py-2 text-xs">{r.entity}</td>
+                          <td className="px-3 py-2">{r.hostel}</td>
+                          <td className="px-3 py-2">{r.hostelGender}</td>
+                          <td className="px-3 py-2 font-medium">{r.room}</td>
+                          <td className="px-3 py-2">{r.warden}</td>
+                          <td className="px-3 py-2 text-xs">{r.wardenPhone}</td>
+                        </tr>
+                      ))}
+                    </TableWrap>
+                  </Card>
+                </div>
               )}
             </>
           )}
@@ -17624,13 +17711,12 @@ const ReportsModule = ({
             </div>
             <div className="flex gap-2">
               <button onClick={generateLibraryReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
-              <PrintBtn />
             </div>
           </Card>
 
           {reportData?.type === 'library' && (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-4 no-print">
                 <StatCard label="Total Titles" value={reportData.summary.totalTitles} color="blue" />
                 <StatCard label="Total Copies" value={reportData.summary.totalCopies} color="purple" />
                 <StatCard label="Available" value={reportData.summary.availableCopies} color="green" />
@@ -17640,60 +17726,64 @@ const ReportsModule = ({
               </div>
 
               {libraryView === 'books' && (
-                <Card>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold">Books ({reportData.rows.length})</h3>
-                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'library_books.csv')} />
-                  </div>
-                  <TableWrap headers={['Title','Author','ISBN','Category','Quantity','Available','Borrowed','Times Borrowed','Location']}>
-                    {reportData.rows.map((r, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 font-medium">{r.title}</td>
-                        <td className="px-3 py-2">{r.author}</td>
-                        <td className="px-3 py-2 font-mono text-xs">{r.isbn}</td>
-                        <td className="px-3 py-2">{r.category}</td>
-                        <td className="px-3 py-2">{r.quantity}</td>
-                        <td className="px-3 py-2 text-green-700">{r.available}</td>
-                        <td className="px-3 py-2 text-red-700">{r.borrowed}</td>
-                        <td className="px-3 py-2 font-bold">{r.timesBorrowed}</td>
-                        <td className="px-3 py-2 text-xs">{r.location}</td>
-                      </tr>
-                    ))}
-                  </TableWrap>
-                </Card>
+                <div className="print-area" data-print-title="Library Books Report">
+                  <Card>
+                    <div className="flex justify-between items-center mb-3">
+                      <h3 className="font-semibold">Books ({reportData.rows.length})</h3>
+                      <ExportBtn onClick={() => exportCSV(reportData.rows, 'library_books.csv')} />
+                    </div>
+                    <TableWrap headers={['Title','Author','ISBN','Category','Quantity','Available','Borrowed','Times Borrowed','Location']}>
+                      {reportData.rows.map((r, i) => (
+                        <tr key={i} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 font-medium">{r.title}</td>
+                          <td className="px-3 py-2">{r.author}</td>
+                          <td className="px-3 py-2 font-mono text-xs">{r.isbn}</td>
+                          <td className="px-3 py-2">{r.category}</td>
+                          <td className="px-3 py-2">{r.quantity}</td>
+                          <td className="px-3 py-2 text-green-700">{r.available}</td>
+                          <td className="px-3 py-2 text-red-700">{r.borrowed}</td>
+                          <td className="px-3 py-2 font-bold">{r.timesBorrowed}</td>
+                          <td className="px-3 py-2 text-xs">{r.location}</td>
+                        </tr>
+                      ))}
+                    </TableWrap>
+                  </Card>
+                </div>
               )}
 
               {libraryView === 'borrows' && (
-                <Card>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold">Borrowers ({reportData.borrowRows.length})</h3>
-                    <ExportBtn onClick={() => exportCSV(reportData.borrowRows, 'library_borrowers.csv')} />
-                  </div>
-                  <TableWrap headers={['Student','Admission','Class/Course','Book','Author','Borrowed','Due','Returned','Status','Days Overdue','Fine']}>
-                    {reportData.borrowRows.map((r, i) => (
-                      <tr key={i} className={`hover:bg-gray-50 ${r.daysOverdue > 0 ? 'bg-red-50' : ''}`}>
-                        <td className="px-3 py-2 font-medium">{r.student}</td>
-                        <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
-                        <td className="px-3 py-2 text-xs">{r.entity}</td>
-                        <td className="px-3 py-2">{r.book}</td>
-                        <td className="px-3 py-2 text-xs">{r.author}</td>
-                        <td className="px-3 py-2 text-xs">{r.borrowDate}</td>
-                        <td className="px-3 py-2 text-xs">{r.dueDate}</td>
-                        <td className="px-3 py-2 text-xs">{r.returnDate}</td>
-                        <td className="px-3 py-2">
-                          <span className={`px-2 py-0.5 rounded-full text-xs ${
-                            r.status === 'RETURNED' ? 'bg-green-100 text-green-800' :
-                            r.status === 'BORROWED' && r.daysOverdue > 0 ? 'bg-red-100 text-red-800' :
-                            r.status === 'BORROWED' ? 'bg-blue-100 text-blue-800' :
-                            'bg-gray-100 text-gray-700'
-                          }`}>{r.status}</span>
-                        </td>
-                        <td className="px-3 py-2 text-xs">{r.daysOverdue > 0 ? `${r.daysOverdue} days` : '—'}</td>
-                        <td className="px-3 py-2 font-bold text-red-700">{r.fine > 0 ? formatCurrency(r.fine) : '—'}</td>
-                      </tr>
-                    ))}
-                  </TableWrap>
-                </Card>
+                <div className="print-area" data-print-title="Library Borrowers Report">
+                  <Card>
+                    <div className="flex justify-between items-center mb-3">
+                      <h3 className="font-semibold">Borrowers ({reportData.borrowRows.length})</h3>
+                      <ExportBtn onClick={() => exportCSV(reportData.borrowRows, 'library_borrowers.csv')} />
+                    </div>
+                    <TableWrap headers={['Student','Admission','Class/Course','Book','Author','Borrowed','Due','Returned','Status','Days Overdue','Fine']}>
+                      {reportData.borrowRows.map((r, i) => (
+                        <tr key={i} className={`hover:bg-gray-50 ${r.daysOverdue > 0 ? 'bg-red-50' : ''}`}>
+                          <td className="px-3 py-2 font-medium">{r.student}</td>
+                          <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
+                          <td className="px-3 py-2 text-xs">{r.entity}</td>
+                          <td className="px-3 py-2">{r.book}</td>
+                          <td className="px-3 py-2 text-xs">{r.author}</td>
+                          <td className="px-3 py-2 text-xs">{r.borrowDate}</td>
+                          <td className="px-3 py-2 text-xs">{r.dueDate}</td>
+                          <td className="px-3 py-2 text-xs">{r.returnDate}</td>
+                          <td className="px-3 py-2">
+                            <span className={`px-2 py-0.5 rounded-full text-xs ${
+                              r.status === 'RETURNED' ? 'bg-green-100 text-green-800' :
+                              r.status === 'BORROWED' && r.daysOverdue > 0 ? 'bg-red-100 text-red-800' :
+                              r.status === 'BORROWED' ? 'bg-blue-100 text-blue-800' :
+                              'bg-gray-100 text-gray-700'
+                            }`}>{r.status}</span>
+                          </td>
+                          <td className="px-3 py-2 text-xs">{r.daysOverdue > 0 ? `${r.daysOverdue} days` : '—'}</td>
+                          <td className="px-3 py-2 font-bold text-red-700">{r.fine > 0 ? formatCurrency(r.fine) : '—'}</td>
+                        </tr>
+                      ))}
+                    </TableWrap>
+                  </Card>
+                </div>
               )}
             </>
           )}
