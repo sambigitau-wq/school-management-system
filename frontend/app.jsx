@@ -64491,161 +64491,182 @@ const HomeworkModule = ({
   const isAdmin = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL'].includes(userRole);
   const canCreate = isTeacher || isAdmin;
   const canGrade = canCreate;
+const SearchableSelect = ({
+  label, value, onChange, options, placeholder,
+  disabled, required, className, showClear = true
+}) => {
+  const [search, setSearch] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const dropdownRef = useRef(null);
+  const inputRef = useRef(null);
 
-  // ==================== SEARCHABLE SELECT ====================
-  const SearchableSelect = ({
-    label, value, onChange, options, placeholder,
-    disabled, required, className, showClear = true
-  }) => {
-    const [search, setSearch] = useState('');
-    const [isOpen, setIsOpen] = useState(false);
-    const [isFocused, setIsFocused] = useState(false);
-    const dropdownRef = useRef(null);
-    const inputRef = useRef(null);
+  const optionsWithEmpty = useMemo(() => {
+    const list = Array.isArray(options) ? options : [];
+    const hasEmpty = list.some(opt => opt && (opt.value === '' || opt.value === null || opt.value === undefined));
+    if (hasEmpty) return list;
+    return [{ value: '', label: '' }, ...list];
+  }, [options]);
 
-    const optionsWithEmpty = useMemo(() => {
-      const hasEmpty = options.some(opt => opt.value === '' || opt.value === null || opt.value === undefined);
-      if (hasEmpty) return options;
-      return [{ value: '', label: '' }, ...options];
-    }, [options]);
+  const filteredOptions = useMemo(() => {
+    if (!String(search ?? '').trim()) return optionsWithEmpty;
+    const s = String(search).toLowerCase();
+    return optionsWithEmpty.filter(opt => {
+      if (!opt) return false;
+      const label = String(opt.label ?? '').toLowerCase();
+      const sub = String(opt.subLabel ?? '').toLowerCase();
+      const val = String(opt.value ?? '').toLowerCase();
+      return label.includes(s) || sub.includes(s) || val.includes(s);
+    });
+  }, [optionsWithEmpty, search]);
 
-    const filteredOptions = useMemo(() => {
-      if (!search.trim()) return optionsWithEmpty;
-      const s = search.toLowerCase();
-      return optionsWithEmpty.filter(opt =>
-        opt.label?.toLowerCase().includes(s) ||
-        opt.subLabel?.toLowerCase().includes(s) ||
-        opt.value?.toString().toLowerCase().includes(s)
-      );
-    }, [optionsWithEmpty, search]);
+  const selectedOption = optionsWithEmpty.find(opt => opt && opt.value === value);
 
-    const selectedOption = optionsWithEmpty.find(opt => opt.value === value);
-
-    useEffect(() => {
-      const handler = (e) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-          setIsOpen(false);
-          setIsFocused(false);
-        }
-      };
-      document.addEventListener('mousedown', handler);
-      return () => document.removeEventListener('mousedown', handler);
-    }, []);
-
-    useEffect(() => {
-      if (selectedOption && !isFocused) setSearch(selectedOption.label);
-      else if (!selectedOption && !isFocused) setSearch('');
-    }, [value, selectedOption, isFocused]);
-
-    const handleSelect = (val) => {
-      onChange({ target: { value: val } });
-      const sel = optionsWithEmpty.find(o => o.value === val);
-      setSearch(sel ? sel.label : '');
-      setIsOpen(false);
-      setIsFocused(false);
-      inputRef.current?.focus();
+  useEffect(() => {
+    const handler = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setIsOpen(false);
+        setIsFocused(false);
+      }
     };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
-    const handleInputChange = (e) => {
-      const v = e.target.value;
-      setSearch(v);
-      setIsOpen(true);
-      setIsFocused(true);
-      if (v === '') onChange({ target: { value: '' } });
-    };
+  useEffect(() => {
+    if (isFocused) return;
+    if (selectedOption) setSearch(String(selectedOption.label ?? ''));
+    else setSearch('');
+  }, [value, selectedOption, isFocused]);
 
-    const handleBlur = () => {
-      setTimeout(() => {
-        if (document.activeElement !== inputRef.current) {
-          setIsOpen(false);
-          setIsFocused(false);
-          setSearch(selectedOption ? selectedOption.label : '');
-        }
-      }, 150);
-    };
-
-    const handleClear = (e) => {
-      e.stopPropagation();
-      onChange({ target: { value: '' } });
-      setSearch('');
-      setIsOpen(false);
-      setIsFocused(false);
-      inputRef.current?.focus();
-    };
-
-    return (
-      <div className="relative" ref={dropdownRef}>
-        {label && (
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}{required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-        )}
-        <div className="relative">
-          <input
-            ref={inputRef}
-            type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
-            } ${className || ''}`}
-            value={isFocused ? search : (selectedOption?.label || '')}
-            onChange={handleInputChange}
-            onFocus={() => { setIsFocused(true); setIsOpen(true); }}
-            onBlur={handleBlur}
-            placeholder={placeholder || 'Search and select...'}
-            disabled={disabled}
-            autoComplete="off"
-          />
-          {value && showClear && !disabled && (
-            <button type="button" onClick={handleClear}
-              className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 z-10">
-              ✕
-            </button>
-          )}
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">▾</div>
-        </div>
-        {isOpen && !disabled && (
-          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-            {filteredOptions.length > 0 ? (
-              filteredOptions.map(opt => (
-                <div
-                  key={opt.value || Math.random().toString()}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 ${
-                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : ''
-                  }`}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => handleSelect(opt.value)}
-                >
-                  <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
-                </div>
-              ))
-            ) : (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">No results</div>
-            )}
-          </div>
-        )}
-      </div>
-    );
+  const handleSelect = (val) => {
+    onChange({ target: { value: val } });
+    const sel = optionsWithEmpty.find(o => o && o.value === val);
+    setSearch(sel ? String(sel.label ?? '') : '');
+    setIsOpen(false);
+    setIsFocused(false);
+    inputRef.current?.focus();
   };
 
-  // ==================== OPTIONS ====================
-  const classOptions = useMemo(() => {
-    const opts = [{ value: '', label: '' }];
-    (classes || []).forEach(c => opts.push({ value: c.id, label: c.name, subLabel: c.streams || 'Class' }));
-    return opts;
-  }, [classes]);
+  const handleInputChange = (e) => {
+    const v = e.target.value;
+    setSearch(v);
+    setIsOpen(true);
+    setIsFocused(true);
+    if (v === '') onChange({ target: { value: '' } });
+  };
 
-  const programOptions = useMemo(() => {
-    const opts = [{ value: '', label: '' }];
-    (programs || []).forEach(p => opts.push({ value: p.id, label: p.name, subLabel: p.code || 'Program' }));
-    return opts;
-  }, [programs]);
+  const handleBlur = () => {
+    setTimeout(() => {
+      if (document.activeElement !== inputRef.current) {
+        setIsOpen(false);
+        setIsFocused(false);
+        setSearch(selectedOption ? String(selectedOption.label ?? '') : '');
+      }
+    }, 150);
+  };
 
-  const courseOptions = useMemo(() => {
-    const opts = [{ value: '', label: '' }];
-    (courses || []).forEach(c => opts.push({ value: c.id, label: c.name, subLabel: c.code || 'Course' }));
-    return opts;
-  }, [courses]);
+  const handleClear = (e) => {
+    e.stopPropagation();
+    onChange({ target: { value: '' } });
+    setSearch('');
+    setIsOpen(false);
+    setIsFocused(false);
+    inputRef.current?.focus();
+  };
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      {label && (
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          {label}{required && <span className="text-red-500 ml-1">*</span>}
+        </label>
+      )}
+      <div className="relative">
+        <input
+          ref={inputRef}
+          type="text"
+          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+            disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
+          } ${className || ''}`}
+          value={isFocused ? search : String(selectedOption?.label ?? '')}
+          onChange={handleInputChange}
+          onFocus={() => { setIsFocused(true); setIsOpen(true); }}
+          onBlur={handleBlur}
+          placeholder={placeholder || 'Search and select...'}
+          disabled={disabled}
+          autoComplete="off"
+        />
+        {value && showClear && !disabled && (
+          <button type="button" onClick={handleClear}
+            className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 z-10">
+            ✕
+          </button>
+        )}
+        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">▾</div>
+      </div>
+      {isOpen && !disabled && (
+        <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
+          {filteredOptions.length > 0 ? (
+            filteredOptions.map(opt => (
+              <div
+                key={String(opt.value ?? Math.random().toString())}
+                className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 ${
+                  opt.value === value ? 'bg-indigo-50 text-indigo-700' : ''
+                }`}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handleSelect(opt.value)}
+              >
+                <div className="font-medium">{String(opt.label ?? '')}</div>
+                {opt.subLabel ? <div className="text-xs text-gray-500">{String(opt.subLabel)}</div> : null}
+              </div>
+            ))
+          ) : (
+            <div className="px-3 py-4 text-center text-gray-500 text-sm">No results</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+const classOptions = useMemo(() => {
+  const opts = [{ value: '', label: '' }];
+  (classes || []).forEach(c => {
+    let sub = 'Class';
+    if (Array.isArray(c.streams) && c.streams.length > 0) {
+      sub = `Streams: ${c.streams.join(', ')}`;
+    } else if (typeof c.streams === 'string' && c.streams.trim()) {
+      sub = c.streams;
+    }
+    opts.push({ value: c.id, label: String(c.name ?? ''), subLabel: sub });
+  });
+  return opts;
+}, [classes]);
+
+const programOptions = useMemo(() => {
+  const opts = [{ value: '', label: '' }];
+  (programs || []).forEach(p => {
+    opts.push({
+      value: p.id,
+      label: String(p.name ?? ''),
+      subLabel: p.code ? `Code: ${p.code}` : 'Program'
+    });
+  });
+  return opts;
+}, [programs]);
+
+const courseOptions = useMemo(() => {
+  const opts = [{ value: '', label: '' }];
+  (courses || []).forEach(c => {
+    opts.push({
+      value: c.id,
+      label: String(c.name ?? ''),
+      subLabel: c.code ? `Code: ${c.code}` : 'Course'
+    });
+  });
+  return opts;
+}, [courses]);
+
 
   const getEntityLabel = () => isUniversity ? 'Course' : isTVET ? 'Program' : 'Class';
   const getEntityOptions = () => isUniversity ? courseOptions : isTVET ? programOptions : classOptions;
@@ -64854,23 +64875,32 @@ const filteredHomeworks = useMemo(() => {
       }
     }, [editingHomework]);
 
-    const subjectOptions = useMemo(() => {
-      const opts = [{ value: '', label: '' }];
-      const chosenClass = form.classId;
-      (subjects || [])
-        .filter(s => !chosenClass || s.classId === chosenClass)
-        .forEach(s => opts.push({ value: s.id, label: s.name, subLabel: s.code || 'Subject' }));
-      return opts;
-    }, [subjects, form.classId]);
+const subjectOptions = useMemo(() => {
+  const opts = [{ value: '', label: '' }];
+  const chosenClass = form.classId;
+  (subjects || [])
+    .filter(s => !chosenClass || s.classId === chosenClass)
+    .forEach(s => opts.push({
+      value: s.id,
+      label: String(s.name ?? ''),
+      subLabel: s.code ? `Code: ${s.code}` : 'Subject'
+    }));
+  return opts;
+}, [subjects, form.classId]);
 
-    const unitOptions = useMemo(() => {
-      const opts = [{ value: '', label: '' }];
-      const scopeId = form.programId || form.courseId;
-      (units || [])
-        .filter(u => !scopeId || u.programId === scopeId || u.courseId === scopeId)
-        .forEach(u => opts.push({ value: u.id, label: u.name, subLabel: u.code || 'Unit' }));
-      return opts;
-    }, [units, form.programId, form.courseId]);
+const unitOptions = useMemo(() => {
+  const opts = [{ value: '', label: '' }];
+  const scopeId = form.programId || form.courseId;
+  (units || [])
+    .filter(u => !scopeId || u.programId === scopeId || u.courseId === scopeId)
+    .forEach(u => opts.push({
+      value: u.id,
+      label: String(u.name ?? ''),
+      subLabel: u.code ? `Code: ${u.code}` : 'Unit'
+    }));
+  return opts;
+}, [units, form.programId, form.courseId]);
+
 
     const addQuestion = () => setQuestions(prev => [...prev, {
       questionText: '', questionType: 'SHORT_ANSWER',
