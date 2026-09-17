@@ -34363,16 +34363,17 @@ const SearchableSelectLocal = ({ value, onChange, options = [], placeholder = ''
   const wrapRef = useRef(null);
 
   const safeOptions = Array.isArray(options) ? options : [];
-
-  const filtered = useMemo(() => {
-    if (!search.trim()) return safeOptions;
-    const s = search.toLowerCase();
-    return safeOptions.filter(o =>
-      (o.label || '').toLowerCase().includes(s) ||
-      (o.subLabel || '').toLowerCase().includes(s) ||
-      String(o.value ?? '').toLowerCase().includes(s)
-    );
-  }, [safeOptions, search]);
+const filtered = useMemo(() => {
+  if (!search || !String(search).trim()) return safeOptions;
+  const s = String(search).toLowerCase();
+  return safeOptions.filter(o => {
+    if (!o) return false;
+    const label = String(o.label ?? '').toLowerCase();
+    const subLabel = String(o.subLabel ?? '').toLowerCase();
+    const val = String(o.value ?? '').toLowerCase();
+    return label.includes(s) || subLabel.includes(s) || val.includes(s);
+  });
+}, [safeOptions, search]);
 
   const selected = useMemo(
     () => safeOptions.find(o => String(o.value) === String(value)) || null,
