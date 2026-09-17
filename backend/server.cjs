@@ -1878,26 +1878,35 @@ const AuditLog = sequelize.define('AuditLog', {
   timestamp: { type: DataTypes.DATE, defaultValue: DataTypes.NOW }
 });
 // ==================== DYNAMIC ROLES & PERMISSIONS MODELS ====================
-
 const Role = sequelize.define('Role', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
   name: { type: DataTypes.STRING, allowNull: false },
   description: { type: DataTypes.TEXT, allowNull: true },
-  permissions: { 
-    type: DataTypes.JSONB, 
-    defaultValue: [] // Array of permission keys like ['view_students', 'manage_exams']
-  },
-  isSystemRole: { type: DataTypes.BOOLEAN, defaultValue: false }, // Prevent deletion of default roles
+  permissions: { type: DataTypes.JSONB, defaultValue: [] },
+  isSystemRole: { type: DataTypes.BOOLEAN, defaultValue: false },
   schoolId: { type: DataTypes.UUID, allowNull: false },
-  isActive: { type: DataTypes.BOOLEAN, defaultValue: true }
+  isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
+
+  // ✅ NEW: restrict which school categories this role belongs to
+  category: {
+    type: DataTypes.ENUM(
+      'ECDE_PRIMARY_JSS',
+      'SENIOR_SECONDARY',
+      'COLLEGE_TVET',
+      'UNIVERSITY',
+      'ALL'
+    ),
+    allowNull: false,
+    defaultValue: 'ALL'
+  }
 }, {
   timestamps: true,
   indexes: [
     { fields: ['schoolId'] },
-    { fields: ['name'] }
+    { fields: ['name'] },
+    { fields: ['schoolId', 'category'] }  // ⬅️ NEW
   ]
 });
-
 const Permission = sequelize.define('Permission', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
   key: { type: DataTypes.STRING, allowNull: false, unique: true },
@@ -2912,6 +2921,65 @@ const Discount = sequelize.define('Discount', {
   ]
 });
 
+
+// ============================================================
+//  ROLE → SCHOOL CATEGORY MAPPING
+// ============================================================
+// Every system role is tagged with the school categories it
+// is valid for. Custom roles inherit the school's category.
+// ============================================================
+const ROLE_CATEGORY_MAP = {
+  // ---- Universal (all schools) ----
+  'Super Admin':        ['ECDE_PRIMARY_JSS', 'SENIOR_SECONDARY', 'COLLEGE_TVET', 'UNIVERSITY'],
+  'School Admin':       ['ECDE_PRIMARY_JSS', 'SENIOR_SECONDARY', 'COLLEGE_TVET', 'UNIVERSITY'],
+  'Accountant':         ['ECDE_PRIMARY_JSS', 'SENIOR_SECONDARY', 'COLLEGE_TVET', 'UNIVERSITY'],
+  'Librarian':          ['ECDE_PRIMARY_JSS', 'SENIOR_SECONDARY', 'COLLEGE_TVET', 'UNIVERSITY'],
+  'Nurse':              ['ECDE_PRIMARY_JSS', 'SENIOR_SECONDARY', 'COLLEGE_TVET', 'UNIVERSITY'],
+  'Parent':             ['ECDE_PRIMARY_JSS', 'SENIOR_SECONDARY', 'COLLEGE_TVET', 'UNIVERSITY'],
+  'Student':            ['ECDE_PRIMARY_JSS', 'SENIOR_SECONDARY', 'COLLEGE_TVET', 'UNIVERSITY'],
+  'Counselor':          ['SENIOR_SECONDARY', 'COLLEGE_TVET', 'UNIVERSITY'],
+  'Matron':             ['ECDE_PRIMARY_JSS', 'SENIOR_SECONDARY', 'COLLEGE_TVET', 'UNIVERSITY'],
+  'Transport Manager':  ['ECDE_PRIMARY_JSS', 'SENIOR_SECONDARY', 'COLLEGE_TVET', 'UNIVERSITY'],
+  'HR Manager':         ['ECDE_PRIMARY_JSS', 'SENIOR_SECONDARY', 'COLLEGE_TVET', 'UNIVERSITY'],
+
+  // ---- Primary / JSS only ----
+  'Head Teacher':         ['ECDE_PRIMARY_JSS'],
+  'Deputy Head Teacher':  ['ECDE_PRIMARY_JSS'],
+  'Senior Teacher':       ['ECDE_PRIMARY_JSS'],
+
+  // ---- Secondary + TVET + University (shared senior roles) ----
+  'Principal':         ['SENIOR_SECONDARY', 'COLLEGE_TVET', 'UNIVERSITY'],
+  'Deputy Principal':  ['SENIOR_SECONDARY', 'COLLEGE_TVET', 'UNIVERSITY'],
+
+  // ---- Secondary & TVET (teaching-oriented) ----
+  'Teacher':           ['ECDE_PRIMARY_JSS', 'SENIOR_SECONDARY', 'COLLEGE_TVET'],
+  'Class Teacher':     ['ECDE_PRIMARY_JSS', 'SENIOR_SECONDARY', 'COLLEGE_TVET'],
+  'Subject Teacher':   ['ECDE_PRIMARY_JSS', 'SENIOR_SECONDARY', 'COLLEGE_TVET'],
+  'Senior Teacher':    ['ECDE_PRIMARY_JSS', 'SENIOR_SECONDARY'],
+
+  // ---- TVET specific ----
+  'Technical Instructor':  ['COLLEGE_TVET'],
+  'Workshop Supervisor':   ['COLLEGE_TVET'],
+
+  // ---- University specific ----
+  'Professor':            ['UNIVERSITY'],
+  'Senior Lecturer':      ['UNIVERSITY'],
+  'Lecturer':             ['UNIVERSITY'],
+  'Assistant Lecturer':   ['UNIVERSITY'],
+  'Tutor':                ['UNIVERSITY'],
+  'Dean':                 ['UNIVERSITY'],
+  'HOD':                  ['UNIVERSITY', 'COLLEGE_TVET'],
+
+  // ---- Department-level (secondary + university) ----
+  'Head of Department':   ['SENIOR_SECONDARY', 'COLLEGE_TVET', 'UNIVERSITY'],
+};
+
+// Reverse lookup: given a school category, which roles are valid?
+const getRolesForCategory = (category) => {
+  return Object.entries(ROLE_CATEGORY_MAP)
+    .filter(([_, cats]) => cats.includes(category))
+    .map(([name]) => name);
+};
 
 
 // Associations (optional but useful)
@@ -4794,122 +4862,33 @@ app.post('/api/schools', authenticate, requireSuperAdmin, async (req, res) => {
       createdBy: req.user.id
     });
 
-    // ============ ADD DEFAULT ROLES FOR THE NEW SCHOOL ============
-    const defaultRoles = [
-      {
-        name: 'Super Admin',
-        description: 'Full system access across all schools',
-        permissions: ['*'],
-        isSystemRole: true,
-        schoolId: school.id,
-        isActive: true
-      },
-      {
-        name: 'School Admin',
-        description: 'Full access to all school features',
-        permissions: [
-          'manage_school', 'manage_users', 'manage_students', 'manage_classes',
-          'manage_subjects', 'manage_exams', 'manage_results', 'manage_attendance',
-          'manage_fees', 'manage_payments', 'manage_staff', 'manage_payroll',
-          'manage_library', 'manage_transport', 'manage_hostel', 'manage_inventory',
-          'manage_announcements', 'manage_events', 'manage_timetable',
-          'view_reports', 'view_financial_reports'
-        ],
-        isSystemRole: true,
-        schoolId: school.id,
-        isActive: true
-      },
-      {
-        name: 'Teacher',
-        description: 'Teaching staff with limited access',
-        permissions: [
-          'view_students', 'view_classes', 'manage_own_subjects',
-          'manage_own_results', 'manage_own_attendance', 'view_timetable'
-        ],
-        isSystemRole: true,
-        schoolId: school.id,
-        isActive: true
-      },
-      {
-        name: 'Student',
-        description: 'Student self-service access',
-        permissions: [
-          'view_own_profile', 'view_own_results', 'view_own_attendance',
-          'view_own_fees', 'view_own_timetable'
-        ],
-        isSystemRole: true,
-        schoolId: school.id,
-        isActive: true
-      },
-      {
-        name: 'Parent',
-        description: 'Parent access to view children',
-        permissions: [
-          'view_own_children', 'view_child_results', 'view_child_attendance',
-          'view_child_fees', 'view_child_timetable'
-        ],
-        isSystemRole: true,
-        schoolId: school.id,
-        isActive: true
-      },
-      {
-        name: 'Accountant',
-        description: 'Finance department access',
-        permissions: [
-          'view_fees', 'manage_payments', 'view_financial_reports', 'manage_expenses'
-        ],
-        isSystemRole: true,
-        schoolId: school.id,
-        isActive: true
-      },
-      {
-        name: 'Librarian',
-        description: 'Library management access',
-        permissions: [
-          'manage_library', 'view_books', 'manage_borrowing'
-        ],
-        isSystemRole: true,
-        schoolId: school.id,
-        isActive: true
-      },
-      {
-        name: 'Nurse',
-        description: 'Health department access',
-        permissions: [
-          'view_students', 'manage_medical_records'
-        ],
-        isSystemRole: true,
-        schoolId: school.id,
-        isActive: true
-      },
-      {
-        name: 'Dean',
-        description: 'Academic leadership access',
-        permissions: [
-          'view_students', 'view_classes', 'view_exams', 'view_results',
-          'manage_attendance', 'manage_timetable', 'manage_subjects',
-          'manage_exams', 'manage_results', 'view_reports'
-        ],
-        isSystemRole: true,
-        schoolId: school.id,
-        isActive: true
-      },
-      {
-        name: 'HOD',
-        description: 'Head of Department access',
-        permissions: [
-          'view_students', 'view_classes', 'view_exams', 'view_results',
-          'manage_attendance', 'manage_timetable', 'manage_subjects',
-          'manage_exams', 'manage_results'
-        ],
-        isSystemRole: true,
-        schoolId: school.id,
-        isActive: true
-      }
-    ];
+ // ============ ADD CATEGORY-SPECIFIC DEFAULT ROLES ============
+const templates = [
+  ...DEFAULT_ROLE_TEMPLATES.universal,
+  ...(DEFAULT_ROLE_TEMPLATES[category] || [])
+];
 
-    await Role.bulkCreate(defaultRoles);
-    console.log(`✅ Created ${defaultRoles.length} default roles for ${school.name}`);
+// De-dupe by name (universal roles take precedence)
+const seenNames = new Set();
+const defaultRoles = templates
+  .filter(t => {
+    if (seenNames.has(t.name)) return false;
+    seenNames.add(t.name);
+    return true;
+  })
+  .map(t => ({
+    name: t.name,
+    description: t.description,
+    permissions: t.permissions,
+    isSystemRole: true,
+    schoolId: school.id,
+    isActive: true,
+    category: category   // ⬅️ store which category this role belongs to
+  }));
+
+await Role.bulkCreate(defaultRoles);
+console.log(`✅ Created ${defaultRoles.length} default roles for ${school.name} (${category})`);
+    
 
     // 2. Define default features for the new school
     const defaultFeatures = [
@@ -20500,16 +20479,29 @@ app.get('/api/system/health', authenticate, async (req, res) => {
     });
   }
 });
-// ==================== GET ALL ROLES ====================
+
+
 app.get('/api/roles', authenticate, async (req, res) => {
   try {
-    const where = { isActive: true };
+    let targetSchoolId = req.user.schoolId;
 
-    // SUPER_ADMIN sees all; others see only their school
-    if (req.user.role !== 'SUPER_ADMIN') {
-      where.schoolId = req.user.schoolId;
-    } else if (req.query.schoolId) {
-      where.schoolId = req.query.schoolId;
+    if (req.user.role === 'SUPER_ADMIN') {
+      targetSchoolId = req.query.schoolId || null;
+    }
+
+    const where = { isActive: true };
+    if (targetSchoolId) {
+      where.schoolId = targetSchoolId;
+
+      // ✅ Restrict to the school's category
+      const school = await School.findByPk(targetSchoolId, {
+        attributes: ['id', 'category']
+      });
+      if (school) {
+        where.category = {
+          [Op.in]: [school.category, 'ALL']
+        };
+      }
     }
 
     const roles = await Role.findAll({
@@ -20517,21 +20509,16 @@ app.get('/api/roles', authenticate, async (req, res) => {
       order: [['isSystemRole', 'DESC'], ['name', 'ASC']]
     });
 
-    if (roles.length === 0) {
-      return res.json({ success: true, roles: [] });
-    }
-
-    // ✅ Count users per role in ONE query
+    // Count users per role
     const roleIds = roles.map(r => r.id);
-    const counts = await User.findAll({
-      attributes: [
-        'roleId',
-        [sequelize.fn('COUNT', sequelize.col('id')), 'count']
-      ],
-      where: { roleId: roleIds },
-      group: ['roleId'],
-      raw: true
-    });
+    const counts = roleIds.length > 0
+      ? await User.findAll({
+          attributes: ['roleId', [sequelize.fn('COUNT', sequelize.col('id')), 'count']],
+          where: { roleId: roleIds },
+          group: ['roleId'],
+          raw: true
+        })
+      : [];
 
     const countMap = counts.reduce((acc, row) => {
       acc[row.roleId] = parseInt(row.count, 10);
@@ -20549,6 +20536,7 @@ app.get('/api/roles', authenticate, async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 });
+
 // GET single role - FIXED
 app.get('/api/roles/:id', authenticate, async (req, res) => {
   try {
@@ -20576,59 +20564,124 @@ app.get('/api/roles/:id', authenticate, async (req, res) => {
     });
   }
 });
-
-// CREATE role - FIXED (removed audit log temporarily)
 app.post('/api/roles', authenticate, async (req, res) => {
   try {
-    const { name, description, permissions } = req.body;
-    
-    if (!name) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Role name is required' 
-      });
+    const { name, description, permissions, schoolId } = req.body;
+
+    let targetSchoolId = req.user.schoolId;
+    if (req.user.role === 'SUPER_ADMIN') {
+      targetSchoolId = schoolId || req.body.schoolId || req.query.schoolId;
     }
-    
-    // Check if role with same name exists in this school
+
+    if (!targetSchoolId) {
+      return res.status(400).json({ success: false, message: 'School is required' });
+    }
+
+    const school = await School.findByPk(targetSchoolId, {
+      attributes: ['id', 'category']
+    });
+    if (!school) {
+      return res.status(404).json({ success: false, message: 'School not found' });
+    }
+
+    const trimmedName = String(name).trim();
     const existing = await Role.findOne({
-      where: { 
-        name: name,
-        schoolId: req.user.schoolId 
-      }
+      where: { name: trimmedName, schoolId: targetSchoolId }
     });
-    
     if (existing) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'A role with this name already exists' 
+      return res.status(400).json({
+        success: false,
+        message: `A role named "${trimmedName}" already exists in this school`
       });
     }
-    
+
     const role = await Role.create({
-      name,
-      description: description || '',
-      permissions: permissions || [],
+      name: trimmedName,
+      description: (description || '').trim(),
+      permissions: Array.isArray(permissions) ? permissions : [],
       isSystemRole: false,
-      schoolId: req.user.schoolId
+      schoolId: targetSchoolId,
+      category: school.category,       // ✅ inherit from school
+      isActive: true
     });
-    
-    // ⚠️ AUDIT LOG TEMPORARILY DISABLED
-    // await createAuditLog(req, 'CREATE', 'ROLE', role.id, null, role);
-    
-    res.status(201).json({ 
-      success: true, 
-      role,
-      message: 'Role created successfully' 
+
+    res.status(201).json({
+      success: true,
+      role: { ...role.toJSON(), userCount: 0 }
     });
   } catch (error) {
-    console.error('Create role error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    console.error('❌ Create role error:', error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
+// ============================================================
+//  MIGRATION: fix existing roles' categories
+//  DELETE THIS ROUTE AFTER RUNNING IT ONCE
+// ============================================================
+app.post('/api/migrate/fix-role-categories', authenticate, requireSuperAdmin, async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const schools = await School.findAll({ transaction });
+    let updated = 0;
+    let deleted = 0;
 
+    for (const school of schools) {
+      // Get roles for this school
+      const roles = await Role.findAll({
+        where: { schoolId: school.id },
+        transaction
+      });
+
+      const validRoleNames = new Set(getRolesForCategory(school.category));
+
+      for (const role of roles) {
+        const isUniversal = ROLE_CATEGORY_MAP[role.name]?.includes(school.category);
+        const isKnownRole = role.name in ROLE_CATEGORY_MAP;
+
+        if (isKnownRole && !isUniversal) {
+          // ❌ Role doesn't belong to this school's category → delete it
+          // (Only safe if no one is assigned. Otherwise, just deactivate.)
+          const userCount = await User.count({
+            where: { roleId: role.id },
+            transaction
+          });
+
+          if (userCount === 0) {
+            await role.destroy({ transaction });
+            deleted++;
+            console.log(`🗑️ Deleted invalid role "${role.name}" from ${school.name} (${school.category})`);
+          } else {
+            // Deactivate instead of delete to preserve audit trail
+            await role.update({ isActive: false }, { transaction });
+            updated++;
+            console.log(`⚠️ Deactivated invalid role "${role.name}" in ${school.name} (${userCount} users still attached)`);
+          }
+        } else {
+          // ✅ Set the correct category
+          const targetCategory = isKnownRole
+            ? school.category
+            : school.category;   // custom roles inherit school category
+
+          await role.update({ category: targetCategory }, { transaction });
+          updated++;
+        }
+      }
+    }
+
+    await transaction.commit();
+
+    res.json({
+      success: true,
+      message: `Migration complete: ${updated} roles updated, ${deleted} roles deleted`,
+      updated,
+      deleted
+    });
+  } catch (error) {
+    await transaction.rollback();
+    console.error('❌ Migration error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 // UPDATE role - FIXED
 app.put('/api/roles/:id', authenticate, async (req, res) => {
   try {
