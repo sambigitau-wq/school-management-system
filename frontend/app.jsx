@@ -69760,6 +69760,19 @@ return (
           />
         )}
 
+        {activeModule === 'exam-card-overrides' && canAccessModule(user, 'exam-card-overrides') && (
+  <ExamCardOverridesModule
+    user={user}
+    students={students}
+    classes={classes}
+    programs={programs}
+    courses={courses}
+    currentSchool={currentSchool}
+    examCardOverrides={examCardOverrides}
+    setExamCardOverrides={setExamCardOverrides}
+  />
+)}
+
         {activeModule === 'receipt-history' && canAccessModule(user, 'receipt-history') && (
           <ReceiptHistoryModule
             payments={payments}
