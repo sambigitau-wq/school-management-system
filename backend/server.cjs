@@ -519,11 +519,7 @@ const MASTER_PERMISSIONS = [
 const DEFAULT_ROLE_TEMPLATES = {
   // ===== Universal roles (all school types) =====
   universal: [
-    {
-      name: 'Super Admin',
-      description: 'Full system access across all schools',
-      permissions: ['*']
-    },
+
     {
       name: 'School Admin',
       description: 'Full access to all school features',
@@ -20850,7 +20846,7 @@ app.get('/api/system/health', authenticate, async (req, res) => {
   }
 });
 
-
+// ==================== GET ALL ROLES ====================
 app.get('/api/roles', authenticate, async (req, res) => {
   try {
     let targetSchoolId = req.user.schoolId;
@@ -20860,6 +20856,12 @@ app.get('/api/roles', authenticate, async (req, res) => {
     }
 
     const where = { isActive: true };
+
+    // ✅ Never expose the Super Admin role to a school-scoped admin
+    if (req.user.role !== 'SUPER_ADMIN') {
+      where.name = { [Op.ne]: 'Super Admin' };
+    }
+
     if (targetSchoolId) {
       where.schoolId = targetSchoolId;
 
@@ -20984,178 +20986,138 @@ app.post('/api/roles', authenticate, async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 });
-// ============================================================
-//  MIGRATION: fix existing roles' categories
-//  DELETE THIS ROUTE AFTER RUNNING IT ONCE
-// ============================================================
-app.post('/api/migrate/fix-role-categories', authenticate, requireSuperAdmin, async (req, res) => {
-  const transaction = await sequelize.transaction();
-  try {
-    const schools = await School.findAll({ transaction });
-    let updated = 0;
-    let deleted = 0;
 
-    for (const school of schools) {
-      // Get roles for this school
-      const roles = await Role.findAll({
-        where: { schoolId: school.id },
-        transaction
-      });
-
-      const validRoleNames = new Set(getRolesForCategory(school.category));
-
-      for (const role of roles) {
-        const isUniversal = ROLE_CATEGORY_MAP[role.name]?.includes(school.category);
-        const isKnownRole = role.name in ROLE_CATEGORY_MAP;
-
-        if (isKnownRole && !isUniversal) {
-          // ❌ Role doesn't belong to this school's category → delete it
-          // (Only safe if no one is assigned. Otherwise, just deactivate.)
-          const userCount = await User.count({
-            where: { roleId: role.id },
-            transaction
-          });
-
-          if (userCount === 0) {
-            await role.destroy({ transaction });
-            deleted++;
-            console.log(`🗑️ Deleted invalid role "${role.name}" from ${school.name} (${school.category})`);
-          } else {
-            // Deactivate instead of delete to preserve audit trail
-            await role.update({ isActive: false }, { transaction });
-            updated++;
-            console.log(`⚠️ Deactivated invalid role "${role.name}" in ${school.name} (${userCount} users still attached)`);
-          }
-        } else {
-          // ✅ Set the correct category
-          const targetCategory = isKnownRole
-            ? school.category
-            : school.category;   // custom roles inherit school category
-
-          await role.update({ category: targetCategory }, { transaction });
-          updated++;
-        }
-      }
-    }
-
-    await transaction.commit();
-
-    res.json({
-      success: true,
-      message: `Migration complete: ${updated} roles updated, ${deleted} roles deleted`,
-      updated,
-      deleted
-    });
-  } catch (error) {
-    await transaction.rollback();
-    console.error('❌ Migration error:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-// UPDATE role - FIXED
+// ==================== UPDATE ROLE ====================
 app.put('/api/roles/:id', authenticate, async (req, res) => {
   try {
     const { name, description, permissions } = req.body;
-    
+
     const role = await Role.findOne({
-      where: { 
+      where: {
         id: req.params.id,
-        schoolId: req.user.schoolId 
+        schoolId: req.user.schoolId
       }
     });
-    
+
     if (!role) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Role not found' 
+      return res.status(404).json({
+        success: false,
+        message: 'Role not found'
       });
     }
-    
+
+    // ✅ Only a real Super Admin can edit the Super Admin role
+    if (role.name === 'Super Admin' && req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({
+        success: false,
+        message: 'You cannot modify the Super Admin role'
+      });
+    }
+
     // Prevent modifying system roles' names
     if (role.isSystemRole && name && name !== role.name) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Cannot rename system roles' 
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot rename system roles'
       });
     }
-    
-    const oldRole = { ...role.toJSON() };
+
+    const oldRole = role.toJSON();
+
     await role.update({
       name: name || role.name,
       description: description !== undefined ? description : role.description,
       permissions: permissions !== undefined ? permissions : role.permissions
     });
-    
-    // ⚠️ AUDIT LOG TEMPORARILY DISABLED
-    // await createAuditLog(req, 'UPDATE', 'ROLE', role.id, oldRole, role);
-    
-    res.json({ 
-      success: true, 
+
+    // ✅ Audit log — records before/after snapshot
+    await createAuditLog(req, 'UPDATE', 'ROLE', role.id, oldRole, role.toJSON());
+
+    res.json({
+      success: true,
       role,
-      message: 'Role updated successfully' 
+      message: 'Role updated successfully'
     });
   } catch (error) {
     console.error('Update role error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+// ==================== DELETE ROLE ====================
+app.delete('/api/roles/:id', authenticate, async (req, res) => {
+  try {
+    const role = await Role.findOne({
+      where: {
+        id: req.params.id,
+        schoolId: req.user.schoolId
+      }
+    });
+
+    if (!role) {
+      return res.status(404).json({
+        success: false,
+        message: 'Role not found'
+      });
+    }
+
+    // ✅ Only a real Super Admin can delete the Super Admin role
+    if (role.name === 'Super Admin' && req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({
+        success: false,
+        message: 'You cannot delete the Super Admin role'
+      });
+    }
+
+    if (role.isSystemRole) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot delete system roles'
+      });
+    }
+
+    // Check if role is in use
+    const userCount = await User.count({
+      where: { roleId: role.id }
+    });
+
+    if (userCount > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete role with ${userCount} assigned users. Please reassign users first.`
+      });
+    }
+
+    // ✅ Snapshot BEFORE destroying — after destroy the PK is nulled
+    const deletedRoleSnapshot = role.toJSON();
+
+    await role.destroy();
+
+    // ✅ Audit log — records the deleted role as oldValue
+    await createAuditLog(
+      req,
+      'DELETE',
+      'ROLE',
+      deletedRoleSnapshot.id,
+      deletedRoleSnapshot,
+      null
+    );
+
+    res.json({
+      success: true,
+      message: 'Role deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete role error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
     });
   }
 });
 
-// DELETE role - FIXED
-app.delete('/api/roles/:id', authenticate, async (req, res) => {
-  try {
-    const role = await Role.findOne({
-      where: { 
-        id: req.params.id,
-        schoolId: req.user.schoolId 
-      }
-    });
-    
-    if (!role) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Role not found' 
-      });
-    }
-    
-    if (role.isSystemRole) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Cannot delete system roles' 
-      });
-    }
-    
-    // Check if role is in use
-    const userCount = await User.count({ 
-      where: { roleId: role.id } 
-    });
-    
-    if (userCount > 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: `Cannot delete role with ${userCount} assigned users. Please reassign users first.` 
-      });
-    }
-    
-    await role.destroy();
-    
-    // ⚠️ AUDIT LOG TEMPORARILY DISABLED
-    // await createAuditLog(req, 'DELETE', 'ROLE', req.params.id);
-    
-    res.json({ 
-      success: true, 
-      message: 'Role deleted successfully' 
-    });
-  } catch (error) {
-    console.error('Delete role error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
-  }
-});
 
 // GET all available permissions (master list) - FIXED
 app.get('/api/permissions', authenticate, async (req, res) => {
@@ -21366,6 +21328,31 @@ app.patch('/api/users/:userId/role', authenticate, async (req, res) => {
       };
     }
 
+        // ✅ Snapshot the user's old role before changing it
+    const oldUserRole = {
+      roleId: user.roleId,
+      role:   user.role
+    };
+
+    const enumRole = roleId ? roleNameToEnum(roleInfo.name) : null;
+
+    const updateData = { roleId: roleId || null };
+    if (enumRole) updateData.role = enumRole;
+    await user.update(updateData);
+
+    // ✅ Audit log the role assignment
+    await createAuditLog(
+      req,
+      'ASSIGN_ROLE',
+      'USER',
+      user.id,
+      oldUserRole,
+      {
+        roleId:   user.roleId,
+        role:     user.role,
+        roleName: roleInfo?.name || null
+      }
+    );
     const payload = updated.toJSON();
     payload.Role = rolePayload;
 
