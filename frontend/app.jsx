@@ -37336,7 +37336,10 @@ const ExamCardsModule = ({
   admissionNumber: propAdmissionNumber,
   programs = [],
   courses = [],
-  units = []
+  units = [],
+  // ✅ NEW: Exam card override props
+  examCardOverrides = [],
+  setExamCardOverrides
 }) => {
   console.log('🎫 ExamCardsModule INITIALIZED');
   console.log('🏫 School category:', currentSchool?.category);
@@ -37348,6 +37351,9 @@ const ExamCardsModule = ({
   const isRegularSchool = !isUniversity && !isTVET;
   const isStudent = user?.role === 'STUDENT';
   const isParent = user?.role === 'PARENT';
+
+  // ✅ Who can approve / revoke exam card overrides
+  const canApproveOverride = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'ACCOUNTANT', 'PRINCIPAL'].includes(user?.role);
 
   // ==================== SEARCHABLE SELECT COMPONENT ====================
   const SearchableSelect = ({ 
@@ -37647,6 +37653,22 @@ const ExamCardsModule = ({
     return '';
   };
 
+  // ✅ NEW: Check if a student has an active override
+  const hasOverride = (studentId) => {
+    if (!studentId) return false;
+    return (examCardOverrides || []).some(
+      o => o.studentId === studentId && o.isActive !== false
+    );
+  };
+
+  // ✅ NEW: Get the active override object for a student
+  const getActiveOverride = (studentId) => {
+    if (!studentId) return null;
+    return (examCardOverrides || []).find(
+      o => o.studentId === studentId && o.isActive !== false
+    ) || null;
+  };
+
   // ==================== STATE ====================
   const [selectedClass, setSelectedClass] = useState('');
   const [selectedStudents, setSelectedStudents] = useState([]);
@@ -37668,6 +37690,8 @@ const ExamCardsModule = ({
   const [tempAdmissionNumber, setTempAdmissionNumber] = useState('');
   const [showExamCardModal, setShowExamCardModal] = useState(false);
   const [loadingExamCard, setLoadingExamCard] = useState(false);
+  // ✅ NEW: Override action loading state
+  const [overrideActionLoading, setOverrideActionLoading] = useState(null);
   
   const [currentExamCardData, setCurrentExamCardData] = useState({
     student: null,
@@ -37675,6 +37699,7 @@ const ExamCardsModule = ({
     totalFees: 0,
     totalPaid: 0,
     isEligible: false,
+    isOverridden: false,
     entityName: '',
     items: []
   });
@@ -37717,7 +37742,8 @@ const ExamCardsModule = ({
     }
     
     const balance = totalFees - totalPaid;
-    const isEligible = balance <= 0;
+    const overrideActive = hasOverride(studentData.id);
+    const isEligible = balance <= 0 || overrideActive;   // ✅ override wins
     
     const entityName = getEntityName(studentData);
     const items = getStudentItems(studentData);
@@ -37728,6 +37754,7 @@ const ExamCardsModule = ({
       totalFees,
       totalPaid,
       isEligible,
+      isOverridden: overrideActive,   // ✅ NEW
       entityName,
       items
     };
@@ -37741,7 +37768,7 @@ const ExamCardsModule = ({
     try {
       let studentData;
       if (studentAdmissionNumber) {
-const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(studentAdmissionNumber)}`);
+        const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(studentAdmissionNumber)}`);
         studentData = studentRes.data.student;
       } else {
         const studentRes = await api.get(`/students/${studentId}`);
@@ -37875,7 +37902,8 @@ const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(st
           
           const totalPaid = studentPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
           const balance = totalFeesAmount - totalPaid;
-          const isEligible = balance <= 0;
+          const overrideActive = hasOverride(student.id);
+          const isEligible = balance <= 0 || overrideActive;   // ✅ override wins
           
           const entityName = getEntityName(student);
           
@@ -37885,7 +37913,8 @@ const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(st
             totalFees: totalFeesAmount,
             totalPaid,
             balance,
-            isEligible
+            isEligible,
+            isOverridden: overrideActive   // ✅ NEW
           };
         })
       );
@@ -37926,6 +37955,7 @@ const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(st
       totalFees: 0,
       totalPaid: 0,
       isEligible: false,
+      isOverridden: false,
       entityName: '',
       items: []
     });
@@ -37958,6 +37988,81 @@ const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(st
       setFilteredStudents(filtered);
     }
   }, [searchTerm, studentsWithZeroBalance]);
+
+  // ✅ NEW: Approve exam card override
+  const handleApproveOverride = async (student) => {
+    const reason = window.prompt(
+      `Approve exam card for ${student.firstName} ${student.lastName}?\n\nBalance: ${formatCurrency(student.balance)}\n\nReason (optional):`,
+      ''
+    );
+    if (reason === null) return; // user cancelled
+
+    setOverrideActionLoading(student.id);
+    try {
+      const res = await api.post('/exam-card-overrides', {
+        studentId: student.id,
+        reason: reason || null,
+        balanceAtApproval: student.balance
+      });
+      const newOverride = res.data.override;
+      setExamCardOverrides?.(prev => [...prev, newOverride]);
+
+      // Update local lists
+      setFilteredStudents(prev =>
+        prev.map(s => s.id === student.id ? { ...s, isOverridden: true, isEligible: true } : s)
+      );
+      setStudentsWithZeroBalance(prev =>
+        prev.map(s => s.id === student.id ? { ...s, isOverridden: true, isEligible: true } : s)
+      );
+
+      // Update current card view if open for this student
+      if (currentExamCardData.student?.id === student.id) {
+        setCurrentExamCardData(prev => ({ ...prev, isOverridden: true, isEligible: true }));
+      }
+
+      setOverrideActionLoading(null);
+      alert(`✅ Exam card approved for ${student.firstName} ${student.lastName}`);
+    } catch (err) {
+      console.error('❌ Approve override error:', err);
+      setOverrideActionLoading(null);
+      alert('Failed to approve: ' + (err.response?.data?.message || err.message));
+    }
+  };
+
+  // ✅ NEW: Revoke exam card override
+  const handleRevokeOverride = async (student) => {
+    const activeOverride = getActiveOverride(student.id);
+    if (!activeOverride) {
+      alert('No active override found for this student');
+      return;
+    }
+    if (!window.confirm(`Revoke exam card approval for ${student.firstName} ${student.lastName}?`)) return;
+
+    setOverrideActionLoading(student.id);
+    try {
+      await api.delete(`/exam-card-overrides/${activeOverride.id}`);
+      setExamCardOverrides?.(prev => prev.filter(o => o.id !== activeOverride.id));
+
+      const stillEligible = student.balance <= 0;
+      setFilteredStudents(prev =>
+        prev.map(s => s.id === student.id ? { ...s, isOverridden: false, isEligible: stillEligible } : s)
+      );
+      setStudentsWithZeroBalance(prev =>
+        prev.map(s => s.id === student.id ? { ...s, isOverridden: false, isEligible: stillEligible } : s)
+      );
+
+      if (currentExamCardData.student?.id === student.id) {
+        setCurrentExamCardData(prev => ({ ...prev, isOverridden: false, isEligible: stillEligible }));
+      }
+
+      setOverrideActionLoading(null);
+      alert('✅ Override revoked');
+    } catch (err) {
+      console.error('❌ Revoke override error:', err);
+      setOverrideActionLoading(null);
+      alert('Failed to revoke: ' + (err.response?.data?.message || err.message));
+    }
+  };
 
   // ==================== RENDER STUDENT VIEW ====================
   if (isStudent) {
@@ -38044,9 +38149,16 @@ const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(st
                   </div>
                   <div className="text-right">
                     {currentExamCardData.isEligible ? (
-                      <div className="flex items-center text-green-600">
-                        <i className="fas fa-check-circle text-2xl mr-2"></i>
-                        <span className="font-medium">Eligible for Exam Card</span>
+                      <div className="flex flex-col items-end gap-1">
+                        <div className="flex items-center text-green-600">
+                          <i className="fas fa-check-circle text-2xl mr-2"></i>
+                          <span className="font-medium">Eligible for Exam Card</span>
+                        </div>
+                        {currentExamCardData.isOverridden && (
+                          <span className="text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded-full">
+                            <i className="fas fa-user-check mr-1"></i>Approved with balance
+                          </span>
+                        )}
                       </div>
                     ) : (
                       <div className="flex items-center text-red-600">
@@ -38161,9 +38273,16 @@ const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(st
                     </div>
                     <div className="text-right">
                       {currentExamCardData.isEligible ? (
-                        <div className="flex items-center text-green-600">
-                          <i className="fas fa-check-circle text-2xl mr-2"></i>
-                          <span className="font-medium">Eligible for Exam Card</span>
+                        <div className="flex flex-col items-end gap-1">
+                          <div className="flex items-center text-green-600">
+                            <i className="fas fa-check-circle text-2xl mr-2"></i>
+                            <span className="font-medium">Eligible for Exam Card</span>
+                          </div>
+                          {currentExamCardData.isOverridden && (
+                            <span className="text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded-full">
+                              <i className="fas fa-user-check mr-1"></i>Approved with balance
+                            </span>
+                          )}
                         </div>
                       ) : (
                         <div className="flex items-center text-red-600">
@@ -38222,13 +38341,26 @@ const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(st
         </div>
       )}
       
-      <h2 className="text-2xl font-bold">Exam Cards (Zero Balance Students)</h2>
-      <p className="text-gray-600">Students who have cleared all fees are eligible for exam cards.</p>
+      <div className="flex justify-between items-center flex-wrap gap-4">
+        <div>
+          <h2 className="text-2xl font-bold">Exam Cards</h2>
+          <p className="text-gray-600">Students eligible for exam cards (fee cleared or manually approved).</p>
+        </div>
+        {examCardOverrides.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
+            <span className="text-sm text-amber-800">
+              <i className="fas fa-user-check mr-1"></i>
+              <strong>{examCardOverrides.length}</strong> manual approval{examCardOverrides.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+        )}
+      </div>
       
       <div className="bg-white p-6 rounded-xl shadow-sm">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <SearchableSelect              label={`Select ${getEntityLabel()}`}
+            <SearchableSelect
+              label={`Select ${getEntityLabel()}`}
               value={selectedClass}
               onChange={(e) => {
                 setSelectedClass(e.target.value);
@@ -38257,7 +38389,7 @@ const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(st
           <div className="p-4 bg-gray-50 border-b flex justify-between items-center flex-wrap gap-4">
             <div>
               <h3 className="font-semibold">Eligible Students ({filteredStudents.length})</h3>
-              <p className="text-sm text-gray-600 mt-1">Fee cleared - eligible for exam cards</p>
+              <p className="text-sm text-gray-600 mt-1">Fee cleared or manually approved for exam cards</p>
             </div>
             <div className="flex space-x-2">
               <label className="flex items-center space-x-2">
@@ -38285,14 +38417,16 @@ const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(st
                   <th className="px-4 py-2 text-left">Total Fees</th>
                   <th className="px-4 py-2 text-left">Paid</th>
                   <th className="px-4 py-2 text-left">Balance</th>
+                  <th className="px-4 py-2 text-left">Override</th>
                   <th className="px-4 py-2 text-left">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {filteredStudents.map(student => {
                   const entityName = student.entityName || getEntityName(student);
+                  const overrideActive = student.isOverridden ?? hasOverride(student.id);
                   return (
-                    <tr key={student.id} className="hover:bg-gray-50">
+                    <tr key={student.id} className={`hover:bg-gray-50 ${overrideActive ? 'bg-amber-50/40' : ''}`}>
                       <td className="px-4 py-2">
                         <input 
                           type="checkbox" 
@@ -38302,7 +38436,14 @@ const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(st
                         />
                       </td>
                       <td className="px-4 py-2 font-mono text-sm">{student.admissionNumber}</td>
-                      <td className="px-4 py-2">{student.firstName} {student.lastName}</td>
+                      <td className="px-4 py-2">
+                        {student.firstName} {student.lastName}
+                        {overrideActive && (
+                          <span className="ml-2 text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                            <i className="fas fa-user-check mr-1"></i>Approved
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-2 text-sm">{entityName || 'N/A'}</td>
                       <td className="px-4 py-2 text-sm">{formatCurrency(student.totalFees)}</td>
                       <td className="px-4 py-2 text-sm text-green-600">{formatCurrency(student.totalPaid)}</td>
@@ -38310,6 +38451,41 @@ const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(st
                         <span className={student.balance > 0 ? 'text-red-600' : 'text-green-600'}>
                           {formatCurrency(student.balance)}
                         </span>
+                      </td>
+                      <td className="px-4 py-2">
+                        {overrideActive ? (
+                          <button
+                            onClick={() => handleRevokeOverride(student)}
+                            disabled={overrideActionLoading === student.id}
+                            className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 disabled:opacity-50 flex items-center gap-1"
+                            title="Revoke override"
+                          >
+                            {overrideActionLoading === student.id ? (
+                              <><i className="fas fa-spinner fa-spin"></i>Revoking...</>
+                            ) : (
+                              <><i className="fas fa-undo"></i>Revoke</>
+                            )}
+                          </button>
+                        ) : student.balance > 0 && canApproveOverride ? (
+                          <button
+                            onClick={() => handleApproveOverride(student)}
+                            disabled={overrideActionLoading === student.id}
+                            className="text-xs px-2 py-1 bg-amber-100 text-amber-800 rounded hover:bg-amber-200 disabled:opacity-50 flex items-center gap-1"
+                            title="Approve exam card despite balance"
+                          >
+                            {overrideActionLoading === student.id ? (
+                              <><i className="fas fa-spinner fa-spin"></i>Approving...</>
+                            ) : (
+                              <><i className="fas fa-user-check"></i>Approve</>
+                            )}
+                          </button>
+                        ) : student.balance <= 0 ? (
+                          <span className="text-xs text-green-600 flex items-center gap-1">
+                            <i className="fas fa-check-circle"></i>Eligible
+                          </span>
+                        ) : (
+                          <span className="text-xs text-gray-400">No permission</span>
+                        )}
                       </td>
                       <td className="px-4 py-2">
                         <button 
@@ -38349,8 +38525,8 @@ const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(st
       {filteredStudents.length === 0 && selectedClass && !loading && (
         <div className="bg-yellow-50 rounded-xl p-8 text-center">
           <i className="fas fa-info-circle text-3xl text-yellow-600 mb-3"></i>
-          <p className="text-gray-700">No students with zero balance found in this {getEntityLabel().toLowerCase()}.</p>
-          <p className="text-sm text-gray-500 mt-1">Only students who have cleared all fees will appear here.</p>
+          <p className="text-gray-700">No students found in this {getEntityLabel().toLowerCase()}.</p>
+          <p className="text-sm text-gray-500 mt-1">Only students who cleared fees or were manually approved will appear here.</p>
         </div>
       )}
 
@@ -38399,7 +38575,6 @@ const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(st
     </div>
   );
 };
-
 // ==================== EXAM CARD PRINT MODAL COMPONENT - ALL SCHOOL TYPES ====================
 const ExamCardPrintModalComponent = ({ 
   student, 
@@ -39026,6 +39201,11 @@ const SettingsModule = ({
     endTime: school?.endTime || '17:00',
     lateThreshold: school?.lateThreshold || 30,
     earlyDepartureThreshold: school?.earlyDepartureThreshold || 30,
+
+    // ✅ NEW: Unit Registration Settings
+    paymentPercentageRequired: school?.paymentPercentageRequired ?? 30,
+    requiresPaymentForUnits: school?.requiresPaymentForUnits ?? true,
+    unitApprovalRequired: school?.unitApprovalRequired ?? true,
     
     settings: school?.settings || {
       academicYear: new Date().getFullYear().toString(),
@@ -39399,6 +39579,12 @@ const SettingsModule = ({
         endTime: schoolForm.endTime,
         lateThreshold: schoolForm.lateThreshold,
         earlyDepartureThreshold: schoolForm.earlyDepartureThreshold,
+
+        // ✅ NEW: Unit Registration settings
+        paymentPercentageRequired: schoolForm.paymentPercentageRequired,
+        requiresPaymentForUnits: schoolForm.requiresPaymentForUnits,
+        unitApprovalRequired: schoolForm.unitApprovalRequired,
+
         settings: schoolForm.settings,
         financialSettings: schoolForm.financialSettings
       };
@@ -39877,12 +40063,112 @@ const SettingsModule = ({
             </div>
           </div>
 
+          {/* ✅ NEW: UNIT REGISTRATION SETTINGS */}
+          <div className="border-t pt-6 mt-6">
+            <h4 className="font-medium text-lg mb-3 flex items-center gap-2">
+              <i className="fas fa-book text-indigo-600"></i>
+              Unit Registration Settings
+            </h4>
+
+            <div className="space-y-4">
+              {/* Enable/disable payment requirement */}
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="requiresPaymentForUnits"
+                  checked={schoolForm.requiresPaymentForUnits !== false}
+                  onChange={(e) => setSchoolForm({
+                    ...schoolForm,
+                    requiresPaymentForUnits: e.target.checked
+                  })}
+                  className="rounded"
+                />
+                <label htmlFor="requiresPaymentForUnits" className="text-sm font-medium text-gray-700">
+                  Require payment before unit registration
+                </label>
+              </div>
+
+              {/* Payment % — only shown when enabled */}
+              {schoolForm.requiresPaymentForUnits !== false && (
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Minimum Payment % Required
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="5"
+                      value={schoolForm.paymentPercentageRequired || 30}
+                      onChange={(e) => setSchoolForm({
+                        ...schoolForm,
+                        paymentPercentageRequired: parseInt(e.target.value)
+                      })}
+                      className="flex-1"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={schoolForm.paymentPercentageRequired || 30}
+                      onChange={(e) => setSchoolForm({
+                        ...schoolForm,
+                        paymentPercentageRequired: Math.max(0, Math.min(100, parseInt(e.target.value) || 0))
+                      })}
+                      className="w-20 px-3 py-2 border rounded-lg text-center"
+                    />
+                    <span className="text-sm text-gray-600">%</span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">
+                    Students must have paid at least this percentage of their fees before registering units.
+                    Set to 0 to allow registration with no payment.
+                  </p>
+                  {/* Quick presets */}
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {[0, 30, 40, 50, 60, 100].map(pct => (
+                      <button
+                        key={pct}
+                        type="button"
+                        onClick={() => setSchoolForm({ ...schoolForm, paymentPercentageRequired: pct })}
+                        className={`text-xs px-3 py-1 rounded transition-colors ${
+                          (schoolForm.paymentPercentageRequired || 30) === pct
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-100'
+                        }`}
+                      >
+                        {pct}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Unit approval required */}
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="unitApprovalRequired"
+                  checked={schoolForm.unitApprovalRequired !== false}
+                  onChange={(e) => setSchoolForm({
+                    ...schoolForm,
+                    unitApprovalRequired: e.target.checked
+                  })}
+                  className="rounded"
+                />
+                <label htmlFor="unitApprovalRequired" className="text-sm font-medium text-gray-700">
+                  Require admin/HOD approval for unit registrations
+                </label>
+              </div>
+            </div>
+          </div>
+
           <button 
             onClick={handleSaveSchool} 
-            className="mt-4 bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700"
+            className="mt-6 bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700"
             disabled={loading}
           >
-            Save Financial Settings
+            {loading ? 'Saving...' : 'Save Financial Settings'}
           </button>
         </div>
       )}
@@ -40317,6 +40603,9 @@ const SettingsModule = ({
                           log.action === 'UPDATE' ? 'bg-blue-100 text-blue-800' : 
                           log.action === 'DELETE' ? 'bg-red-100 text-red-800' : 
                           log.action === 'ASSIGN' ? 'bg-purple-100 text-purple-800' :
+                          log.action === 'ASSIGN_ROLE' ? 'bg-purple-100 text-purple-800' :
+                          log.action === 'APPROVE_EXAM_CARD_OVERRIDE' ? 'bg-amber-100 text-amber-800' :
+                          log.action === 'REVOKE_EXAM_CARD_OVERRIDE' ? 'bg-red-100 text-red-800' :
                           log.action === 'RECORD' ? 'bg-yellow-100 text-yellow-800' :
                           log.action === 'PUBLISH' ? 'bg-indigo-100 text-indigo-800' :
                           'bg-gray-100 text-gray-800'
@@ -64094,6 +64383,1898 @@ const OnlineExamsModule = ({
     </div>
   );
 };
+
+// ==================== HOMEWORK MODULE ====================
+const HomeworkModule = ({
+  user,
+  students = [],
+  classes = [],
+  programs = [],
+  courses = [],
+  subjects = [],
+  units = [],
+  currentSchool,
+}) => {
+  // ==================== SCHOOL TYPE DETECTION ====================
+  const schoolCategory = currentSchool?.category || 'SENIOR_SECONDARY';
+  const isUniversity = schoolCategory === 'UNIVERSITY';
+  const isTVET = schoolCategory === 'COLLEGE_TVET';
+  const isRegularSchool = !isUniversity && !isTVET;
+
+  const userRole = user?.role || '';
+  const isStudent = userRole === 'STUDENT';
+  const isParent = userRole === 'PARENT';
+  const isTeacher = [
+    'TEACHER', 'LECTURER', 'SENIOR_TEACHER', 'CLASS_TEACHER',
+    'SUBJECT_TEACHER', 'INSTRUCTOR', 'TRAINER', 'HOD', 'DEAN'
+  ].includes(userRole);
+  const isAdmin = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL'].includes(userRole);
+  const canCreate = isTeacher || isAdmin;
+  const canGrade = canCreate;
+
+  // ==================== SEARCHABLE SELECT ====================
+  const SearchableSelect = ({
+    label, value, onChange, options, placeholder,
+    disabled, required, className, showClear = true
+  }) => {
+    const [search, setSearch] = useState('');
+    const [isOpen, setIsOpen] = useState(false);
+    const [isFocused, setIsFocused] = useState(false);
+    const dropdownRef = useRef(null);
+    const inputRef = useRef(null);
+
+    const optionsWithEmpty = useMemo(() => {
+      const hasEmpty = options.some(opt => opt.value === '' || opt.value === null || opt.value === undefined);
+      if (hasEmpty) return options;
+      return [{ value: '', label: '' }, ...options];
+    }, [options]);
+
+    const filteredOptions = useMemo(() => {
+      if (!search.trim()) return optionsWithEmpty;
+      const s = search.toLowerCase();
+      return optionsWithEmpty.filter(opt =>
+        opt.label?.toLowerCase().includes(s) ||
+        opt.subLabel?.toLowerCase().includes(s) ||
+        opt.value?.toString().toLowerCase().includes(s)
+      );
+    }, [optionsWithEmpty, search]);
+
+    const selectedOption = optionsWithEmpty.find(opt => opt.value === value);
+
+    useEffect(() => {
+      const handler = (e) => {
+        if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+          setIsOpen(false);
+          setIsFocused(false);
+        }
+      };
+      document.addEventListener('mousedown', handler);
+      return () => document.removeEventListener('mousedown', handler);
+    }, []);
+
+    useEffect(() => {
+      if (selectedOption && !isFocused) setSearch(selectedOption.label);
+      else if (!selectedOption && !isFocused) setSearch('');
+    }, [value, selectedOption, isFocused]);
+
+    const handleSelect = (val) => {
+      onChange({ target: { value: val } });
+      const sel = optionsWithEmpty.find(o => o.value === val);
+      setSearch(sel ? sel.label : '');
+      setIsOpen(false);
+      setIsFocused(false);
+      inputRef.current?.focus();
+    };
+
+    const handleInputChange = (e) => {
+      const v = e.target.value;
+      setSearch(v);
+      setIsOpen(true);
+      setIsFocused(true);
+      if (v === '') onChange({ target: { value: '' } });
+    };
+
+    const handleBlur = () => {
+      setTimeout(() => {
+        if (document.activeElement !== inputRef.current) {
+          setIsOpen(false);
+          setIsFocused(false);
+          setSearch(selectedOption ? selectedOption.label : '');
+        }
+      }, 150);
+    };
+
+    const handleClear = (e) => {
+      e.stopPropagation();
+      onChange({ target: { value: '' } });
+      setSearch('');
+      setIsOpen(false);
+      setIsFocused(false);
+      inputRef.current?.focus();
+    };
+
+    return (
+      <div className="relative" ref={dropdownRef}>
+        {label && (
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            {label}{required && <span className="text-red-500 ml-1">*</span>}
+          </label>
+        )}
+        <div className="relative">
+          <input
+            ref={inputRef}
+            type="text"
+            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
+            } ${className || ''}`}
+            value={isFocused ? search : (selectedOption?.label || '')}
+            onChange={handleInputChange}
+            onFocus={() => { setIsFocused(true); setIsOpen(true); }}
+            onBlur={handleBlur}
+            placeholder={placeholder || 'Search and select...'}
+            disabled={disabled}
+            autoComplete="off"
+          />
+          {value && showClear && !disabled && (
+            <button type="button" onClick={handleClear}
+              className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 z-10">
+              ✕
+            </button>
+          )}
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">▾</div>
+        </div>
+        {isOpen && !disabled && (
+          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
+            {filteredOptions.length > 0 ? (
+              filteredOptions.map(opt => (
+                <div
+                  key={opt.value || Math.random().toString()}
+                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 ${
+                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : ''
+                  }`}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => handleSelect(opt.value)}
+                >
+                  <div className="font-medium">{opt.label}</div>
+                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+                </div>
+              ))
+            ) : (
+              <div className="px-3 py-4 text-center text-gray-500 text-sm">No results</div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ==================== OPTIONS ====================
+  const classOptions = useMemo(() => {
+    const opts = [{ value: '', label: '' }];
+    (classes || []).forEach(c => opts.push({ value: c.id, label: c.name, subLabel: c.streams || 'Class' }));
+    return opts;
+  }, [classes]);
+
+  const programOptions = useMemo(() => {
+    const opts = [{ value: '', label: '' }];
+    (programs || []).forEach(p => opts.push({ value: p.id, label: p.name, subLabel: p.code || 'Program' }));
+    return opts;
+  }, [programs]);
+
+  const courseOptions = useMemo(() => {
+    const opts = [{ value: '', label: '' }];
+    (courses || []).forEach(c => opts.push({ value: c.id, label: c.name, subLabel: c.code || 'Course' }));
+    return opts;
+  }, [courses]);
+
+  const getEntityLabel = () => isUniversity ? 'Course' : isTVET ? 'Program' : 'Class';
+  const getEntityOptions = () => isUniversity ? courseOptions : isTVET ? programOptions : classOptions;
+
+  // ==================== STATE ====================
+  const [homeworks, setHomeworks] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterScope, setFilterScope] = useState('');
+
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showSubmitModal, setShowSubmitModal] = useState(false);
+  const [showGradeModal, setShowGradeModal] = useState(false);
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [selectedHomework, setSelectedHomework] = useState(null);
+  const [editingHomework, setEditingHomework] = useState(null);
+
+  // Parent state
+  const [myChildren, setMyChildren] = useState([]);
+  const [selectedChild, setSelectedChild] = useState(null);
+  const [loadingChildren, setLoadingChildren] = useState(false);
+
+  // ==================== FORMATTERS ====================
+  const formatDate = (d) => {
+    if (!d) return '—';
+    return new Date(d).toLocaleDateString('en-KE', {
+      year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+  };
+
+  const formatDateShort = (d) => {
+    if (!d) return '—';
+    return new Date(d).toLocaleDateString('en-KE', { year: 'numeric', month: 'short', day: 'numeric' });
+  };
+
+  const getStatusBadge = (status) => {
+    const map = {
+      DRAFT:     'bg-gray-100 text-gray-800',
+      PUBLISHED: 'bg-green-100 text-green-800',
+      CLOSED:    'bg-red-100 text-red-800',
+    };
+    return map[status] || 'bg-gray-100 text-gray-800';
+  };
+
+  const getSubmissionBadge = (status) => {
+    const map = {
+      NOT_STARTED: 'bg-gray-100 text-gray-700',
+      SUBMITTED:   'bg-blue-100 text-blue-800',
+      GRADED:      'bg-green-100 text-green-800',
+    };
+    return map[status] || 'bg-gray-100 text-gray-700';
+  };
+
+  // ==================== LOAD ====================
+  const loadHomeworks = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      if (isParent) {
+        if (!selectedChild) { setLoading(false); return; }
+        const res = await api.get(`/homework/child/${selectedChild.id}`);
+        setHomeworks(res.data.homeworks || []);
+      } else {
+        const res = await api.get('/homework');
+        setHomeworks(res.data.homeworks || []);
+      }
+    } catch (err) {
+      console.error('Load homework error:', err);
+      setError(err.response?.data?.message || 'Failed to load homework');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isParent) loadHomeworks();
+    // eslint-disable-next-line
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!isParent) return;
+    const loadChildren = async () => {
+      setLoadingChildren(true);
+      try {
+        const res = await api.get('/parents/me/children');
+        const kids = res.data.children || [];
+        setMyChildren(kids);
+        if (kids.length > 0) setSelectedChild(kids[0]);
+      } catch (err) {
+        console.error('Load children error:', err);
+        setError('Failed to load children');
+      } finally {
+        setLoadingChildren(false);
+      }
+    };
+    loadChildren();
+  }, [isParent]);
+
+  useEffect(() => {
+    if (isParent && selectedChild) loadHomeworks();
+    // eslint-disable-next-line
+  }, [selectedChild?.id]);
+
+  // ==================== FILTERED + STATS ====================
+  const filteredHomeworks = useMemo(() => {
+    let list = [...homeworks];
+    if (filterStatus !== 'all') list = list.filter(h => h.status === filterStatus);
+    if (filterScope) {
+      list = list.filter(h =>
+        h.classId === filterScope ||
+        h.programId === filterScope ||
+        h.courseId === filterScope
+      );
+    }
+    if (searchTerm.trim()) {
+      const t = searchTerm.toLowerCase();
+      list = list.filter(h =>
+        (h.title || '').toLowerCase().includes(t) ||
+        (h.description || '').toLowerCase().includes(t)
+      );
+    }
+    return list;
+  }, [homeworks, filterStatus, filterScope, searchTerm]);
+
+  const stats = useMemo(() => {
+    const total = homeworks.length;
+    const published = homeworks.filter(h => h.status === 'PUBLISHED').length;
+    const draft = homeworks.filter(h => h.status === 'DRAFT').length;
+    const closed = homeworks.filter(h => h.status === 'CLOSED').length;
+    return { total, published, draft, closed };
+  }, [homeworks]);
+
+  // ==================== HELPERS ====================
+  const scopeLabel = (hw) => {
+    if (hw.Class) return hw.Class.name;
+    if (hw.Program) return hw.Program.name;
+    if (hw.Course) return hw.Course.name;
+    if (hw.classId) return classes.find(c => c.id === hw.classId)?.name || '—';
+    if (hw.programId) return programs.find(p => p.id === hw.programId)?.name || '—';
+    if (hw.courseId) return courses.find(c => c.id === hw.courseId)?.name || '—';
+    return '—';
+  };
+
+  const subjectLabel = (hw) => {
+    if (hw.Subject) return hw.Subject.name;
+    if (hw.Unit) return hw.Unit.name;
+    if (hw.subjectId) return subjects.find(s => s.id === hw.subjectId)?.name || '—';
+    if (hw.unitId) return units.find(u => u.id === hw.unitId)?.name || '—';
+    return '—';
+  };
+
+  // ==================== CREATE / EDIT MODAL ====================
+  const HomeworkCreateModal = () => {
+    const [form, setForm] = useState({
+      title: '', description: '', instructions: '',
+      classId: '', programId: '', courseId: '', subjectId: '', unitId: '',
+      dueDate: '', allowLateSubmission: false, gradingMode: 'MANUAL',
+      attachments: []
+    });
+    const [questions, setQuestions] = useState([]);
+    const [saving, setSaving] = useState(false);
+    const [localError, setLocalError] = useState('');
+    const [uploading, setUploading] = useState(false);
+
+    useEffect(() => {
+      if (editingHomework) {
+        setForm({
+          title: editingHomework.title || '',
+          description: editingHomework.description || '',
+          instructions: editingHomework.instructions || '',
+          classId: editingHomework.classId || '',
+          programId: editingHomework.programId || '',
+          courseId: editingHomework.courseId || '',
+          subjectId: editingHomework.subjectId || '',
+          unitId: editingHomework.unitId || '',
+          dueDate: editingHomework.dueDate
+            ? new Date(editingHomework.dueDate).toISOString().slice(0, 16)
+            : '',
+          allowLateSubmission: editingHomework.allowLateSubmission || false,
+          gradingMode: editingHomework.gradingMode || 'MANUAL',
+          attachments: editingHomework.attachments || []
+        });
+        const qs = editingHomework.Questions || [];
+        setQuestions(
+          qs.length > 0
+            ? qs.map(q => ({
+                id: q.id,
+                questionText: q.questionText || '',
+                questionType: q.questionType || 'SHORT_ANSWER',
+                options: Array.isArray(q.options) ? q.options : [],
+                correctAnswer: q.correctAnswer || '',
+                points: q.points || 1
+              }))
+            : []
+        );
+      } else {
+        setForm({
+          title: '', description: '', instructions: '',
+          classId: '', programId: '', courseId: '', subjectId: '', unitId: '',
+          dueDate: '', allowLateSubmission: false, gradingMode: 'MANUAL',
+          attachments: []
+        });
+        setQuestions([]);
+      }
+    }, [editingHomework]);
+
+    const subjectOptions = useMemo(() => {
+      const opts = [{ value: '', label: '' }];
+      const chosenClass = form.classId;
+      (subjects || [])
+        .filter(s => !chosenClass || s.classId === chosenClass)
+        .forEach(s => opts.push({ value: s.id, label: s.name, subLabel: s.code || 'Subject' }));
+      return opts;
+    }, [subjects, form.classId]);
+
+    const unitOptions = useMemo(() => {
+      const opts = [{ value: '', label: '' }];
+      const scopeId = form.programId || form.courseId;
+      (units || [])
+        .filter(u => !scopeId || u.programId === scopeId || u.courseId === scopeId)
+        .forEach(u => opts.push({ value: u.id, label: u.name, subLabel: u.code || 'Unit' }));
+      return opts;
+    }, [units, form.programId, form.courseId]);
+
+    const addQuestion = () => setQuestions(prev => [...prev, {
+      questionText: '', questionType: 'SHORT_ANSWER',
+      options: [], correctAnswer: '', points: 1
+    }]);
+
+    const removeQuestion = (idx) => setQuestions(prev => prev.filter((_, i) => i !== idx));
+    const updateQuestion = (idx, patch) =>
+      setQuestions(prev => prev.map((q, i) => (i === idx ? { ...q, ...patch } : q)));
+
+    const addOption = (qIdx) => setQuestions(prev => prev.map((q, i) => {
+      if (i !== qIdx) return q;
+      const letters = 'ABCDEFGHIJ';
+      const nextKey = letters[q.options.length] || String(q.options.length + 1);
+      return { ...q, options: [...q.options, { key: nextKey, text: '' }] };
+    }));
+
+    const updateOption = (qIdx, oIdx, patch) => setQuestions(prev => prev.map((q, i) => {
+      if (i !== qIdx) return q;
+      return { ...q, options: q.options.map((o, oi) => (oi === oIdx ? { ...o, ...patch } : o)) };
+    }));
+
+    const removeOption = (qIdx, oIdx) => setQuestions(prev => prev.map((q, i) => {
+      if (i !== qIdx) return q;
+      const newOpts = q.options.filter((_, oi) => oi !== oIdx);
+      const letters = 'ABCDEFGHIJ';
+      return {
+        ...q,
+        options: newOpts.map((o, oi) => ({ ...o, key: letters[oi] || o.key })),
+        correctAnswer: newOpts.some(o => o.key === q.correctAnswer) ? q.correctAnswer : ''
+      };
+    }));
+
+    const handleFileUpload = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      setUploading(true);
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        const res = await api.post('/upload/homework', fd, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+        setForm(prev => ({ ...prev, attachments: [...prev.attachments, res.data.file] }));
+      } catch (err) {
+        setLocalError(err.response?.data?.message || 'Upload failed');
+      } finally {
+        setUploading(false);
+        e.target.value = '';
+      }
+    };
+
+    const removeAttachment = (idx) =>
+      setForm(prev => ({ ...prev, attachments: prev.attachments.filter((_, i) => i !== idx) }));
+
+    const handleSave = async (publish = false) => {
+      setLocalError('');
+      if (!form.title.trim()) { setLocalError('Title is required'); return; }
+      if (questions.length === 0) { setLocalError('Add at least one question'); return; }
+
+      for (let i = 0; i < questions.length; i++) {
+        const q = questions[i];
+        if (!q.questionText.trim()) { setLocalError(`Question ${i + 1}: text is required`); return; }
+        if (q.questionType === 'MULTIPLE_CHOICE') {
+          if (q.options.length < 2) { setLocalError(`Question ${i + 1}: add at least 2 options`); return; }
+          if (q.options.some(o => !o.text.trim())) { setLocalError(`Question ${i + 1}: all options need text`); return; }
+          if (form.gradingMode === 'AUTO' && !q.correctAnswer) {
+            setLocalError(`Question ${i + 1}: select the correct answer (required for AUTO grading)`); return;
+          }
+        }
+        if (q.questionType === 'SHORT_ANSWER' && form.gradingMode === 'AUTO' && !q.correctAnswer?.trim()) {
+          setLocalError(`Question ${i + 1}: provide the expected answer (required for AUTO grading)`); return;
+        }
+      }
+
+      setSaving(true);
+      try {
+        const payload = {
+          ...form,
+          classId: form.classId || null,
+          programId: form.programId || null,
+          courseId: form.courseId || null,
+          subjectId: form.subjectId || null,
+          unitId: form.unitId || null,
+          dueDate: form.dueDate ? new Date(form.dueDate).toISOString() : null,
+          questions: questions.map((q, i) => ({ ...q, order: i }))
+        };
+
+        let savedId;
+        if (editingHomework) {
+          const res = await api.put(`/homework/${editingHomework.id}`, payload);
+          savedId = res.data.homework.id;
+        } else {
+          const res = await api.post('/homework', payload);
+          savedId = res.data.homework.id;
+        }
+        if (publish) await api.patch(`/homework/${savedId}/publish`);
+
+        setSuccess(publish ? '✅ Homework published!' : '✅ Homework saved as draft');
+        setTimeout(() => setSuccess(''), 3000);
+        setShowCreateModal(false);
+        setEditingHomework(null);
+        loadHomeworks();
+      } catch (err) {
+        console.error('Save homework error:', err);
+        setLocalError(err.response?.data?.message || 'Failed to save homework');
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    const scopeField = isUniversity ? 'courseId' : isTVET ? 'programId' : 'classId';
+    const scopeValue = form[scopeField];
+    const scopeOptions = isUniversity ? courseOptions : isTVET ? programOptions : classOptions;
+    const scopeLabelText = getEntityLabel();
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto p-4">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl p-6 max-h-[92vh] overflow-auto">
+          <div className="flex justify-between items-center mb-4 sticky top-0 bg-white z-10 pb-3 border-b">
+            <h3 className="text-xl font-bold">
+              {editingHomework ? 'Edit Homework' : 'Create Homework'}
+            </h3>
+            <button onClick={() => { setShowCreateModal(false); setEditingHomework(null); }}
+              className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+          </div>
+
+          {localError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-lg mb-4 text-sm">
+              <i className="fas fa-exclamation-circle mr-2"></i>{localError}
+            </div>
+          )}
+
+          <div className="space-y-4 mb-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Title <span className="text-red-500">*</span>
+              </label>
+              <input type="text"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+                placeholder="e.g. Algebra Chapter 3 Quiz" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+              <textarea rows="2"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                placeholder="Brief overview shown to students" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Instructions</label>
+              <textarea rows="3"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                value={form.instructions}
+                onChange={(e) => setForm({ ...form, instructions: e.target.value })}
+                placeholder="Detailed instructions, rules, etc." />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <SearchableSelect
+                label={scopeLabelText}
+                value={scopeValue}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setForm(prev => ({
+                    ...prev,
+                    classId:   scopeField === 'classId'   ? v : '',
+                    programId: scopeField === 'programId' ? v : '',
+                    courseId:  scopeField === 'courseId'  ? v : '',
+                    subjectId: '', unitId: ''
+                  }));
+                }}
+                options={scopeOptions}
+                placeholder={`Select ${scopeLabelText.toLowerCase()}...`}
+                required />
+
+              {isRegularSchool ? (
+                <SearchableSelect
+                  label="Subject"
+                  value={form.subjectId}
+                  onChange={(e) => setForm({ ...form, subjectId: e.target.value })}
+                  options={subjectOptions}
+                  placeholder="Select subject..."
+                  disabled={!form.classId} />
+              ) : (
+                <SearchableSelect
+                  label={isTVET ? 'Module' : 'Unit'}
+                  value={form.unitId}
+                  onChange={(e) => setForm({ ...form, unitId: e.target.value })}
+                  options={unitOptions}
+                  placeholder={`Select ${isTVET ? 'module' : 'unit'}...`}
+                  disabled={!(form.programId || form.courseId)} />
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Due Date</label>
+                <input type="datetime-local"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  value={form.dueDate}
+                  onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-6">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox"
+                  checked={form.allowLateSubmission}
+                  onChange={(e) => setForm({ ...form, allowLateSubmission: e.target.checked })}
+                  className="rounded" />
+                Allow late submissions
+              </label>
+
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium text-gray-700">Grading Mode:</span>
+                <label className="flex items-center gap-1 text-sm">
+                  <input type="radio" name="gradingMode" value="MANUAL"
+                    checked={form.gradingMode === 'MANUAL'}
+                    onChange={() => setForm({ ...form, gradingMode: 'MANUAL' })} />
+                  Manual
+                </label>
+                <label className="flex items-center gap-1 text-sm">
+                  <input type="radio" name="gradingMode" value="AUTO"
+                    checked={form.gradingMode === 'AUTO'}
+                    onChange={() => setForm({ ...form, gradingMode: 'AUTO' })} />
+                  ⚡ Auto (MC + short answer)
+                </label>
+              </div>
+            </div>
+
+            {form.gradingMode === 'AUTO' && (
+              <div className="bg-purple-50 border border-purple-200 text-purple-800 text-xs px-3 py-2 rounded-lg">
+                <i className="fas fa-info-circle mr-1"></i>
+                Auto mode grades multiple-choice and short-answer questions automatically.
+                Long-answer and file-upload questions still need manual grading.
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Attachments</label>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {form.attachments.map((a, i) => (
+                  <div key={i} className="flex items-center gap-2 bg-gray-100 px-3 py-1 rounded-lg text-sm">
+                    <i className="fas fa-paperclip text-gray-500"></i>
+                    <a href={a.url} target="_blank" rel="noopener noreferrer"
+                      className="text-indigo-600 hover:underline truncate max-w-[200px]">{a.name}</a>
+                    <button onClick={() => removeAttachment(i)} className="text-red-500 hover:text-red-700">✕</button>
+                  </div>
+                ))}
+              </div>
+              <input type="file" onChange={handleFileUpload} disabled={uploading} className="text-sm" />
+              {uploading && <p className="text-xs text-gray-500 mt-1">Uploading...</p>}
+            </div>
+          </div>
+
+          <div className="border-t pt-4 mb-4">
+            <div className="flex justify-between items-center mb-3">
+              <h4 className="font-semibold text-lg">
+                Questions <span className="text-sm text-gray-500 font-normal">({questions.length})</span>
+              </h4>
+              <button onClick={addQuestion}
+                className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-indigo-700 flex items-center gap-1">
+                <i className="fas fa-plus"></i>Add Question
+              </button>
+            </div>
+
+            {questions.length === 0 ? (
+              <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-8 text-center text-gray-500">
+                <i className="fas fa-question-circle text-3xl mb-2"></i>
+                <p className="text-sm">No questions yet. Click "Add Question" to start.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {questions.map((q, idx) => (
+                  <div key={idx} className="border rounded-lg p-4 bg-gray-50">
+                    <div className="flex justify-between items-start mb-3">
+                      <span className="text-xs font-bold text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded">
+                        Q{idx + 1}
+                      </span>
+                      <button onClick={() => removeQuestion(idx)}
+                        className="text-red-500 hover:text-red-700 text-sm">
+                        <i className="fas fa-trash"></i>
+                      </button>
+                    </div>
+
+                    <textarea rows="2"
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 mb-3"
+                      placeholder="Enter your question..."
+                      value={q.questionText}
+                      onChange={(e) => updateQuestion(idx, { questionText: e.target.value })} />
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">Type</label>
+                        <select className="w-full px-2 py-1.5 border rounded-lg text-sm"
+                          value={q.questionType}
+                          onChange={(e) => {
+                            const t = e.target.value;
+                            updateQuestion(idx, {
+                              questionType: t,
+                              options: t === 'MULTIPLE_CHOICE'
+                                ? [{ key: 'A', text: '' }, { key: 'B', text: '' }]
+                                : [],
+                              correctAnswer: ''
+                            });
+                          }}>
+                          <option value="SHORT_ANSWER">Short Answer</option>
+                          <option value="LONG_ANSWER">Long Answer</option>
+                          <option value="MULTIPLE_CHOICE">Multiple Choice</option>
+                          <option value="FILE_UPLOAD">File Upload</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">Points</label>
+                        <input type="number" min="1"
+                          className="w-full px-2 py-1.5 border rounded-lg text-sm"
+                          value={q.points}
+                          onChange={(e) => updateQuestion(idx, { points: parseInt(e.target.value) || 1 })} />
+                      </div>
+
+                      {q.questionType === 'SHORT_ANSWER' && (
+                        <div>
+                          <label className="block text-xs text-gray-600 mb-1">
+                            Expected Answer {form.gradingMode === 'AUTO' && <span className="text-red-500">*</span>}
+                          </label>
+                          <input type="text"
+                            className="w-full px-2 py-1.5 border rounded-lg text-sm"
+                            placeholder="Case-insensitive"
+                            value={q.correctAnswer || ''}
+                            onChange={(e) => updateQuestion(idx, { correctAnswer: e.target.value })} />
+                        </div>
+                      )}
+                    </div>
+
+                    {q.questionType === 'MULTIPLE_CHOICE' && (
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                          <label className="text-xs text-gray-600">Options — click radio to mark correct</label>
+                          <button onClick={() => addOption(idx)}
+                            className="text-xs text-indigo-600 hover:text-indigo-800">
+                            + Add option
+                          </button>
+                        </div>
+                        {q.options.map((opt, oi) => (
+                          <div key={oi} className="flex items-center gap-2">
+                            <input type="radio" name={`correct-${idx}`}
+                              checked={q.correctAnswer === opt.key}
+                              onChange={() => updateQuestion(idx, { correctAnswer: opt.key })} />
+                            <span className="font-mono text-sm w-6 text-gray-500">{opt.key}.</span>
+                            <input type="text"
+                              className="flex-1 px-2 py-1 border rounded text-sm"
+                              placeholder={`Option ${opt.key}`}
+                              value={opt.text}
+                              onChange={(e) => updateOption(idx, oi, { text: e.target.value })} />
+                            {q.options.length > 2 && (
+                              <button onClick={() => removeOption(idx, oi)}
+                                className="text-red-500 hover:text-red-700 text-sm">✕</button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {q.questionType === 'LONG_ANSWER' && (
+                      <p className="text-xs text-gray-500 italic">
+                        Students will type a long response. Always graded manually.
+                      </p>
+                    )}
+                    {q.questionType === 'FILE_UPLOAD' && (
+                      <p className="text-xs text-gray-500 italic">
+                        Students will upload a file. Always graded manually.
+                      </p>
+                    )}
+                  </div>
+                ))}
+
+                <div className="text-right text-sm text-gray-600">
+                  Total: <strong>{questions.reduce((s, q) => s + (parseInt(q.points) || 1), 0)}</strong> points
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4 border-t sticky bottom-0 bg-white">
+            <button onClick={() => { setShowCreateModal(false); setEditingHomework(null); }}
+              disabled={saving}
+              className="px-5 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 disabled:opacity-50">
+              Cancel
+            </button>
+            <button onClick={() => handleSave(false)} disabled={saving}
+              className="px-5 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2">
+              {saving ? <><i className="fas fa-spinner fa-spin"></i>Saving...</> : <><i className="fas fa-save"></i>Save Draft</>}
+            </button>
+            <button onClick={() => handleSave(true)} disabled={saving}
+              className="px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center gap-2">
+              {saving ? <><i className="fas fa-spinner fa-spin"></i>Publishing...</> : <><i className="fas fa-paper-plane"></i>Save & Publish</>}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ==================== DETAIL MODAL ====================
+  const HomeworkDetailModal = () => {
+    const [detail, setDetail] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [submissions, setSubmissions] = useState([]);
+    const [loadingSubs, setLoadingSubs] = useState(false);
+
+    useEffect(() => {
+      if (!selectedHomework) return;
+      const load = async () => {
+        setLoading(true);
+        try {
+          const res = await api.get(`/homework/${selectedHomework.id}`);
+          setDetail(res.data.homework);
+        } catch (err) {
+          console.error(err);
+          setError('Failed to load homework');
+        } finally {
+          setLoading(false);
+        }
+      };
+      load();
+    }, [selectedHomework?.id]);
+
+    useEffect(() => {
+      if (!selectedHomework || !canCreate) return;
+      const loadSubs = async () => {
+        setLoadingSubs(true);
+        try {
+          const res = await api.get(`/homework/${selectedHomework.id}/submissions`);
+          setSubmissions(res.data.submissions || []);
+        } catch (err) {
+          console.error(err);
+        } finally {
+          setLoadingSubs(false);
+        }
+      };
+      loadSubs();
+    }, [selectedHomework?.id, canCreate]);
+
+    const gradedCount = submissions.filter(s => s.status === 'GRADED').length;
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto p-4">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl p-6 max-h-[92vh] overflow-auto">
+          <div className="flex justify-between items-start mb-4 sticky top-0 bg-white z-10 pb-3 border-b">
+            <div>
+              <h3 className="text-xl font-bold">{detail?.title || selectedHomework.title}</h3>
+              <div className="flex flex-wrap gap-2 mt-1">
+                <span className={`text-xs px-2 py-0.5 rounded-full ${getStatusBadge(detail?.status || selectedHomework.status)}`}>
+                  {detail?.status || selectedHomework.status}
+                </span>
+                {(detail?.gradingMode || selectedHomework.gradingMode) === 'AUTO' && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-800">⚡ Auto-graded</span>
+                )}
+                {detail?.allowLateSubmission && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">Late allowed</span>
+                )}
+              </div>
+            </div>
+            <button onClick={() => setShowDetailModal(false)}
+              className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+          </div>
+
+          {loading ? (
+            <div className="text-center py-12 text-gray-500">
+              <i className="fas fa-spinner fa-spin text-2xl"></i>
+              <p className="mt-2 text-sm">Loading...</p>
+            </div>
+          ) : detail ? (
+            <div className="space-y-5">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-xs text-gray-500">Teacher</p>
+                  <p className="font-medium">{detail.Teacher?.firstName} {detail.Teacher?.lastName}</p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-xs text-gray-500">{getEntityLabel()}</p>
+                  <p className="font-medium">{scopeLabel(detail)}</p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-xs text-gray-500">Due</p>
+                  <p className="font-medium">{formatDate(detail.dueDate)}</p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-xs text-gray-500">Max Score</p>
+                  <p className="font-medium">{detail.maxScore}</p>
+                </div>
+              </div>
+
+              {detail.description && (
+                <div>
+                  <h4 className="font-semibold text-sm text-gray-700 mb-1">Description</h4>
+                  <p className="text-gray-700 whitespace-pre-line">{detail.description}</p>
+                </div>
+              )}
+
+              {detail.instructions && (
+                <div>
+                  <h4 className="font-semibold text-sm text-gray-700 mb-1">Instructions</h4>
+                  <p className="text-gray-700 whitespace-pre-line">{detail.instructions}</p>
+                </div>
+              )}
+
+              {detail.attachments?.length > 0 && (
+                <div>
+                  <h4 className="font-semibold text-sm text-gray-700 mb-1">Attachments</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {detail.attachments.map((a, i) => (
+                      <a key={i} href={a.url} target="_blank" rel="noopener noreferrer"
+                        className="flex items-center gap-1 bg-indigo-50 text-indigo-700 px-3 py-1 rounded-lg text-sm hover:bg-indigo-100">
+                        <i className="fas fa-paperclip"></i>{a.name}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <h4 className="font-semibold text-sm text-gray-700 mb-2">
+                  Questions ({detail.Questions?.length || 0})
+                </h4>
+                <div className="space-y-2">
+                  {(detail.Questions || []).map((q, i) => (
+                    <div key={q.id || i} className="border rounded-lg p-3 bg-gray-50">
+                      <div className="flex justify-between items-start mb-1">
+                        <span className="text-xs font-bold text-indigo-600">Q{i + 1}</span>
+                        <span className="text-xs text-gray-500">{q.points} pt{q.points !== 1 ? 's' : ''}</span>
+                      </div>
+                      <p className="font-medium text-gray-800 mb-2">{q.questionText}</p>
+                      {q.questionType === 'MULTIPLE_CHOICE' && (
+                        <div className="space-y-1 text-sm">
+                          {(q.options || []).map((o, oi) => {
+                            const isCorrect = canCreate && q.correctAnswer === o.key;
+                            return (
+                              <div key={oi} className={`px-2 py-1 rounded ${isCorrect ? 'bg-green-100 text-green-800' : 'text-gray-700'}`}>
+                                <span className="font-mono mr-2">{o.key}.</span>{o.text}
+                                {isCorrect && <span className="ml-2 text-xs">✓ correct</span>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {q.questionType === 'SHORT_ANSWER' && canCreate && q.correctAnswer && (
+                        <p className="text-xs text-green-700 mt-1">Expected: <strong>{q.correctAnswer}</strong></p>
+                      )}
+                      <p className="text-xs text-gray-500 mt-1">
+                        Type: {q.questionType.replace(/_/g, ' ').toLowerCase()}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {isStudent && detail.mySubmission && (
+                <div className={`rounded-lg p-4 border ${detail.mySubmission.status === 'GRADED' ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-200'}`}>
+                  <h4 className="font-semibold text-sm mb-1">Your Submission</h4>
+                  <div className="flex items-center gap-3 text-sm">
+                    <span className={`px-2 py-0.5 rounded-full ${getSubmissionBadge(detail.mySubmission.status)}`}>
+                      {detail.mySubmission.status}
+                    </span>
+                    <span className="text-gray-600">Submitted {formatDate(detail.mySubmission.submittedAt)}</span>
+                  </div>
+                  {detail.mySubmission.status === 'GRADED' && (
+                    <>
+                      <p className="text-2xl font-bold text-indigo-600 mt-2">
+                        {detail.mySubmission.score}/{detail.maxScore}
+                      </p>
+                      {detail.mySubmission.feedback && (
+                        <p className="text-sm text-gray-700 mt-1 whitespace-pre-line">
+                          <strong>Feedback:</strong> {detail.mySubmission.feedback}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {canCreate && (
+                <div>
+                  <h4 className="font-semibold text-sm text-gray-700 mb-2 flex items-center gap-2">
+                    Submissions
+                    {loadingSubs ? <i className="fas fa-spinner fa-spin text-xs"></i> :
+                      <span className="text-xs text-gray-500">({gradedCount}/{submissions.length} graded)</span>}
+                  </h4>
+                  {submissions.length === 0 && !loadingSubs ? (
+                    <p className="text-sm text-gray-500 italic">No submissions yet.</p>
+                  ) : (
+                    <div className="overflow-auto border rounded-lg">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-3 py-2 text-left">Student</th>
+                            <th className="px-3 py-2 text-left">Submitted</th>
+                            <th className="px-3 py-2 text-left">Status</th>
+                            <th className="px-3 py-2 text-left">Score</th>
+                            <th className="px-3 py-2 text-left">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {submissions.map(s => (
+                            <tr key={s.id} className="hover:bg-gray-50">
+                              <td className="px-3 py-2">
+                                {s.Student?.firstName} {s.Student?.lastName}
+                                <div className="text-xs text-gray-500">{s.Student?.admissionNumber}</div>
+                              </td>
+                              <td className="px-3 py-2 text-xs">
+                                {formatDate(s.submittedAt)}
+                                {s.isLate && <span className="ml-1 text-red-500">(late)</span>}
+                              </td>
+                              <td className="px-3 py-2">
+                                <span className={`text-xs px-2 py-0.5 rounded-full ${getSubmissionBadge(s.status)}`}>
+                                  {s.status}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 font-medium">
+                                {s.status === 'GRADED' ? `${s.score}/${detail.maxScore}` : '—'}
+                              </td>
+                              <td className="px-3 py-2">
+                                <button onClick={() => {
+                                  setShowDetailModal(false);
+                                  setSelectedHomework(detail);
+                                  setShowGradeModal(true);
+                                }}
+                                  className="text-xs px-2 py-1 bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200">
+                                  Grade
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {isStudent && !detail.mySubmission && detail.status === 'PUBLISHED' && (
+                <div className="pt-3 border-t">
+                  <button onClick={() => {
+                    setShowDetailModal(false);
+                    setSelectedHomework(detail);
+                    setShowSubmitModal(true);
+                  }}
+                    className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 flex items-center justify-center gap-2">
+                    <i className="fas fa-pen"></i>Start Homework
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-center py-8 text-gray-500">Not found.</p>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // ==================== SUBMIT MODAL ====================
+  const HomeworkSubmitModal = () => {
+    const [homework, setHomework] = useState(null);
+    const [answers, setAnswers] = useState({});
+    const [uploading, setUploading] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
+    const [localError, setLocalError] = useState('');
+    const [loading, setLoading] = useState(false);
+    const startTime = useRef(Date.now());
+
+    useEffect(() => {
+      if (!selectedHomework) return;
+      const load = async () => {
+        setLoading(true);
+        try {
+          const res = await api.get(`/homework/${selectedHomework.id}`);
+          const hw = res.data.homework;
+          setHomework(hw);
+          // Pre-fill from existing submission
+          const init = {};
+          (hw.mySubmission?.answers || []).forEach(a => { init[a.questionId] = a.answer || ''; });
+          setAnswers(init);
+        } catch (err) {
+          setError('Failed to load homework');
+        } finally {
+          setLoading(false);
+        }
+      };
+      load();
+      startTime.current = Date.now();
+    }, [selectedHomework?.id]);
+
+    const setAnswer = (qid, value) => setAnswers(prev => ({ ...prev, [qid]: value }));
+
+    const handleFileUpload = async (qid, file) => {
+      if (!file) return;
+      setUploading(true);
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        const res = await api.post('/upload/homework', fd, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+        setAnswer(qid, res.data.file.url);
+      } catch (err) {
+        setLocalError('File upload failed');
+      } finally {
+        setUploading(false);
+      }
+    };
+
+    const handleSubmit = async () => {
+      setLocalError('');
+      if (!homework) return;
+
+      // Validate all questions answered
+      for (const q of homework.Questions || []) {
+        if (!answers[q.id] || !answers[q.id].toString().trim()) {
+          setLocalError(`Please answer all questions (Q${(homework.Questions.indexOf(q)) + 1} is empty)`);
+          return;
+        }
+      }
+
+      setSubmitting(true);
+      try {
+        const payload = {
+          answers: (homework.Questions || []).map(q => ({
+            questionId: q.id,
+            answer: answers[q.id] || ''
+          })),
+          timeSpentSeconds: Math.round((Date.now() - startTime.current) / 1000)
+        };
+        await api.post(`/homework/${homework.id}/submit`, payload);
+        setSuccess('✅ Homework submitted!');
+        setTimeout(() => setSuccess(''), 3000);
+        setShowSubmitModal(false);
+        loadHomeworks();
+      } catch (err) {
+        setLocalError(err.response?.data?.message || 'Failed to submit');
+      } finally {
+        setSubmitting(false);
+      }
+    };
+
+    if (!homework && !loading) return null;
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto p-4">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl p-6 max-h-[92vh] overflow-auto">
+          <div className="flex justify-between items-center mb-4 sticky top-0 bg-white z-10 pb-3 border-b">
+            <div>
+              <h3 className="text-xl font-bold">{homework?.title}</h3>
+              <p className="text-xs text-gray-500">
+                {homework?.Questions?.length} questions • Max {homework?.maxScore} points
+              </p>
+            </div>
+            <button onClick={() => setShowSubmitModal(false)}
+              className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+          </div>
+
+          {localError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-lg mb-4 text-sm">
+              <i className="fas fa-exclamation-circle mr-2"></i>{localError}
+            </div>
+          )}
+
+          {loading ? (
+            <div className="text-center py-12">
+              <i className="fas fa-spinner fa-spin text-2xl text-gray-400"></i>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {homework.description && (
+                <div className="bg-blue-50 rounded-lg p-3 text-sm text-blue-800 whitespace-pre-line">
+                  {homework.description}
+                </div>
+              )}
+              {homework.instructions && (
+                <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-700 whitespace-pre-line">
+                  <strong>Instructions:</strong> {homework.instructions}
+                </div>
+              )}
+
+              {(homework.Questions || []).map((q, idx) => (
+                <div key={q.id} className="border rounded-lg p-4">
+                  <div className="flex justify-between items-start mb-2">
+                    <span className="text-xs font-bold text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded">
+                      Q{idx + 1}
+                    </span>
+                    <span className="text-xs text-gray-500">{q.points} pt{q.points !== 1 ? 's' : ''}</span>
+                  </div>
+                  <p className="font-medium text-gray-800 mb-3">{q.questionText}</p>
+
+                  {q.questionType === 'MULTIPLE_CHOICE' && (
+                    <div className="space-y-2">
+                      {(q.options || []).map(o => (
+                        <label key={o.key}
+                          className={`flex items-center gap-2 p-2 rounded cursor-pointer transition-colors ${
+                            answers[q.id] === o.key
+                              ? 'bg-indigo-50 border border-indigo-300'
+                              : 'hover:bg-gray-50 border border-transparent'
+                          }`}>
+                          <input type="radio"
+                            name={`q-${q.id}`}
+                            value={o.key}
+                            checked={answers[q.id] === o.key}
+                            onChange={() => setAnswer(q.id, o.key)} />
+                          <span className="font-mono text-sm text-gray-500">{o.key}.</span>
+                          <span>{o.text}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+
+                  {q.questionType === 'SHORT_ANSWER' && (
+                    <input type="text"
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      value={answers[q.id] || ''}
+                      onChange={(e) => setAnswer(q.id, e.target.value)}
+                      placeholder="Your answer..." />
+                  )}
+
+                  {q.questionType === 'LONG_ANSWER' && (
+                    <textarea rows="5"
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      value={answers[q.id] || ''}
+                      onChange={(e) => setAnswer(q.id, e.target.value)}
+                      placeholder="Write your answer..." />
+                  )}
+
+                  {q.questionType === 'FILE_UPLOAD' && (
+                    <div>
+                      {answers[q.id] ? (
+                        <div className="flex items-center gap-2 bg-gray-100 px-3 py-2 rounded-lg">
+                          <i className="fas fa-paperclip"></i>
+                          <a href={answers[q.id]} target="_blank" rel="noopener noreferrer"
+                            className="text-indigo-600 hover:underline text-sm">View uploaded file</a>
+                          <button onClick={() => setAnswer(q.id, '')}
+                            className="ml-auto text-red-500 text-xs">Remove</button>
+                        </div>
+                      ) : (
+                        <input type="file"
+                          onChange={(e) => handleFileUpload(q.id, e.target.files?.[0])}
+                          disabled={uploading} />
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              <div className="flex justify-end gap-2 pt-4 border-t">
+                <button onClick={() => setShowSubmitModal(false)}
+                  disabled={submitting}
+                  className="px-5 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 disabled:opacity-50">
+                  Cancel
+                </button>
+                <button onClick={handleSubmit} disabled={submitting || uploading}
+                  className="px-5 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2">
+                  {submitting
+                    ? <><i className="fas fa-spinner fa-spin"></i>Submitting...</>
+                    : <><i className="fas fa-paper-plane"></i>Submit Homework</>}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // ==================== GRADE MODAL ====================
+  const HomeworkGradeModal = () => {
+    const [homework, setHomework] = useState(null);
+    const [submissions, setSubmissions] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [activeSubmission, setActiveSubmission] = useState(null);
+    const [grades, setGrades] = useState({});        // { [questionId]: pointsAwarded }
+    const [feedback, setFeedback] = useState('');
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+      if (!selectedHomework) return;
+      const load = async () => {
+        setLoading(true);
+        try {
+          const res = await api.get(`/homework/${selectedHomework.id}/submissions`);
+          setHomework(res.data.homework);
+          setSubmissions(res.data.submissions || []);
+        } catch (err) {
+          setError('Failed to load submissions');
+        } finally {
+          setLoading(false);
+        }
+      };
+      load();
+    }, [selectedHomework?.id]);
+
+    const openSubmission = (sub) => {
+      setActiveSubmission(sub);
+      setFeedback(sub.feedback || '');
+      const g = {};
+      (sub.answers || []).forEach(a => {
+        const q = homework.Questions.find(x => x.id === a.questionId);
+        g[a.questionId] = a.pointsAwarded ?? (a.isCorrect ? (q?.points || 0) : 0);
+      });
+      setGrades(g);
+    };
+
+    const totalFromGrades = useMemo(() => {
+      return Object.values(grades).reduce((sum, v) => sum + (parseInt(v) || 0), 0);
+    }, [grades]);
+
+    const saveGrade = async () => {
+      if (!activeSubmission) return;
+      setSaving(true);
+      try {
+        const perQuestion = Object.entries(grades).map(([questionId, pointsAwarded]) => ({
+          questionId,
+          pointsAwarded: parseInt(pointsAwarded) || 0
+        }));
+        await api.patch(`/homework/submissions/${activeSubmission.id}/grade`, {
+          perQuestion,
+          feedback
+        });
+        setSuccess('✅ Grade saved');
+        setTimeout(() => setSuccess(''), 3000);
+        // Refresh
+        const res = await api.get(`/homework/${selectedHomework.id}/submissions`);
+        setSubmissions(res.data.submissions || []);
+        setActiveSubmission(null);
+      } catch (err) {
+        setError(err.response?.data?.message || 'Failed to save grade');
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto p-4">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl p-6 max-h-[92vh] overflow-auto">
+          <div className="flex justify-between items-center mb-4 sticky top-0 bg-white z-10 pb-3 border-b">
+            <div>
+              <h3 className="text-xl font-bold">
+                {activeSubmission ? 'Grade Submission' : 'Submissions'}
+              </h3>
+              <p className="text-xs text-gray-500">{homework?.title}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              {activeSubmission && (
+                <button onClick={() => setActiveSubmission(null)}
+                  className="text-sm px-3 py-1 bg-gray-100 rounded-lg hover:bg-gray-200">
+                  ← Back to list
+                </button>
+              )}
+              <button onClick={() => setShowGradeModal(false)}
+                className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="text-center py-12">
+              <i className="fas fa-spinner fa-spin text-2xl text-gray-400"></i>
+            </div>
+          ) : !activeSubmission ? (
+            submissions.length === 0 ? (
+              <p className="text-center py-8 text-gray-500">No submissions yet.</p>
+            ) : (
+              <div className="overflow-auto border rounded-lg">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left">Student</th>
+                      <th className="px-3 py-2 text-left">Submitted</th>
+                      <th className="px-3 py-2 text-left">Status</th>
+                      <th className="px-3 py-2 text-left">Score</th>
+                      <th className="px-3 py-2 text-left"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {submissions.map(s => (
+                      <tr key={s.id} className="hover:bg-gray-50">
+                        <td className="px-3 py-2">
+                          {s.Student?.firstName} {s.Student?.lastName}
+                          <div className="text-xs text-gray-500">{s.Student?.admissionNumber}</div>
+                        </td>
+                        <td className="px-3 py-2 text-xs">
+                          {formatDate(s.submittedAt)}
+                          {s.isLate && <span className="ml-1 text-red-500">(late)</span>}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${getSubmissionBadge(s.status)}`}>
+                            {s.status}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 font-medium">
+                          {s.status === 'GRADED' ? `${s.score}/${homework.maxScore}` : '—'}
+                        </td>
+                        <td className="px-3 py-2">
+                          <button onClick={() => openSubmission(s)}
+                            className="text-xs px-3 py-1 bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200">
+                            {s.status === 'GRADED' ? 'Re-grade' : 'Grade'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          ) : (
+            <div className="space-y-4">
+              <div className="bg-gray-50 rounded-lg p-3 text-sm">
+                <strong>{activeSubmission.Student?.firstName} {activeSubmission.Student?.lastName}</strong>
+                <span className="text-gray-500 ml-2">• {activeSubmission.Student?.admissionNumber}</span>
+                <span className="text-gray-500 ml-2">• Submitted {formatDate(activeSubmission.submittedAt)}</span>
+                {activeSubmission.isLate && <span className="text-red-500 ml-2">(late)</span>}
+              </div>
+
+              {(homework.Questions || []).map((q, idx) => {
+                const ans = (activeSubmission.answers || []).find(a => a.questionId === q.id);
+                return (
+                  <div key={q.id} className="border rounded-lg p-4">
+                    <div className="flex justify-between items-start mb-2">
+                      <span className="text-xs font-bold text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded">
+                        Q{idx + 1}
+                      </span>
+                      <span className="text-xs text-gray-500">Max {q.points} pt{q.points !== 1 ? 's' : ''}</span>
+                    </div>
+                    <p className="font-medium text-gray-800 mb-2">{q.questionText}</p>
+
+                    {q.questionType === 'MULTIPLE_CHOICE' && (
+                      <div className="space-y-1 mb-3 text-sm">
+                        {(q.options || []).map(o => (
+                          <div key={o.key}
+                            className={`px-2 py-1 rounded ${
+                              o.key === q.correctAnswer ? 'bg-green-100 text-green-800' :
+                              o.key === ans?.answer ? 'bg-red-100 text-red-800' :
+                              'text-gray-700'
+                            }`}>
+                            <span className="font-mono mr-2">{o.key}.</span>{o.text}
+                            {o.key === q.correctAnswer && <span className="ml-2 text-xs">✓</span>}
+                            {o.key === ans?.answer && o.key !== q.correctAnswer && (
+                              <span className="ml-2 text-xs">← student's answer</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {q.questionType === 'SHORT_ANSWER' && (
+                      <div className="text-sm space-y-1 mb-3">
+                        <p><strong>Student's answer:</strong> {ans?.answer || '—'}</p>
+                        {q.correctAnswer && (
+                          <p className="text-green-700"><strong>Expected:</strong> {q.correctAnswer}</p>
+                        )}
+                      </div>
+                    )}
+
+                    {q.questionType === 'LONG_ANSWER' && (
+                      <div className="bg-gray-50 rounded-lg p-3 mb-3 text-sm whitespace-pre-line">
+                        {ans?.answer || '—'}
+                      </div>
+                    )}
+
+                    {q.questionType === 'FILE_UPLOAD' && ans?.answer && (
+                      <div className="mb-3">
+                        <a href={ans.answer} target="_blank" rel="noopener noreferrer"
+                          className="text-indigo-600 hover:underline text-sm">
+                          <i className="fas fa-paperclip mr-1"></i>View submitted file
+                        </a>
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-3">
+                      <label className="text-sm text-gray-600">Points awarded:</label>
+                      <input type="number" min="0" max={q.points}
+                        className="w-24 px-3 py-1 border rounded-lg text-sm"
+                        value={grades[q.id] ?? ''}
+                        onChange={(e) => setGrades(prev => ({ ...prev, [q.id]: e.target.value }))} />
+                      <span className="text-sm text-gray-500">/ {q.points}</span>
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Feedback</label>
+                <textarea rows="3"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  value={feedback}
+                  onChange={(e) => setFeedback(e.target.value)}
+                  placeholder="Comments for the student..." />
+              </div>
+
+              <div className="flex items-center justify-between pt-4 border-t">
+                <div className="text-lg font-bold text-indigo-600">
+                  Total: {totalFromGrades} / {homework?.maxScore}
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => setActiveSubmission(null)}
+                    className="px-5 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">
+                    Cancel
+                  </button>
+                  <button onClick={saveGrade} disabled={saving}
+                    className="px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center gap-2">
+                    {saving
+                      ? <><i className="fas fa-spinner fa-spin"></i>Saving...</>
+                      : <><i className="fas fa-save"></i>Save Grade</>}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // ==================== RENDER: PARENT ====================
+  if (isParent) {
+    return (
+      <div className="space-y-6">
+        {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
+
+        <div>
+          <h2 className="text-2xl font-bold">📚 My Children's Homework</h2>
+          <p className="text-sm text-gray-500 mt-1">View homework assigned to your child and their grades.</p>
+        </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+            <i className="fas fa-exclamation-circle mr-2"></i>{error}
+          </div>
+        )}
+
+        {myChildren.length === 0 && !loadingChildren ? (
+          <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+            <i className="fas fa-child text-6xl text-gray-300 mb-4"></i>
+            <p className="text-gray-500">No children linked to your account.</p>
+          </div>
+        ) : (
+          <>
+            <div className="bg-white p-6 rounded-xl shadow-sm">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Select Child</label>
+              <select value={selectedChild?.id || ''}
+                onChange={(e) => {
+                  const c = myChildren.find(x => x.id === e.target.value);
+                  setSelectedChild(c);
+                }}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
+                <option value="">-- Select Child --</option>
+                {myChildren.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.firstName} {c.lastName} ({c.admissionNumber})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {filteredHomeworks.length === 0 && !loading && selectedChild && (
+              <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+                <i className="fas fa-book-open text-5xl text-gray-300 mb-3"></i>
+                <p className="text-gray-500">No homework assigned yet.</p>
+              </div>
+            )}
+
+            <div className="space-y-3">
+              {filteredHomeworks.map(hw => {
+                const mySub = hw.Submissions?.[0] || null;
+                return (
+                  <div key={hw.id}
+                    onClick={() => { setSelectedHomework(hw); setShowDetailModal(true); }}
+                    className="bg-white rounded-xl shadow-sm p-5 hover:shadow-md transition-shadow cursor-pointer border border-gray-100">
+                    <div className="flex justify-between items-start gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="text-lg font-bold text-gray-800 truncate">{hw.title}</h3>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${getStatusBadge(hw.status)}`}>
+                            {hw.status}
+                          </span>
+                        </div>
+                        {hw.description && (
+                          <p className="text-sm text-gray-600 mt-1 line-clamp-2">{hw.description}</p>
+                        )}
+                        <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-gray-500">
+                          <span><i className="fas fa-user-tie mr-1"></i>{hw.Teacher?.firstName} {hw.Teacher?.lastName}</span>
+                          <span><i className="fas fa-bookmark mr-1"></i>{scopeLabel(hw)}</span>
+                          {subjectLabel(hw) !== '—' && (
+                            <span><i className="fas fa-book mr-1"></i>{subjectLabel(hw)}</span>
+                          )}
+                          <span><i className="fas fa-calendar mr-1"></i>Due: {formatDateShort(hw.dueDate)}</span>
+                        </div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        {mySub ? (
+                          <>
+                            <span className={`text-xs px-2 py-1 rounded-full ${getSubmissionBadge(mySub.status)}`}>
+                              {mySub.status === 'GRADED' ? '✓ Graded' : '✓ Submitted'}
+                            </span>
+                            {mySub.status === 'GRADED' && (
+                              <p className="text-lg font-bold text-indigo-600 mt-2">
+                                {mySub.score}/{hw.maxScore}
+                              </p>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-700">
+                            Not submitted
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {showDetailModal && selectedHomework && <HomeworkDetailModal />}
+      </div>
+    );
+  }
+
+  // ==================== RENDER: STUDENT / TEACHER / ADMIN ====================
+  return (
+    <div className="space-y-6">
+      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
+
+      <div className="flex justify-between items-center flex-wrap gap-4">
+        <div>
+          <h2 className="text-2xl font-bold">📚 Homework</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            {isStudent ? 'View and submit your homework' :
+             isTeacher ? 'Create homework and grade submissions' :
+             'Manage all homework in your school'}
+          </p>
+        </div>
+        {canCreate && (
+          <button onClick={() => { setEditingHomework(null); setShowCreateModal(true); }}
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2">
+            <i className="fas fa-plus"></i>Create Homework
+          </button>
+        )}
+      </div>
+
+      {success && (
+        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center justify-between">
+          <span><i className="fas fa-check-circle mr-2"></i>{success}</span>
+          <button onClick={() => setSuccess('')} className="text-green-500 hover:text-green-700">✕</button>
+        </div>
+      )}
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
+          <span><i className="fas fa-exclamation-circle mr-2"></i>{error}</span>
+          <button onClick={() => setError('')} className="text-red-500 hover:text-red-700">✕</button>
+        </div>
+      )}
+
+      {canCreate && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white">
+            <p className="text-sm opacity-90">Total</p>
+            <p className="text-2xl font-bold">{stats.total}</p>
+          </div>
+          <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl p-4 text-white">
+            <p className="text-sm opacity-90">Published</p>
+            <p className="text-2xl font-bold">{stats.published}</p>
+          </div>
+          <div className="bg-gradient-to-br from-gray-500 to-gray-600 rounded-xl p-4 text-white">
+            <p className="text-sm opacity-90">Drafts</p>
+            <p className="text-2xl font-bold">{stats.draft}</p>
+          </div>
+          <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-xl p-4 text-white">
+            <p className="text-sm opacity-90">Closed</p>
+            <p className="text-2xl font-bold">{stats.closed}</p>
+          </div>
+        </div>
+      )}
+
+      <div className="bg-white p-4 rounded-xl shadow-sm">
+        <div className="flex flex-wrap gap-3 items-center">
+          <div className="flex-1 min-w-[200px] relative">
+            <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+            <input type="text" placeholder="Search homework..."
+              className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)} />
+          </div>
+          {canCreate && (
+            <select value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
+              <option value="all">All Status</option>
+              <option value="DRAFT">Draft</option>
+              <option value="PUBLISHED">Published</option>
+              <option value="CLOSED">Closed</option>
+            </select>
+          )}
+          {canCreate && (
+            <div className="min-w-[200px]">
+              <SearchableSelect
+                value={filterScope}
+                onChange={(e) => setFilterScope(e.target.value)}
+                options={getEntityOptions()}
+                placeholder={`All ${getEntityLabel()}s`} />
+            </div>
+          )}
+          <span className="text-sm text-gray-500">
+            Showing {filteredHomeworks.length} of {homeworks.length}
+          </span>
+        </div>
+      </div>
+
+      {filteredHomeworks.length === 0 && !loading ? (
+        <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+          <i className="fas fa-book-open text-5xl text-gray-300 mb-3"></i>
+          <p className="text-gray-500">
+            {searchTerm ? 'No homework matches your search' : 'No homework created yet'}
+          </p>
+          {canCreate && !searchTerm && (
+            <button onClick={() => { setEditingHomework(null); setShowCreateModal(true); }}
+              className="mt-3 text-indigo-600 hover:text-indigo-800 font-medium">
+              Click here to create your first homework
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filteredHomeworks.map(hw => {
+            const questionsCount = hw.Questions?.length || 0;
+            const submissionsCount = hw.Submissions?.length || 0;
+            const mySub = hw.mySubmission || null;
+
+            return (
+              <div key={hw.id}
+                className="bg-white rounded-xl shadow-sm p-5 hover:shadow-md transition-shadow border border-gray-100">
+                <div className="flex justify-between items-start gap-4 flex-wrap">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-lg font-bold text-gray-800 hover:text-indigo-600 cursor-pointer truncate"
+                        onClick={() => { setSelectedHomework(hw); setShowDetailModal(true); }}>
+                        {hw.title}
+                      </h3>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${getStatusBadge(hw.status)}`}>
+                        {hw.status}
+                      </span>
+                      {hw.gradingMode === 'AUTO' && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-800">
+                          ⚡ Auto-graded
+                        </span>
+                      )}
+                      {hw.allowLateSubmission && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                          Late allowed
+                        </span>
+                      )}
+                    </div>
+                    {hw.description && (
+                      <p className="text-sm text-gray-600 mt-1 line-clamp-2">{hw.description}</p>
+                    )}
+                    <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-gray-500">
+                      {hw.Teacher && (
+                        <span><i className="fas fa-user-tie mr-1"></i>{hw.Teacher.firstName} {hw.Teacher.lastName}</span>
+                      )}
+                      <span><i className="fas fa-bookmark mr-1"></i>{scopeLabel(hw)}</span>
+                      {subjectLabel(hw) !== '—' && (
+                        <span><i className="fas fa-book mr-1"></i>{subjectLabel(hw)}</span>
+                      )}
+                      <span><i className="fas fa-question-circle mr-1"></i>{questionsCount} question{questionsCount !== 1 ? 's' : ''}</span>
+                      <span><i className="fas fa-calendar mr-1"></i>Due: {formatDateShort(hw.dueDate)}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {canCreate && (
+                      <>
+                        <div className="text-center mr-2">
+                          <p className="text-xs text-gray-500">Submissions</p>
+                          <p className="font-bold text-gray-700">{submissionsCount}</p>
+                        </div>
+                        {hw.status === 'DRAFT' && (
+                          <button onClick={async (e) => {
+                            e.stopPropagation();
+                            if (!window.confirm(`Publish "${hw.title}"?`)) return;
+                            try {
+                              await api.patch(`/homework/${hw.id}/publish`);
+                              setSuccess('✅ Homework published');
+                              setTimeout(() => setSuccess(''), 3000);
+                              loadHomeworks();
+                            } catch (err) {
+                              setError(err.response?.data?.message || 'Failed to publish');
+                            }
+                          }}
+                            className="text-xs px-3 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200"
+                            title="Publish">
+                            <i className="fas fa-paper-plane mr-1"></i>Publish
+                          </button>
+                        )}
+                        <button onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedHomework(hw);
+                          setShowGradeModal(true);
+                        }}
+                          className="text-xs px-3 py-1 bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200"
+                          title="Grade submissions">
+                          <i className="fas fa-check-double mr-1"></i>Grade
+                        </button>
+                        <button onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingHomework(hw);
+                          setShowCreateModal(true);
+                        }}
+                          className="p-2 text-blue-600 hover:bg-blue-50 rounded"
+                          title="Edit">
+                          <i className="fas fa-edit"></i>
+                        </button>
+                        <button onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!window.confirm(`Delete "${hw.title}"? This cannot be undone.`)) return;
+                          try {
+                            await api.delete(`/homework/${hw.id}`);
+                            setSuccess('✅ Homework deleted');
+                            setTimeout(() => setSuccess(''), 3000);
+                            loadHomeworks();
+                          } catch (err) {
+                            setError(err.response?.data?.message || 'Failed to delete');
+                          }
+                        }}
+                          className="p-2 text-red-600 hover:bg-red-50 rounded"
+                          title="Delete">
+                          <i className="fas fa-trash"></i>
+                        </button>
+                      </>
+                    )}
+
+                    {isStudent && (
+                      <>
+                        {mySub ? (
+                          <div className="text-right">
+                            <span className={`text-xs px-2 py-1 rounded-full ${getSubmissionBadge(mySub.status)}`}>
+                              {mySub.status === 'GRADED' ? '✓ Graded' : '✓ Submitted'}
+                            </span>
+                            {mySub.status === 'GRADED' && (
+                              <p className="text-lg font-bold text-indigo-600 mt-1">
+                                {mySub.score}/{hw.maxScore}
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <button onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedHomework(hw);
+                            setShowSubmitModal(true);
+                          }}
+                            className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 text-sm font-medium">
+                            <i className="fas fa-pen mr-1"></i>Start
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {showCreateModal && <HomeworkCreateModal />}
+      {showDetailModal && selectedHomework && <HomeworkDetailModal />}
+      {showSubmitModal && selectedHomework && <HomeworkSubmitModal />}
+      {showGradeModal && selectedHomework && <HomeworkGradeModal />}
+    </div>
+  );
+};
 // ==================== MAIN APP COMPONENT ====================
 function App() {
   // ===== RESET PASSWORD ROUTE =====
@@ -64163,6 +66344,7 @@ function App() {
    const [roles, setRoles] = useState([]);
    const [roleSearchTerm, setRoleSearchTerm] = useState('');
 const [permissionSearchTerm, setPermissionSearchTerm] = useState('');
+const [examCardOverrides, setExamCardOverrides] = useState([]);
   
   const [dashboardSections, setDashboardSections] = useState([]);
   const [schoolSettings, setSchoolSettings] = useState({
@@ -64338,38 +66520,38 @@ const canAccessModule = (user, moduleId) => {
       'dashboard', 'results', 'attendance', 'exam-cards', 'timetable',
       'course-units', 'fee-statement', 'library', 'events', 'announcements',
       'settings', 'course-enrollment', 'unit-registration', 'live-classroom',
-      'online-exams'
+      'online-exams','homework' 
     ],
     'PARENT': [
       'dashboard', 'students', 'attendance', 'results', 'exam-cards',
       'fee-statement', 'library', 'timetable', 'events', 'announcements',
-      'settings'
+      'settings','homework' 
     ],
     'TEACHER': [
       'dashboard', 'students', 'classes', 'subjects', 'exams', 'results',
       'attendance', 'timetable', 'schemes-of-work', 'student-arrival',
       'unit-registration', 'card-management', 'certificates', 'alumni',
       'live-classroom', 'online-exams', 'receptionist', 'announcements',
-      'events', 'settings', 'labs'
+      'events', 'settings', 'labs','homework' 
     ],
     'CLASS_TEACHER': [
       'dashboard', 'students', 'classes', 'subjects', 'exams', 'results',
       'attendance', 'timetable', 'schemes-of-work', 'student-arrival',
       'card-management', 'certificates', 'alumni', 'live-classroom',
       'online-exams', 'receptionist', 'announcements', 'events', 'settings',
-      'labs'
+      'labs','homework' 
     ],
     'SUBJECT_TEACHER': [
       'dashboard', 'students', 'subjects', 'exams', 'results', 'attendance',
       'timetable', 'schemes-of-work', 'student-arrival', 'live-classroom',
-      'online-exams', 'settings', 'labs'
+      'online-exams', 'settings', 'labs','homework' 
     ],
     'SENIOR_TEACHER': [
       'dashboard', 'students', 'classes', 'subjects', 'exams', 'results',
       'attendance', 'timetable', 'schemes-of-work', 'student-arrival',
       'card-management', 'certificates', 'alumni', 'live-classroom',
       'online-exams', 'receptionist', 'announcements', 'events', 'settings',
-      'labs'
+      'labs','homework' 
     ],
     'LECTURER': [
       'dashboard', 'students', 'attendance', 'results', 'exams', 'timetable',
@@ -64422,14 +66604,14 @@ const canAccessModule = (user, moduleId) => {
       'staff-attendance', 'payroll', 'card-management', 'certificates',
       'alumni', 'live-classroom', 'online-exams', 'receptionist', 'events',
       'announcements', 'messages', 'settings', 'course-enrollment',
-      'unit-registration', 'health', 'sickbay', 'labs'
+      'unit-registration', 'health', 'sickbay', 'labs','homework' 
     ],
     'DEPUTY_PRINCIPAL': [
       'dashboard', 'students', 'attendance', 'timetable', 'exams', 'results',
       'schemes-of-work', 'promotion', 'exam-cards', 'student-arrival',
       'card-management', 'certificates', 'alumni', 'live-classroom',
       'online-exams', 'receptionist', 'events', 'announcements', 'settings',
-      'course-enrollment', 'unit-registration', 'labs'
+      'course-enrollment', 'unit-registration', 'labs','homework' 
     ],
     'ACCOUNTANT': [
       'dashboard', 'fees', 'fee-allocation', 'fee-collection', 'receipt-history',
@@ -64471,7 +66653,7 @@ const canAccessModule = (user, moduleId) => {
       'certificates', 'alumni', 'live-classroom', 'online-exams',
       'receptionist', 'events', 'announcements', 'messages', 'settings',
       'course-enrollment', 'unit-registration', 'health', 'sickbay',
-      'faculties', 'departments', 'courses', 'programs', 'labs', 'research'
+      'faculties', 'departments', 'courses', 'programs', 'labs', 'research','homework' 
     ]
   };
 
@@ -64570,6 +66752,25 @@ useEffect(() => {
     window.removeEventListener('switchModule', handleSwitchModule);
   };
 }, []);
+
+
+// ✅ Load exam card overrides whenever the user or school changes
+useEffect(() => {
+  const loadExamCardOverrides = async () => {
+    if (!user) {
+      setExamCardOverrides([]);
+      return;
+    }
+    try {
+      const res = await api.get('/exam-card-overrides');
+      setExamCardOverrides(res.data.overrides || []);
+    } catch (err) {
+      console.error('Failed to load exam card overrides:', err);
+      setExamCardOverrides([]);
+    }
+  };
+  loadExamCardOverrides();
+}, [user?.id, currentSchool?.id]);
   // ===== 4. HELPER FUNCTIONS =====
   const getFilteredSchools = () => {
     if (!filterCategory) return schools;
@@ -64608,6 +66809,7 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
       { icon: "file-alt", label: "My Results", id: 'results' },
       { icon: "calendar-check", label: "My Attendance", id: 'attendance' },
       { icon: "id-card", label: "Exam Card", id: 'exam-cards' },
+      { icon: "book-open", label: "Homework", id: 'homework' },
       { icon: "clock", label: "Timetable", id: 'timetable' },
       { icon: "money-bill", label: "Fee Statement", id: 'fee-statement' },
       { icon: "book-open", label: "Library", id: 'library' },
@@ -64647,6 +66849,7 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
       { icon: "calendar-check", label: "Attendance", id: 'attendance' },
       { icon: "file-alt", label: "Results", id: 'results' },
       { icon: "id-card", label: "Exam Cards", id: 'exam-cards' },
+      { icon: "book-open", label: "Homework", id: 'homework' },
       { icon: "money-bill", label: "Fee Statement", id: 'fee-statement' },
       { icon: "book-open", label: "Library", id: 'library' },
       { icon: "clock", label: "Timetable", id: 'timetable' },
@@ -64668,6 +66871,7 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
     let teacherItems = [
       { icon: "users", label: "My Students", id: 'students' },
       { icon: "calendar-check", label: "Take Attendance", id: 'attendance' },
+      { icon: "book-open", label: "Homework", id: 'homework' },
       { icon: "edit", label: "Enter Results", id: 'results' },
       { icon: "file-alt", label: "Exams", id: 'exams' },
       { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' },
@@ -64886,6 +67090,7 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
         title: "STUDENT MANAGEMENT",
         items: [
           { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
+          { icon: "book-open", label: "Homework", id: 'homework' },
           { icon: "stethoscope", label: "Health Records", id: 'health' },
           { icon: "bed", label: "Sick Bay", id: 'sickbay' }
         ]
@@ -64950,6 +67155,7 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
           { icon: "calendar-check", label: "Attendance", id: 'attendance' },
           { icon: "clock", label: "Timetable", id: 'timetable' },
           { icon: "id-card", label: "Exam Cards", id: 'exam-cards' },
+          { icon: "book-open", label: "Homework", id: 'homework' },
           { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
           { icon: "microscope", label: "Labs", id: 'labs' }
         ]
@@ -65250,6 +67456,7 @@ if (isTVET) {
         { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
         { icon: "calendar-check", label: "Attendance", id: 'attendance' },
         { icon: "id-card", label: "Exam Cards", id: 'exam-cards' },
+        { icon: "book-open", label: "Homework", id: 'homework' },
         { icon: "arrow-up", label: "Promotion", id: 'promotion' },
         { icon: "stethoscope", label: "Health Records", id: 'health' },
         { icon: "bed", label: "Sick Bay", id: 'sickbay' }
@@ -67544,6 +69751,8 @@ return (
             user={user}
             admissionNumber={studentAdmissionNumber}
             unitRegistrations={unitRegistrations}
+              examCardOverrides={examCardOverrides}
+  setExamCardOverrides={setExamCardOverrides}
           />
         )}
 
@@ -68252,6 +70461,19 @@ return (
             setActiveTab={setActiveTab}
           />
         )}
+
+        {activeModule === 'homework' && canAccessModule(user, 'homework') && (
+  <HomeworkModule
+    user={user}
+    students={students}
+    classes={classes}
+    programs={programs}
+    courses={courses}
+    subjects={subjects}
+    units={units}
+    currentSchool={currentSchool}
+  />
+)}
 
         {/* ==================== END OF MODULE RENDERING ==================== */}
       </div>
