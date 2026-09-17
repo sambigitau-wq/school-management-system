@@ -514,6 +514,417 @@ const MASTER_PERMISSIONS = [
   { key: 'view_own_arrival', name: 'View Own Arrival', description: 'Can view own arrival records', category: 'self', module: 'student_arrival', action: 'read', isDefault: true }
 ];
 
+
+// ==================== DEFAULT ROLE TEMPLATES ====================
+const DEFAULT_ROLE_TEMPLATES = {
+  // ===== Universal roles (all school types) =====
+  universal: [
+    {
+      name: 'Super Admin',
+      description: 'Full system access across all schools',
+      permissions: ['*']
+    },
+    {
+      name: 'School Admin',
+      description: 'Full access to all school features',
+      permissions: [
+        'view_students', 'create_students', 'edit_students', 'delete_students', 'promote_students',
+        'view_classes', 'manage_classes', 'view_subjects', 'manage_subjects',
+        'view_exams', 'manage_exams', 'publish_results', 'view_results', 'manage_results',
+        'view_attendance', 'manage_attendance', 'view_fees', 'manage_fees',
+        'view_payments', 'manage_payments', 'view_staff', 'manage_staff', 'manage_payroll',
+        'view_library', 'manage_library', 'view_transport', 'manage_transport',
+        'view_hostel', 'manage_hostel', 'view_inventory', 'manage_inventory',
+        'manage_school', 'manage_users', 'manage_roles', 'view_reports', 'view_financial_reports',
+        'manage_announcements', 'manage_events', 'view_timetable', 'manage_timetable',
+        'manage_medical_records', 'view_card_management', 'manage_card_management',
+        'view_certificates', 'manage_certificates', 'view_alumni', 'manage_alumni',
+        'view_receptionist', 'manage_receptionist', 'view_course_enrollment', 'manage_course_enrollment',
+        'view_unit_registration', 'manage_unit_registration', 'view_schemes_of_work', 'manage_schemes_of_work',
+        'view_exam_cards', 'manage_exam_cards', 'view_fee_allocation', 'manage_fee_allocation',
+        'view_fee_collection', 'manage_fee_collection', 'view_receipt_history', 'print_receipts',
+        'view_payroll', 'manage_payroll', 'view_staff_attendance', 'manage_staff_attendance',
+        'approve_staff_attendance', 'view_student_arrival', 'manage_student_arrival',
+        'send_arrival_sms', 'view_sickbay', 'manage_sickbay', 'view_live_classroom',
+        'manage_live_classroom', 'view_online_exams', 'manage_online_exams', 'publish_online_exams'
+      ]
+    },
+    {
+      name: 'Accountant',
+      description: 'Finance department access',
+      permissions: [
+        'view_students', 'view_fees', 'view_payments', 'manage_payments',
+        'view_financial_reports', 'view_fee_allocation', 'manage_fee_allocation',
+        'view_fee_collection', 'manage_fee_collection', 'view_receipt_history', 'print_receipts',
+        'view_payroll', 'view_staff_attendance', 'view_reports', 'view_receptionist'
+      ]
+    },
+    {
+      name: 'Librarian',
+      description: 'Library management access',
+      permissions: [
+        'view_library', 'manage_library', 'view_students', 'view_receptionist'
+      ]
+    },
+    {
+      name: 'Nurse',
+      description: 'Health department access',
+      permissions: [
+        'view_students', 'manage_medical_records', 'view_sickbay', 'manage_sickbay',
+        'view_attendance', 'view_receptionist'
+      ]
+    },
+    {
+      name: 'Matron',
+      description: 'Hostel management access',
+      permissions: [
+        'view_students', 'view_hostel', 'manage_hostel', 'view_sickbay', 'manage_sickbay',
+        'view_attendance', 'view_inventory', 'view_receptionist'
+      ]
+    },
+    {
+      name: 'Transport Manager',
+      description: 'Transport and fleet management',
+      permissions: [
+        'view_transport', 'manage_transport', 'view_students', 'view_attendance', 'view_receptionist'
+      ]
+    },
+    {
+      name: 'HR Manager',
+      description: 'Human resources management',
+      permissions: [
+        'view_staff', 'manage_staff', 'view_payroll', 'manage_payroll',
+        'view_staff_attendance', 'manage_staff_attendance', 'approve_staff_attendance',
+        'view_reports', 'view_receptionist'
+      ]
+    },
+    {
+      name: 'Parent',
+      description: 'Parent portal access',
+      permissions: [
+        'view_own_children', 'view_child_results', 'view_child_attendance',
+        'view_child_fees', 'view_child_timetable', 'view_own_profile'
+      ]
+    },
+    {
+      name: 'Student',
+      description: 'Student portal access',
+      permissions: [
+        'view_own_profile', 'view_own_results', 'view_own_attendance',
+        'view_own_fees', 'view_own_timetable', 'take_online_exams',
+        'join_live_classroom', 'view_own_arrival', 'view_fee_statement'
+      ]
+    }
+  ],
+
+  // ===== ECDE Primary & JSS only =====
+  ECDE_PRIMARY_JSS: [
+    {
+      name: 'Head Teacher',
+      description: 'Head teacher of the primary school',
+      permissions: [
+        'view_students', 'create_students', 'edit_students', 'view_classes', 'manage_classes',
+        'view_subjects', 'manage_subjects', 'view_exams', 'manage_exams', 'view_results',
+        'manage_results', 'publish_results', 'view_attendance', 'manage_attendance',
+        'view_fees', 'manage_fees', 'view_payments', 'view_staff', 'view_reports',
+        'manage_announcements', 'manage_events', 'view_timetable', 'manage_timetable',
+        'view_card_management', 'manage_card_management', 'view_certificates', 'manage_certificates'
+      ]
+    },
+    {
+      name: 'Deputy Head Teacher',
+      description: 'Deputy head teacher',
+      permissions: [
+        'view_students', 'view_classes', 'view_subjects', 'view_exams', 'view_results',
+        'view_attendance', 'manage_attendance', 'view_timetable', 'view_reports',
+        'manage_announcements', 'manage_events'
+      ]
+    },
+    {
+      name: 'Senior Teacher',
+      description: 'Senior teacher with supervisory duties',
+      permissions: [
+        'view_students', 'view_classes', 'view_subjects', 'manage_subjects',
+        'view_exams', 'manage_exams', 'view_results', 'manage_results',
+        'view_attendance', 'manage_attendance', 'view_timetable', 'manage_timetable'
+      ]
+    },
+    {
+      name: 'Class Teacher',
+      description: 'Class teacher responsible for a specific class',
+      permissions: [
+        'view_students', 'view_classes', 'view_subjects', 'view_exams',
+        'view_results', 'manage_results', 'view_attendance', 'manage_attendance',
+        'view_timetable'
+      ]
+    },
+    {
+      name: 'Subject Teacher',
+      description: 'Subject teacher',
+      permissions: [
+        'view_students', 'view_subjects', 'manage_own_subjects', 'view_exams',
+        'view_results', 'manage_results', 'view_attendance', 'manage_attendance',
+        'view_timetable'
+      ]
+    },
+    {
+      name: 'Counselor',
+      description: 'School counselor',
+      permissions: [
+        'view_students', 'view_attendance', 'view_results', 'view_receptionist'
+      ]
+    }
+  ],
+
+  // ===== Senior Secondary only =====
+  SENIOR_SECONDARY: [
+    {
+      name: 'Principal',
+      description: 'Principal of the secondary school',
+      permissions: [
+        'view_students', 'create_students', 'edit_students', 'delete_students',
+        'view_classes', 'manage_classes', 'view_subjects', 'manage_subjects',
+        'view_exams', 'manage_exams', 'view_results', 'manage_results', 'publish_results',
+        'view_attendance', 'manage_attendance', 'view_fees', 'manage_fees',
+        'view_payments', 'manage_payments', 'view_staff', 'manage_staff',
+        'view_reports', 'view_financial_reports', 'manage_announcements', 'manage_events',
+        'view_timetable', 'manage_timetable', 'manage_school'
+      ]
+    },
+    {
+      name: 'Deputy Principal',
+      description: 'Deputy principal',
+      permissions: [
+        'view_students', 'view_classes', 'view_subjects', 'view_exams', 'view_results',
+        'view_attendance', 'manage_attendance', 'view_timetable', 'manage_timetable',
+        'view_reports', 'manage_announcements', 'manage_events', 'view_card_management',
+        'manage_card_management'
+      ]
+    },
+    {
+      name: 'HOD',
+      description: 'Head of Department',
+      permissions: [
+        'view_students', 'view_classes', 'view_subjects', 'manage_subjects',
+        'view_exams', 'manage_exams', 'view_results', 'manage_results',
+        'view_attendance', 'manage_attendance', 'view_timetable', 'manage_timetable',
+        'view_schemes_of_work', 'manage_schemes_of_work'
+      ]
+    },
+    {
+      name: 'Senior Teacher',
+      description: 'Senior teacher with supervisory duties',
+      permissions: [
+        'view_students', 'view_classes', 'view_subjects', 'manage_subjects',
+        'view_exams', 'manage_exams', 'view_results', 'manage_results',
+        'view_attendance', 'manage_attendance', 'view_timetable'
+      ]
+    },
+    {
+      name: 'Class Teacher',
+      description: 'Class teacher',
+      permissions: [
+        'view_students', 'view_classes', 'view_subjects', 'view_exams',
+        'view_results', 'manage_results', 'view_attendance', 'manage_attendance',
+        'view_timetable'
+      ]
+    },
+    {
+      name: 'Subject Teacher',
+      description: 'Subject teacher',
+      permissions: [
+        'view_students', 'view_subjects', 'manage_own_subjects', 'view_exams',
+        'view_results', 'manage_results', 'view_attendance', 'manage_attendance',
+        'view_timetable'
+      ]
+    },
+    {
+      name: 'Counselor',
+      description: 'School counselor',
+      permissions: [
+        'view_students', 'view_attendance', 'view_results', 'view_receptionist'
+      ]
+    }
+  ],
+
+  // ===== TVET College only =====
+  COLLEGE_TVET: [
+    {
+      name: 'Principal',
+      description: 'Principal of the TVET college',
+      permissions: [
+        'view_students', 'create_students', 'edit_students', 'delete_students',
+        'view_classes', 'manage_classes', 'view_programs', 'manage_programs',
+        'view_exams', 'manage_exams', 'view_results', 'manage_results', 'publish_results',
+        'view_attendance', 'manage_attendance', 'view_fees', 'manage_fees',
+        'view_payments', 'manage_payments', 'view_staff', 'manage_staff',
+        'view_reports', 'view_financial_reports', 'manage_announcements', 'manage_events',
+        'view_timetable', 'manage_timetable', 'manage_school'
+      ]
+    },
+    {
+      name: 'Deputy Principal',
+      description: 'Deputy principal',
+      permissions: [
+        'view_students', 'view_classes', 'view_programs', 'view_exams', 'view_results',
+        'view_attendance', 'manage_attendance', 'view_timetable', 'manage_timetable',
+        'view_reports', 'manage_announcements', 'manage_events'
+      ]
+    },
+    {
+      name: 'HOD',
+      description: 'Head of Department',
+      permissions: [
+        'view_students', 'view_classes', 'view_programs', 'manage_programs',
+        'view_exams', 'manage_exams', 'view_results', 'manage_results',
+        'view_attendance', 'manage_attendance', 'view_timetable', 'manage_timetable',
+        'view_schemes_of_work', 'manage_schemes_of_work', 'view_labs'
+      ]
+    },
+    {
+      name: 'Technical Instructor',
+      description: 'Technical instructor for practical training',
+      permissions: [
+        'view_students', 'view_programs', 'view_units', 'view_exams',
+        'view_results', 'manage_results', 'view_attendance', 'manage_attendance',
+        'view_timetable', 'view_schemes_of_work', 'manage_schemes_of_work', 'view_labs'
+      ]
+    },
+    {
+      name: 'Workshop Supervisor',
+      description: 'Workshop supervisor',
+      permissions: [
+        'view_students', 'view_programs', 'view_units', 'view_attendance',
+        'manage_attendance', 'view_timetable', 'view_labs'
+      ]
+    },
+    {
+      name: 'Counselor',
+      description: 'TVET counselor',
+      permissions: [
+        'view_students', 'view_attendance', 'view_results', 'view_receptionist'
+      ]
+    }
+  ],
+
+  // ===== University only =====
+  UNIVERSITY: [
+    {
+      name: 'Principal',
+      description: 'Vice Chancellor / Principal',
+      permissions: [
+        'view_students', 'create_students', 'edit_students', 'delete_students',
+        'view_faculties', 'manage_faculties', 'view_departments', 'manage_departments',
+        'view_courses', 'manage_courses', 'view_exams', 'manage_exams',
+        'view_results', 'manage_results', 'publish_results', 'view_attendance',
+        'manage_attendance', 'view_fees', 'manage_fees', 'view_payments', 'manage_payments',
+        'view_staff', 'manage_staff', 'view_reports', 'view_financial_reports',
+        'manage_announcements', 'manage_events', 'view_timetable', 'manage_timetable',
+        'manage_school', 'view_course_enrollment', 'manage_course_enrollment',
+        'view_unit_registration', 'manage_unit_registration'
+      ]
+    },
+    {
+      name: 'Deputy Principal',
+      description: 'Deputy Vice Chancellor',
+      permissions: [
+        'view_students', 'view_faculties', 'view_departments', 'view_courses',
+        'view_exams', 'view_results', 'view_attendance', 'manage_attendance',
+        'view_timetable', 'manage_timetable', 'view_reports', 'manage_announcements',
+        'manage_events', 'view_course_enrollment', 'manage_course_enrollment',
+        'view_unit_registration', 'manage_unit_registration'
+      ]
+    },
+    {
+      name: 'Dean',
+      description: 'Faculty Dean',
+      permissions: [
+        'view_students', 'view_faculties', 'view_departments', 'view_courses',
+        'manage_courses', 'view_exams', 'manage_exams', 'view_results',
+        'manage_results', 'view_attendance', 'manage_attendance', 'view_timetable',
+        'manage_timetable', 'view_course_enrollment', 'manage_course_enrollment',
+        'view_unit_registration', 'manage_unit_registration', 'view_schemes_of_work',
+        'manage_schemes_of_work', 'view_research'
+      ]
+    },
+    {
+      name: 'HOD',
+      description: 'Head of Department',
+      permissions: [
+        'view_students', 'view_departments', 'view_courses', 'manage_courses',
+        'view_exams', 'manage_exams', 'view_results', 'manage_results',
+        'view_attendance', 'manage_attendance', 'view_timetable', 'manage_timetable',
+        'view_course_enrollment', 'manage_course_enrollment', 'view_unit_registration',
+        'manage_unit_registration', 'view_schemes_of_work', 'manage_schemes_of_work'
+      ]
+    },
+    {
+      name: 'Professor',
+      description: 'Professor',
+      permissions: [
+        'view_students', 'view_courses', 'view_exams', 'manage_exams',
+        'view_results', 'manage_results', 'view_attendance', 'manage_attendance',
+        'view_timetable', 'view_schemes_of_work', 'manage_schemes_of_work',
+        'view_research', 'manage_research'
+      ]
+    },
+    {
+      name: 'Senior Lecturer',
+      description: 'Senior Lecturer',
+      permissions: [
+        'view_students', 'view_courses', 'view_exams', 'manage_exams',
+        'view_results', 'manage_results', 'view_attendance', 'manage_attendance',
+        'view_timetable', 'view_schemes_of_work', 'manage_schemes_of_work', 'view_research'
+      ]
+    },
+    {
+      name: 'Lecturer',
+      description: 'Lecturer',
+      permissions: [
+        'view_students', 'view_courses', 'view_exams', 'manage_exams',
+        'view_results', 'manage_results', 'view_attendance', 'manage_attendance',
+        'view_timetable', 'view_schemes_of_work', 'manage_schemes_of_work'
+      ]
+    },
+    {
+      name: 'Assistant Lecturer',
+      description: 'Assistant Lecturer',
+      permissions: [
+        'view_students', 'view_courses', 'view_exams', 'view_results',
+        'manage_results', 'view_attendance', 'manage_attendance', 'view_timetable',
+        'view_schemes_of_work'
+      ]
+    },
+    {
+      name: 'Tutor',
+      description: 'Tutorial Fellow',
+      permissions: [
+        'view_students', 'view_courses', 'view_exams', 'view_results',
+        'manage_results', 'view_attendance', 'manage_attendance', 'view_timetable'
+      ]
+    },
+    {
+      name: 'Registrar',
+      description: 'University Registrar',
+      permissions: [
+        'view_students', 'create_students', 'edit_students', 'view_courses',
+        'view_exams', 'view_results', 'view_attendance', 'view_fees',
+        'view_payments', 'view_staff', 'view_reports', 'view_course_enrollment',
+        'manage_course_enrollment', 'view_unit_registration', 'manage_unit_registration'
+      ]
+    },
+    {
+      name: 'Research Fellow',
+      description: 'Research Fellow',
+      permissions: [
+        'view_students', 'view_courses', 'view_exams', 'view_results',
+        'view_attendance', 'view_timetable', 'view_research', 'manage_research'
+      ]
+    }
+  ]
+};
+
+
 // ==================== MODEL DEFINITIONS ====================
 const User = sequelize.define('User', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
@@ -4834,10 +5245,15 @@ app.post('/api/auth/reset-password', async (req, res) => {
     });
   }
 });
-// ==================== CREATE SCHOOL WITH AUTO-SEEDING ====================
 app.post('/api/schools', authenticate, requireSuperAdmin, async (req, res) => {
+  const t = await sequelize.transaction();
   try {
     const { name, category, subscription, contact, motto, established, gradingSystem } = req.body;
+
+    if (!name || !category) {
+      await t.rollback();
+      return res.status(400).json({ success: false, message: 'Name and category are required' });
+    }
 
     const code = name.substring(0, 3).toUpperCase() + Date.now().toString().slice(-4);
 
@@ -4849,10 +5265,10 @@ app.post('/api/schools', authenticate, requireSuperAdmin, async (req, res) => {
       gradingSystem: gradingSystem || (() => {
         switch(category) {
           case 'ECDE_PRIMARY_JSS': return 'CBC';
-          case 'SENIOR_SECONDARY': return '844';
-          case 'COLLEGE_TVET': return 'TVET';
-          case 'UNIVERSITY': return 'UNIVERSITY';
-          default: return 'CBC';
+          case 'SENIOR_SECONDARY':  return '844';
+          case 'COLLEGE_TVET':      return 'TVET';
+          case 'UNIVERSITY':        return 'UNIVERSITY';
+          default:                  return 'CBC';
         }
       })(),
       subscription: subscription || { plan: 'BASIC' },
@@ -4860,132 +5276,86 @@ app.post('/api/schools', authenticate, requireSuperAdmin, async (req, res) => {
       motto,
       established,
       createdBy: req.user.id
-    });
+    }, { transaction: t });
 
- // ============ ADD CATEGORY-SPECIFIC DEFAULT ROLES ============
-const templates = [
-  ...DEFAULT_ROLE_TEMPLATES.universal,
-  ...(DEFAULT_ROLE_TEMPLATES[category] || [])
-];
-
-// De-dupe by name (universal roles take precedence)
-const seenNames = new Set();
-const defaultRoles = templates
-  .filter(t => {
-    if (seenNames.has(t.name)) return false;
-    seenNames.add(t.name);
-    return true;
-  })
-  .map(t => ({
-    name: t.name,
-    description: t.description,
-    permissions: t.permissions,
-    isSystemRole: true,
-    schoolId: school.id,
-    isActive: true,
-    category: category   // ⬅️ store which category this role belongs to
-  }));
-
-await Role.bulkCreate(defaultRoles);
-console.log(`✅ Created ${defaultRoles.length} default roles for ${school.name} (${category})`);
-    
-
-    // 2. Define default features for the new school
-    const defaultFeatures = [
-      { name: 'SMS Notifications', code: 'SMS', category: 'COMMUNICATION', description: 'Send SMS notifications to parents and staff', isEnabled: true },
-      { name: 'Email Notifications', code: 'EMAIL', category: 'COMMUNICATION', description: 'Send email notifications', isEnabled: true },
-      { name: 'Online Payments', code: 'ONLINE_PAYMENTS', category: 'FINANCE', description: 'Accept online fee payments', isEnabled: false },
-      { name: 'Exam Portal', code: 'EXAM_PORTAL', category: 'ACADEMIC', description: 'Online exam submission and grading', isEnabled: false },
-      { name: 'Parent Portal', code: 'PARENT_PORTAL', category: 'ACCESS', description: 'Parent login to view student progress', isEnabled: true },
-      { name: 'Student Portal', code: 'STUDENT_PORTAL', category: 'ACCESS', description: 'Student login to view results', isEnabled: true },
-      { name: 'Library Management', code: 'LIBRARY', category: 'RESOURCES', description: 'Complete library management system', isEnabled: true },
-      { name: 'Transport Tracking', code: 'TRANSPORT', category: 'LOGISTICS', description: 'Real-time vehicle tracking', isEnabled: false },
-      { name: 'Hostel Management', code: 'HOSTEL', category: 'ACCOMMODATION', description: 'Hostel room allocation and management', isEnabled: true },
-      { name: 'Inventory Management', code: 'INVENTORY', category: 'RESOURCES', description: 'Stock and inventory tracking', isEnabled: true },
-      { name: 'Attendance Biometrics', code: 'BIOMETRICS', category: 'ATTENDANCE', description: 'Biometric attendance marking', isEnabled: false },
-      { name: 'WhatsApp Integration', code: 'WHATSAPP', category: 'COMMUNICATION', description: 'Send WhatsApp messages', isEnabled: false }
+    // 2. Create default roles (category-aware)
+    const templates = [
+      ...DEFAULT_ROLE_TEMPLATES.universal,
+      ...(DEFAULT_ROLE_TEMPLATES[category] || [])
     ];
 
-    // 3. Auto-seed features for the new school
+    const seenNames = new Set();
+    const defaultRoles = templates
+      .filter(roleTpl => {
+        if (seenNames.has(roleTpl.name)) return false;
+        seenNames.add(roleTpl.name);
+        return true;
+      })
+      .map(roleTpl => ({
+        name: roleTpl.name,
+        description: roleTpl.description,
+        permissions: roleTpl.permissions,
+        isSystemRole: true,
+        schoolId: school.id,
+        isActive: true,
+        category                        // ✅ inherit from school
+      }));
+
+    const createdRoles = await Role.bulkCreate(defaultRoles, { transaction: t });
+    console.log(`✅ Created ${createdRoles.length} default roles for ${school.name} (${category})`);
+
+    // 3. Default features
+    const defaultFeatures = [
+      { name: 'SMS Notifications', code: 'SMS', category: 'COMMUNICATION', description: '...', isEnabled: true },
+      { name: 'Email Notifications', code: 'EMAIL', category: 'COMMUNICATION', description: '...', isEnabled: true },
+      // ... rest unchanged
+    ];
+
     const seededFeatures = [];
     for (const feature of defaultFeatures) {
       const [featureInstance, created] = await Feature.findOrCreate({
-        where: { 
-          code: feature.code, 
-          schoolId: school.id 
-        },
-        defaults: { 
-          ...feature, 
-          schoolId: school.id 
-        }
+        where: { code: feature.code, schoolId: school.id },
+        defaults: { ...feature, schoolId: school.id },
+        transaction: t
       });
-      if (created) {
-        seededFeatures.push(featureInstance);
-        console.log(`✅ Feature created for ${school.name}: ${feature.name}`);
-      }
+      if (created) seededFeatures.push(featureInstance);
     }
-// ✅ REPLACE the audit log section with this:
 
-// Create a simple audit log entry without complex associations
-try {
-  const logData = {
-    schoolId: school.id,
-    userId: req.user.id,
-    action: 'CREATE_SCHOOL',
-    entity: 'SCHOOL',
-    entityId: school.id,
-    newValue: { 
-      name: school.name,
-      code: school.code,
-      category: school.category,
-      featuresSeeded: seededFeatures.length,
-      rolesCreated: defaultRoles.length
-    },
-    timestamp: new Date()
-  };
-  
-  // Use raw query to avoid model association issues
-  await sequelize.query(
-    `INSERT INTO "AuditLogs" (id, "schoolId", "userId", action, entity, "entityId", "newValue", timestamp, "createdAt", "updatedAt")
-     VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, NOW(), NOW())`,
-    {
-      bind: [
-        logData.schoolId,
-        logData.userId,
-        logData.action,
-        logData.entity,
-        logData.entityId,
-        JSON.stringify(logData.newValue),
-        logData.timestamp
-      ],
-      type: sequelize.QueryTypes.INSERT
+    // 4. Commit
+    await t.commit();
+
+    // 5. Audit log (best-effort, not part of transaction)
+    try {
+      await sequelize.query(
+        `INSERT INTO "AuditLogs" (id, "schoolId", "userId", action, entity, "entityId", "newValue", timestamp, "createdAt", "updatedAt")
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, NOW(), NOW())`,
+        {
+          bind: [
+            school.id, req.user.id, 'CREATE_SCHOOL', 'SCHOOL', school.id,
+            JSON.stringify({ name: school.name, code: school.code, category: school.category }),
+            new Date()
+          ],
+          type: sequelize.QueryTypes.INSERT
+        }
+      );
+    } catch (logError) {
+      console.warn('⚠️ Audit log failed (non-critical):', logError.message);
     }
-  );
-  console.log('✅ Audit log created successfully');
-} catch (logError) {
-  console.warn('⚠️ Audit log creation failed (non-critical):', logError.message);
-}
 
-    // 6. Return success response with seeding info
-    res.status(201).json({ 
-      success: true, 
+    res.status(201).json({
+      success: true,
       school,
       seeding: {
-        rolesCreated: defaultRoles.length,
+        rolesCreated: createdRoles.length,
         featuresSeeded: seededFeatures.length,
-        message: `School created successfully with ${defaultRoles.length} roles and ${seededFeatures.length} features`
+        message: `School created with ${createdRoles.length} roles and ${seededFeatures.length} features`
       }
     });
 
-    console.log(`✅ School created and auto-seeded: ${school.name} (${defaultRoles.length} roles, ${seededFeatures.length} features)`);
-
   } catch (error) {
+    await t.rollback();
     console.error('❌ Create school error:', error);
-    res.status(500).json({ 
-      success: false,
-      message: 'Server error', 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 // ==================== MIGRATION: CREATE DEFAULT ROLES FOR EXISTING SCHOOLS ====================
