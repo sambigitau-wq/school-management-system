@@ -4147,7 +4147,7 @@ Homework.belongsTo(Class,   { foreignKey: 'classId',   as: 'Class' });
 Homework.belongsTo(Program, { foreignKey: 'programId', as: 'Program' });
 Homework.belongsTo(Course,  { foreignKey: 'courseId',  as: 'Course' });
 Homework.belongsTo(Subject, { foreignKey: 'subjectId', as: 'Subject' });
-Homework.belongsTo(Unit,    { foreignKey: 'unitId',    as: 'Unit' });
+Homework.belongsTo(CourseUnit, { foreignKey: 'unitId', as: 'Unit' });
 
 // Homework ↔ Questions
 Homework.hasMany(HomeworkQuestion, { foreignKey: 'homeworkId', as: 'Questions', onDelete: 'CASCADE' });
