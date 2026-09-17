@@ -9,6 +9,7 @@ const nodemailer = require('nodemailer');
 const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
+const { Op } = require('sequelize');
 
 const app = express();
 const emailService = require('./emailService');
@@ -27,9 +28,9 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 // Create uploads directory
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
@@ -959,6 +960,7 @@ const User = sequelize.define('User', {
   lastLogin: DataTypes.DATE,
   resetToken: { type: DataTypes.STRING, allowNull: true }
 });
+
 const School = sequelize.define('School', {
   id: { 
     type: DataTypes.UUID, 
@@ -1006,6 +1008,24 @@ const School = sequelize.define('School', {
   earlyDepartureThreshold: { 
     type: DataTypes.INTEGER, 
     defaultValue: 30 
+  },
+  
+  // ==================== UNIT REGISTRATION SETTINGS ====================
+  paymentPercentageRequired: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 30,
+    validate: { min: 0, max: 100 }
+  },
+  requiresPaymentForUnits: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true
+  },
+  unitApprovalRequired: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true
   },
   
   // ==================== SUBSCRIPTION ====================
@@ -1124,13 +1144,13 @@ const School = sequelize.define('School', {
   smsProvider: {
     type: DataTypes.ENUM(
       'AFRICASTALKING', 
-      'CELCOM',           // ← Added: Celcom Africa
-      'SMSLEOPARD',       // ← Added: SMSLeopard
-      'ADVANTA',          // ← Added: Advanta Africa
+      'CELCOM',
+      'SMSLEOPARD',
+      'ADVANTA',
       'TWILIO', 
       'BULKSMS', 
       'SMSCOUNTRY', 
-      'PAWATALK',         // ← Added: PawaTalk
+      'PAWATALK',
       'NONE'
     ),
     defaultValue: 'NONE'
@@ -1151,7 +1171,7 @@ const School = sequelize.define('School', {
       celcom: {
         apiKey: '',
         senderId: '',
-        route: 'direct', // direct, economy, promotional
+        route: 'direct',
         callbackUrl: ''
       },
       
@@ -1159,7 +1179,7 @@ const School = sequelize.define('School', {
       smsleopard: {
         apiKey: '',
         senderId: '',
-        route: 'safaricom', // safaricom, airtel, telkom, all
+        route: 'safaricom',
         userId: ''
       },
       
@@ -1206,17 +1226,17 @@ const School = sequelize.define('School', {
       enabled: false,
       testMode: false,
       testPhone: '',
-      sendLimit: 500,          // Max SMS per day
-      sendLimitPerHour: 50,    // Max SMS per hour
-      batchSize: 100,          // SMS per batch
-      delayBetweenBatches: 2000, // Milliseconds between batches
+      sendLimit: 500,
+      sendLimitPerHour: 50,
+      batchSize: 100,
+      delayBetweenBatches: 2000,
       defaultCountryCode: '254',
       maxRetries: 3,
       retryDelay: 5000,
       
       // ===== Price Tracking =====
       pricing: {
-        costPerSMS: 0,        // Current cost per SMS (KES)
+        costPerSMS: 0,
         currency: 'KES',
         monthlyVolume: 0,
         estimatedMonthlyCost: 0
@@ -1382,6 +1402,7 @@ const School = sequelize.define('School', {
     { fields: ['emailProvider'] }
   ]
 });
+
 const Class = sequelize.define('Class', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
   name: { type: DataTypes.STRING, allowNull: false },
@@ -3327,7 +3348,276 @@ const Discount = sequelize.define('Discount', {
     { fields: ['studentId', 'feeId'] }
   ]
 });
+// ============================================================
+//  EXAM CARD OVERRIDE MODEL
+//  Allows Accountant / School Admin to grant a student with a
+//  fee balance permission to receive an exam card.
+// ============================================================
+const ExamCardOverride = sequelize.define('ExamCardOverride', {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true
+  },
+  studentId: {
+    type: DataTypes.UUID,
+    allowNull: false
+  },
+  schoolId: {
+    type: DataTypes.UUID,
+    allowNull: false
+  },
+  approvedBy: {
+    type: DataTypes.UUID,
+    allowNull: false
+  },
+  reason: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+  balanceAtApproval: {
+    type: DataTypes.DECIMAL(12, 2),
+    allowNull: true
+  },
+  academicYear: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  semester: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  isActive: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: true,
+    allowNull: false
+  }
+}, {
+  timestamps: true,
+  indexes: [
+    { fields: ['studentId'] },
+    { fields: ['schoolId'] },
+    { fields: ['isActive'] },
+    { fields: ['approvedBy'] }
+  ]
+});
 
+// ============================================================
+//  HOMEWORK MODULE MODELS
+//  Teacher creates homework with quiz questions.
+//  Students submit answers. Teacher grades (auto or manual).
+//  Parents view their child's homework.
+// ============================================================
+
+const Homework = sequelize.define('Homework', {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true
+  },
+  title: {
+    type: DataTypes.STRING,
+    allowNull: false
+  },
+  description: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+  instructions: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+
+  // ===== Scope (school + class/program/course + subject/unit) =====
+  schoolId: {
+    type: DataTypes.UUID,
+    allowNull: false
+  },
+  classId: { type: DataTypes.UUID, allowNull: true },     // Regular schools
+  programId: { type: DataTypes.UUID, allowNull: true },   // TVET
+  courseId: { type: DataTypes.UUID, allowNull: true },    // University
+  subjectId: { type: DataTypes.UUID, allowNull: true },   // Regular schools
+  unitId: { type: DataTypes.UUID, allowNull: true },      // TVET / University
+
+  // ===== Ownership =====
+  createdBy: {
+    type: DataTypes.UUID,
+    allowNull: false
+  },
+
+  // ===== Timing =====
+  dueDate: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  allowLateSubmission: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+
+  // ===== Grading =====
+  maxScore: {
+    type: DataTypes.INTEGER,
+    defaultValue: 100
+  },
+  // ✅ AUTO   → system grades MC + short-answer with matching correctAnswer
+  // ✅ MANUAL → teacher grades everything
+  gradingMode: {
+    type: DataTypes.ENUM('AUTO', 'MANUAL'),
+    defaultValue: 'MANUAL',
+    allowNull: false
+  },
+
+  // ===== State =====
+  status: {
+    type: DataTypes.ENUM('DRAFT', 'PUBLISHED', 'CLOSED'),
+    defaultValue: 'DRAFT',
+    allowNull: false
+  },
+
+  // ===== Attachments (teacher resources) =====
+  attachments: {
+    type: DataTypes.JSONB,
+    defaultValue: []   // [{ name, url, size, mimeType }]
+  },
+
+  publishedAt: { type: DataTypes.DATE, allowNull: true }
+}, {
+  timestamps: true,
+  indexes: [
+    { fields: ['schoolId'] },
+    { fields: ['classId'] },
+    { fields: ['programId'] },
+    { fields: ['courseId'] },
+    { fields: ['subjectId'] },
+    { fields: ['unitId'] },
+    { fields: ['createdBy'] },
+    { fields: ['status'] },
+    { fields: ['dueDate'] }
+  ]
+});
+
+
+const HomeworkQuestion = sequelize.define('HomeworkQuestion', {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true
+  },
+  homeworkId: {
+    type: DataTypes.UUID,
+    allowNull: false
+  },
+
+  questionText: {
+    type: DataTypes.TEXT,
+    allowNull: false
+  },
+  // ✅ MULTIPLE_CHOICE, SHORT_ANSWER, LONG_ANSWER, FILE_UPLOAD
+  questionType: {
+    type: DataTypes.ENUM('MULTIPLE_CHOICE', 'SHORT_ANSWER', 'LONG_ANSWER', 'FILE_UPLOAD'),
+    defaultValue: 'SHORT_ANSWER',
+    allowNull: false
+  },
+
+  // For MULTIPLE_CHOICE → [{ key: 'A', text: '...' }, ...]
+  options: {
+    type: DataTypes.JSONB,
+    defaultValue: []
+  },
+
+  // For AUTO grading:
+  //   MULTIPLE_CHOICE → key e.g. "A"
+  //   SHORT_ANSWER    → expected string (case-insensitive compare)
+  correctAnswer: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+
+  points: {
+    type: DataTypes.INTEGER,
+    defaultValue: 1,
+    allowNull: false
+  },
+  order: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
+    allowNull: false
+  }
+}, {
+  timestamps: true,
+  indexes: [
+    { fields: ['homeworkId'] },
+    { fields: ['order'] }
+  ]
+});
+
+
+const HomeworkSubmission = sequelize.define('HomeworkSubmission', {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true
+  },
+  homeworkId: {
+    type: DataTypes.UUID,
+    allowNull: false
+  },
+  studentId: {
+    type: DataTypes.UUID,
+    allowNull: false
+  },
+  schoolId: {
+    type: DataTypes.UUID,
+    allowNull: false
+  },
+
+  // ===== State =====
+  //   NOT_STARTED  → student opened but never submitted
+  //   SUBMITTED    → submitted, awaiting grading
+  //   GRADED       → teacher/system graded
+  status: {
+    type: DataTypes.ENUM('NOT_STARTED', 'SUBMITTED', 'GRADED'),
+    defaultValue: 'SUBMITTED',
+    allowNull: false
+  },
+
+  // ===== Answers =====
+  // [{ questionId, answer, fileUrl, isCorrect, pointsAwarded }]
+  answers: {
+    type: DataTypes.JSONB,
+    defaultValue: []
+  },
+
+  // ===== Grading =====
+  score: { type: DataTypes.INTEGER, allowNull: true },
+  feedback: { type: DataTypes.TEXT, allowNull: true },
+  gradedBy: { type: DataTypes.UUID, allowNull: true },
+  gradedAt: { type: DataTypes.DATE, allowNull: true },
+
+  // ===== Meta =====
+  submittedAt: {
+    type: DataTypes.DATE,
+    defaultValue: DataTypes.NOW,
+    allowNull: false
+  },
+  isLate: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  timeSpentSeconds: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  }
+}, {
+  timestamps: true,
+  indexes: [
+    { fields: ['homeworkId'] },
+    { fields: ['studentId'] },
+    { fields: ['schoolId'] },
+    { fields: ['status'] }
+  ]
+});
 
 // ============================================================
 //  ROLE → SCHOOL CATEGORY MAPPING
@@ -3428,6 +3718,7 @@ Task.belongsTo(User, { as: 'assignedByUser', foreignKey: 'assignedBy', constrain
 
 CallLog.belongsTo(School, { foreignKey: 'schoolId' });
 CallLog.belongsTo(User, { as: 'loggedByUser', foreignKey: 'loggedBy' });
+
 
 Card.belongsTo(School, { foreignKey: 'schoolId' });
 Card.belongsTo(Student, { foreignKey: 'personId', constraints: false });
@@ -3829,9 +4120,49 @@ Parent.belongsTo(User, { foreignKey: 'userId', as: 'User' });
 Parent.belongsTo(School, { foreignKey: 'schoolId' });
 School.hasMany(Parent,   { foreignKey: 'schoolId' });
 
+
 // ---- Student ↔ School ----
 Student.belongsTo(School, { foreignKey: 'schoolId' });
 School.hasMany(Student,   { foreignKey: 'schoolId' });
+
+
+// ==================== EXAM CARD OVERRIDE ASSOCIATIONS ====================
+ExamCardOverride.belongsTo(Student, { foreignKey: 'studentId', as: 'Student' });
+ExamCardOverride.belongsTo(User, { foreignKey: 'approvedBy', as: 'Approver' });
+ExamCardOverride.belongsTo(School, { foreignKey: 'schoolId', as: 'School' });
+
+Student.hasMany(ExamCardOverride, { foreignKey: 'studentId', as: 'ExamCardOverrides' });
+User.hasMany(ExamCardOverride, { foreignKey: 'approvedBy', as: 'ApprovedOverrides' });
+School.hasMany(ExamCardOverride, { foreignKey: 'schoolId', as: 'ExamCardOverrides' });
+
+// ==================== HOMEWORK ASSOCIATIONS ====================
+
+// Homework → School / Teacher
+Homework.belongsTo(School, { foreignKey: 'schoolId', as: 'School' });
+Homework.belongsTo(User,   { foreignKey: 'createdBy', as: 'Teacher' });
+School.hasMany(Homework,   { foreignKey: 'schoolId', as: 'Homeworks' });
+User.hasMany(Homework,     { foreignKey: 'createdBy', as: 'CreatedHomeworks' });
+
+// Homework → scope (Class / Program / Course / Subject / Unit)
+Homework.belongsTo(Class,   { foreignKey: 'classId',   as: 'Class' });
+Homework.belongsTo(Program, { foreignKey: 'programId', as: 'Program' });
+Homework.belongsTo(Course,  { foreignKey: 'courseId',  as: 'Course' });
+Homework.belongsTo(Subject, { foreignKey: 'subjectId', as: 'Subject' });
+Homework.belongsTo(Unit,    { foreignKey: 'unitId',    as: 'Unit' });
+
+// Homework ↔ Questions
+Homework.hasMany(HomeworkQuestion, { foreignKey: 'homeworkId', as: 'Questions', onDelete: 'CASCADE' });
+HomeworkQuestion.belongsTo(Homework, { foreignKey: 'homeworkId', as: 'Homework' });
+
+// Homework ↔ Submissions
+Homework.hasMany(HomeworkSubmission, { foreignKey: 'homeworkId', as: 'Submissions', onDelete: 'CASCADE' });
+HomeworkSubmission.belongsTo(Homework, { foreignKey: 'homeworkId', as: 'Homework' });
+
+// Submission → Student + Grader
+HomeworkSubmission.belongsTo(Student, { foreignKey: 'studentId', as: 'Student' });
+HomeworkSubmission.belongsTo(User,    { foreignKey: 'gradedBy',  as: 'Grader' });
+Student.hasMany(HomeworkSubmission, { foreignKey: 'studentId', as: 'HomeworkSubmissions' });
+User.hasMany(HomeworkSubmission,    { foreignKey: 'gradedBy',  as: 'GradedSubmissions' });
 // ==================== PERMISSION DEFINITIONS ====================
 const PERMISSIONS = {
   SUPER_ADMIN: '*',
@@ -4776,6 +5107,31 @@ const checkSchoolAccess = (req, res, next) => {
   next();
 };
 
+// ============================================================
+//  FILE UPLOADS (Homework)
+// ============================================================
+const homeworkUploadDir = path.join(__dirname, 'uploads', 'homework');
+if (!fs.existsSync(homeworkUploadDir)) {
+  fs.mkdirSync(homeworkUploadDir, { recursive: true });
+}
+
+const homeworkStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, homeworkUploadDir),
+  filename: (req, file, cb) => {
+    const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname);
+    cb(null, `${unique}${ext}`);
+  }
+});
+
+const homeworkUpload = multer({
+  storage: homeworkStorage,
+  limits: { fileSize: 20 * 1024 * 1024 } // 20 MB
+});
+
+// Serve uploaded homework files statically
+app.use('/uploads/homework', express.static(homeworkUploadDir));
+
 // ==================== API ROOT ====================
 
 app.get('/', (req, res) => {
@@ -5528,7 +5884,6 @@ app.get('/api/schools/:id', authenticate, async (req, res) => {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
-
 app.put('/api/schools/:id', authenticate, async (req, res) => {
   try {
     const school = await School.findByPk(req.params.id);
@@ -5539,7 +5894,71 @@ app.put('/api/schools/:id', authenticate, async (req, res) => {
     }
 
     const oldSchool = { ...school.toJSON() };
-    await school.update(req.body);
+
+    // ✅ Whitelist updatable fields (prevents id/createdBy/isActive tampering)
+    const {
+      name,
+      motto,
+      established,
+      registrationNumber,
+      category,
+      gradingSystem,
+      contact,
+      emailProvider,
+      emailConfig,
+      smsProvider,
+      smsConfig,
+      notificationConfig,
+      features,
+      branding,
+      systemConfig,
+      settings,
+      startTime,
+      endTime,
+      lateThreshold,
+      earlyDepartureThreshold,
+      // ✅ NEW: Unit Registration settings
+      paymentPercentageRequired,
+      requiresPaymentForUnits,
+      unitApprovalRequired
+    } = req.body;
+
+    // ✅ Build the update payload, only including defined keys
+    const updateData = {};
+    if (name !== undefined) updateData.name = name;
+    if (motto !== undefined) updateData.motto = motto;
+    if (established !== undefined) updateData.established = established;
+    if (registrationNumber !== undefined) updateData.registrationNumber = registrationNumber;
+    if (category !== undefined) updateData.category = category;
+    if (gradingSystem !== undefined) updateData.gradingSystem = gradingSystem;
+    if (contact !== undefined) updateData.contact = contact;
+    if (emailProvider !== undefined) updateData.emailProvider = emailProvider;
+    if (emailConfig !== undefined) updateData.emailConfig = emailConfig;
+    if (smsProvider !== undefined) updateData.smsProvider = smsProvider;
+    if (smsConfig !== undefined) updateData.smsConfig = smsConfig;
+    if (notificationConfig !== undefined) updateData.notificationConfig = notificationConfig;
+    if (features !== undefined) updateData.features = features;
+    if (branding !== undefined) updateData.branding = branding;
+    if (systemConfig !== undefined) updateData.systemConfig = systemConfig;
+    if (settings !== undefined) updateData.settings = settings;
+    if (startTime !== undefined) updateData.startTime = startTime;
+    if (endTime !== undefined) updateData.endTime = endTime;
+    if (lateThreshold !== undefined) updateData.lateThreshold = lateThreshold;
+    if (earlyDepartureThreshold !== undefined) updateData.earlyDepartureThreshold = earlyDepartureThreshold;
+
+    // ✅ NEW: Unit Registration settings — with clamping
+    if (paymentPercentageRequired !== undefined) {
+      const pct = parseInt(paymentPercentageRequired, 10);
+      updateData.paymentPercentageRequired = Math.max(0, Math.min(100, isNaN(pct) ? 30 : pct));
+    }
+    if (requiresPaymentForUnits !== undefined) {
+      updateData.requiresPaymentForUnits = Boolean(requiresPaymentForUnits);
+    }
+    if (unitApprovalRequired !== undefined) {
+      updateData.unitApprovalRequired = Boolean(unitApprovalRequired);
+    }
+
+    await school.update(updateData);
     await createAuditLog(req, 'UPDATE', 'SCHOOL', school.id, oldSchool, school);
 
     res.json({ success: true, school });
@@ -25250,6 +25669,813 @@ app.get('/api/online-exams/:id/stats', authenticate, async (req, res) => {
   } catch (error) {
     console.error('Error fetching exam stats:', error);
     res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ============================================================
+//  EXAM CARD OVERRIDES
+//  Allows ACCOUNTANT / SCHOOL_ADMIN / PRINCIPAL to grant a
+//  student with a fee balance permission to receive an exam card.
+// ============================================================
+
+// ✅ GET all active overrides for the current school
+app.get('/api/exam-card-overrides', authenticate, async (req, res) => {
+  try {
+    const where = { isActive: true };
+    if (req.user.role !== 'SUPER_ADMIN') {
+      where.schoolId = req.user.schoolId;
+    }
+
+    const overrides = await ExamCardOverride.findAll({
+      where,
+      include: [
+        {
+          model: User,
+          as: 'Approver',
+          attributes: ['id', 'firstName', 'lastName', 'role']
+        },
+        {
+          model: Student,
+          as: 'Student',
+          attributes: ['id', 'firstName', 'lastName', 'admissionNumber', 'classId', 'programId', 'courseId']
+        }
+      ],
+      order: [['createdAt', 'DESC']]
+    });
+
+    res.json({ success: true, overrides });
+  } catch (err) {
+    console.error('❌ Load exam-card overrides error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ✅ POST create an override (approve student with balance)
+app.post('/api/exam-card-overrides', authenticate, async (req, res) => {
+  try {
+    const allowed = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'ACCOUNTANT', 'PRINCIPAL'];
+    if (!allowed.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to approve exam card overrides'
+      });
+    }
+
+    const { studentId, reason, balanceAtApproval, academicYear, semester } = req.body;
+
+    if (!studentId) {
+      return res.status(400).json({ success: false, message: 'studentId is required' });
+    }
+
+    // Verify student exists and belongs to the same school
+    const student = await Student.findByPk(studentId);
+    if (!student) {
+      return res.status(404).json({ success: false, message: 'Student not found' });
+    }
+    if (req.user.role !== 'SUPER_ADMIN' && student.schoolId !== req.user.schoolId) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    // Deactivate any existing active override for the same student
+    await ExamCardOverride.update(
+      { isActive: false },
+      { where: { studentId, isActive: true } }
+    );
+
+    const override = await ExamCardOverride.create({
+      studentId,
+      schoolId: student.schoolId,
+      approvedBy: req.user.id,
+      reason: reason || null,
+      balanceAtApproval: balanceAtApproval != null ? balanceAtApproval : null,
+      academicYear: academicYear || null,
+      semester: semester != null ? parseInt(semester, 10) : null,
+      isActive: true
+    });
+
+    // ✅ Audit log
+    await createAuditLog(
+      req,
+      'APPROVE_EXAM_CARD_OVERRIDE',
+      'STUDENT',
+      studentId,
+      null,
+      {
+        overrideId: override.id,
+        reason: reason || null,
+        balanceAtApproval: balanceAtApproval ?? null
+      }
+    );
+
+    // Return with Approver + Student included
+    const full = await ExamCardOverride.findByPk(override.id, {
+      include: [
+        { model: User, as: 'Approver', attributes: ['id', 'firstName', 'lastName', 'role'] },
+        { model: Student, as: 'Student', attributes: ['id', 'firstName', 'lastName', 'admissionNumber'] }
+      ]
+    });
+
+    res.json({ success: true, override: full });
+  } catch (err) {
+    console.error('❌ Create exam-card override error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ✅ DELETE revoke an override
+app.delete('/api/exam-card-overrides/:id', authenticate, async (req, res) => {
+  try {
+    const allowed = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'ACCOUNTANT', 'PRINCIPAL'];
+    if (!allowed.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to revoke overrides'
+      });
+    }
+
+    const override = await ExamCardOverride.findByPk(req.params.id);
+    if (!override) {
+      return res.status(404).json({ success: false, message: 'Override not found' });
+    }
+
+    if (req.user.role !== 'SUPER_ADMIN' && override.schoolId !== req.user.schoolId) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    await override.update({ isActive: false });
+
+    // ✅ Audit log
+    await createAuditLog(
+      req,
+      'REVOKE_EXAM_CARD_OVERRIDE',
+      'STUDENT',
+      override.studentId,
+      { overrideId: override.id, isActive: true },
+      { overrideId: override.id, isActive: false }
+    );
+
+    res.json({ success: true, message: 'Override revoked successfully' });
+  } catch (err) {
+    console.error('❌ Revoke exam-card override error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ============================================================
+//  HOMEWORK ENDPOINTS
+// ============================================================
+
+// ============================================================
+//  Helper: detect scope (class / program / course)
+// ============================================================
+const getHomeworkScopeFilter = (school) => {
+  // Returns {} — we build the WHERE per-request based on caller role.
+};
+
+// ============================================================
+//  Helper: auto-grade a submission against questions
+// ============================================================
+const autoGradeSubmission = async (submission, questions, homework) => {
+  let totalAwarded = 0;
+  const updatedAnswers = (submission.answers || []).map(ans => {
+    const q = questions.find(x => x.id === ans.questionId);
+    if (!q) return { ...ans, isCorrect: null, pointsAwarded: 0 };
+
+    // Only auto-grade MULTIPLE_CHOICE and SHORT_ANSWER
+    if (q.questionType === 'MULTIPLE_CHOICE') {
+      const correct = (q.correctAnswer || '').toString().trim().toUpperCase();
+      const given = (ans.answer || '').toString().trim().toUpperCase();
+      const isCorrect = correct !== '' && correct === given;
+      const pts = isCorrect ? (q.points || 1) : 0;
+      totalAwarded += pts;
+      return { ...ans, isCorrect, pointsAwarded: pts };
+    }
+
+    if (q.questionType === 'SHORT_ANSWER') {
+      const correct = (q.correctAnswer || '').toString().trim().toLowerCase();
+      const given = (ans.answer || '').toString().trim().toLowerCase();
+      const isCorrect = correct !== '' && correct === given;
+      const pts = isCorrect ? (q.points || 1) : 0;
+      totalAwarded += pts;
+      return { ...ans, isCorrect, pointsAwarded: pts };
+    }
+
+    // LONG_ANSWER and FILE_UPLOAD → require manual grading
+    return { ...ans, isCorrect: null, pointsAwarded: 0 };
+  });
+
+  return { updatedAnswers, totalAwarded };
+};
+
+
+// ============================================================
+//  1. GET /api/homework — role-filtered list
+// ============================================================
+app.get('/api/homework', authenticate, async (req, res) => {
+  try {
+    const userRole = req.user.role;
+    const where = {};
+
+    if (userRole !== 'SUPER_ADMIN') {
+      where.schoolId = req.user.schoolId;
+    }
+
+    // ----- TEACHER / ADMIN → homework they created or all in school -----
+    if (['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL'].includes(userRole)) {
+      // Admin sees everything in school — no additional filter
+    } else if (['TEACHER', 'LECTURER', 'SENIOR_TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER', 'INSTRUCTOR', 'TRAINER', 'HOD', 'DEAN'].includes(userRole)) {
+      // Teachers see homework they created
+      where.createdBy = req.user.id;
+    } else if (userRole === 'STUDENT') {
+      // Students see published homework for their class/program/course
+      const student = await Student.findOne({ where: { userId: req.user.id } });
+      if (!student) return res.status(404).json({ success: false, message: 'Student record not found' });
+
+      where.status = { [Op.in]: ['PUBLISHED', 'CLOSED'] };
+      const scopes = [];
+      if (student.classId)   scopes.push({ classId: student.classId });
+      if (student.programId) scopes.push({ programId: student.programId });
+      if (student.courseId)  scopes.push({ courseId: student.courseId });
+      if (scopes.length > 0) {
+        where[Op.or] = scopes;
+      } else {
+        return res.json({ success: true, homeworks: [] });
+      }
+    } else if (userRole === 'PARENT') {
+      return res.status(400).json({ success: false, message: 'Use /api/homework/child/:studentId for parents' });
+    } else {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    const homeworks = await Homework.findAll({
+      where,
+      include: [
+        { model: User, as: 'Teacher', attributes: ['id', 'firstName', 'lastName', 'email'] },
+        { model: HomeworkQuestion, as: 'Questions', attributes: ['id'] },
+        { model: HomeworkSubmission, as: 'Submissions', attributes: ['id', 'studentId', 'status', 'score'] }
+      ],
+      order: [['createdAt', 'DESC']]
+    });
+
+    // For students, attach their own submission
+    if (userRole === 'STUDENT') {
+      const student = await Student.findOne({ where: { userId: req.user.id } });
+      const decorated = homeworks.map(hw => {
+        const mine = hw.Submissions.find(s => s.studentId === student.id);
+        const json = hw.toJSON();
+        json.mySubmission = mine || null;
+        return json;
+      });
+      return res.json({ success: true, homeworks: decorated });
+    }
+
+    res.json({ success: true, homeworks });
+  } catch (err) {
+    console.error('❌ GET /api/homework error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
+// ============================================================
+//  2. POST /api/homework — create (teacher / admin)
+// ============================================================
+app.post('/api/homework', authenticate, async (req, res) => {
+  try {
+    const allowed = [
+      'SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL',
+      'TEACHER', 'LECTURER', 'SENIOR_TEACHER', 'CLASS_TEACHER',
+      'SUBJECT_TEACHER', 'INSTRUCTOR', 'TRAINER', 'HOD', 'DEAN'
+    ];
+    if (!allowed.includes(req.user.role)) {
+      return res.status(403).json({ success: false, message: 'You cannot create homework' });
+    }
+
+    const {
+      title, description, instructions,
+      classId, programId, courseId, subjectId, unitId,
+      dueDate, allowLateSubmission, maxScore, gradingMode,
+      attachments, questions
+    } = req.body;
+
+    if (!title) {
+      return res.status(400).json({ success: false, message: 'Title is required' });
+    }
+
+    const schoolId = req.user.role === 'SUPER_ADMIN' && req.body.schoolId
+      ? req.body.schoolId
+      : req.user.schoolId;
+
+    // Auto-calculate maxScore from questions if provided
+    let computedMax = maxScore || 0;
+    if (Array.isArray(questions) && questions.length > 0) {
+      computedMax = questions.reduce((sum, q) => sum + (parseInt(q.points) || 1), 0);
+    }
+    if (!computedMax) computedMax = 100;
+
+    const homework = await Homework.create({
+      title,
+      description: description || null,
+      instructions: instructions || null,
+      schoolId,
+      classId:   classId   || null,
+      programId: programId || null,
+      courseId:  courseId  || null,
+      subjectId: subjectId || null,
+      unitId:    unitId    || null,
+      createdBy: req.user.id,
+      dueDate: dueDate ? new Date(dueDate) : null,
+      allowLateSubmission: !!allowLateSubmission,
+      maxScore: computedMax,
+      gradingMode: gradingMode === 'AUTO' ? 'AUTO' : 'MANUAL',
+      status: 'DRAFT',
+      attachments: Array.isArray(attachments) ? attachments : []
+    });
+
+    // Create questions
+    if (Array.isArray(questions) && questions.length > 0) {
+      const qRows = questions.map((q, i) => ({
+        homeworkId: homework.id,
+        questionText: q.questionText || '',
+        questionType: q.questionType || 'SHORT_ANSWER',
+        options: Array.isArray(q.options) ? q.options : [],
+        correctAnswer: q.correctAnswer || null,
+        points: parseInt(q.points) || 1,
+        order: q.order ?? i
+      }));
+      await HomeworkQuestion.bulkCreate(qRows);
+    }
+
+    await createAuditLog(req, 'CREATE', 'HOMEWORK', homework.id, null, homework);
+
+    const full = await Homework.findByPk(homework.id, {
+      include: [{ model: HomeworkQuestion, as: 'Questions' }]
+    });
+
+    res.json({ success: true, homework: full });
+  } catch (err) {
+    console.error('❌ POST /api/homework error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
+// ============================================================
+//  3. GET /api/homework/:id — full detail
+// ============================================================
+app.get('/api/homework/:id', authenticate, async (req, res) => {
+  try {
+    const homework = await Homework.findByPk(req.params.id, {
+      include: [
+        { model: User, as: 'Teacher', attributes: ['id', 'firstName', 'lastName', 'email'] },
+        { model: HomeworkQuestion, as: 'Questions', separate: true, order: [['order', 'ASC']] },
+        { model: HomeworkSubmission, as: 'Submissions' }
+      ]
+    });
+
+    if (!homework) return res.status(404).json({ success: false, message: 'Homework not found' });
+
+    if (req.user.role !== 'SUPER_ADMIN' && homework.schoolId !== req.user.schoolId) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    // Student: hide correctAnswer, include own submission
+    if (req.user.role === 'STUDENT') {
+      const student = await Student.findOne({ where: { userId: req.user.id } });
+      const json = homework.toJSON();
+      json.Questions = json.Questions.map(q => {
+        const { correctAnswer, ...rest } = q;
+        return rest;
+      });
+      json.mySubmission = json.Submissions.find(s => s.studentId === student?.id) || null;
+      delete json.Submissions;
+      return res.json({ success: true, homework: json });
+    }
+
+    res.json({ success: true, homework });
+  } catch (err) {
+    console.error('❌ GET /api/homework/:id error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
+// ============================================================
+//  4. PUT /api/homework/:id — edit (owner teacher / admin)
+// ============================================================
+app.put('/api/homework/:id', authenticate, async (req, res) => {
+  try {
+    const homework = await Homework.findByPk(req.params.id);
+    if (!homework) return res.status(404).json({ success: false, message: 'Homework not found' });
+
+    const isOwner = homework.createdBy === req.user.id;
+    const isAdmin = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL'].includes(req.user.role);
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    const old = homework.toJSON();
+
+    const {
+      title, description, instructions,
+      classId, programId, courseId, subjectId, unitId,
+      dueDate, allowLateSubmission, maxScore, gradingMode,
+      attachments, questions
+    } = req.body;
+
+    const update = {};
+    if (title !== undefined) update.title = title;
+    if (description !== undefined) update.description = description;
+    if (instructions !== undefined) update.instructions = instructions;
+    if (classId !== undefined) update.classId = classId || null;
+    if (programId !== undefined) update.programId = programId || null;
+    if (courseId !== undefined) update.courseId = courseId || null;
+    if (subjectId !== undefined) update.subjectId = subjectId || null;
+    if (unitId !== undefined) update.unitId = unitId || null;
+    if (dueDate !== undefined) update.dueDate = dueDate ? new Date(dueDate) : null;
+    if (allowLateSubmission !== undefined) update.allowLateSubmission = !!allowLateSubmission;
+    if (gradingMode !== undefined) update.gradingMode = gradingMode === 'AUTO' ? 'AUTO' : 'MANUAL';
+    if (attachments !== undefined) update.attachments = Array.isArray(attachments) ? attachments : [];
+
+    // If questions provided → replace them + recompute maxScore
+    if (Array.isArray(questions)) {
+      await HomeworkQuestion.destroy({ where: { homeworkId: homework.id } });
+      const qRows = questions.map((q, i) => ({
+        homeworkId: homework.id,
+        questionText: q.questionText || '',
+        questionType: q.questionType || 'SHORT_ANSWER',
+        options: Array.isArray(q.options) ? q.options : [],
+        correctAnswer: q.correctAnswer || null,
+        points: parseInt(q.points) || 1,
+        order: q.order ?? i
+      }));
+      if (qRows.length > 0) await HomeworkQuestion.bulkCreate(qRows);
+      update.maxScore = qRows.reduce((s, q) => s + (q.points || 1), 0) || 100;
+    } else if (maxScore !== undefined) {
+      update.maxScore = maxScore;
+    }
+
+    await homework.update(update);
+    await createAuditLog(req, 'UPDATE', 'HOMEWORK', homework.id, old, homework);
+
+    const full = await Homework.findByPk(homework.id, {
+      include: [{ model: HomeworkQuestion, as: 'Questions', separate: true, order: [['order', 'ASC']] }]
+    });
+
+    res.json({ success: true, homework: full });
+  } catch (err) {
+    console.error('❌ PUT /api/homework/:id error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
+// ============================================================
+//  5. DELETE /api/homework/:id
+// ============================================================
+app.delete('/api/homework/:id', authenticate, async (req, res) => {
+  try {
+    const homework = await Homework.findByPk(req.params.id);
+    if (!homework) return res.status(404).json({ success: false, message: 'Homework not found' });
+
+    const isOwner = homework.createdBy === req.user.id;
+    const isAdmin = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL'].includes(req.user.role);
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    await HomeworkQuestion.destroy({ where: { homeworkId: homework.id } });
+    await HomeworkSubmission.destroy({ where: { homeworkId: homework.id } });
+    await homework.destroy();
+
+    await createAuditLog(req, 'DELETE', 'HOMEWORK', homework.id, homework, null);
+
+    res.json({ success: true, message: 'Homework deleted' });
+  } catch (err) {
+    console.error('❌ DELETE /api/homework/:id error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
+// ============================================================
+//  6. PATCH /api/homework/:id/publish
+// ============================================================
+app.patch('/api/homework/:id/publish', authenticate, async (req, res) => {
+  try {
+    const homework = await Homework.findByPk(req.params.id, {
+      include: [{ model: HomeworkQuestion, as: 'Questions' }]
+    });
+    if (!homework) return res.status(404).json({ success: false, message: 'Homework not found' });
+
+    const isOwner = homework.createdBy === req.user.id;
+    const isAdmin = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL'].includes(req.user.role);
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    if (!homework.Questions || homework.Questions.length === 0) {
+      return res.status(400).json({ success: false, message: 'Add at least one question before publishing' });
+    }
+
+    await homework.update({ status: 'PUBLISHED', publishedAt: new Date() });
+    await createAuditLog(req, 'PUBLISH', 'HOMEWORK', homework.id, null, { status: 'PUBLISHED' });
+
+    res.json({ success: true, homework });
+  } catch (err) {
+    console.error('❌ PATCH publish error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
+// ============================================================
+//  7. GET /api/homework/:id/submissions — for teacher grading
+// ============================================================
+app.get('/api/homework/:id/submissions', authenticate, async (req, res) => {
+  try {
+    const homework = await Homework.findByPk(req.params.id, {
+      include: [{ model: HomeworkQuestion, as: 'Questions', separate: true, order: [['order', 'ASC']] }]
+    });
+    if (!homework) return res.status(404).json({ success: false, message: 'Homework not found' });
+
+    const isOwner = homework.createdBy === req.user.id;
+    const isAdmin = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL'].includes(req.user.role);
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    const submissions = await HomeworkSubmission.findAll({
+      where: { homeworkId: homework.id },
+      include: [{ model: Student, as: 'Student', attributes: ['id', 'firstName', 'lastName', 'admissionNumber'] }],
+      order: [['submittedAt', 'DESC']]
+    });
+
+    res.json({ success: true, homework, submissions });
+  } catch (err) {
+    console.error('❌ GET submissions error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
+// ============================================================
+//  8. POST /api/homework/:id/submit — student submission
+// ============================================================
+app.post('/api/homework/:id/submit', authenticate, async (req, res) => {
+  try {
+    if (req.user.role !== 'STUDENT') {
+      return res.status(403).json({ success: false, message: 'Only students can submit homework' });
+    }
+
+    const homework = await Homework.findByPk(req.params.id, {
+      include: [{ model: HomeworkQuestion, as: 'Questions', separate: true, order: [['order', 'ASC']] }]
+    });
+    if (!homework) return res.status(404).json({ success: false, message: 'Homework not found' });
+
+    if (homework.status !== 'PUBLISHED' && homework.status !== 'CLOSED') {
+      return res.status(400).json({ success: false, message: 'Homework is not open for submission' });
+    }
+
+    const student = await Student.findOne({ where: { userId: req.user.id } });
+    if (!student) return res.status(404).json({ success: false, message: 'Student record not found' });
+
+    // Prevent double-submission
+    const existing = await HomeworkSubmission.findOne({
+      where: { homeworkId: homework.id, studentId: student.id }
+    });
+    if (existing && existing.status === 'GRADED') {
+      return res.status(400).json({ success: false, message: 'Already graded — cannot resubmit' });
+    }
+
+    const { answers, timeSpentSeconds } = req.body;
+    const now = new Date();
+    const isLate = homework.dueDate && now > new Date(homework.dueDate);
+
+    if (isLate && !homework.allowLateSubmission) {
+      return res.status(400).json({ success: false, message: 'Due date has passed' });
+    }
+
+    // Build submission
+    const submissionData = {
+      homeworkId: homework.id,
+      studentId: student.id,
+      schoolId: homework.schoolId,
+      answers: Array.isArray(answers) ? answers : [],
+      submittedAt: now,
+      isLate,
+      timeSpentSeconds: timeSpentSeconds || null,
+      status: 'SUBMITTED'
+    };
+
+    // ✅ Auto-grade if homework.gradingMode === 'AUTO'
+    if (homework.gradingMode === 'AUTO') {
+      const { updatedAnswers, totalAwarded } = await autoGradeSubmission(
+        submissionData,
+        homework.Questions || [],
+        homework
+      );
+      submissionData.answers = updatedAnswers;
+      submissionData.score = totalAwarded;
+      submissionData.status = 'GRADED';
+      submissionData.gradedAt = now;
+      submissionData.gradedBy = null; // system
+      submissionData.feedback = 'Auto-graded by system.';
+    }
+
+    let submission;
+    if (existing) {
+      submission = await existing.update(submissionData);
+    } else {
+      submission = await HomeworkSubmission.create(submissionData);
+    }
+
+    await createAuditLog(req, 'CREATE', 'HOMEWORK_SUBMISSION', submission.id, null, {
+      homeworkId: homework.id,
+      isLate,
+      status: submission.status
+    });
+
+    res.json({ success: true, submission });
+  } catch (err) {
+    console.error('❌ POST submit error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
+// ============================================================
+//  9. PATCH /api/homework/submissions/:id/grade — teacher grades
+// ============================================================
+app.patch('/api/homework/submissions/:id/grade', authenticate, async (req, res) => {
+  try {
+    const submission = await HomeworkSubmission.findByPk(req.params.id, {
+      include: [{ model: Homework, as: 'Homework' }]
+    });
+    if (!submission) return res.status(404).json({ success: false, message: 'Submission not found' });
+
+    const homework = submission.Homework;
+    const isOwner = homework.createdBy === req.user.id;
+    const isAdmin = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL'].includes(req.user.role);
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    const { score, feedback, perQuestion } = req.body;
+
+    // Optional: per-question overrides [{questionId, pointsAwarded, isCorrect}]
+    let updatedAnswers = submission.answers || [];
+    if (Array.isArray(perQuestion)) {
+      updatedAnswers = updatedAnswers.map(a => {
+        const override = perQuestion.find(p => p.questionId === a.questionId);
+        return override ? { ...a, ...override } : a;
+      });
+    }
+
+    const update = {
+      answers: updatedAnswers,
+      feedback: feedback ?? submission.feedback,
+      status: 'GRADED',
+      gradedBy: req.user.id,
+      gradedAt: new Date()
+    };
+
+    // If perQuestion scores provided, compute total; else use explicit score
+    if (Array.isArray(perQuestion)) {
+      update.score = updatedAnswers.reduce((sum, a) => sum + (parseInt(a.pointsAwarded) || 0), 0);
+    } else if (score !== undefined) {
+      update.score = parseInt(score);
+    }
+
+    await submission.update(update);
+    await createAuditLog(req, 'GRADE', 'HOMEWORK_SUBMISSION', submission.id, null, {
+      score: update.score, gradedBy: req.user.id
+    });
+
+    res.json({ success: true, submission });
+  } catch (err) {
+    console.error('❌ PATCH grade error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
+// ============================================================
+//  10. GET /api/homework/my-submissions — student's own
+// ============================================================
+app.get('/api/homework/my-submissions', authenticate, async (req, res) => {
+  try {
+    if (req.user.role !== 'STUDENT') {
+      return res.status(403).json({ success: false, message: 'Students only' });
+    }
+    const student = await Student.findOne({ where: { userId: req.user.id } });
+    if (!student) return res.status(404).json({ success: false, message: 'Student record not found' });
+
+    const subs = await HomeworkSubmission.findAll({
+      where: { studentId: student.id },
+      include: [{ model: Homework, as: 'Homework' }],
+      order: [['submittedAt', 'DESC']]
+    });
+
+    res.json({ success: true, submissions: subs });
+  } catch (err) {
+    console.error('❌ my-submissions error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
+// ============================================================
+//  11. GET /api/homework/child/:studentId — parent view
+// ============================================================
+app.get('/api/homework/child/:studentId', authenticate, async (req, res) => {
+  try {
+    if (req.user.role !== 'PARENT' && req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'SCHOOL_ADMIN') {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    const student = await Student.findByPk(req.params.studentId);
+    if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
+
+    if (req.user.role !== 'SUPER_ADMIN' && student.schoolId !== req.user.schoolId) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    // For parents: verify link. Assumes a ParentStudent join table exists.
+    // If your parent-child link uses a different table, adjust this block.
+    if (req.user.role === 'PARENT') {
+      try {
+        const ParentStudent = sequelize.models.ParentStudent;
+        if (ParentStudent) {
+          const link = await ParentStudent.findOne({
+            where: { parentId: req.user.id, studentId: student.id }
+          });
+          if (!link) return res.status(403).json({ success: false, message: 'Not your child' });
+        }
+      } catch (_) {
+        // If the table doesn't exist, we skip the check (relies on schoolId).
+      }
+    }
+
+    // All homework for this student's class/program/course
+    const scopes = [];
+    if (student.classId)   scopes.push({ classId: student.classId });
+    if (student.programId) scopes.push({ programId: student.programId });
+    if (student.courseId)  scopes.push({ courseId: student.courseId });
+
+    const where = {
+      schoolId: student.schoolId,
+      status: { [Op.in]: ['PUBLISHED', 'CLOSED'] }
+    };
+    if (scopes.length > 0) where[Op.or] = scopes;
+
+    const homeworks = await Homework.findAll({
+      where,
+      include: [
+        { model: User, as: 'Teacher', attributes: ['id', 'firstName', 'lastName'] },
+        { model: HomeworkQuestion, as: 'Questions', attributes: ['id'] },
+        {
+          model: HomeworkSubmission, as: 'Submissions',
+          where: { studentId: student.id },
+          required: false
+        }
+      ],
+      order: [['dueDate', 'DESC'], ['createdAt', 'DESC']]
+    });
+
+    res.json({
+      success: true,
+      student: { id: student.id, firstName: student.firstName, lastName: student.lastName, admissionNumber: student.admissionNumber },
+      homeworks
+    });
+  } catch (err) {
+    console.error('❌ child homework error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
+// ============================================================
+//  12. POST /api/upload/homework — file upload
+// ============================================================
+app.post('/api/upload/homework', authenticate, homeworkUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No file uploaded' });
+    }
+    const url = `/uploads/homework/${req.file.filename}`;
+    res.json({
+      success: true,
+      file: {
+        name: req.file.originalname,
+        url,
+        size: req.file.size,
+        mimeType: req.file.mimetype
+      }
+    });
+  } catch (err) {
+    console.error('❌ upload error:', err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
