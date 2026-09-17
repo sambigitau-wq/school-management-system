@@ -14956,6 +14956,10 @@ const ReportsModule = ({
   const canViewStaffReports     = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'HR_MANAGER', 'HR'].includes(user?.role);
   const canViewResourceReports  = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'LIBRARIAN', 'TRANSPORT_MANAGER', 'MATRON', 'ACCOUNTANT'].includes(user?.role);
 
+  // ==================== COLUMN LABELS ====================
+  const entityColumnLabel   = isUniversity ? 'Course'  : isTVET ? 'Program' : 'Class';
+  const academicColumnLabel = isUniversity ? 'Unit'    : isTVET ? 'Module'  : 'Subject';
+
   // ==================== TABS ====================
   const ALL_TABS = [
     { key: 'student',     label: 'Student Report',        icon: 'fa-user-graduate',      allowed: canViewStudentReports },
@@ -15073,15 +15077,19 @@ const ReportsModule = ({
   const todayStr = () => new Date().toISOString().split('T')[0];
   const firstOfMonthStr = () => new Date(new Date().setDate(1)).toISOString().split('T')[0];
 
-  // ==================== PRINT STYLES — ONLY THE TABLE PRINTS ====================
+  const getStudentEntityName = (s) => {
+    if (isUniversity) return s.course?.name || courses.find(c => c.id === s.courseId)?.name || 'N/A';
+    if (isTVET) return s.program?.name || programs.find(p => p.id === s.programId)?.name || 'N/A';
+    return s.class?.name || classes.find(c => c.id === s.classId)?.name || 'N/A';
+  };
+
+  // ==================== PRINT STYLES ====================
   useEffect(() => {
     const style = document.createElement('style');
     style.innerHTML = `
-      /* Screen: print-area is invisible as a wrapper, its children display normally */
       .print-area { display: block; }
 
       @media print {
-        /* Hide EVERYTHING by default */
         body * { visibility: hidden !important; }
         html, body {
           background: white !important;
@@ -15089,11 +15097,9 @@ const ReportsModule = ({
           padding: 0 !important;
         }
 
-        /* Show only the print-area and everything inside it */
         .print-area,
         .print-area * { visibility: visible !important; }
 
-        /* Pull the print-area up to the top-left of the page */
         .print-area {
           position: absolute !important;
           left: 0 !important;
@@ -15107,7 +15113,6 @@ const ReportsModule = ({
           border-radius: 0 !important;
         }
 
-        /* Hide interactions and charts even if somehow inside print-area */
         .no-print,
         button,
         input,
@@ -15118,7 +15123,6 @@ const ReportsModule = ({
         .recharts-legend-wrapper,
         .recharts-tooltip-wrapper { display: none !important; }
 
-        /* Print title from data-print-title attribute */
         .print-area::before {
           content: attr(data-print-title);
           display: block;
@@ -15130,7 +15134,6 @@ const ReportsModule = ({
           border-bottom: 1px solid #d1d5db;
         }
 
-        /* Table styling for print */
         table {
           border-collapse: collapse !important;
           width: 100% !important;
@@ -15150,7 +15153,6 @@ const ReportsModule = ({
           text-transform: uppercase !important;
         }
 
-        /* Strip card chrome in print */
         .print-area .bg-white,
         .print-area .rounded-xl,
         .print-area .shadow-sm {
@@ -15309,8 +15311,8 @@ const ReportsModule = ({
   const studentOptions = useMemo(() => students.map(s => ({
     value: s.id,
     label: `${s.firstName || ''} ${s.lastName || ''}`.trim() || 'Unnamed',
-    subLabel: `${s.admissionNumber || ''} • ${s.class?.name || s.course?.name || s.program?.name || ''}`
-  })), [students]);
+    subLabel: `${s.admissionNumber || ''} • ${getStudentEntityName(s)}`
+  })), [students, isUniversity, isTVET, classes, courses, programs]);
 
   const classOptions = useMemo(() => classes.map(c => ({ value: c.id, label: c.name, subLabel: c.academicYear || '' })), [classes]);
   const courseOptions = useMemo(() => courses.map(c => ({ value: c.id, label: c.name, subLabel: c.code || '' })), [courses]);
@@ -15362,12 +15364,6 @@ const ReportsModule = ({
       if (p !== undefined) return { grade, points: p, color: p >= 3 ? 'green' : p >= 1 ? 'yellow' : 'red' };
     }
     return { grade, points: points || '-', color: 'gray' };
-  };
-
-  const getStudentEntityName = (s) => {
-    if (isUniversity) return s.course?.name || courses.find(c => c.id === s.courseId)?.name || 'N/A';
-    if (isTVET) return s.program?.name || programs.find(p => p.id === s.programId)?.name || 'N/A';
-    return s.class?.name || classes.find(c => c.id === s.classId)?.name || 'N/A';
   };
 
   // ==================== STUDENT REPORT ====================
@@ -15574,71 +15570,89 @@ const ReportsModule = ({
     finally { setLoading(false); }
   };
 
-  // ==================== FEE ====================
+  // ==================== FEE (FIXED per-student fee matching) ====================
   const generateFeeReport = async () => {
     setLoading(true);
     try {
       await fetchOnce('fees');
       const start = feeDateRange.start || firstOfMonthStr();
       const end = feeDateRange.end || todayStr();
+
       const filteredPayments = payments.filter(p => {
         const d = new Date(p.date || p.paymentDate).toISOString().split('T')[0];
         return d >= start && d <= end;
       });
+
+      // Report filters only narrow WHICH students appear in the report
       let targetStudents = students;
       if (isUniversity && feeCourseId) targetStudents = students.filter(s => s.courseId === feeCourseId);
       if (isTVET && feeProgramId) targetStudents = students.filter(s => s.programId === feeProgramId);
       if (isRegularSchool && feeClassId) targetStudents = students.filter(s => s.classId === feeClassId);
+
       const studentIds = new Set(targetStudents.map(s => s.id));
       const paymentsForStudents = filteredPayments.filter(p => studentIds.has(p.studentId));
       const totalCollected = paymentsForStudents.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
-      const applicableFees = fees.filter(f => {
-        if (isUniversity && feeCourseId) return f.courseId === feeCourseId;
-        if (isTVET && feeProgramId) return f.programId === feeProgramId;
-        if (isRegularSchool && feeClassId) return f.classId === feeClassId;
-        return true;
-      });
-      const totalBilled = applicableFees.reduce((s, f) => s + parseFloat(f.amount || 0), 0) * (targetStudents.length || 1);
-      const totalOutstanding = Math.max(0, totalBilled - totalCollected);
+
+      // Per-student rows — match fees to EACH student's own scope
+      const perStudent = targetStudents.map(s => {
+        const applicableFees = fees.filter(f => {
+          if (isUniversity) return f.courseId === s.courseId;
+          if (isTVET) return f.programId === s.programId;
+          return f.classId === s.classId;
+        });
+        const billed = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
+        const paid = paymentsForStudents
+          .filter(p => p.studentId === s.id)
+          .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+        const balance = Math.max(0, billed - paid);
+        return {
+          admissionNumber: s.admissionNumber,
+          name: `${s.firstName || ''} ${s.lastName || ''}`.trim(),
+          entity: getStudentEntityName(s),
+          billed,
+          paid,
+          balance,
+          status: balance <= 0 ? 'Cleared' : 'Outstanding'
+        };
+      }).sort((a, b) => b.balance - a.balance);
+
+      const totalBilled = perStudent.reduce((s, r) => s + r.billed, 0);
+      const totalOutstanding = perStudent.reduce((s, r) => s + r.balance, 0);
+
       const monthly = {};
       paymentsForStudents.forEach(p => {
         const m = new Date(p.date || p.paymentDate).toLocaleString('default', { month: 'short', year: 'numeric' });
         monthly[m] = (monthly[m] || 0) + parseFloat(p.amount || 0);
       });
       const monthlyChart = Object.keys(monthly).map(m => ({ month: m, collected: monthly[m] }));
+
       const byMethod = {};
-      paymentsForStudents.forEach(p => { const m = p.paymentMethod || 'Other'; byMethod[m] = (byMethod[m] || 0) + parseFloat(p.amount || 0); });
-      const methodChart = Object.keys(byMethod).map(m => ({ name: m, value: byMethod[m] }));
-      const byFee = {};
       paymentsForStudents.forEach(p => {
-        const f = fees.find(x => x.id === p.feeId);
-        const name = f?.name || p.feeName || 'Unspecified';
-        byFee[name] = (byFee[name] || 0) + parseFloat(p.amount || 0);
+        const m = p.paymentMethod || 'Other';
+        byMethod[m] = (byMethod[m] || 0) + parseFloat(p.amount || 0);
       });
-      const feeChart = Object.keys(byFee).map(n => ({ name: n, amount: byFee[n] }));
-      const perStudent = targetStudents.map(s => {
-        const paid = paymentsForStudents.filter(p => p.studentId === s.id).reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-        const billed = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
-        const balance = Math.max(0, billed - paid);
-        return {
-          admissionNumber: s.admissionNumber,
-          name: `${s.firstName || ''} ${s.lastName || ''}`.trim(),
-          entity: getStudentEntityName(s),
-          billed, paid, balance,
-          status: balance <= 0 ? 'Cleared' : 'Outstanding'
-        };
-      }).sort((a, b) => b.balance - a.balance);
+      const methodChart = Object.keys(byMethod).map(m => ({ name: m, value: byMethod[m] }));
+
       setReportData({
         type: 'fee',
         summary: {
-          totalCollected, totalBilled, totalOutstanding,
+          totalCollected,
+          totalBilled,
+          totalOutstanding,
           collectionRate: totalBilled > 0 ? ((totalCollected / totalBilled) * 100).toFixed(2) : '0.00',
-          paymentCount: paymentsForStudents.length, studentCount: targetStudents.length
+          paymentCount: paymentsForStudents.length,
+          studentCount: targetStudents.length
         },
-        charts: { monthlyChart, methodChart, feeChart }, rows: perStudent, period: { start, end }
+        charts: { monthlyChart, methodChart },
+        rows: perStudent,
+        period: { start, end }
       });
-    } catch (err) { console.error(err); alert('Failed to generate fee report'); }
-    finally { setLoading(false); }
+    } catch (err) {
+      console.error(err);
+      alert('Failed to generate fee report');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // ==================== OUTSTANDING ====================
@@ -16526,7 +16540,7 @@ const ReportsModule = ({
                     </ChartCard>
                   )}
                   {reportData.charts.subjectPerf.length > 0 && (
-                    <ChartCard title={isTVET ? 'Module Performance' : 'Subject Performance'}>
+                    <ChartCard title={`${academicColumnLabel} Performance`}>
                       <BarChart data={reportData.charts.subjectPerf}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="name" angle={-45} textAnchor="end" height={60} interval={0} />
@@ -16555,7 +16569,7 @@ const ReportsModule = ({
                       <h3 className="font-semibold">Detailed Results ({reportData.results.length})</h3>
                       <ExportBtn onClick={() => exportCSV(reportData.results, 'student_report.csv')} />
                     </div>
-                    <TableWrap headers={['Date','Exam','Subject/Unit','Marks','Grade','Points']}>
+                    <TableWrap headers={['Date','Exam', academicColumnLabel,'Marks','Grade','Points']}>
                       {reportData.results.map((r, i) => (
                         <tr key={i} className="hover:bg-gray-50">
                           <td className="px-3 py-2">{r.examDate ? new Date(r.examDate).toLocaleDateString() : '—'}</td>
@@ -16685,7 +16699,7 @@ const ReportsModule = ({
               {showCharts && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 no-print">
                   {reportData.charts.radarData.length > 0 && (
-                    <ChartCard title="Subject Performance Radar">
+                    <ChartCard title={`${academicColumnLabel} Performance Radar`}>
                       <RadarChart data={reportData.charts.radarData}>
                         <PolarGrid /><PolarAngleAxis dataKey="subject" />
                         <PolarRadiusAxis domain={[0, 100]} />
@@ -16710,13 +16724,13 @@ const ReportsModule = ({
               <div className="print-area" data-print-title={`Detailed Academic — ${reportData.student.firstName} ${reportData.student.lastName}`}>
                 <Card>
                   <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold">Subject Breakdown ({reportData.subjectRows.length})</h3>
+                    <h3 className="font-semibold">{academicColumnLabel} Breakdown ({reportData.subjectRows.length})</h3>
                     <ExportBtn onClick={() => exportCSV(reportData.subjectRows.map(s => ({
                       subject: s.subject, exams: s.examCount, total: s.totalMarks, average: s.average,
                       bestExam: s.bestExam, worstExam: s.worstExam
                     })), 'academic_detailed.csv')} />
                   </div>
-                  <TableWrap headers={['Subject/Unit','Exams','Total Marks','Average','Best Exam','Weakest Exam']}>
+                  <TableWrap headers={[academicColumnLabel,'Exams','Total Marks','Average','Best Exam','Weakest Exam']}>
                     {reportData.subjectRows.map((s, i) => (
                       <tr key={i} className="hover:bg-gray-50">
                         <td className="px-3 py-2 font-medium">{s.subject}</td>
@@ -16790,7 +16804,7 @@ const ReportsModule = ({
                     <h3 className="font-semibold">Per-Student Fee Status ({reportData.rows.length})</h3>
                     <ExportBtn onClick={() => exportCSV(reportData.rows, 'fee_report.csv')} />
                   </div>
-                  <TableWrap headers={['Admission','Student','Class/Course','Billed','Paid','Balance','Status']}>
+                  <TableWrap headers={['Admission','Student', entityColumnLabel,'Billed','Paid','Balance','Status']}>
                     {reportData.rows.map((r, i) => (
                       <tr key={i} className="hover:bg-gray-50">
                         <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
@@ -16856,7 +16870,7 @@ const ReportsModule = ({
                     <h3 className="font-semibold">Students with Balances ({reportData.rows.length})</h3>
                     <ExportBtn onClick={() => exportCSV(reportData.rows, 'outstanding.csv')} />
                   </div>
-                  <TableWrap headers={['Admission','Student','Class/Course','Billed','Paid','Balance','Last Payment']}>
+                  <TableWrap headers={['Admission','Student', entityColumnLabel,'Billed','Paid','Balance','Last Payment']}>
                     {reportData.rows.map((r, i) => (
                       <tr key={i} className="hover:bg-gray-50">
                         <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
@@ -17071,7 +17085,7 @@ const ReportsModule = ({
                     </ChartCard>
                   )}
                   {reportData.charts.entityChart.length > 0 && (
-                    <ChartCard title="By Class / Course / Program">
+                    <ChartCard title={`By ${entityColumnLabel}`}>
                       <BarChart data={reportData.charts.entityChart} layout="vertical">
                         <CartesianGrid strokeDasharray="3 3" /><XAxis type="number" />
                         <YAxis type="category" dataKey="name" width={130} />
@@ -17098,7 +17112,7 @@ const ReportsModule = ({
                     <h3 className="font-semibold">Admitted Students ({reportData.rows.length})</h3>
                     <ExportBtn onClick={() => exportCSV(reportData.rows, 'admissions.csv')} />
                   </div>
-                  <TableWrap headers={['Admission','Name','Gender','Class/Course','Boarding','Admission Date','Phone']}>
+                  <TableWrap headers={['Admission','Name','Gender', entityColumnLabel,'Boarding','Admission Date','Phone']}>
                     {reportData.rows.map((r, i) => (
                       <tr key={i} className="hover:bg-gray-50">
                         <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
@@ -17204,7 +17218,7 @@ const ReportsModule = ({
                     <h3 className="font-semibold">Per-Student Attendance ({reportData.rows.length})</h3>
                     <ExportBtn onClick={() => exportCSV(reportData.rows, 'attendance_report.csv')} />
                   </div>
-                  <TableWrap headers={['Admission','Student','Class/Course','Present','Absent','Late','Leave','Total','Rate']}>
+                  <TableWrap headers={['Admission','Student', entityColumnLabel,'Present','Absent','Late','Leave','Total','Rate']}>
                     {reportData.rows.map((r, i) => (
                       <tr key={i} className="hover:bg-gray-50">
                         <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
@@ -17566,7 +17580,7 @@ const ReportsModule = ({
                       <h3 className="font-semibold">Students on Transport ({reportData.studentRows.length})</h3>
                       <ExportBtn onClick={() => exportCSV(reportData.studentRows, 'transport_students.csv')} />
                     </div>
-                    <TableWrap headers={['Student','Admission','Class/Course','Route','Vehicle','Driver','Phone','Fee','Pickup']}>
+                    <TableWrap headers={['Student','Admission', entityColumnLabel,'Route','Vehicle','Driver','Phone','Fee','Pickup']}>
                       {reportData.studentRows.map((r, i) => (
                         <tr key={i} className="hover:bg-gray-50">
                           <td className="px-3 py-2 font-medium">{r.student}</td>
@@ -17669,7 +17683,7 @@ const ReportsModule = ({
                       <h3 className="font-semibold">Students in Hostels ({reportData.studentRows.length})</h3>
                       <ExportBtn onClick={() => exportCSV(reportData.studentRows, 'hostel_students.csv')} />
                     </div>
-                    <TableWrap headers={['Student','Admission','Class/Course','Hostel','Gender','Room','Warden','Phone']}>
+                    <TableWrap headers={['Student','Admission', entityColumnLabel,'Hostel','Gender','Room','Warden','Phone']}>
                       {reportData.studentRows.map((r, i) => (
                         <tr key={i} className="hover:bg-gray-50">
                           <td className="px-3 py-2 font-medium">{r.student}</td>
@@ -17758,7 +17772,7 @@ const ReportsModule = ({
                       <h3 className="font-semibold">Borrowers ({reportData.borrowRows.length})</h3>
                       <ExportBtn onClick={() => exportCSV(reportData.borrowRows, 'library_borrowers.csv')} />
                     </div>
-                    <TableWrap headers={['Student','Admission','Class/Course','Book','Author','Borrowed','Due','Returned','Status','Days Overdue','Fine']}>
+                    <TableWrap headers={['Student','Admission', entityColumnLabel,'Book','Author','Borrowed','Due','Returned','Status','Days Overdue','Fine']}>
                       {reportData.borrowRows.map((r, i) => (
                         <tr key={i} className={`hover:bg-gray-50 ${r.daysOverdue > 0 ? 'bg-red-50' : ''}`}>
                           <td className="px-3 py-2 font-medium">{r.student}</td>
