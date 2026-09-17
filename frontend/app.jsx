@@ -4809,7 +4809,312 @@ const ClassModule = ({
   );
 };
 
-// ==================== STUDENT MODULE — SAFE REWRITE ====================
+
+// ============================================================
+//  STUDENT SEARCHABLE SELECT — module scope, stable identity
+// ============================================================
+const StudentSearchableSelect = ({
+  label,
+  value,
+  onChange,
+  options = [],
+  placeholder = 'Search...',
+  disabled,
+  required,
+  className,
+  emptyMessage = 'No options available',
+  noOptionsMessage = 'No results found'
+}) => {
+  const [search, setSearch] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const dropdownRef = useRef(null);
+  const inputRef = useRef(null);
+  const listRef = useRef(null);
+
+  const safeOptions = Array.isArray(options) ? options : [];
+
+  const filteredOptions = useMemo(() => {
+    if (!safeOptions.length) return [];
+    if (!search.trim()) return safeOptions;
+    const s = search.toLowerCase();
+    return safeOptions.filter(opt => {
+      if (!opt) return false;
+      return (opt.label || '').toLowerCase().includes(s)
+          || (opt.subLabel || '').toLowerCase().includes(s)
+          || String(opt.value ?? '').toLowerCase().includes(s);
+    });
+  }, [safeOptions, search]);
+
+  const selectedOption = useMemo(() => {
+    if (value === undefined || value === null || value === '') return null;
+    return safeOptions.find(opt => String(opt.value) === String(value)) || null;
+  }, [safeOptions, value]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handlePointerDown = (event) => {
+      const node = dropdownRef.current;
+      if (!node) return;
+      if (node.contains(event.target)) return;
+      setIsOpen(false);
+      setIsFocused(false);
+      setHighlightedIndex(-1);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+    };
+  }, [isOpen]);
+
+  const openMenu = () => {
+    if (disabled) return;
+    setIsFocused(true);
+    setIsOpen(true);
+    if (selectedOption && !search) setSearch(selectedOption.label);
+  };
+
+  const closeMenu = (restoreLabel = true) => {
+    setIsOpen(false);
+    setIsFocused(false);
+    setHighlightedIndex(-1);
+    if (restoreLabel) {
+      setSearch(selectedOption ? selectedOption.label : '');
+    }
+  };
+
+  const handleSelect = (opt) => {
+    if (!opt || opt.disabled) return;
+    onChange({ target: { value: opt.value } });
+    setSearch(opt.label);
+    setIsOpen(false);
+    setIsFocused(false);
+    setHighlightedIndex(-1);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const handleInputChange = (e) => {
+    const val = e.target.value;
+    setSearch(val);
+    setIsOpen(true);
+    setIsFocused(true);
+    setHighlightedIndex(-1);
+    if (val === '') onChange({ target: { value: '' } });
+  };
+
+  const handleKeyDown = (e) => {
+    if (disabled) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!isOpen) { openMenu(); return; }
+      setHighlightedIndex(i =>
+        filteredOptions.length === 0 ? -1 : (i + 1) % filteredOptions.length
+      );
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!isOpen) { openMenu(); return; }
+      setHighlightedIndex(i =>
+        filteredOptions.length === 0
+          ? -1
+          : (i - 1 + filteredOptions.length) % filteredOptions.length
+      );
+    } else if (e.key === 'Enter') {
+      if (isOpen && highlightedIndex >= 0 && filteredOptions[highlightedIndex]) {
+        e.preventDefault();
+        handleSelect(filteredOptions[highlightedIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      if (isOpen) { e.preventDefault(); closeMenu(true); }
+    } else if (e.key === 'Tab') {
+      closeMenu(true);
+    }
+  };
+
+  useEffect(() => {
+    if (!isOpen || highlightedIndex < 0 || !listRef.current) return;
+    const el = listRef.current.children[highlightedIndex];
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+  }, [highlightedIndex, isOpen]);
+
+  const handleClear = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onChange({ target: { value: '' } });
+    setSearch('');
+    setIsOpen(false);
+    setIsFocused(false);
+    setHighlightedIndex(-1);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const displayValue = isFocused ? search : (selectedOption ? selectedOption.label : '');
+
+  return (
+    <div className="w-full">
+      {label && (
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          {label}
+          {required && <span className="text-red-500 ml-1">*</span>}
+        </label>
+      )}
+
+      <div className="relative" ref={dropdownRef}>
+        <input
+          ref={inputRef}
+          type="text"
+          className={`w-full px-3 py-2 pr-16 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
+            disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
+          } ${className || ''}`}
+          value={displayValue}
+          onChange={handleInputChange}
+          onFocus={openMenu}
+          onBlur={() => {
+            setTimeout(() => {
+              if (!dropdownRef.current) return;
+              if (dropdownRef.current.contains(document.activeElement)) return;
+              closeMenu(true);
+            }, 120);
+          }}
+          onKeyDown={handleKeyDown}
+          placeholder={placeholder}
+          disabled={disabled}
+          autoComplete="off"
+          role="combobox"
+          aria-expanded={isOpen}
+          aria-haspopup="listbox"
+        />
+
+        {selectedOption && !disabled && (
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={handleClear}
+            className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
+            tabIndex={-1}
+            aria-label="Clear selection"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
+
+        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+          <svg
+            className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+
+        {isOpen && !disabled && (
+          <div
+            ref={listRef}
+            role="listbox"
+            className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-auto"
+            style={{ zIndex: 9999 }}
+          >
+            {safeOptions.length === 0 ? (
+              <div className="px-3 py-4 text-center text-gray-500 text-sm">
+                {emptyMessage}
+              </div>
+            ) : filteredOptions.length > 0 ? (
+              filteredOptions.map((opt, idx) => (
+                <div
+                  key={String(opt.value ?? opt.key ?? opt.id ?? idx)}
+                  role="option"
+                  aria-selected={String(opt.value) === String(value)}
+                  className={`px-3 py-2 cursor-pointer border-b last:border-b-0 transition-colors ${
+                    String(opt.value) === String(value)
+                      ? 'bg-indigo-50 text-indigo-700'
+                      : idx === highlightedIndex
+                        ? 'bg-gray-100'
+                        : 'text-gray-900 hover:bg-indigo-50'
+                  } ${opt.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onMouseEnter={() => setHighlightedIndex(idx)}
+                  onClick={() => handleSelect(opt)}
+                >
+                  <div className="font-medium">{opt.label}</div>
+                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+                </div>
+              ))
+            ) : (
+              <div className="px-3 py-4 text-center text-gray-500 text-sm">
+                {search.trim() ? `No results for "${search}"` : noOptionsMessage}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ============================================================
+//  STUDENT TEXT INPUT — module scope
+// ============================================================
+const StudentTextInput = ({
+  label,
+  value,
+  onChange,
+  placeholder,
+  required,
+  disabled,
+  type = 'text',
+  min,
+  max
+}) => (
+  <div className="w-full">
+    {label && (
+      <label className="block text-sm font-medium text-gray-700 mb-1">
+        {label}
+        {required && <span className="text-red-500 ml-1">*</span>}
+      </label>
+    )}
+    <input
+      type={type}
+      value={value ?? ''}
+      onChange={onChange}
+      placeholder={placeholder}
+      disabled={disabled}
+      min={min}
+      max={max}
+      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:bg-gray-100"
+      autoComplete="off"
+    />
+  </div>
+);
+
+// ============================================================
+//  STUDENT PLAIN SELECT — module scope
+// ============================================================
+const StudentSelect = ({ label, value, onChange, options = [] }) => (
+  <div className="w-full">
+    {label && (
+      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+    )}
+    <select
+      value={value ?? ''}
+      onChange={onChange}
+      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+    >
+      {options.map(o => {
+        const val = typeof o === 'string' ? o : o.value;
+        const lbl = typeof o === 'string' ? o : o.label;
+        return <option key={String(val)} value={val}>{lbl}</option>;
+      })}
+    </select>
+  </div>
+);
+
+// ============================================================
+//  STUDENT MODULE
+// ============================================================
 const StudentModule = ({
   students = [],
   setStudents,
@@ -4836,6 +5141,11 @@ const StudentModule = ({
   setAttendance,
   user
 }) => {
+  // ---- Aliases for the module-scope sub-components ----
+  const SearchableSelect = StudentSearchableSelect;
+  const TextInput = StudentTextInput;
+  const SelectField = StudentSelect;
+
   // ==================================================================
   //  SAFE HELPERS
   // ==================================================================
@@ -4891,6 +5201,12 @@ const StudentModule = ({
     return buildAdmissionNumber(y, maxSeq + 1, prefix);
   };
 
+  const toNumberOrNull = (v) => {
+    if (v === '' || v === undefined || v === null) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
   // ==================================================================
   //  PERMISSIONS
   // ==================================================================
@@ -4944,7 +5260,6 @@ const StudentModule = ({
   const [showAddParentModal, setShowAddParentModal] = useState(false);
   const [selectedStudentForParent, setSelectedStudentForParent] = useState(null);
 
-  // Auto / Manual mode for admission number
   const [autoAdm, setAutoAdm] = useState(true);
   const [admPreview, setAdmPreview] = useState('');
 
@@ -4952,13 +5267,11 @@ const StudentModule = ({
   const formState = form ?? localForm;
   const setFormState = setForm ?? setLocalForm;
 
-  // Student's own record (student role only)
   const [myStudentRecord, setMyStudentRecord] = useState(null);
   const [loadingMyData, setLoadingMyData] = useState(false);
   const [showAdmissionModal, setShowAdmissionModal] = useState(false);
   const [admissionNumber, setAdmissionNumber] = useState(() => localStorage.getItem('studentAdmissionNumber'));
 
-  // Parent form (link / create)
   const [parentForm, setParentForm] = useState({
     userId: '', studentId: '', relationship: 'Mother',
     isPrimary: true, emergencyContact: false,
@@ -5017,7 +5330,7 @@ const StudentModule = ({
   }, [currentSchool?.id]);
 
   // ==================================================================
-  //  ADMISSION NUMBER — server-authoritative + local fallback
+  //  ADMISSION NUMBER
   // ==================================================================
   const fetchNextAdmissionNumber = async () => {
     if (!currentSchool?.id) return;
@@ -5044,243 +5357,6 @@ const StudentModule = ({
       setLoadingAdm(false);
     }
   };
-
-  // ==================================================================
-  //  SEARCHABLE SELECT — non-blocking
-  // ==================================================================
-  const SearchableSelect = ({
-    label, value, onChange, options = [], placeholder = 'Search...',
-    disabled, required, className,
-    noOptionsMessage = 'No results found',
-    emptyMessage = 'No options available'
-  }) => {
-    const [search, setSearch] = useState('');
-    const [isOpen, setIsOpen] = useState(false);
-    const [isFocused, setIsFocused] = useState(false);
-    const [highlighted, setHighlighted] = useState(-1);
-    const wrapRef = useRef(null);
-    const inputRef = useRef(null);
-    const listRef = useRef(null);
-
-    const safeOptions = Array.isArray(options) ? options : [];
-
-    const filtered = useMemo(() => {
-      if (!search.trim()) return safeOptions;
-      const s = search.toLowerCase();
-      return safeOptions.filter(o =>
-        (o.label || '').toLowerCase().includes(s) ||
-        (o.subLabel || '').toLowerCase().includes(s) ||
-        String(o.value ?? '').toLowerCase().includes(s)
-      );
-    }, [safeOptions, search]);
-
-    const selected = useMemo(
-      () => safeOptions.find(o => String(o.value) === String(value)) || null,
-      [safeOptions, value]
-    );
-
-    useEffect(() => {
-      if (!isOpen) return;
-      const onDown = (e) => {
-        if (!wrapRef.current) return;
-        if (wrapRef.current.contains(e.target)) return;
-        setIsOpen(false); setIsFocused(false); setHighlighted(-1);
-      };
-      document.addEventListener('mousedown', onDown);
-      document.addEventListener('touchstart', onDown, { passive: true });
-      return () => {
-        document.removeEventListener('mousedown', onDown);
-        document.removeEventListener('touchstart', onDown);
-      };
-    }, [isOpen]);
-
-    useEffect(() => {
-      if (!isOpen || highlighted < 0 || !listRef.current) return;
-      const el = listRef.current.children[highlighted];
-      if (el?.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
-    }, [highlighted, isOpen]);
-
-    const open = () => {
-      if (disabled) return;
-      setIsFocused(true); setIsOpen(true);
-      if (selected && !search) setSearch(selected.label);
-    };
-    const close = (restore = true) => {
-      setIsOpen(false); setIsFocused(false); setHighlighted(-1);
-      if (restore) setSearch(selected ? selected.label : '');
-    };
-    const pick = (opt) => {
-      if (!opt || opt.disabled) return;
-      onChange({ target: { value: opt.value } });
-      setSearch(opt.label);
-      setIsOpen(false); setIsFocused(false); setHighlighted(-1);
-      requestAnimationFrame(() => inputRef.current?.focus());
-    };
-
-    const onKey = (e) => {
-      if (disabled) return;
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        if (!isOpen) return open();
-        setHighlighted(i => filtered.length ? (i + 1) % filtered.length : -1);
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        if (!isOpen) return open();
-        setHighlighted(i => filtered.length ? (i - 1 + filtered.length) % filtered.length : -1);
-      } else if (e.key === 'Enter') {
-        if (isOpen && highlighted >= 0 && filtered[highlighted]) {
-          e.preventDefault(); pick(filtered[highlighted]);
-        }
-      } else if (e.key === 'Escape') {
-        if (isOpen) { e.preventDefault(); close(true); }
-      } else if (e.key === 'Tab') {
-        close(true);
-      }
-    };
-
-    const display = isFocused ? search : (selected ? selected.label : '');
-
-    return (
-      <div className="w-full">
-        {label && (
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}{required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-        )}
-        <div className="relative" ref={wrapRef}>
-          <input
-            ref={inputRef}
-            type="text"
-            className={`w-full px-3 py-2 pr-14 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
-            } ${className || ''}`}
-            value={display}
-            onChange={(e) => {
-              const v = e.target.value;
-              setSearch(v); setIsOpen(true); setIsFocused(true); setHighlighted(-1);
-              if (v === '') onChange({ target: { value: '' } });
-            }}
-            onFocus={open}
-            onBlur={() => setTimeout(() => {
-              if (!wrapRef.current) return;
-              if (wrapRef.current.contains(document.activeElement)) return;
-              close(true);
-            }, 120)}
-            onKeyDown={onKey}
-            placeholder={placeholder}
-            disabled={disabled}
-            autoComplete="off"
-          />
-          {selected && !disabled && (
-            <button
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={(e) => {
-                e.stopPropagation();
-                onChange({ target: { value: '' } });
-                setSearch(''); close(false);
-                requestAnimationFrame(() => inputRef.current?.focus());
-              }}
-              className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              tabIndex={-1}
-              aria-label="Clear"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
-                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-
-          {isOpen && !disabled && (
-            <div ref={listRef}
-                 className="absolute left-0 right-0 top-full mt-1 bg-white border rounded-lg shadow-xl max-h-60 overflow-auto"
-                 style={{ zIndex: 9999 }}>
-              {safeOptions.length === 0 ? (
-                <div className="px-3 py-4 text-center text-gray-500 text-sm">{emptyMessage}</div>
-              ) : filtered.length === 0 ? (
-                <div className="px-3 py-4 text-center text-gray-500 text-sm">No results for "{search}"</div>
-              ) : (
-                filtered.map((opt, i) => (
-                  <div
-                    key={String(opt.value ?? i)}
-                    className={`px-3 py-2 cursor-pointer border-b last:border-b-0 ${
-                      String(opt.value) === String(value)
-                        ? 'bg-indigo-50 text-indigo-700'
-                        : i === highlighted ? 'bg-gray-100' : 'hover:bg-indigo-50'
-                    }`}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onMouseEnter={() => setHighlighted(i)}
-                    onClick={() => pick(opt)}
-                  >
-                    <div className="font-medium">{opt.label}</div>
-                    {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  // ==================================================================
-  //  PLAIN INPUTS
-  // ==================================================================
-  const TextInput = ({ label, value, onChange, placeholder, required, disabled, type = 'text', min, max, textarea, rows }) => (
-    <div className="w-full">
-      {label && (
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          {label}{required && <span className="text-red-500 ml-1">*</span>}
-        </label>
-      )}
-      {textarea ? (
-        <textarea
-          value={value ?? ''}
-          onChange={onChange}
-          placeholder={placeholder}
-          disabled={disabled}
-          rows={rows || 3}
-          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none disabled:bg-gray-100"
-        />
-      ) : (
-        <input
-          type={type}
-          value={value ?? ''}
-          onChange={onChange}
-          placeholder={placeholder}
-          disabled={disabled}
-          min={min}
-          max={max}
-          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none disabled:bg-gray-100"
-          autoComplete="off"
-        />
-      )}
-    </div>
-  );
-
-  const SelectField = ({ label, value, onChange, options = [] }) => (
-    <div className="w-full">
-      {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
-      <select
-        value={value ?? ''}
-        onChange={onChange}
-        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-      >
-        {options.map(o => {
-          const val = typeof o === 'string' ? o : o.value;
-          const lbl = typeof o === 'string' ? o : o.label;
-          return <option key={String(val)} value={val}>{lbl}</option>;
-        })}
-      </select>
-    </div>
-  );
 
   // ==================================================================
   //  OPTIONS
@@ -5393,11 +5469,23 @@ const StudentModule = ({
   // ==================================================================
   const prepareFormData = (data) => {
     const uuidFields = ['classId', 'courseId', 'programId', 'facultyId', 'departmentId', 'transportRouteId'];
-    const prepared = { ...data };
-    uuidFields.forEach(f => { if (prepared[f] === '') prepared[f] = null; });
+    const numericFields = ['currentYear', 'currentSemester'];
 
-    // Admission number: if blank, omit so the backend generates one.
-    // If present, keep whatever the school typed (uppercased for consistency).
+    const prepared = { ...data };
+
+    uuidFields.forEach(f => { if (prepared[f] === '') prepared[f] = null; });
+    numericFields.forEach(f => { prepared[f] = toNumberOrNull(prepared[f]); });
+
+    if (prepared.parent && typeof prepared.parent === 'object') {
+      const parent = { ...prepared.parent };
+      parent.monthlyIncome = toNumberOrNull(parent.monthlyIncome);
+      if (!parent.grantPortalAccess) {
+        delete parent.password;
+        delete parent.existingUserId;
+      }
+      prepared.parent = parent;
+    }
+
     if (!prepared.admissionNumber || !String(prepared.admissionNumber).trim()) {
       delete prepared.admissionNumber;
     } else {
@@ -5464,7 +5552,7 @@ const StudentModule = ({
   const openAdd = () => {
     setEditingId(null);
     setFormState(emptyForm());
-    setAutoAdm(true);        // start in Auto mode
+    setAutoAdm(true);
     setSubmitError('');
     setShowForm(true);
     setTimeout(() => document.getElementById('student-form')?.scrollIntoView({ behavior: 'smooth' }), 100);
@@ -5474,7 +5562,7 @@ const StudentModule = ({
     if (!canEdit) { alert('You do not have permission to edit students'); return; }
     if (!student) return;
     setEditingId(student.id);
-    setAutoAdm(false);       // editing always manual
+    setAutoAdm(false);
     setSubmitError('');
     setFormState({
       admissionNumber: student.admissionNumber || '',
@@ -6008,7 +6096,7 @@ const StudentModule = ({
           )}
 
           <form onSubmit={editingId ? handleUpdateSubmit : handleCreate} className="space-y-4">
-            {/* ================= Admission number + Auto/Manual ================= */}
+            {/* Admission number + Auto/Manual */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <div className="flex items-center justify-between mb-1">
@@ -6741,7 +6829,6 @@ const StudentModule = ({
     </div>
   );
 };
-
 
 // ==================== SUBJECT MODULE WITH MULTI-CLASS SUPPORT ====================
 const SubjectModule = ({ 
