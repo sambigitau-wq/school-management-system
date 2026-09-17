@@ -9,7 +9,6 @@ const nodemailer = require('nodemailer');
 const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
-const { Op } = require('sequelize');
 
 const app = express();
 const emailService = require('./emailService');
