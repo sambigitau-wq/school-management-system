@@ -14935,7 +14935,6 @@ import {
   PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
-
 const ReportsModule = ({
   students = [], classes = [], results = [], exams = [], subjects = [], units = [],
   payments = [], expenses = [], dateRange, setDateRange,
@@ -14964,6 +14963,7 @@ const ReportsModule = ({
     { key: 'academic',    label: 'Detailed Academic',     icon: 'fa-award',              allowed: canViewStudentReports },
     { key: 'fee',         label: 'Fee Collection',        icon: 'fa-money-bill-wave',    allowed: canViewFinancialReports },
     { key: 'outstanding', label: 'Outstanding Balances',  icon: 'fa-exclamation-circle', allowed: canViewFinancialReports },
+    { key: 'feeTransfer', label: 'Fee Transfers',         icon: 'fa-exchange-alt',       allowed: canViewFinancialReports },
     { key: 'admission',   label: 'Admissions',            icon: 'fa-user-plus',          allowed: canViewAdmissionReports },
     { key: 'financial',   label: 'Financial Summary',     icon: 'fa-chart-line',         allowed: canViewFinancialReports },
     { key: 'attendance',  label: 'Attendance',            icon: 'fa-calendar-check',     allowed: canViewClassReports },
@@ -14993,6 +14993,7 @@ const ReportsModule = ({
   const [hostels, setHostels] = useState([]);
   const [books, setBooks] = useState([]);
   const [borrows, setBorrows] = useState([]);
+  const [feeTransfers, setFeeTransfers] = useState([]);   // ← NEW
   const [fetchedOnce, setFetchedOnce] = useState({});
 
   // Student
@@ -15018,6 +15019,11 @@ const ReportsModule = ({
   const [outstandingClassId, setOutstandingClassId] = useState('');
   const [outstandingCourseId, setOutstandingCourseId] = useState('');
   const [outstandingProgramId, setOutstandingProgramId] = useState('');
+
+  // Fee Transfers (NEW)
+  const [transferSearch, setTransferSearch] = useState('');
+  const [transferStatus, setTransferStatus] = useState('');
+  const [transferStudentId, setTransferStudentId] = useState('');
 
   // Admission
   const [admissionYear, setAdmissionYear] = useState(new Date().getFullYear().toString());
@@ -15049,15 +15055,15 @@ const ReportsModule = ({
 
   // Transport
   const [transportSearch, setTransportSearch] = useState('');
-  const [transportView, setTransportView] = useState('routes'); // 'routes' | 'students'
+  const [transportView, setTransportView] = useState('routes');
 
   // Hostel
   const [hostelGenderFilter, setHostelGenderFilter] = useState('');
-  const [hostelView, setHostelView] = useState('hostels'); // 'hostels' | 'students'
+  const [hostelView, setHostelView] = useState('hostels');
 
   // Library
   const [libraryCategory, setLibraryCategory] = useState('');
-  const [libraryView, setLibraryView] = useState('books'); // 'books' | 'borrows'
+  const [libraryView, setLibraryView] = useState('books');
 
   // ==================== COLORS ====================
   const CHART_COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#14b8a6', '#6366f1', '#f97316'];
@@ -15118,6 +15124,7 @@ const ReportsModule = ({
       if (key === 'hostels')         { res = await api.get('/hostels');                                  setHostels(res.data.hostels || []); }
       if (key === 'books')           { res = await api.get('/books');                                    setBooks(res.data.books || []); }
       if (key === 'borrows')         { res = await api.get('/borrows');                                  setBorrows(res.data.borrows || []); }
+      if (key === 'feeTransfers')    { res = await api.get('/fee-transfers');                            setFeeTransfers(res.data.transfers || []); }   // ← NEW
       setFetchedOnce(prev => ({ ...prev, [key]: true }));
     } catch (err) {
       console.warn(`Optional data fetch failed (${key}):`, err?.response?.data || err.message);
@@ -15137,13 +15144,15 @@ const ReportsModule = ({
 
     const filteredOptions = useMemo(() => {
       if (!options?.length) return [];
-      if (!search.trim()) return options;
-      const s = search.toLowerCase();
-      return options.filter(o => o && (
-        o.label?.toLowerCase().includes(s) ||
-        o.subLabel?.toLowerCase().includes(s) ||
-        o.value?.toString().toLowerCase().includes(s)
-      ));
+      if (!String(search ?? '').trim()) return options;
+      const s = String(search).toLowerCase();
+      return options.filter(o => {
+        if (!o) return false;
+        const lbl = String(o.label ?? '').toLowerCase();
+        const sub = String(o.subLabel ?? '').toLowerCase();
+        const val = String(o.value ?? '').toLowerCase();
+        return lbl.includes(s) || sub.includes(s) || val.includes(s);
+      });
     }, [options, search]);
 
     const selected = useMemo(() => {
@@ -15159,7 +15168,7 @@ const ReportsModule = ({
 
     useEffect(() => { if (!isOpen) setSearch(''); }, [isOpen]);
 
-    const display = isFocused ? search : (selected ? selected.label : '');
+    const display = isFocused ? search : (selected ? String(selected.label ?? '') : '');
 
     return (
       <div className="relative" ref={dropdownRef}>
@@ -15170,12 +15179,13 @@ const ReportsModule = ({
             className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 transition-all ${disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'} ${className || ''}`}
             value={display}
             onChange={(e) => {
-              setSearch(e.target.value);
+              const v = e.target.value;
+              setSearch(v);
               setIsOpen(true);
               setIsFocused(true);
-              if (e.target.value === '') onChange({ target: { value: '' } });
+              if (v === '') onChange({ target: { value: '' } });
             }}
-            onFocus={() => { if (!disabled) { setIsFocused(true); setIsOpen(true); if (selected) setSearch(selected.label); } }}
+            onFocus={() => { if (!disabled) { setIsFocused(true); setIsOpen(true); if (selected) setSearch(String(selected.label ?? '')); } }}
             onBlur={() => setTimeout(() => { if (!dropdownRef.current?.contains(document.activeElement)) { setIsOpen(false); setIsFocused(false); } }, 200)}
             placeholder={placeholder}
             disabled={disabled}
@@ -15197,13 +15207,13 @@ const ReportsModule = ({
             ) : filteredOptions.length > 0 ? (
               filteredOptions.map((opt, i) => (
                 <div
-                  key={opt.value || i}
+                  key={String(opt.value ?? i)}
                   className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 ${opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'}`}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => { onChange({ target: { value: opt.value } }); setSearch(''); setIsOpen(false); setIsFocused(false); }}
                 >
-                  <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+                  <div className="font-medium">{String(opt.label ?? '')}</div>
+                  {opt.subLabel && <div className="text-xs text-gray-500">{String(opt.subLabel)}</div>}
                 </div>
               ))
             ) : (
@@ -15249,6 +15259,16 @@ const ReportsModule = ({
   const programOptions = useMemo(() => programs.map(p => ({ value: p.id, label: p.name, subLabel: p.code || '' })), [programs]);
   const yearOptions = useMemo(() => ['1','2','3','4','5','6'].map(y => ({ value: y, label: `Year ${y}` })), []);
   const moduleOptions = useMemo(() => ['1','2','3','4'].map(m => ({ value: m, label: `Module ${m}` })), []);
+
+  // NEW: student options for the transfers filter
+  const studentOptionsForTransfers = useMemo(() => [
+    { value: '', label: 'All students' },
+    ...students.map(s => ({
+      value: s.id,
+      label: `${s.firstName || ''} ${s.lastName || ''}`.trim() || 'Unnamed',
+      subLabel: s.admissionNumber || ''
+    }))
+  ], [students]);
 
   const examOptionsForStudent = useMemo(() => {
     if (!selectedStudent) return [];
@@ -15610,6 +15630,133 @@ const ReportsModule = ({
       });
     } catch (err) { console.error(err); alert('Failed to generate outstanding report'); }
     finally { setLoading(false); }
+  };
+
+  // ==================== FEE TRANSFERS (NEW) ====================
+  const generateFeeTransferReport = async () => {
+    setLoading(true);
+    try {
+      await fetchOnce('feeTransfers');
+
+      // Local filters on top of the fetched list
+      let rows = feeTransfers;
+
+      if (transferStatus) {
+        rows = rows.filter(t => t.status === transferStatus);
+      }
+      if (transferStudentId) {
+        rows = rows.filter(t =>
+          t.fromStudentId === transferStudentId ||
+          t.toStudentId === transferStudentId
+        );
+      }
+      if (String(transferSearch ?? '').trim()) {
+        const q = String(transferSearch).toLowerCase();
+        rows = rows.filter(t => {
+          const from = t.fromStudent || {};
+          const to = t.toStudent || {};
+          return (
+            String(from.firstName || '').toLowerCase().includes(q) ||
+            String(from.lastName || '').toLowerCase().includes(q) ||
+            String(from.admissionNumber || '').toLowerCase().includes(q) ||
+            String(to.firstName || '').toLowerCase().includes(q) ||
+            String(to.lastName || '').toLowerCase().includes(q) ||
+            String(to.admissionNumber || '').toLowerCase().includes(q)
+          );
+        });
+      }
+
+      // Server-side global stats (authoritative totals — ignore filters)
+      let serverStats = null;
+      try {
+        const statsRes = await api.get('/fee-transfers/stats');
+        serverStats = statsRes.data.stats;
+      } catch (_) { /* ignore, fall back to filtered */ }
+
+      // Filtered counts
+      const byStatus = {
+        PENDING:   rows.filter(t => t.status === 'PENDING').length,
+        APPROVED:  rows.filter(t => t.status === 'APPROVED').length,
+        REJECTED:  rows.filter(t => t.status === 'REJECTED').length,
+        CANCELLED: rows.filter(t => t.status === 'CANCELLED').length
+      };
+
+      // Approved transfer total (from filtered rows)
+      const approvedTotal = rows
+        .filter(t => t.status === 'APPROVED')
+        .reduce((s, t) => s + parseFloat(t.amount || 0), 0);
+
+      // Chart: status distribution
+      const statusChart = Object.entries(byStatus)
+        .filter(([_, v]) => v > 0)
+        .map(([name, value]) => ({ name, value }));
+
+      // Chart: monthly approved transfer volume
+      const monthly = {};
+      rows.filter(t => t.status === 'APPROVED').forEach(t => {
+        const d = new Date(t.approvedAt || t.createdAt);
+        if (isNaN(d.getTime())) return;
+        const key = d.toLocaleString('default', { month: 'short', year: 'numeric' });
+        monthly[key] = (monthly[key] || 0) + parseFloat(t.amount || 0);
+      });
+      const monthlyChart = Object.keys(monthly).map(m => ({ month: m, amount: monthly[m] }));
+
+      // Table rows
+      const tableRows = rows.map(t => {
+        const from = t.fromStudent || {};
+        const to = t.toStudent || {};
+        return {
+          status: t.status,
+          amount: parseFloat(t.amount || 0),
+          fromStudent: `${from.firstName || ''} ${from.lastName || ''}`.trim() || '—',
+          fromAdmission: from.admissionNumber || '—',
+          toStudent: `${to.firstName || ''} ${to.lastName || ''}`.trim() || '—',
+          toAdmission: to.admissionNumber || '—',
+          reason: t.reason || '—',
+          requestedBy: t.requestedByUser
+            ? `${t.requestedByUser.firstName || ''} ${t.requestedByUser.lastName || ''}`.trim()
+            : '—',
+          requestedAt: t.requestedAt ? new Date(t.requestedAt).toLocaleString() : '—',
+          approvedBy: t.approvedByUser
+            ? `${t.approvedByUser.firstName || ''} ${t.approvedByUser.lastName || ''}`.trim()
+            : '—',
+          approvedAt: t.approvedAt ? new Date(t.approvedAt).toLocaleString() : '—',
+          rejectedBy: t.rejectedByUser
+            ? `${t.rejectedByUser.firstName || ''} ${t.rejectedByUser.lastName || ''}`.trim()
+            : '—',
+          rejectedAt: t.rejectedAt ? new Date(t.rejectedAt).toLocaleString() : '—',
+          rejectReason: t.rejectReason || '—'
+        };
+      });
+
+      setReportData({
+        type: 'feeTransfer',
+        summary: serverStats
+          ? {
+              total: serverStats.pending + serverStats.approved + serverStats.rejected + serverStats.cancelled,
+              pending: serverStats.pending,
+              approved: serverStats.approved,
+              rejected: serverStats.rejected,
+              cancelled: serverStats.cancelled,
+              totalTransferred: serverStats.totalAmount
+            }
+          : {
+              total: rows.length,
+              pending: byStatus.PENDING,
+              approved: byStatus.APPROVED,
+              rejected: byStatus.REJECTED,
+              cancelled: byStatus.CANCELLED,
+              totalTransferred: approvedTotal
+            },
+        charts: { statusChart, monthlyChart },
+        rows: tableRows
+      });
+    } catch (err) {
+      console.error(err);
+      alert('Failed to generate fee transfers report');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // ==================== ADMISSIONS ====================
@@ -15989,7 +16136,6 @@ const ReportsModule = ({
         };
       }).sort((a, b) => b.monthlyRevenue - a.monthlyRevenue);
 
-      // Student-level rows: which student is on which route
       const studentRows = [];
       routes.forEach(r => {
         const v = vehicles.find(x => x.id === r.vehicleId);
@@ -16063,7 +16209,6 @@ const ReportsModule = ({
         };
       }).sort((a, b) => parseFloat(b.occupancyRate) - parseFloat(a.occupancyRate));
 
-      // Student-level rows: which student is in which room
       const studentRows = [];
       target.forEach(h => {
         (h.rooms || []).forEach(room => {
@@ -16148,7 +16293,6 @@ const ReportsModule = ({
         };
       }).sort((a, b) => b.timesBorrowed - a.timesBorrowed);
 
-      // Student-level: who borrowed what
       const borrowRows = borrows.map(br => {
         const student = students.find(s => s.id === br.studentId);
         const book = books.find(b => b.id === br.bookId);
@@ -16170,7 +16314,6 @@ const ReportsModule = ({
           fine: parseFloat(br.fine || 0)
         };
       }).sort((a, b) => {
-        // Overdue first, then most recent
         if (a.daysOverdue !== b.daysOverdue) return b.daysOverdue - a.daysOverdue;
         return new Date(b.borrowDate) - new Date(a.borrowDate);
       });
@@ -16191,6 +16334,7 @@ const ReportsModule = ({
     setReportData(null);
     if (activeTab === 'fee')         generateFeeReport();
     if (activeTab === 'outstanding') generateOutstandingReport();
+    if (activeTab === 'feeTransfer') generateFeeTransferReport();  // ← NEW
     if (activeTab === 'admission')   generateAdmissionReport();
     if (activeTab === 'financial')   generateFinancialReport();
     if (activeTab === 'attendance')  generateAttendanceReport();
@@ -16247,7 +16391,6 @@ const ReportsModule = ({
     </div>
   );
 
-  // Two-mode toggle (used in transport / hostel / library)
   const ModeToggle = ({ value, onChange, options }) => (
     <div className="inline-flex rounded-lg border bg-white p-0.5 no-print">
       {options.map(o => (
@@ -16267,7 +16410,7 @@ const ReportsModule = ({
     <div className="reports-module space-y-6">
       {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50 no-print" />}
 
-      {/* Header - hidden in print */}
+      {/* Header */}
       <div className="flex flex-wrap justify-between items-center gap-3 no-print">
         <h2 className="text-2xl font-bold">
           {isUniversity ? '🎓 University Reports' : isTVET ? '🔧 TVET Reports' : '📊 School Reports'}
@@ -16283,7 +16426,7 @@ const ReportsModule = ({
         </div>
       </div>
 
-      {/* Tabs - hidden in print */}
+      {/* Tabs */}
       <div className="bg-white rounded-xl shadow-sm p-1 flex flex-wrap gap-1 no-print">
         {ALL_TABS.map(t => (
           <button
@@ -16662,6 +16805,161 @@ const ReportsModule = ({
                       <td className="px-3 py-2 text-green-700">{formatCurrency(r.paid)}</td>
                       <td className="px-3 py-2 text-red-700 font-bold">{formatCurrency(r.balance)}</td>
                       <td className="px-3 py-2 text-xs">{r.lastPaymentDate}</td>
+                    </tr>
+                  ))}
+                </TableWrap>
+              </Card>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ==================== TAB: FEE TRANSFERS (NEW) ==================== */}
+      {activeTab === 'feeTransfer' && (
+        <div className="space-y-6">
+          <Card className="no-print">
+            <h3 className="text-lg font-semibold mb-4">Fee Transfers Report</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <SearchableSelect
+                label="Status"
+                value={transferStatus}
+                onChange={(e) => setTransferStatus(e.target.value)}
+                options={[
+                  { value: 'PENDING',   label: 'Pending' },
+                  { value: 'APPROVED',  label: 'Approved' },
+                  { value: 'REJECTED',  label: 'Rejected' },
+                  { value: 'CANCELLED', label: 'Cancelled' }
+                ]}
+                placeholder="All statuses"
+              />
+              <SearchableSelect
+                label="Student"
+                value={transferStudentId}
+                onChange={(e) => setTransferStudentId(e.target.value)}
+                options={studentOptionsForTransfers}
+                placeholder="All students"
+              />
+              <div>
+                <label className="block text-sm font-medium mb-1">Search by name or admission no.</label>
+                <input
+                  value={transferSearch}
+                  onChange={(e) => setTransferSearch(e.target.value)}
+                  placeholder="Type to filter..."
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={generateFeeTransferReport}
+                className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
+              >
+                Generate Report
+              </button>
+              <PrintBtn />
+            </div>
+          </Card>
+
+          {reportData?.type === 'feeTransfer' && (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <StatCard label="Total Transfers" value={reportData.summary.total}       color="blue" />
+                <StatCard label="Pending"          value={reportData.summary.pending}     color="yellow" />
+                <StatCard label="Approved"         value={reportData.summary.approved}    color="green" />
+                <StatCard label="Rejected"         value={reportData.summary.rejected}    color="red" />
+                <StatCard
+                  label="Total Transferred"
+                  value={formatCurrency(reportData.summary.totalTransferred)}
+                  color="purple"
+                />
+              </div>
+
+              {showCharts && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {reportData.charts.statusChart.length > 0 && (
+                    <ChartCard title="By Status">
+                      <PieChart>
+                        <Pie
+                          data={reportData.charts.statusChart}
+                          cx="50%"
+                          cy="50%"
+                          label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                          outerRadius={100}
+                          dataKey="value"
+                        >
+                          {reportData.charts.statusChart.map((_, i) => (
+                            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ChartCard>
+                  )}
+
+                  {reportData.charts.monthlyChart.length > 0 && (
+                    <ChartCard title="Approved Transfers by Month">
+                      <BarChart data={reportData.charts.monthlyChart}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="month" />
+                        <YAxis />
+                        <Tooltip formatter={formatCurrency} />
+                        <Bar dataKey="amount" fill="#4f46e5" />
+                      </BarChart>
+                    </ChartCard>
+                  )}
+                </div>
+              )}
+
+              <Card>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-semibold">
+                    Transfers ({reportData.rows.length})
+                  </h3>
+                  <ExportBtn
+                    onClick={() => exportCSV(reportData.rows, 'fee_transfers.csv')}
+                  />
+                </div>
+                <TableWrap
+                  headers={[
+                    'Status', 'Amount',
+                    'From Student', 'From Adm.',
+                    'To Student', 'To Adm.',
+                    'Reason',
+                    'Requested By', 'Requested At',
+                    'Approved By', 'Approved At',
+                    'Rejected By', 'Rejected At', 'Reject Reason'
+                  ]}
+                >
+                  {reportData.rows.map((r, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-3 py-2">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-xs ${
+                            r.status === 'APPROVED'
+                              ? 'bg-green-100 text-green-800'
+                              : r.status === 'PENDING'
+                              ? 'bg-yellow-100 text-yellow-800'
+                              : r.status === 'REJECTED'
+                              ? 'bg-red-100 text-red-800'
+                              : 'bg-gray-100 text-gray-700'
+                          }`}
+                        >
+                          {r.status}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 font-bold">{formatCurrency(r.amount)}</td>
+                      <td className="px-3 py-2">{r.fromStudent}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{r.fromAdmission}</td>
+                      <td className="px-3 py-2">{r.toStudent}</td>
+                      <td className="px-3 py-2 font-mono text-xs">{r.toAdmission}</td>
+                      <td className="px-3 py-2 text-xs">{r.reason}</td>
+                      <td className="px-3 py-2 text-xs">{r.requestedBy}</td>
+                      <td className="px-3 py-2 text-xs">{r.requestedAt}</td>
+                      <td className="px-3 py-2 text-xs">{r.approvedBy}</td>
+                      <td className="px-3 py-2 text-xs">{r.approvedAt}</td>
+                      <td className="px-3 py-2 text-xs">{r.rejectedBy}</td>
+                      <td className="px-3 py-2 text-xs">{r.rejectedAt}</td>
+                      <td className="px-3 py-2 text-xs">{r.rejectReason}</td>
                     </tr>
                   ))}
                 </TableWrap>
@@ -17404,7 +17702,6 @@ const ReportsModule = ({
     </div>
   );
 };
-
 
 // ==================== EXAM CARD PRINT MODAL ====================
 const ExamCardPrintModal = ({ student, units, currentSchool, onClose }) => {
