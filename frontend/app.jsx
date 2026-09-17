@@ -37337,7 +37337,7 @@ const ExamCardsModule = ({
   programs = [],
   courses = [],
   units = [],
-  // ✅ NEW: Exam card override props
+  // ✅ Exam card override props
   examCardOverrides = [],
   setExamCardOverrides
 }) => {
@@ -37379,13 +37379,14 @@ const ExamCardsModule = ({
       return [{ value: '', label: '' }, ...options];
     }, [options]);
 
+    // ✅ FIXED: All string ops guarded with String(... ?? '')
     const filteredOptions = useMemo(() => {
-      if (!search.trim()) return optionsWithEmpty;
-      const searchLower = search.toLowerCase();
+      if (!String(search || '').trim()) return optionsWithEmpty;
+      const searchLower = String(search || '').toLowerCase();
       return optionsWithEmpty.filter(opt => 
-        opt.label?.toLowerCase().includes(searchLower) ||
-        opt.subLabel?.toLowerCase().includes(searchLower) ||
-        opt.value?.toString().toLowerCase().includes(searchLower)
+        String(opt.label ?? '').toLowerCase().includes(searchLower) ||
+        String(opt.subLabel ?? '').toLowerCase().includes(searchLower) ||
+        String(opt.value ?? '').toLowerCase().includes(searchLower)
       );
     }, [optionsWithEmpty, search]);
 
@@ -37545,8 +37546,8 @@ const ExamCardsModule = ({
     (programs || []).forEach(p => {
       opts.push({
         value: p.id,
-        label: p.name,
-        subLabel: p.level || p.code || 'Program'
+        label: String(p.name ?? 'Unnamed Program'),
+        subLabel: String(p.level || p.code || 'Program')
       });
     });
     return opts;
@@ -37557,8 +37558,8 @@ const ExamCardsModule = ({
     (courses || []).forEach(c => {
       opts.push({
         value: c.id,
-        label: c.name,
-        subLabel: c.code || 'Course'
+        label: String(c.name ?? 'Unnamed Course'),
+        subLabel: String(c.code || 'Course')
       });
     });
     return opts;
@@ -37569,8 +37570,8 @@ const ExamCardsModule = ({
     (classes || []).forEach(c => {
       opts.push({
         value: c.id,
-        label: c.name,
-        subLabel: c.streams ? `Stream: ${c.streams}` : 'Class'
+        label: String(c.name ?? 'Unnamed Class'),
+        subLabel: c.streams ? `Stream: ${String(c.streams)}` : 'Class'
       });
     });
     return opts;
@@ -37653,7 +37654,7 @@ const ExamCardsModule = ({
     return '';
   };
 
-  // ✅ NEW: Check if a student has an active override
+  // ✅ Check if a student has an active override
   const hasOverride = (studentId) => {
     if (!studentId) return false;
     return (examCardOverrides || []).some(
@@ -37661,7 +37662,7 @@ const ExamCardsModule = ({
     );
   };
 
-  // ✅ NEW: Get the active override object for a student
+  // ✅ Get the active override object for a student
   const getActiveOverride = (studentId) => {
     if (!studentId) return null;
     return (examCardOverrides || []).find(
@@ -37690,7 +37691,7 @@ const ExamCardsModule = ({
   const [tempAdmissionNumber, setTempAdmissionNumber] = useState('');
   const [showExamCardModal, setShowExamCardModal] = useState(false);
   const [loadingExamCard, setLoadingExamCard] = useState(false);
-  // ✅ NEW: Override action loading state
+  // ✅ Override action loading state
   const [overrideActionLoading, setOverrideActionLoading] = useState(null);
   
   const [currentExamCardData, setCurrentExamCardData] = useState({
@@ -37754,7 +37755,7 @@ const ExamCardsModule = ({
       totalFees,
       totalPaid,
       isEligible,
-      isOverridden: overrideActive,   // ✅ NEW
+      isOverridden: overrideActive,
       entityName,
       items
     };
@@ -37903,7 +37904,7 @@ const ExamCardsModule = ({
           const totalPaid = studentPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
           const balance = totalFeesAmount - totalPaid;
           const overrideActive = hasOverride(student.id);
-          const isEligible = balance <= 0 || overrideActive;   // ✅ override wins
+          const isEligible = balance <= 0 || overrideActive;
           
           const entityName = getEntityName(student);
           
@@ -37914,7 +37915,7 @@ const ExamCardsModule = ({
             totalPaid,
             balance,
             isEligible,
-            isOverridden: overrideActive   // ✅ NEW
+            isOverridden: overrideActive
           };
         })
       );
@@ -37976,26 +37977,28 @@ const ExamCardsModule = ({
     }
   };
 
+  // ✅ FIXED: Student search filter — all strings guarded
   useEffect(() => {
     if (studentsWithZeroBalance.length > 0) {
       let filtered = [...studentsWithZeroBalance];
       if (searchTerm) {
+        const q = String(searchTerm || '').toLowerCase();
         filtered = filtered.filter(s => 
-          `${s.firstName} ${s.lastName}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          s.admissionNumber.toLowerCase().includes(searchTerm.toLowerCase())
+          `${s.firstName || ''} ${s.lastName || ''}`.toLowerCase().includes(q) ||
+          String(s.admissionNumber || '').toLowerCase().includes(q)
         );
       }
       setFilteredStudents(filtered);
     }
   }, [searchTerm, studentsWithZeroBalance]);
 
-  // ✅ NEW: Approve exam card override
+  // ✅ Approve exam card override
   const handleApproveOverride = async (student) => {
     const reason = window.prompt(
       `Approve exam card for ${student.firstName} ${student.lastName}?\n\nBalance: ${formatCurrency(student.balance)}\n\nReason (optional):`,
       ''
     );
-    if (reason === null) return; // user cancelled
+    if (reason === null) return;
 
     setOverrideActionLoading(student.id);
     try {
@@ -38007,7 +38010,6 @@ const ExamCardsModule = ({
       const newOverride = res.data.override;
       setExamCardOverrides?.(prev => [...prev, newOverride]);
 
-      // Update local lists
       setFilteredStudents(prev =>
         prev.map(s => s.id === student.id ? { ...s, isOverridden: true, isEligible: true } : s)
       );
@@ -38015,7 +38017,6 @@ const ExamCardsModule = ({
         prev.map(s => s.id === student.id ? { ...s, isOverridden: true, isEligible: true } : s)
       );
 
-      // Update current card view if open for this student
       if (currentExamCardData.student?.id === student.id) {
         setCurrentExamCardData(prev => ({ ...prev, isOverridden: true, isEligible: true }));
       }
@@ -38029,7 +38030,7 @@ const ExamCardsModule = ({
     }
   };
 
-  // ✅ NEW: Revoke exam card override
+  // ✅ Revoke exam card override
   const handleRevokeOverride = async (student) => {
     const activeOverride = getActiveOverride(student.id);
     if (!activeOverride) {
@@ -38330,7 +38331,7 @@ const ExamCardsModule = ({
     );
   }
 
-  // ==================== RENDER ADMIN VIEW WITH SEARCHABLE SELECT ====================
+  // ==================== RENDER ADMIN VIEW ====================
   return (
     <div className="space-y-6">
       {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse"></div>}
