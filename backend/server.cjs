@@ -7569,40 +7569,39 @@ app.patch('/api/fee-transfers/:id/approve', authenticate, async (req, res) => {
 
     const receiptBase = `TRF-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2,'0')}${String(new Date().getDate()).padStart(2,'0')}-${String(Date.now()).slice(-6)}`;
 
-    // Outgoing (sender side) — tagged as a transfer
-    const outgoing = await Payment.create({
-      studentId: transfer.fromStudentId,
-      feeId: null,
-      schoolId: req.user.schoolId,
-      amount: amt,
-      paymentMethod: 'TRANSFER',
-      receiptNo: `${receiptBase}-OUT`,
-      notes: `Fee transferred out to student (transfer ID ${transfer.id})`,
-      recordedBy: req.user.id,
-      paymentDate: new Date(),
-      isOtherIncome: false,
-      description: 'Fee Transfer — Out',
-      isTransfer: true,
-      transferId: transfer.id
-    }, { transaction: t });
+// Outgoing (sender side) — store as NEGATIVE
+const outgoing = await Payment.create({
+  studentId: transfer.fromStudentId,
+  feeId: null,
+  schoolId: req.user.schoolId,
+  amount: -amt,                                   // ← NEGATIVE
+  paymentMethod: 'TRANSFER',
+  receiptNo: `${receiptBase}-OUT`,
+  notes: `Fee transferred out to student (transfer ID ${transfer.id})`,
+  recordedBy: req.user.id,
+  paymentDate: new Date(),
+  isOtherIncome: false,
+  description: 'Fee Transfer — Out',
+  isTransfer: true,
+  transferId: transfer.id
+}, { transaction: t });
 
-    // Incoming (receiver side)
-    const incoming = await Payment.create({
-      studentId: transfer.toStudentId,
-      feeId: null,
-      schoolId: req.user.schoolId,
-      amount: amt,
-      paymentMethod: 'TRANSFER',
-      receiptNo: `${receiptBase}-IN`,
-      notes: `Fee transferred in from another student (transfer ID ${transfer.id})`,
-      recordedBy: req.user.id,
-      paymentDate: new Date(),
-      isOtherIncome: false,
-      description: 'Fee Transfer — In',
-      isTransfer: true,
-      transferId: transfer.id
-    }, { transaction: t });
-
+// Incoming (receiver side) — POSITIVE (unchanged)
+const incoming = await Payment.create({
+  studentId: transfer.toStudentId,
+  feeId: null,
+  schoolId: req.user.schoolId,
+  amount: amt,                                    // ← POSITIVE
+  paymentMethod: 'TRANSFER',
+  receiptNo: `${receiptBase}-IN`,
+  notes: `Fee transferred in from another student (transfer ID ${transfer.id})`,
+  recordedBy: req.user.id,
+  paymentDate: new Date(),
+  isOtherIncome: false,
+  description: 'Fee Transfer — In',
+  isTransfer: true,
+  transferId: transfer.id
+}, { transaction: t });
     // ---- Mark the transfer as approved ----
     await transfer.update({
       status: 'APPROVED',
