@@ -4470,14 +4470,12 @@ app.get('/api/auth/me', authenticate, async (req, res) => {
     const user = await User.findByPk(req.user.id, {
       attributes: { exclude: ['password'] }
     });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
-
-    // ✅ Load permissions from the role
+    // ✅ Load the dynamic role if assigned
     let roleObject = null;
     let permissions = [];
+    let effectiveRole = user.role; // fallback: legacy ENUM
 
     if (user.roleId) {
       roleObject = await Role.findByPk(user.roleId, {
@@ -4485,18 +4483,41 @@ app.get('/api/auth/me', authenticate, async (req, res) => {
       });
       if (roleObject) {
         permissions = roleObject.permissions || [];
+        // ✅ Use the dynamic role's NAME as the effective role when it maps to a known ENUM
+        const normalized = String(roleObject.name).toUpperCase().replace(/[\s-]+/g, '_');
+        const knownEnums = [
+          'SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL',
+          'SENIOR_TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER', 'TEACHER',
+          'LECTURER', 'SENIOR_LECTURER', 'PROFESSOR', 'DEAN', 'HOD',
+          'INSTRUCTOR', 'TRAINER', 'WORKSHOP_SUPERVISOR',
+          'ACCOUNTANT', 'LIBRARIAN', 'NURSE', 'MATRON', 'TRANSPORT_MANAGER',
+          'HR_MANAGER', 'HR', 'PARENT', 'STUDENT'
+        ];
+        if (knownEnums.includes(normalized)) {
+          effectiveRole = normalized;
+        } else {
+          // Fallback aliases
+          const aliasMap = {
+            'FINANCE_OFFICER': 'ACCOUNTANT',
+            'BURSAR': 'ACCOUNTANT',
+            'HEAD_OF_DEPARTMENT': 'HOD',
+            'HEAD_TEACHER': 'PRINCIPAL'
+          };
+          effectiveRole = aliasMap[normalized] || effectiveRole;
+        }
       }
     }
 
-    // ✅ Fallback to default role permissions
-    if (permissions.length === 0 && user.role) {
-      permissions = getPermissionsForRole(user.role);
+    // Fallback to default ENUM permissions if none came from the role
+    if (permissions.length === 0 && effectiveRole) {
+      permissions = getPermissionsForRole(effectiveRole);
     }
 
     res.json({
       success: true,
       user: {
         ...user.toJSON(),
+        role: effectiveRole,       // ✅ override with effective role
         roleObject,
         permissions
       }
@@ -20835,58 +20856,81 @@ app.patch('/api/users/:userId/role', authenticate, async (req, res) => {
     const { userId } = req.params;
     const { roleId } = req.body;
 
-    console.log('🎭 Assign role request:', { userId, roleId, by: req.user?.id });
-
-    // ---- 1. Permission check ----
     const canAssign = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL'].includes(req.user.role);
     if (!canAssign) {
-      return res.status(403).json({
-        success: false,
-        message: 'You do not have permission to assign roles'
-      });
+      return res.status(403).json({ success: false, message: 'You do not have permission to assign roles' });
     }
 
-    // ---- 2. Find user ----
     const user = await User.findByPk(userId);
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
-    // ---- 3. School scope ----
     if (req.user.role !== 'SUPER_ADMIN' && user.schoolId !== req.user.schoolId) {
-      return res.status(403).json({
-        success: false,
-        message: 'You cannot modify users from another school'
-      });
+      return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
-    // ---- 4. Validate role (if provided) ----
-    // ⚠️ Only select columns that ACTUALLY EXIST on the Roles table.
     let roleInfo = null;
     if (roleId) {
       roleInfo = await Role.findByPk(roleId, {
-        attributes: ['id', 'name', 'permissions', 'isSystemRole', 'isActive', 'schoolId', 'createdAt', 'updatedAt']
+        attributes: ['id', 'name', 'permissions', 'isSystemRole', 'isActive', 'schoolId']
       });
-      if (!roleInfo) {
-        return res.status(404).json({ success: false, message: 'Role not found' });
-      }
+      if (!roleInfo) return res.status(404).json({ success: false, message: 'Role not found' });
       if (req.user.role !== 'SUPER_ADMIN' && roleInfo.schoolId !== req.user.schoolId) {
-        return res.status(403).json({
-          success: false,
-          message: 'That role does not belong to your school'
-        });
+        return res.status(403).json({ success: false, message: 'Role belongs to another school' });
       }
     }
 
-    // ---- 5. Update ----
-    await user.update({ roleId: roleId || null });
+    // ✅ Map the dynamic Role.name → legacy ENUM role
+    // The Role.name is free-form ("Accountant", "Custom Role X"),
+    // so we normalize it to the User.role ENUM.
+    const roleNameToEnum = (name) => {
+      if (!name) return null;
+      const n = String(name).trim().toUpperCase().replace(/[\s-]+/g, '_');
+      // Direct matches
+      const allowed = [
+        'SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL',
+        'SENIOR_TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER', 'TEACHER',
+        'LECTURER', 'SENIOR_LECTURER', 'PROFESSOR', 'DEAN', 'HOD',
+        'INSTRUCTOR', 'TRAINER', 'WORKSHOP_SUPERVISOR',
+        'ACCOUNTANT', 'LIBRARIAN', 'NURSE', 'MATRON', 'TRANSPORT_MANAGER',
+        'HR_MANAGER', 'HR', 'PARENT', 'STUDENT'
+      ];
+      if (allowed.includes(n)) return n;
+      // Friendly aliases
+      const aliases = {
+        'FINANCE_OFFICER': 'ACCOUNTANT',
+        'BURSAR': 'ACCOUNTANT',
+        'HEAD_OF_DEPARTMENT': 'HOD',
+        'HEAD_TEACHER': 'PRINCIPAL',
+        'DEPUTY_HEAD_TEACHER': 'DEPUTY_PRINCIPAL',
+        'DEPUTY_PRINCIPAL': 'DEPUTY_PRINCIPAL',
+        'SPORTS_MASTER': 'TEACHER',
+        'COUNSELOR': 'TEACHER',
+        'IT_OFFICER': 'TEACHER',
+        'ADMINISTRATOR': 'SCHOOL_ADMIN',
+        'SUPPORT_STAFF': 'TEACHER'
+      };
+      return aliases[n] || null;
+    };
 
-    // ---- 6. Return updated user (fresh fetch) ----
-    const updated = await User.findByPk(userId, {
-      attributes: { exclude: ['password'] }
+    const enumRole = roleId ? roleNameToEnum(roleInfo.name) : null;
+
+    // Update BOTH fields
+    const updateData = { roleId: roleId || null };
+    if (enumRole) {
+      updateData.role = enumRole;
+    }
+    await user.update(updateData);
+
+    console.log('✅ Assigned role:', {
+      userId,
+      dynamicRoleId: roleId,
+      dynamicRoleName: roleInfo?.name,
+      legacyEnumRole: enumRole
     });
 
-    // ✅ Compute userCount for the role on the fly (not a DB column)
+    // Return updated user with computed userCount
+    const updated = await User.findByPk(userId, { attributes: { exclude: ['password'] } });
+
     let rolePayload = null;
     if (roleInfo) {
       const userCount = await User.count({ where: { roleId: roleInfo.id } });
@@ -20895,7 +20939,6 @@ app.patch('/api/users/:userId/role', authenticate, async (req, res) => {
         name: roleInfo.name,
         permissions: roleInfo.permissions || [],
         isSystemRole: roleInfo.isSystemRole,
-        isActive: roleInfo.isActive,
         userCount
       };
     }
@@ -20903,24 +20946,16 @@ app.patch('/api/users/:userId/role', authenticate, async (req, res) => {
     const payload = updated.toJSON();
     payload.Role = rolePayload;
 
-    console.log('✅ Role assigned:', { userId, roleName: roleInfo?.name });
-
     return res.json({
       success: true,
       user: payload,
       role: rolePayload,
-      message: roleId
-        ? `Role "${roleInfo.name}" assigned successfully`
-        : 'Role removed successfully'
+      message: roleId ? `Role "${roleInfo.name}" assigned successfully` : 'Role removed'
     });
 
   } catch (error) {
     console.error('❌ Assign role error:', error);
-    console.error('❌ Stack:', error.stack);
-    return res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 // ==================== STUDENT ARRIVAL ROUTES ====================
