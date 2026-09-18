@@ -6970,7 +6970,44 @@ app.get('/api/billing/status', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+// Add this route in your server.cjs file, near the other super-admin routes.
 
+// GET /api/super-admin/features
+// Returns the full feature catalogue + feature presets per school category
+app.get('/api/super-admin/features', authenticate, requireSuperAdmin, async (req, res) => {
+  try {
+    // Optional: allow ?schoolId=... to also return that school's enabled features
+    const { schoolId } = req.query;
+    let enabledForSchool = null;
+
+    if (schoolId) {
+      const school = await School.findByPk(schoolId, {
+        attributes: ['id', 'name', 'category', 'features']
+      });
+      if (school) {
+        enabledForSchool = {
+          schoolId: school.id,
+          schoolName: school.name,
+          category: school.category,
+          enabled: Array.isArray(school.features) ? school.features : []
+        };
+      }
+    }
+
+    res.json({
+      success: true,
+      catalogue: FEATURE_CATALOG,
+      allFeatures: ALL_FEATURES,
+      featureByKey: FEATURE_BY_KEY,
+      featureByModule: FEATURE_BY_MODULE,
+      presets: FEATURE_PRESETS,
+      school: enabledForSchool
+    });
+  } catch (err) {
+    console.error('❌ GET /api/super-admin/features error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 // ==================== USER ROUTES ====================
 app.get('/api/users', authenticate, async (req, res) => {
   try {
@@ -10637,7 +10674,6 @@ app.get('/api/exams/:id', authenticate, async (req, res) => {
   }
 });
 
-// GET ALL EXAMS WITH FILTERS
 app.get('/api/exams', authenticate, async (req, res) => {
   try {
     console.log('📋 Fetching exams with query:', req.query);
@@ -10647,14 +10683,30 @@ app.get('/api/exams', authenticate, async (req, res) => {
       type, term, year, semester, module, unitId 
     } = req.query;
     
-    const where = { schoolId: req.user.schoolId };
+    const where = {};
     
-    const school = await School.findByPk(req.user.schoolId);
-    
+    // ✅ FIX: Handle SUPER_ADMIN vs school-scoped users
+    let school;
+    if (req.user.role === 'SUPER_ADMIN') {
+      if (req.query.schoolId) {
+        where.schoolId = req.query.schoolId;
+        school = await School.findByPk(req.query.schoolId);
+      } else {
+        // SUPER_ADMIN with no schoolId filter: return all exams
+        // We still need a school object for the category-based filtering logic below.
+        // Since there isn't one, we can just return all exams with simple includes.
+        const exams = await Exam.findAll({ where, order: [['date', 'DESC'], ['createdAt', 'DESC']] });
+        return res.json({ success: true, exams });
+      }
+    } else {
+      where.schoolId = req.user.schoolId;
+      school = await School.findByPk(req.user.schoolId);
+    }
+
     if (!school) {
       return res.status(400).json({ 
         success: false, 
-        message: 'School not found' 
+        message: 'School context is required for this request. Provide a schoolId or ensure the user is associated with a school.' 
       });
     }
 
@@ -10690,7 +10742,7 @@ app.get('/api/exams', authenticate, async (req, res) => {
             { model: Course, as: 'course', attributes: ['id', 'name', 'code'], required: false },
             { model: Faculty, as: 'faculty', attributes: ['id', 'name'], required: false },
             { model: Department, as: 'department', attributes: ['id', 'name'], required: false },
-            { model: CourseUnit, as: 'courseUnit', attributes: ['id', 'name', 'code', 'creditHours'], required: false } // Changed from 'unit'
+            { model: CourseUnit, as: 'courseUnit', attributes: ['id', 'name', 'code', 'creditHours'], required: false }
           ],
           order: [['date', 'DESC'], ['createdAt', 'DESC']]
         });
@@ -10700,7 +10752,7 @@ app.get('/api/exams', authenticate, async (req, res) => {
           where,
           include: [
             { model: Program, as: 'program', attributes: ['id', 'name', 'code'], required: false },
-            { model: CourseUnit, as: 'courseUnit', attributes: ['id', 'name', 'code', 'creditHours'], required: false } // Changed from 'unit'
+            { model: CourseUnit, as: 'courseUnit', attributes: ['id', 'name', 'code', 'creditHours'], required: false }
           ],
           order: [['date', 'DESC'], ['createdAt', 'DESC']]
         });
@@ -10717,7 +10769,6 @@ app.get('/api/exams', authenticate, async (req, res) => {
       }
     } catch (includeError) {
       console.error('Error with includes, falling back to simple query:', includeError);
-      // Fallback to simple query without includes
       exams = await Exam.findAll({ 
         where, 
         order: [['date', 'DESC'], ['createdAt', 'DESC']] 
@@ -12881,46 +12932,67 @@ app.delete('/api/attendance/:id', authenticate, async (req, res) => {
   }
 });
 
-
 // ==================== GET ALL FEES ====================
 app.get('/api/fees', authenticate, async (req, res) => {
   try {
-    const { classId, courseId, programId, year, term, module } = req.query;
-    const where = { schoolId: req.user.schoolId };
-    
-    const school = await School.findByPk(req.user.schoolId);
-    
-    // Build where clause based on school type
-    if (school.category === 'UNIVERSITY') {
-      if (courseId) where.courseId = courseId;
-      if (year) where.year = parseInt(year);
-      if (term) where.semester = parseInt(term);
-    } else if (school.category === 'COLLEGE_TVET') {
-      if (programId) where.programId = programId;
-      if (module) where.module = parseInt(module);
-      if (year) where.year = parseInt(year);
-    } else {
-      if (classId) where.classId = classId;
-      if (term) where.term = term;
+    const { classId, courseId, programId, year, term, module, schoolId } = req.query;
+
+    // ✅ FIX: Determine which school to scope to
+    let targetSchoolId = req.user.schoolId;
+
+    // SUPER_ADMIN has no schoolId — allow an explicit ?schoolId= filter
+    if (req.user.role === 'SUPER_ADMIN') {
+      targetSchoolId = schoolId || null;
+    }
+
+    const where = {};
+    if (targetSchoolId) {
+      where.schoolId = targetSchoolId;
+    }
+
+    // ✅ FIX: Only look up the school if we have an id, and guard against null
+    const school = targetSchoolId
+      ? await School.findByPk(targetSchoolId, { attributes: ['id', 'category'] })
+      : null;
+
+    // If we have a school, apply category-specific filters.
+    // If not (e.g. SUPER_ADMIN with no filter), skip the filters and return all fees.
+    if (school) {
+      if (school.category === 'UNIVERSITY') {
+        if (courseId) where.courseId = courseId;
+        if (year)     where.year = parseInt(year, 10);
+        if (term)     where.semester = parseInt(term, 10);
+      } else if (school.category === 'COLLEGE_TVET') {
+        if (programId) where.programId = programId;
+        if (module)    where.module = parseInt(module, 10);
+        if (year)      where.year = parseInt(year, 10);
+      } else {
+        if (classId) where.classId = classId;
+        if (term)    where.term = term;
+      }
     }
 
     const fees = await Fee.findAll({
       where,
       include: [
-        { model: Class, required: false },
-        { model: Course, required: false },
-        { model: Program, required: false },
-        { model: Faculty, required: false },
-        { model: Department, required: false },
-        { model: TransportRoute, required: false }
+        { model: Class,           required: false },
+        { model: Course,          required: false },
+        { model: Program,         required: false },
+        { model: Faculty,         required: false },
+        { model: Department,      required: false },
+        { model: TransportRoute,  required: false }
       ],
       order: [['createdAt', 'DESC']]
     });
-    
+
     res.json({ success: true, fees });
   } catch (error) {
-    console.error('Get fees error:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('❌ Get fees error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
   }
 });
 
@@ -15375,7 +15447,6 @@ app.get('/api/library/by-admission/:admissionNumber/history', authenticate, asyn
     });
   }
 });
-
 // ==================== TIMETABLE ROUTES ====================
 // ==================== GET TIMETABLE ====================
 app.get('/api/timetable', authenticate, async (req, res) => {
@@ -15384,13 +15455,14 @@ app.get('/api/timetable', authenticate, async (req, res) => {
 
     const where = { schoolId: req.user.schoolId };
 
-    // ⬅️ Filter by timetable type. Defaults to CLASS so old clients keep working.
+    // Filter by timetable type. Defaults to CLASS so old clients keep working.
     const validTypes = ['CLASS', 'TUITION', 'EXTRA', 'REMEDIAL'];
     where.timetableType = validTypes.includes(timetableType) ? timetableType : 'CLASS';
 
     const school = await School.findByPk(req.user.schoolId);
     if (!school) {
-      return res.status(404).json({ message: 'School not found' });
+      // For a SUPER_ADMIN, you may want to return an empty array or all timetables.
+      return res.json({ success: true, timetable: [] });
     }
 
     if (school.category === 'UNIVERSITY') {
@@ -15467,7 +15539,6 @@ app.get('/api/timetable', authenticate, async (req, res) => {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
-
 // ==================== POST /api/timetable ====================
 // Creates a class entry OR a break entry, for any timetable type.
 // Breaks only need day + period + times + a scope id (class/course/program).
@@ -20049,10 +20120,18 @@ app.get('/api/staff-attendance', authenticate, async (req, res) => {
   try {
     const { staffId, startDate, endDate, department, status, approved } = req.query;
     const userId = req.user.id;
-    const schoolId = req.user.schoolId;
-
-    if (!schoolId) {
-      return res.status(400).json({ success: false, message: 'No school associated with user' });
+    
+    // ✅ FIX: Handle SUPER_ADMIN who has no schoolId
+    let schoolId = req.user.schoolId;
+    if (req.user.role === 'SUPER_ADMIN') {
+      // For a super admin, you can either return all records or an empty array.
+      // Returning an empty array is safer to avoid performance issues.
+      // If you want to allow filtering, add a `schoolId` query param.
+      if (req.query.schoolId) {
+        schoolId = req.query.schoolId;
+      } else {
+        return res.json({ success: true, attendance: [] });
+      }
     }
 
     const isAdmin = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL',
@@ -20090,9 +20169,9 @@ app.get('/api/staff-attendance', authenticate, async (req, res) => {
       where: attendanceWhere,
       include: [{
         model: Staff,
-        as: 'Staff',           // <-- matches: StaffAttendance.belongsTo(Staff, { as: 'Staff' })
+        as: 'Staff',
         required: true,
-        where: staffWhere,     // <-- CRITICAL: school scoping lives here
+        where: staffWhere,
         include: [{
           model: User,
           attributes: ['id', 'firstName', 'lastName', 'email', 'phone']
