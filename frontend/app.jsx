@@ -68349,174 +68349,173 @@ const [examCardOverrides, setExamCardOverrides] = useState([]);
   const [dataFetched, setDataFetched] = useState(false);
 
 // ===== 2. CAN ACCESS MODULE FUNCTION =====
+// Single source of truth: "May this user open this module?"
+// Order:
+//   1. No user → no.
+//   2. SUPER_ADMIN → yes to everything.
+//   3. Feature gate  — school must have the feature enabled.
+//   4. Role gate     — the user's role must allow the module.
 const canAccessModule = (user, moduleId) => {
   if (!user) return false;
   if (user.role === 'SUPER_ADMIN') return true;
 
-  // ============================================================
-  // ✅ FEATURE GATE — runs BEFORE the role gate.
-  // If the school doesn't have this feature enabled, the module
-  // is hidden regardless of the user's role.
-  // ============================================================
+  // ---------- 1. FEATURE GATE ----------
   const requiredFeature = MODULE_TO_FEATURE[moduleId];
-  if (requiredFeature) {
-    // schoolFeatures is null for users without a school (rare).
-    // Only enforce when we actually have a list to compare against.
-    if (Array.isArray(user.schoolFeatures)) {
-      if (!user.schoolFeatures.includes(requiredFeature)) {
-        return false;
-      }
+  if (requiredFeature && Array.isArray(user.schoolFeatures)) {
+    if (!user.schoolFeatures.includes(requiredFeature)) {
+      return false;
     }
   }
 
-  // ---------- ROLE GATE ----------
-  // Role-based module access
+  // ---------- 2. ROLE GATE ----------
   const roleModules = {
-    'STUDENT': [
+    STUDENT: [
       'dashboard', 'results', 'attendance', 'exam-cards', 'timetable',
       'course-units', 'fee-statement', 'library', 'events', 'announcements',
       'settings', 'course-enrollment', 'unit-registration', 'live-classroom',
-      'online-exams','homework'
+      'online-exams', 'homework'
     ],
-    'PARENT': [
+    PARENT: [
       'dashboard', 'students', 'attendance', 'results', 'exam-cards',
       'fee-statement', 'library', 'timetable', 'events', 'announcements',
-      'settings','homework'
+      'settings', 'homework'
     ],
-    'TEACHER': [
+    TEACHER: [
       'dashboard', 'students', 'classes', 'subjects', 'exams', 'results',
       'attendance', 'timetable', 'schemes-of-work', 'student-arrival',
       'unit-registration', 'card-management', 'certificates', 'alumni',
       'live-classroom', 'online-exams', 'receptionist', 'announcements',
-      'events', 'settings', 'labs','homework'
+      'events', 'settings', 'labs', 'homework'
     ],
-    'CLASS_TEACHER': [
+    CLASS_TEACHER: [
       'dashboard', 'students', 'classes', 'subjects', 'exams', 'results',
       'attendance', 'timetable', 'schemes-of-work', 'student-arrival',
       'card-management', 'certificates', 'alumni', 'live-classroom',
       'online-exams', 'receptionist', 'announcements', 'events', 'settings',
-      'labs','homework'
+      'labs', 'homework'
     ],
-    'SUBJECT_TEACHER': [
+    SUBJECT_TEACHER: [
       'dashboard', 'students', 'subjects', 'exams', 'results', 'attendance',
       'timetable', 'schemes-of-work', 'student-arrival', 'live-classroom',
-      'online-exams', 'settings', 'labs','homework'
+      'online-exams', 'settings', 'labs', 'homework'
     ],
-    'SENIOR_TEACHER': [
+    SENIOR_TEACHER: [
       'dashboard', 'students', 'classes', 'subjects', 'exams', 'results',
       'attendance', 'timetable', 'schemes-of-work', 'student-arrival',
       'card-management', 'certificates', 'alumni', 'live-classroom',
       'online-exams', 'receptionist', 'announcements', 'events', 'settings',
-      'labs','homework'
+      'labs', 'homework'
     ],
-    'LECTURER': [
+    LECTURER: [
       'dashboard', 'students', 'attendance', 'results', 'exams', 'timetable',
       'course-units', 'schemes-of-work', 'course-enrollment', 'unit-registration',
       'student-arrival', 'card-management', 'certificates', 'alumni',
       'live-classroom', 'online-exams', 'research', 'events', 'announcements',
       'settings', 'receptionist', 'labs'
     ],
-    'SENIOR_LECTURER': [
+    SENIOR_LECTURER: [
       'dashboard', 'students', 'attendance', 'results', 'exams', 'timetable',
       'course-units', 'schemes-of-work', 'course-enrollment', 'unit-registration',
       'student-arrival', 'research', 'live-classroom', 'online-exams',
       'events', 'announcements', 'settings', 'labs'
     ],
-    'PROFESSOR': [
+    PROFESSOR: [
       'dashboard', 'students', 'attendance', 'results', 'exams', 'timetable',
       'course-units', 'schemes-of-work', 'course-enrollment', 'unit-registration',
       'student-arrival', 'research', 'live-classroom', 'online-exams',
       'events', 'announcements', 'settings', 'labs'
     ],
-    'DEAN': [
+    DEAN: [
       'dashboard', 'faculties', 'departments', 'courses', 'course-units',
       'schemes-of-work', 'students', 'staff', 'research', 'student-arrival',
       'exams', 'results', 'timetable', 'attendance', 'promotion',
       'course-enrollment', 'unit-registration', 'card-management',
       'certificates', 'alumni', 'live-classroom', 'online-exams',
-      'receptionist', 'events', 'announcements', 'settings', 'labs','exam-card-overrides'
+      'receptionist', 'events', 'announcements', 'settings', 'labs',
+      'exam-card-overrides'
     ],
-    'HOD': [
+    HOD: [
       'dashboard', 'courses', 'course-units', 'students', 'staff',
       'student-arrival', 'exams', 'results', 'timetable', 'attendance',
       'schemes-of-work', 'promotion', 'course-enrollment', 'unit-registration',
       'card-management', 'certificates', 'alumni', 'live-classroom',
-      'online-exams', 'receptionist', 'events', 'announcements', 'settings','exam-card-overrides',
-      'labs'
+      'online-exams', 'receptionist', 'events', 'announcements', 'settings',
+      'exam-card-overrides', 'labs'
     ],
-    'HEAD_OF_DEPARTMENT': [
+    HEAD_OF_DEPARTMENT: [
       'dashboard', 'courses', 'course-units', 'students', 'staff',
       'student-arrival', 'exams', 'results', 'timetable', 'attendance',
       'schemes-of-work', 'promotion', 'course-enrollment', 'unit-registration',
       'card-management', 'certificates', 'alumni', 'live-classroom',
-      'online-exams', 'receptionist', 'events', 'announcements', 'settings','exam-card-overrides',
-      'labs'
+      'online-exams', 'receptionist', 'events', 'announcements', 'settings',
+      'exam-card-overrides', 'labs'
     ],
-    'PRINCIPAL': [
+    PRINCIPAL: [
       'dashboard', 'classes', 'subjects', 'students', 'staff', 'exams',
       'results', 'timetable', 'attendance', 'schemes-of-work', 'course-units',
       'promotion', 'exam-cards', 'student-arrival', 'fees', 'fee-allocation',
-      'fee-collection', 'receipt-history', 'reports', 'fee-reminders','fee-transfers',
-      'staff-attendance', 'payroll', 'card-management', 'certificates',
-      'alumni', 'live-classroom', 'online-exams', 'receptionist', 'events',
-      'announcements', 'messages', 'settings', 'course-enrollment',
-      'unit-registration', 'health', 'sickbay', 'labs','homework','exam-card-overrides'
+      'fee-collection', 'receipt-history', 'reports', 'fee-reminders',
+      'fee-transfers', 'staff-attendance', 'payroll', 'card-management',
+      'certificates', 'alumni', 'live-classroom', 'online-exams',
+      'receptionist', 'events', 'announcements', 'messages', 'settings',
+      'course-enrollment', 'unit-registration', 'health', 'sickbay', 'labs',
+      'homework', 'exam-card-overrides'
     ],
-    'DEPUTY_PRINCIPAL': [
+    DEPUTY_PRINCIPAL: [
       'dashboard', 'students', 'attendance', 'timetable', 'exams', 'results',
       'schemes-of-work', 'promotion', 'exam-cards', 'student-arrival',
       'card-management', 'certificates', 'alumni', 'live-classroom',
       'online-exams', 'receptionist', 'events', 'announcements', 'settings',
-      'course-enrollment', 'unit-registration', 'labs','homework','exam-card-overrides'
+      'course-enrollment', 'unit-registration', 'labs', 'homework',
+      'exam-card-overrides'
     ],
-    'ACCOUNTANT': [
+    ACCOUNTANT: [
       'dashboard', 'fees', 'fee-allocation', 'fee-collection', 'receipt-history',
-      'other-income', 'expenses', 'reports', 'fee-reminders',  'fee-transfers', 'payroll',
-      'receptionist', 'events', 'announcements', 'settings','exam-card-overrides'
+      'other-income', 'expenses', 'reports', 'fee-reminders', 'fee-transfers',
+      'payroll', 'receptionist', 'events', 'announcements', 'settings',
+      'exam-card-overrides'
     ],
-    'LIBRARIAN': [
+    LIBRARIAN: [
       'dashboard', 'library', 'students', 'announcements', 'events',
       'receptionist', 'settings'
     ],
-    'NURSE': [
+    NURSE: [
       'dashboard', 'students', 'health', 'sickbay', 'attendance',
       'receptionist', 'events', 'announcements', 'settings'
     ],
-    'MATRON': [
+    MATRON: [
       'dashboard', 'hostel', 'students', 'sickbay', 'attendance',
       'inventory', 'receptionist', 'events', 'announcements', 'settings'
     ],
-    'TRANSPORT_MANAGER': [
+    TRANSPORT_MANAGER: [
       'dashboard', 'transport', 'students', 'attendance',
       'receptionist', 'events', 'announcements', 'settings'
     ],
-    'HR_MANAGER': [
+    HR_MANAGER: [
       'dashboard', 'staff', 'staff-attendance', 'payroll', 'reports',
       'receptionist', 'events', 'announcements', 'settings'
     ],
-    'HR': [
+    HR: [
       'dashboard', 'staff', 'staff-attendance', 'payroll', 'reports',
       'receptionist', 'events', 'announcements', 'settings'
     ],
-    'SCHOOL_ADMIN': [
+    SCHOOL_ADMIN: [
       'dashboard', 'schools', 'users', 'roles', 'classes', 'subjects',
       'students', 'exams', 'results', 'attendance', 'timetable',
-      'schemes-of-work', 'course-units', 'promotion', 'exam-cards','exam-card-overrides',
-      'student-arrival', 'fees', 'fee-allocation', 'fee-collection',
-      'receipt-history', 'other-income', 'expenses', 'reports',
-      'fee-reminders','fee-transfers', 'staff', 'staff-attendance', 'payroll',
-      'library', 'transport', 'hostel', 'inventory', 'card-management',
-      'certificates', 'alumni', 'live-classroom', 'online-exams',
-      'receptionist', 'events', 'announcements', 'messages', 'settings',
-      'course-enrollment', 'unit-registration', 'health', 'sickbay',
-      'faculties', 'departments', 'courses', 'programs', 'labs', 'research','homework'
+      'schemes-of-work', 'course-units', 'promotion', 'exam-cards',
+      'exam-card-overrides', 'student-arrival', 'fees', 'fee-allocation',
+      'fee-collection', 'receipt-history', 'other-income', 'expenses',
+      'reports', 'fee-reminders', 'fee-transfers', 'staff', 'staff-attendance',
+      'payroll', 'library', 'transport', 'hostel', 'inventory',
+      'card-management', 'certificates', 'alumni', 'live-classroom',
+      'online-exams', 'receptionist', 'events', 'announcements', 'messages',
+      'settings', 'course-enrollment', 'unit-registration', 'health',
+      'sickbay', 'faculties', 'departments', 'courses', 'programs', 'labs',
+      'research', 'homework'
     ]
   };
 
-  // Get modules for this role, fallback to empty array
   const allowedModules = roleModules[user.role] || ['dashboard'];
-
-  // Check if the module is allowed
   return allowedModules.includes(moduleId);
 };
   // ===== 3. ALL useEffect HOOKS =====
@@ -68640,414 +68639,415 @@ useEffect(() => {
     return currentSchool?.id;
   };
 // ===== 5. GET FILTERED DASHBOARD SECTIONS =====
+// Builds the sidebar. Every item is passed through canAccessModule()
+// so the sidebar NEVER shows a module the user cannot open.
 const getFilteredDashboardSections = (user, schoolCategory) => {
   if (!user) return [];
-  
+
   const isUniversity = schoolCategory === 'UNIVERSITY';
   const isTVET = schoolCategory === 'COLLEGE_TVET';
   const isPrimary = schoolCategory === 'ECDE_PRIMARY_JSS';
   const isSecondary = schoolCategory === 'SENIOR_SECONDARY';
   const isSecondaryOrPrimary = isPrimary || isSecondary;
   const showCourseAndUnitMenus = isUniversity || isTVET;
-  
+
   const dashboardSection = {
-    title: "MAIN",
-    items: [
-      { icon: "tachometer-alt", label: "Dashboard", id: 'dashboard' }
-    ]
+    title: 'MAIN',
+    items: [{ icon: 'tachometer-alt', label: 'Dashboard', id: 'dashboard' }]
   };
+
+  // ------------------------------------------------------------------
+  // Every branch below only builds a *raw* list of sections.
+  // The final filter at the bottom is what enforces permissions.
+  // ------------------------------------------------------------------
+  let sections = [];
 
   // ============================================
   // STUDENT VIEW
   // ============================================
   if (user.role === 'STUDENT') {
     const studentItems = [
-      { icon: "file-alt", label: "My Results", id: 'results' },
-      { icon: "calendar-check", label: "My Attendance", id: 'attendance' },
-      { icon: "id-card", label: "Exam Card", id: 'exam-cards' },
-      { icon: "book-open", label: "Homework", id: 'homework' },
-      { icon: "clock", label: "Timetable", id: 'timetable' },
-      { icon: "money-bill", label: "Fee Statement", id: 'fee-statement' },
-      { icon: "book-open", label: "Library", id: 'library' },
-      { icon: "calendar-alt", label: "Events", id: 'events' },
-      { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-      { icon: "video", label: "Live Classroom", id: 'live-classroom' },
-      { icon: "laptop", label: "Online Exams", id: 'online-exams' },
-      { icon: "cog", label: "Settings", id: 'settings' }
+      { icon: 'file-alt',       label: 'My Results',      id: 'results' },
+      { icon: 'calendar-check', label: 'My Attendance',   id: 'attendance' },
+      { icon: 'id-card',        label: 'Exam Card',       id: 'exam-cards' },
+      { icon: 'book-open',      label: 'Homework',        id: 'homework' },
+      { icon: 'clock',          label: 'Timetable',       id: 'timetable' },
+      { icon: 'money-bill',     label: 'Fee Statement',   id: 'fee-statement' },
+      { icon: 'book-open',      label: 'Library',         id: 'library' },
+      { icon: 'calendar-alt',   label: 'Events',          id: 'events' },
+      { icon: 'bullhorn',       label: 'Announcements',   id: 'announcements' },
+      { icon: 'video',          label: 'Live Classroom',  id: 'live-classroom' },
+      { icon: 'laptop',         label: 'Online Exams',    id: 'online-exams' },
+      { icon: 'cog',            label: 'Settings',        id: 'settings' }
     ];
-    
+
     if (showCourseAndUnitMenus) {
       studentItems.unshift(
-        { icon: "user-plus", label: "Course Enrollment", id: 'course-enrollment' },
-        { icon: "book", label: "Unit Registration", id: 'unit-registration' }
+        { icon: 'user-plus', label: 'Course Enrollment', id: 'course-enrollment' },
+        { icon: 'book',      label: 'Unit Registration', id: 'unit-registration' }
       );
-      studentItems.splice(4, 0, { 
-        icon: "book-open", 
-        label: isTVET ? "My Modules" : "My Units", 
-        id: 'course-units' 
+      studentItems.splice(4, 0, {
+        icon: 'book-open',
+        label: isTVET ? 'My Modules' : 'My Units',
+        id: 'course-units'
       });
     } else if (isSecondaryOrPrimary) {
-      studentItems.splice(4, 0, { icon: "book", label: "My Subjects", id: 'subjects' });
+      studentItems.splice(4, 0, { icon: 'book', label: 'My Subjects', id: 'subjects' });
     }
-    
-    return [
+
+    sections = [
       dashboardSection,
-      { title: "MY ACADEMICS", items: studentItems }
+      { title: 'MY ACADEMICS', items: studentItems }
     ];
   }
 
   // ============================================
   // PARENT VIEW
   // ============================================
-  if (user.role === 'PARENT') {
+  else if (user.role === 'PARENT') {
     const parentItems = [
-      { icon: "child", label: "My Children", id: 'students' },
-      { icon: "calendar-check", label: "Attendance", id: 'attendance' },
-      { icon: "file-alt", label: "Results", id: 'results' },
-      { icon: "id-card", label: "Exam Cards", id: 'exam-cards' },
-      { icon: "book-open", label: "Homework", id: 'homework' },
-      { icon: "money-bill", label: "Fee Statement", id: 'fee-statement' },
-      { icon: "book-open", label: "Library", id: 'library' },
-      { icon: "clock", label: "Timetable", id: 'timetable' },
-      { icon: "calendar-alt", label: "Events", id: 'events' },
-      { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-      { icon: "cog", label: "Settings", id: 'settings' }
+      { icon: 'child',          label: 'My Children',    id: 'students' },
+      { icon: 'calendar-check', label: 'Attendance',     id: 'attendance' },
+      { icon: 'file-alt',       label: 'Results',        id: 'results' },
+      { icon: 'id-card',        label: 'Exam Cards',     id: 'exam-cards' },
+      { icon: 'book-open',      label: 'Homework',       id: 'homework' },
+      { icon: 'money-bill',     label: 'Fee Statement',  id: 'fee-statement' },
+      { icon: 'book-open',      label: 'Library',        id: 'library' },
+      { icon: 'clock',          label: 'Timetable',      id: 'timetable' },
+      { icon: 'calendar-alt',   label: 'Events',         id: 'events' },
+      { icon: 'bullhorn',       label: 'Announcements',  id: 'announcements' },
+      { icon: 'cog',            label: 'Settings',       id: 'settings' }
     ];
 
-    return [
+    sections = [
       dashboardSection,
-      { title: "MY CHILDREN", items: parentItems }
+      { title: 'MY CHILDREN', items: parentItems }
     ];
   }
 
   // ============================================
   // TEACHER VIEW
   // ============================================
-  if (['TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER', 'SENIOR_TEACHER'].includes(user.role)) {
+  else if (['TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER', 'SENIOR_TEACHER'].includes(user.role)) {
     let teacherItems = [
-      { icon: "users", label: "My Students", id: 'students' },
-      { icon: "calendar-check", label: "Take Attendance", id: 'attendance' },
-      { icon: "book-open", label: "Homework", id: 'homework' },
-      { icon: "edit", label: "Enter Results", id: 'results' },
-      { icon: "file-alt", label: "Exams", id: 'exams' },
-      { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' },
-      { icon: "clock", label: "My Timetable", id: 'timetable' },
-      { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
-      { icon: "video", label: "Live Classroom", id: 'live-classroom' },
-      { icon: "laptop", label: "Online Exams", id: 'online-exams' },
-      { icon: "users", label: "Alumni", id: 'alumni' },
-      { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-      { icon: "calendar-alt", label: "Events", id: 'events' },
-      { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-      { icon: "cog", label: "Settings", id: 'settings' },
-      { icon: "microscope", label: "Labs", id: 'labs' }
+      { icon: 'users',          label: 'My Students',      id: 'students' },
+      { icon: 'calendar-check', label: 'Take Attendance',  id: 'attendance' },
+      { icon: 'book-open',      label: 'Homework',         id: 'homework' },
+      { icon: 'edit',           label: 'Enter Results',    id: 'results' },
+      { icon: 'file-alt',       label: 'Exams',            id: 'exams' },
+      { icon: 'book',           label: 'Schemes of Work',  id: 'schemes-of-work' },
+      { icon: 'clock',          label: 'My Timetable',     id: 'timetable' },
+      { icon: 'user-check',     label: 'Student Arrival',  id: 'student-arrival' },
+      { icon: 'video',          label: 'Live Classroom',   id: 'live-classroom' },
+      { icon: 'laptop',         label: 'Online Exams',     id: 'online-exams' },
+      { icon: 'users',          label: 'Alumni',           id: 'alumni' },
+      { icon: 'concierge',      label: 'Receptionist',     id: 'receptionist' },
+      { icon: 'calendar-alt',   label: 'Events',           id: 'events' },
+      { icon: 'bullhorn',       label: 'Announcements',    id: 'announcements' },
+      { icon: 'cog',            label: 'Settings',         id: 'settings' },
+      { icon: 'microscope',     label: 'Labs',             id: 'labs' }
     ];
-    
+
     if (isSecondaryOrPrimary) {
-      teacherItems.unshift({ icon: "school", label: "My Classes", id: 'classes' });
-      teacherItems.splice(6, 0, { icon: "book", label: "My Subjects", id: 'subjects' });
+      teacherItems.unshift({ icon: 'school', label: 'My Classes', id: 'classes' });
+      teacherItems.splice(6, 0, { icon: 'book', label: 'My Subjects', id: 'subjects' });
     }
-    
+
     if (showCourseAndUnitMenus) {
-      teacherItems.push({ icon: "book", label: "Unit Registration", id: 'unit-registration' });
+      teacherItems.push({ icon: 'book', label: 'Unit Registration', id: 'unit-registration' });
     }
-    
-    return [
+
+    sections = [
       dashboardSection,
-      { title: "TEACHING", items: teacherItems }
+      { title: 'TEACHING', items: teacherItems }
     ];
   }
 
   // ============================================
-  // LECTURER VIEW (University only)
+  // LECTURER VIEW (University)
   // ============================================
-  if (['LECTURER', 'SENIOR_LECTURER', 'PROFESSOR'].includes(user.role)) {
+  else if (['LECTURER', 'SENIOR_LECTURER', 'PROFESSOR'].includes(user.role)) {
     const lecturerItems = [
-      { icon: "users", label: "My Students", id: 'students' },
-      { icon: "calendar-check", label: "Take Attendance", id: 'attendance' },
-      { icon: "edit", label: "Enter Results", id: 'results' },
-      { icon: "file-alt", label: "Exams", id: 'exams' },
-      { icon: "clock", label: "My Timetable", id: 'timetable' },
-      { icon: "book-open", label: "My Units", id: 'course-units' },
-      { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' },
-      { icon: "user-plus", label: "Course Enrollment", id: 'course-enrollment' },
-      { icon: "book", label: "Unit Registration", id: 'unit-registration' },
-      { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
-      { icon: "flask", label: "Research", id: 'research' },
-      { icon: "video", label: "Live Classroom", id: 'live-classroom' },
-      { icon: "laptop", label: "Online Exams", id: 'online-exams' },
-      { icon: "users", label: "Alumni", id: 'alumni' },
-      { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-      { icon: "calendar-alt", label: "Events", id: 'events' },
-      { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-      { icon: "cog", label: "Settings", id: 'settings' },
-      { icon: "microscope", label: "Labs", id: 'labs' }
+      { icon: 'users',          label: 'My Students',         id: 'students' },
+      { icon: 'calendar-check', label: 'Take Attendance',     id: 'attendance' },
+      { icon: 'edit',           label: 'Enter Results',       id: 'results' },
+      { icon: 'file-alt',       label: 'Exams',               id: 'exams' },
+      { icon: 'clock',          label: 'My Timetable',        id: 'timetable' },
+      { icon: 'book-open',      label: 'My Units',            id: 'course-units' },
+      { icon: 'book',           label: 'Schemes of Work',     id: 'schemes-of-work' },
+      { icon: 'user-plus',      label: 'Course Enrollment',   id: 'course-enrollment' },
+      { icon: 'book',           label: 'Unit Registration',   id: 'unit-registration' },
+      { icon: 'user-check',     label: 'Student Arrival',     id: 'student-arrival' },
+      { icon: 'flask',          label: 'Research',            id: 'research' },
+      { icon: 'video',          label: 'Live Classroom',      id: 'live-classroom' },
+      { icon: 'laptop',         label: 'Online Exams',        id: 'online-exams' },
+      { icon: 'users',          label: 'Alumni',              id: 'alumni' },
+      { icon: 'concierge',      label: 'Receptionist',        id: 'receptionist' },
+      { icon: 'calendar-alt',   label: 'Events',              id: 'events' },
+      { icon: 'bullhorn',       label: 'Announcements',       id: 'announcements' },
+      { icon: 'cog',            label: 'Settings',            id: 'settings' },
+      { icon: 'microscope',     label: 'Labs',                id: 'labs' }
     ];
-    
-    return [
+
+    sections = [
       dashboardSection,
-      { title: "TEACHING", items: lecturerItems }
+      { title: 'TEACHING', items: lecturerItems }
     ];
   }
 
   // ============================================
   // DEAN VIEW (University)
   // ============================================
-  if (user.role === 'DEAN') {
-    return [
+  else if (user.role === 'DEAN') {
+    sections = [
       dashboardSection,
       {
-        title: "FACULTY MANAGEMENT",
+        title: 'FACULTY MANAGEMENT',
         items: [
-          { icon: "building", label: "Faculties", id: 'faculties' },
-          { icon: "layer-group", label: "Departments", id: 'departments' },
-          { icon: "graduation-cap", label: "Courses", id: 'courses' },
-          { icon: "book-open", label: "Units", id: 'course-units' },
-          { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' },
-          { icon: "flask", label: "Research", id: 'research' },
-          { icon: "microscope", label: "Labs", id: 'labs' }
+          { icon: 'building',     label: 'Faculties',        id: 'faculties' },
+          { icon: 'layer-group',  label: 'Departments',      id: 'departments' },
+          { icon: 'graduation-cap', label: 'Courses',        id: 'courses' },
+          { icon: 'book-open',    label: 'Units',            id: 'course-units' },
+          { icon: 'book',         label: 'Schemes of Work',  id: 'schemes-of-work' },
+          { icon: 'flask',        label: 'Research',         id: 'research' },
+          { icon: 'microscope',   label: 'Labs',             id: 'labs' }
         ]
       },
       {
-        title: "STUDENTS & STAFF",
+        title: 'STUDENTS & STAFF',
         items: [
-          { icon: "users", label: "Students", id: 'students' },
-          { icon: "chalkboard-teacher", label: "Staff", id: 'staff' },
-          { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
-          { icon: "user-plus", label: "Course Enrollment", id: 'course-enrollment' },
-          { icon: "book", label: "Unit Registration", id: 'unit-registration' }
+          { icon: 'users',             label: 'Students',           id: 'students' },
+          { icon: 'chalkboard-teacher', label: 'Staff',             id: 'staff' },
+          { icon: 'user-check',        label: 'Student Arrival',    id: 'student-arrival' },
+          { icon: 'user-plus',         label: 'Course Enrollment',  id: 'course-enrollment' },
+          { icon: 'book',              label: 'Unit Registration',  id: 'unit-registration' }
         ]
       },
       {
-        title: "ACADEMICS",
+        title: 'ACADEMICS',
         items: [
-          { icon: "file-alt", label: "Exams", id: 'exams' },
-          { icon: "user-check", label: "Exam Card Overrides", id: 'exam-card-overrides' },
-          { icon: "chart-line", label: "Results", id: 'results' },
-          { icon: "clock", label: "Timetable", id: 'timetable' },
-          { icon: "calendar-check", label: "Attendance", id: 'attendance' },
-          { icon: "arrow-up", label: "Promotion", id: 'promotion' },
-          { icon: "video", label: "Live Classroom", id: 'live-classroom' },
-          { icon: "laptop", label: "Online Exams", id: 'online-exams' }
+          { icon: 'file-alt',       label: 'Exams',                id: 'exams' },
+          { icon: 'user-check',     label: 'Exam Card Overrides',  id: 'exam-card-overrides' },
+          { icon: 'chart-line',     label: 'Results',              id: 'results' },
+          { icon: 'clock',          label: 'Timetable',            id: 'timetable' },
+          { icon: 'calendar-check', label: 'Attendance',           id: 'attendance' },
+          { icon: 'arrow-up',       label: 'Promotion',            id: 'promotion' },
+          { icon: 'video',          label: 'Live Classroom',       id: 'live-classroom' },
+          { icon: 'laptop',         label: 'Online Exams',         id: 'online-exams' }
         ]
       },
       {
-        title: "ADVANCED TOOLS",
+        title: 'ADVANCED TOOLS',
         items: [
-          { icon: "id-card", label: "Card Management", id: 'card-management' },
-          { icon: "certificate", label: "Certificates", id: 'certificates' },
-          { icon: "users", label: "Alumni", id: 'alumni' }
+          { icon: 'id-card',     label: 'Card Management', id: 'card-management' },
+          { icon: 'certificate', label: 'Certificates',    id: 'certificates' },
+          { icon: 'users',       label: 'Alumni',          id: 'alumni' }
         ]
       },
       {
-        title: "RECEPTION",
+        title: 'RECEPTION',
         items: [
-          { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-          { icon: "calendar-alt", label: "Events", id: 'events' },
-          { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-          { icon: "cog", label: "Settings", id: 'settings' }
+          { icon: 'concierge',    label: 'Receptionist',  id: 'receptionist' },
+          { icon: 'calendar-alt', label: 'Events',        id: 'events' },
+          { icon: 'bullhorn',     label: 'Announcements', id: 'announcements' },
+          { icon: 'cog',          label: 'Settings',      id: 'settings' }
         ]
       }
     ];
   }
 
   // ============================================
-  // HOD VIEW (University/TVET)
+  // HOD / HEAD_OF_DEPARTMENT
   // ============================================
-  if (user.role === 'HOD' || user.role === 'HEAD_OF_DEPARTMENT') {
+  else if (user.role === 'HOD' || user.role === 'HEAD_OF_DEPARTMENT') {
     const hodItems = [
-      { icon: "users", label: "Students", id: 'students' },
-      { icon: "chalkboard-teacher", label: "Staff", id: 'staff' },
-      { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
-      { icon: "user-plus", label: "Course Enrollment", id: 'course-enrollment' },
-      { icon: "book", label: "Unit Registration", id: 'unit-registration' },
-      { icon: "microscope", label: "Labs", id: 'labs' }
+      { icon: 'users',             label: 'Students',           id: 'students' },
+      { icon: 'chalkboard-teacher', label: 'Staff',             id: 'staff' },
+      { icon: 'user-check',        label: 'Student Arrival',    id: 'student-arrival' },
+      { icon: 'user-plus',         label: 'Course Enrollment',  id: 'course-enrollment' },
+      { icon: 'book',              label: 'Unit Registration',  id: 'unit-registration' },
+      { icon: 'microscope',        label: 'Labs',               id: 'labs' }
     ];
-    
+
     if (isUniversity) {
       hodItems.unshift(
-        { icon: "graduation-cap", label: "Courses", id: 'courses' },
-        { icon: "book-open", label: "Units", id: 'course-units' }
+        { icon: 'graduation-cap', label: 'Courses', id: 'courses' },
+        { icon: 'book-open',      label: 'Units',   id: 'course-units' }
       );
     } else if (isTVET) {
       hodItems.unshift(
-        { icon: "graduation-cap", label: "Programs", id: 'programs' },
-        { icon: "book-open", label: "Modules", id: 'course-units' }
+        { icon: 'graduation-cap', label: 'Programs', id: 'programs' },
+        { icon: 'book-open',      label: 'Modules',  id: 'course-units' }
       );
     }
-    
-    return [
+
+    sections = [
       dashboardSection,
+      { title: 'DEPARTMENT MANAGEMENT', items: hodItems },
       {
-        title: "DEPARTMENT MANAGEMENT",
-        items: hodItems
-      },
-      {
-        title: "ACADEMICS",
+        title: 'ACADEMICS',
         items: [
-          { icon: "file-alt", label: "Exams", id: 'exams' },
-          { icon: "user-check", label: "Exam Card Overrides", id: 'exam-card-overrides' },
-          { icon: "chart-line", label: "Results", id: 'results' },
-          { icon: "clock", label: "Timetable", id: 'timetable' },
-          { icon: "calendar-check", label: "Attendance", id: 'attendance' },
-          { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' },
-          { icon: "arrow-up", label: "Promotion", id: 'promotion' }
+          { icon: 'file-alt',       label: 'Exams',                 id: 'exams' },
+          { icon: 'user-check',     label: 'Exam Card Overrides',   id: 'exam-card-overrides' },
+          { icon: 'chart-line',     label: 'Results',               id: 'results' },
+          { icon: 'clock',          label: 'Timetable',             id: 'timetable' },
+          { icon: 'calendar-check', label: 'Attendance',            id: 'attendance' },
+          { icon: 'book',           label: 'Schemes of Work',       id: 'schemes-of-work' },
+          { icon: 'arrow-up',       label: 'Promotion',             id: 'promotion' }
         ]
       },
       {
-        title: "ADVANCED TOOLS",
+        title: 'ADVANCED TOOLS',
         items: [
-          { icon: "id-card", label: "Card Management", id: 'card-management' },
-          { icon: "certificate", label: "Certificates", id: 'certificates' },
-          { icon: "users", label: "Alumni", id: 'alumni' },
-          { icon: "video", label: "Live Classroom", id: 'live-classroom' },
-          { icon: "laptop", label: "Online Exams", id: 'online-exams' }
+          { icon: 'id-card',     label: 'Card Management', id: 'card-management' },
+          { icon: 'certificate', label: 'Certificates',    id: 'certificates' },
+          { icon: 'users',       label: 'Alumni',          id: 'alumni' },
+          { icon: 'video',       label: 'Live Classroom',  id: 'live-classroom' },
+          { icon: 'laptop',      label: 'Online Exams',    id: 'online-exams' }
         ]
       },
       {
-        title: "RECEPTION",
+        title: 'RECEPTION',
         items: [
-          { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-          { icon: "calendar-alt", label: "Events", id: 'events' },
-          { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-          { icon: "cog", label: "Settings", id: 'settings' }
+          { icon: 'concierge',    label: 'Receptionist',  id: 'receptionist' },
+          { icon: 'calendar-alt', label: 'Events',        id: 'events' },
+          { icon: 'bullhorn',     label: 'Announcements', id: 'announcements' },
+          { icon: 'cog',          label: 'Settings',      id: 'settings' }
         ]
       }
     ];
   }
 
   // ============================================
-  // PRINCIPAL VIEW (Primary/Secondary)
+  // PRINCIPAL VIEW
   // ============================================
-  if (user.role === 'PRINCIPAL') {
-    return [
+  else if (user.role === 'PRINCIPAL') {
+    sections = [
       dashboardSection,
       {
-        title: "SCHOOL OVERVIEW",
+        title: 'SCHOOL OVERVIEW',
         items: [
-          { icon: "school", label: "Classes", id: 'classes' },
-          { icon: "book", label: "Subjects", id: 'subjects' },
-          { icon: "users", label: "Students", id: 'students' },
-          { icon: "chalkboard-teacher", label: "Staff", id: 'staff' },
-          { icon: "microscope", label: "Labs", id: 'labs' }
+          { icon: 'school',             label: 'Classes',   id: 'classes' },
+          { icon: 'book',               label: 'Subjects',  id: 'subjects' },
+          { icon: 'users',              label: 'Students',  id: 'students' },
+          { icon: 'chalkboard-teacher', label: 'Staff',     id: 'staff' },
+          { icon: 'microscope',         label: 'Labs',      id: 'labs' }
         ]
       },
       {
-        title: "ACADEMICS",
+        title: 'ACADEMICS',
         items: [
-          { icon: "file-alt", label: "Exams", id: 'exams' },
-          { icon: "chart-line", label: "Results", id: 'results' },
-          { icon: "clock", label: "Timetable", id: 'timetable' },
-          { icon: "calendar-check", label: "Attendance", id: 'attendance' },
-          { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' },
-          { icon: "arrow-up", label: "Promotion", id: 'promotion' },
-          { icon: "id-card", label: "Exam Cards", id: 'exam-cards' }
+          { icon: 'file-alt',       label: 'Exams',           id: 'exams' },
+          { icon: 'chart-line',     label: 'Results',         id: 'results' },
+          { icon: 'clock',          label: 'Timetable',       id: 'timetable' },
+          { icon: 'calendar-check', label: 'Attendance',      id: 'attendance' },
+          { icon: 'book',           label: 'Schemes of Work', id: 'schemes-of-work' },
+          { icon: 'arrow-up',       label: 'Promotion',       id: 'promotion' },
+          { icon: 'id-card',        label: 'Exam Cards',      id: 'exam-cards' }
         ]
       },
       {
-        title: "STUDENT MANAGEMENT",
+        title: 'STUDENT MANAGEMENT',
         items: [
-          { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
-          { icon: "book-open", label: "Homework", id: 'homework' },
-          
-{ icon: "user-check", label: "Exam Card Overrides", id: 'exam-card-overrides' },
-          { icon: "stethoscope", label: "Health Records", id: 'health' },
-          { icon: "bed", label: "Sick Bay", id: 'sickbay' }
+          { icon: 'user-check',  label: 'Student Arrival',      id: 'student-arrival' },
+          { icon: 'book-open',   label: 'Homework',             id: 'homework' },
+          { icon: 'user-check',  label: 'Exam Card Overrides',  id: 'exam-card-overrides' },
+          { icon: 'stethoscope', label: 'Health Records',       id: 'health' },
+          { icon: 'bed',         label: 'Sick Bay',             id: 'sickbay' }
         ]
       },
       {
-        title: "FINANCE",
+        title: 'FINANCE',
         items: [
-          { icon: "money-bill", label: "Fee Management", id: 'fees' },
-          { icon: "hand-holding-usd", label: "Fee Allocation", id: 'fee-allocation' },
-          { icon: "credit-card", label: "Fee Collection", id: 'fee-collection' },
-          { icon: "receipt", label: "Receipt History", id: 'receipt-history' },
-          { icon: "file-invoice", label: "Reports", id: 'reports' },
-          { icon: "bell", label: "Fee Reminders", id: 'fee-reminders' },
-          { icon: "exchange-alt", label: "Fee Transfers", id: 'fee-transfers' }
+          { icon: 'money-bill',       label: 'Fee Management',   id: 'fees' },
+          { icon: 'hand-holding-usd', label: 'Fee Allocation',   id: 'fee-allocation' },
+          { icon: 'credit-card',      label: 'Fee Collection',   id: 'fee-collection' },
+          { icon: 'receipt',          label: 'Receipt History',  id: 'receipt-history' },
+          { icon: 'file-invoice',     label: 'Reports',          id: 'reports' },
+          { icon: 'bell',             label: 'Fee Reminders',    id: 'fee-reminders' },
+          { icon: 'exchange-alt',     label: 'Fee Transfers',    id: 'fee-transfers' }
         ]
       },
       {
-        title: "STAFF",
+        title: 'STAFF',
         items: [
-          { icon: "clipboard-list", label: "Staff Attendance", id: 'staff-attendance' },
-          { icon: "money-bill-wave", label: "Payroll", id: 'payroll' }
+          { icon: 'clipboard-list',   label: 'Staff Attendance', id: 'staff-attendance' },
+          { icon: 'money-bill-wave',  label: 'Payroll',          id: 'payroll' }
         ]
       },
       {
-        title: "ADVANCED TOOLS",
+        title: 'ADVANCED TOOLS',
         items: [
-          { icon: "id-card", label: "Card Management", id: 'card-management' },
-          { icon: "certificate", label: "Certificates", id: 'certificates' },
-          { icon: "users", label: "Alumni", id: 'alumni' },
-          { icon: "video", label: "Live Classroom", id: 'live-classroom' },
-          { icon: "laptop", label: "Online Exams", id: 'online-exams' }
+          { icon: 'id-card',     label: 'Card Management', id: 'card-management' },
+          { icon: 'certificate', label: 'Certificates',    id: 'certificates' },
+          { icon: 'users',       label: 'Alumni',          id: 'alumni' },
+          { icon: 'video',       label: 'Live Classroom',  id: 'live-classroom' },
+          { icon: 'laptop',      label: 'Online Exams',    id: 'online-exams' }
         ]
       },
       {
-        title: "RECEPTION",
+        title: 'RECEPTION',
         items: [
-          { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-          { icon: "calendar-alt", label: "Events", id: 'events' },
-          { icon: "bullhorn", label: "Announcements", id: 'announcements' }
+          { icon: 'concierge',    label: 'Receptionist',  id: 'receptionist' },
+          { icon: 'calendar-alt', label: 'Events',        id: 'events' },
+          { icon: 'bullhorn',     label: 'Announcements', id: 'announcements' }
         ]
       },
       {
-        title: "COMMUNICATION",
+        title: 'COMMUNICATION',
         items: [
-          { icon: "envelope", label: "Messages", id: 'messages' },
-          { icon: "cog", label: "Settings", id: 'settings' }
+          { icon: 'envelope', label: 'Messages', id: 'messages' },
+          { icon: 'cog',      label: 'Settings', id: 'settings' }
         ]
       }
     ];
   }
 
   // ============================================
-  // DEPUTY PRINCIPAL VIEW (Primary/Secondary)
+  // DEPUTY PRINCIPAL VIEW
   // ============================================
-  if (user.role === 'DEPUTY_PRINCIPAL') {
-    return [
+  else if (user.role === 'DEPUTY_PRINCIPAL') {
+    sections = [
       dashboardSection,
       {
-        title: "STUDENT AFFAIRS",
+        title: 'STUDENT AFFAIRS',
         items: [
-          { icon: "users", label: "Students", id: 'students' },
-          { icon: "calendar-check", label: "Attendance", id: 'attendance' },
-          { icon: "clock", label: "Timetable", id: 'timetable' },
-          { icon: "id-card", label: "Exam Cards", id: 'exam-cards' },
-   
-{ icon: "user-check", label: "Exam Card Overrides", id: 'exam-card-overrides' },
-          { icon: "book-open", label: "Homework", id: 'homework' },
-          { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
-          { icon: "microscope", label: "Labs", id: 'labs' }
+          { icon: 'users',          label: 'Students',             id: 'students' },
+          { icon: 'calendar-check', label: 'Attendance',           id: 'attendance' },
+          { icon: 'clock',          label: 'Timetable',            id: 'timetable' },
+          { icon: 'id-card',        label: 'Exam Cards',           id: 'exam-cards' },
+          { icon: 'user-check',     label: 'Exam Card Overrides',  id: 'exam-card-overrides' },
+          { icon: 'book-open',      label: 'Homework',             id: 'homework' },
+          { icon: 'user-check',     label: 'Student Arrival',      id: 'student-arrival' },
+          { icon: 'microscope',     label: 'Labs',                 id: 'labs' }
         ]
       },
       {
-        title: "ACADEMICS",
+        title: 'ACADEMICS',
         items: [
-          { icon: "file-alt", label: "Exams", id: 'exams' },
-          { icon: "chart-line", label: "Results", id: 'results' },
-          { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' },
-          { icon: "arrow-up", label: "Promotion", id: 'promotion' }
+          { icon: 'file-alt',   label: 'Exams',           id: 'exams' },
+          { icon: 'chart-line', label: 'Results',         id: 'results' },
+          { icon: 'book',       label: 'Schemes of Work', id: 'schemes-of-work' },
+          { icon: 'arrow-up',   label: 'Promotion',       id: 'promotion' }
         ]
       },
       {
-        title: "ADVANCED TOOLS",
+        title: 'ADVANCED TOOLS',
         items: [
-          { icon: "id-card", label: "Card Management", id: 'card-management' },
-          { icon: "certificate", label: "Certificates", id: 'certificates' },
-          { icon: "users", label: "Alumni", id: 'alumni' },
-          { icon: "video", label: "Live Classroom", id: 'live-classroom' },
-          { icon: "laptop", label: "Online Exams", id: 'online-exams' }
+          { icon: 'id-card',     label: 'Card Management', id: 'card-management' },
+          { icon: 'certificate', label: 'Certificates',    id: 'certificates' },
+          { icon: 'users',       label: 'Alumni',          id: 'alumni' },
+          { icon: 'video',       label: 'Live Classroom',  id: 'live-classroom' },
+          { icon: 'laptop',      label: 'Online Exams',    id: 'online-exams' }
         ]
       },
       {
-        title: "RECEPTION",
+        title: 'RECEPTION',
         items: [
-          { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-          { icon: "calendar-alt", label: "Events", id: 'events' },
-          { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-          { icon: "cog", label: "Settings", id: 'settings' }
+          { icon: 'concierge',    label: 'Receptionist',  id: 'receptionist' },
+          { icon: 'calendar-alt', label: 'Events',        id: 'events' },
+          { icon: 'bullhorn',     label: 'Announcements', id: 'announcements' },
+          { icon: 'cog',          label: 'Settings',      id: 'settings' }
         ]
       }
     ];
@@ -69056,38 +69056,32 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
   // ============================================
   // ACCOUNTANT VIEW
   // ============================================
-  if (user.role === 'ACCOUNTANT') {
-    return [
+  else if (user.role === 'ACCOUNTANT') {
+    sections = [
       dashboardSection,
       {
-        title: "FINANCE",
+        title: 'FINANCE',
         items: [
-          { icon: "money-bill", label: "Fee Management", id: 'fees' },
-          { icon: "hand-holding-usd", label: "Fee Allocation", id: 'fee-allocation' },
-          { icon: "credit-card", label: "Fee Collection", id: 'fee-collection' },
-          { icon: "receipt", label: "Receipt History", id: 'receipt-history' },
-          { icon: "plus-circle", label: "Other Income", id: 'other-income' },
-          { icon: "minus-circle", label: "Expenses", id: 'expenses' },
-          { icon: "file-invoice", label: "Reports", id: 'reports' },
-          { icon: "bell", label: "Fee Reminders", id: 'fee-reminders' },
-             { icon: "exchange-alt", label: "Fee Transfers", id: 'fee-transfers' },
-             {
-  title: "EXAMS",
-  items: [
-    { icon: "id-card", label: "Exam Card Overrides", id: 'exam-card-overrides' }
-  ]
-},
-          { icon: "money-bill-wave", label: "Payroll", id: 'payroll' }
-        
+          { icon: 'money-bill',       label: 'Fee Management',      id: 'fees' },
+          { icon: 'hand-holding-usd', label: 'Fee Allocation',      id: 'fee-allocation' },
+          { icon: 'credit-card',      label: 'Fee Collection',      id: 'fee-collection' },
+          { icon: 'receipt',          label: 'Receipt History',     id: 'receipt-history' },
+          { icon: 'plus-circle',      label: 'Other Income',        id: 'other-income' },
+          { icon: 'minus-circle',     label: 'Expenses',            id: 'expenses' },
+          { icon: 'file-invoice',     label: 'Reports',             id: 'reports' },
+          { icon: 'bell',             label: 'Fee Reminders',       id: 'fee-reminders' },
+          { icon: 'exchange-alt',     label: 'Fee Transfers',       id: 'fee-transfers' },
+          { icon: 'id-card',          label: 'Exam Card Overrides', id: 'exam-card-overrides' },
+          { icon: 'money-bill-wave',  label: 'Payroll',             id: 'payroll' }
         ]
       },
       {
-        title: "RECEPTION",
+        title: 'RECEPTION',
         items: [
-          { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-          { icon: "calendar-alt", label: "Events", id: 'events' },
-          { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-          { icon: "cog", label: "Settings", id: 'settings' }
+          { icon: 'concierge',    label: 'Receptionist',  id: 'receptionist' },
+          { icon: 'calendar-alt', label: 'Events',        id: 'events' },
+          { icon: 'bullhorn',     label: 'Announcements', id: 'announcements' },
+          { icon: 'cog',          label: 'Settings',      id: 'settings' }
         ]
       }
     ];
@@ -69096,25 +69090,25 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
   // ============================================
   // LIBRARIAN VIEW
   // ============================================
-  if (user.role === 'LIBRARIAN') {
-    return [
+  else if (user.role === 'LIBRARIAN') {
+    sections = [
       dashboardSection,
       {
-        title: "LIBRARY",
+        title: 'LIBRARY',
         items: [
-          { icon: "book", label: "Books", id: 'library' },
-          { icon: "hand-holding", label: "Borrow Books", id: 'library' },
-          { icon: "undo-alt", label: "Return Books", id: 'library' },
-          { icon: "users", label: "Students", id: 'students' }
+          { icon: 'book',         label: 'Books',          id: 'library' },
+          { icon: 'hand-holding', label: 'Borrow Books',   id: 'library' },
+          { icon: 'undo-alt',     label: 'Return Books',   id: 'library' },
+          { icon: 'users',        label: 'Students',       id: 'students' }
         ]
       },
       {
-        title: "RECEPTION",
+        title: 'RECEPTION',
         items: [
-          { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-          { icon: "calendar-alt", label: "Events", id: 'events' },
-          { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-          { icon: "cog", label: "Settings", id: 'settings' }
+          { icon: 'concierge',    label: 'Receptionist',  id: 'receptionist' },
+          { icon: 'calendar-alt', label: 'Events',        id: 'events' },
+          { icon: 'bullhorn',     label: 'Announcements', id: 'announcements' },
+          { icon: 'cog',          label: 'Settings',      id: 'settings' }
         ]
       }
     ];
@@ -69123,25 +69117,25 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
   // ============================================
   // NURSE VIEW
   // ============================================
-  if (user.role === 'NURSE') {
-    return [
+  else if (user.role === 'NURSE') {
+    sections = [
       dashboardSection,
       {
-        title: "HEALTH MANAGEMENT",
+        title: 'HEALTH MANAGEMENT',
         items: [
-          { icon: "users", label: "Students", id: 'students' },
-          { icon: "stethoscope", label: "Health Records", id: 'health' },
-          { icon: "bed", label: "Sick Bay", id: 'sickbay' },
-          { icon: "calendar-check", label: "Attendance", id: 'attendance' }
+          { icon: 'users',          label: 'Students',        id: 'students' },
+          { icon: 'stethoscope',    label: 'Health Records',  id: 'health' },
+          { icon: 'bed',            label: 'Sick Bay',        id: 'sickbay' },
+          { icon: 'calendar-check', label: 'Attendance',      id: 'attendance' }
         ]
       },
       {
-        title: "RECEPTION",
+        title: 'RECEPTION',
         items: [
-          { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-          { icon: "calendar-alt", label: "Events", id: 'events' },
-          { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-          { icon: "cog", label: "Settings", id: 'settings' }
+          { icon: 'concierge',    label: 'Receptionist',  id: 'receptionist' },
+          { icon: 'calendar-alt', label: 'Events',        id: 'events' },
+          { icon: 'bullhorn',     label: 'Announcements', id: 'announcements' },
+          { icon: 'cog',          label: 'Settings',      id: 'settings' }
         ]
       }
     ];
@@ -69150,26 +69144,26 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
   // ============================================
   // MATRON VIEW
   // ============================================
-  if (user.role === 'MATRON') {
-    return [
+  else if (user.role === 'MATRON') {
+    sections = [
       dashboardSection,
       {
-        title: "HOSTEL MANAGEMENT",
+        title: 'HOSTEL MANAGEMENT',
         items: [
-          { icon: "bed", label: "Hostels", id: 'hostel' },
-          { icon: "users", label: "Students", id: 'students' },
-          { icon: "bed", label: "Sick Bay", id: 'sickbay' },
-          { icon: "calendar-check", label: "Attendance", id: 'attendance' },
-          { icon: "box", label: "Inventory", id: 'inventory' }
+          { icon: 'bed',            label: 'Hostels',    id: 'hostel' },
+          { icon: 'users',          label: 'Students',   id: 'students' },
+          { icon: 'bed',            label: 'Sick Bay',   id: 'sickbay' },
+          { icon: 'calendar-check', label: 'Attendance', id: 'attendance' },
+          { icon: 'box',            label: 'Inventory',  id: 'inventory' }
         ]
       },
       {
-        title: "RECEPTION",
+        title: 'RECEPTION',
         items: [
-          { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-          { icon: "calendar-alt", label: "Events", id: 'events' },
-          { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-          { icon: "cog", label: "Settings", id: 'settings' }
+          { icon: 'concierge',    label: 'Receptionist',  id: 'receptionist' },
+          { icon: 'calendar-alt', label: 'Events',        id: 'events' },
+          { icon: 'bullhorn',     label: 'Announcements', id: 'announcements' },
+          { icon: 'cog',          label: 'Settings',      id: 'settings' }
         ]
       }
     ];
@@ -69178,25 +69172,25 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
   // ============================================
   // TRANSPORT MANAGER VIEW
   // ============================================
-  if (user.role === 'TRANSPORT_MANAGER') {
-    return [
+  else if (user.role === 'TRANSPORT_MANAGER') {
+    sections = [
       dashboardSection,
       {
-        title: "FLEET MANAGEMENT",
+        title: 'FLEET MANAGEMENT',
         items: [
-          { icon: "bus", label: "Vehicles", id: 'transport' },
-          { icon: "route", label: "Routes", id: 'transport' },
-          { icon: "users", label: "Students on Transport", id: 'students' },
-          { icon: "calendar-check", label: "Attendance", id: 'attendance' }
+          { icon: 'bus',            label: 'Vehicles',             id: 'transport' },
+          { icon: 'route',          label: 'Routes',               id: 'transport' },
+          { icon: 'users',          label: 'Students on Transport', id: 'students' },
+          { icon: 'calendar-check', label: 'Attendance',           id: 'attendance' }
         ]
       },
       {
-        title: "RECEPTION",
+        title: 'RECEPTION',
         items: [
-          { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-          { icon: "calendar-alt", label: "Events", id: 'events' },
-          { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-          { icon: "cog", label: "Settings", id: 'settings' }
+          { icon: 'concierge',    label: 'Receptionist',  id: 'receptionist' },
+          { icon: 'calendar-alt', label: 'Events',        id: 'events' },
+          { icon: 'bullhorn',     label: 'Announcements', id: 'announcements' },
+          { icon: 'cog',          label: 'Settings',      id: 'settings' }
         ]
       }
     ];
@@ -69205,242 +69199,230 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
   // ============================================
   // HR MANAGER VIEW
   // ============================================
-  if (user.role === 'HR_MANAGER' || user.role === 'HR') {
-    return [
+  else if (user.role === 'HR_MANAGER' || user.role === 'HR') {
+    sections = [
       dashboardSection,
       {
-        title: "HUMAN RESOURCES",
+        title: 'HUMAN RESOURCES',
         items: [
-          { icon: "users", label: "Staff", id: 'staff' },
-          { icon: "clipboard-list", label: "Staff Attendance", id: 'staff-attendance' },
-          { icon: "money-bill-wave", label: "Payroll", id: 'payroll' },
-          { icon: "file-invoice", label: "Reports", id: 'reports' }
+          { icon: 'users',           label: 'Staff',             id: 'staff' },
+          { icon: 'clipboard-list',  label: 'Staff Attendance',  id: 'staff-attendance' },
+          { icon: 'money-bill-wave', label: 'Payroll',           id: 'payroll' },
+          { icon: 'file-invoice',    label: 'Reports',           id: 'reports' }
         ]
       },
       {
-        title: "RECEPTION",
+        title: 'RECEPTION',
         items: [
-          { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-          { icon: "calendar-alt", label: "Events", id: 'events' },
-          { icon: "bullhorn", label: "Announcements", id: 'announcements' },
-          { icon: "cog", label: "Settings", id: 'settings' }
+          { icon: 'concierge',    label: 'Receptionist',  id: 'receptionist' },
+          { icon: 'calendar-alt', label: 'Events',        id: 'events' },
+          { icon: 'bullhorn',     label: 'Announcements', id: 'announcements' },
+          { icon: 'cog',          label: 'Settings',      id: 'settings' }
         ]
       }
     ];
   }
 
-// ============================================
-// SCHOOL ADMIN VIEW (COMPLETE - WITH TVET SUPPORT)
-// ============================================
-if (user.role === 'SCHOOL_ADMIN') {
-  const sections = [
-    dashboardSection
-  ];
-if (isTVET) {
-  sections.push(
-    {
-      title: "TVET",
-      items: [
-        { icon: "building", label: "Faculties", id: 'faculties' },
-        { icon: "layer-group", label: "Departments", id: 'departments' },
-        { icon: "graduation-cap", label: "Programs", id: 'programs' },
-        { icon: "book-open", label: "Modules", id: 'course-units' },
-        { icon: "microscope", label: "Labs", id: 'labs' },
-        { icon: "user-plus", label: "Course Enrollment", id: 'course-enrollment' },
-        { icon: "book", label: "Unit Registration", id: 'unit-registration' }
-      ]
-    },
-    // 👇 ADD THIS NEW SECTION
-    {
-      title: "STUDENTS & STAFF",
-      items: [
-        { icon: "user-graduate", label: "Students", id: 'students' },
-        { icon: "chalkboard-teacher", label: "Staff", id: 'staff' }
-      ]
-    }
-  );
-}
+  // ============================================
+  // SCHOOL ADMIN VIEW
+  // ============================================
+  else if (user.role === 'SCHOOL_ADMIN') {
+    sections = [dashboardSection];
 
-  // ===== UNIVERSITY SECTIONS =====
-  if (isUniversity) {
+    if (isTVET) {
+      sections.push(
+        {
+          title: 'TVET',
+          items: [
+            { icon: 'building',       label: 'Faculties',          id: 'faculties' },
+            { icon: 'layer-group',    label: 'Departments',        id: 'departments' },
+            { icon: 'graduation-cap', label: 'Programs',           id: 'programs' },
+            { icon: 'book-open',      label: 'Modules',            id: 'course-units' },
+            { icon: 'microscope',     label: 'Labs',               id: 'labs' },
+            { icon: 'user-plus',      label: 'Course Enrollment',  id: 'course-enrollment' },
+            { icon: 'book',           label: 'Unit Registration',  id: 'unit-registration' }
+          ]
+        },
+        {
+          title: 'STUDENTS & STAFF',
+          items: [
+            { icon: 'user-graduate',      label: 'Students', id: 'students' },
+            { icon: 'chalkboard-teacher', label: 'Staff',    id: 'staff' }
+          ]
+        }
+      );
+    }
+
+    if (isUniversity) {
+      sections.push({
+        title: 'UNIVERSITY',
+        items: [
+          { icon: 'building',       label: 'Faculties',          id: 'faculties' },
+          { icon: 'layer-group',    label: 'Departments',        id: 'departments' },
+          { icon: 'graduation-cap', label: 'Courses',            id: 'courses' },
+          { icon: 'book-open',      label: 'Units',              id: 'course-units' },
+          { icon: 'flask',          label: 'Research',           id: 'research' },
+          { icon: 'microscope',     label: 'Labs',               id: 'labs' },
+          { icon: 'user-plus',      label: 'Course Enrollment',  id: 'course-enrollment' },
+          { icon: 'book',           label: 'Unit Registration',  id: 'unit-registration' }
+        ]
+      });
+    }
+
+    if (isPrimary || isSecondary) {
+      sections.push({
+        title: 'SCHOOL',
+        items: [
+          { icon: 'school',             label: 'Classes',  id: 'classes' },
+          { icon: 'book',               label: 'Subjects', id: 'subjects' },
+          { icon: 'microscope',         label: 'Labs',     id: 'labs' },
+          { icon: 'user-graduate',      label: 'Students', id: 'students' },
+          { icon: 'chalkboard-teacher', label: 'Staff',    id: 'staff' }
+        ]
+      });
+    }
+
     sections.push(
       {
-        title: "UNIVERSITY",
+        title: 'ACADEMICS',
         items: [
-          { icon: "building", label: "Faculties", id: 'faculties' },
-          { icon: "layer-group", label: "Departments", id: 'departments' },
-          { icon: "graduation-cap", label: "Courses", id: 'courses' },
-          { icon: "book-open", label: "Units", id: 'course-units' },
-          { icon: "flask", label: "Research", id: 'research' },
-          { icon: "microscope", label: "Labs", id: 'labs' },
-          { icon: "user-plus", label: "Course Enrollment", id: 'course-enrollment' },
-          { icon: "book", label: "Unit Registration", id: 'unit-registration' }
+          { icon: 'file-alt',   label: 'Exams',           id: 'exams' },
+          { icon: 'chart-line', label: 'Results',         id: 'results' },
+          { icon: 'clock',      label: 'Timetable',       id: 'timetable' },
+          { icon: 'book',       label: 'Schemes of Work', id: 'schemes-of-work' }
+        ]
+      },
+      {
+        title: 'STUDENT MANAGEMENT',
+        items: [
+          { icon: 'user-check',     label: 'Student Arrival',      id: 'student-arrival' },
+          { icon: 'calendar-check', label: 'Attendance',           id: 'attendance' },
+          { icon: 'id-card',        label: 'Exam Cards',           id: 'exam-cards' },
+          { icon: 'user-check',     label: 'Exam Card Overrides',  id: 'exam-card-overrides' },
+          { icon: 'book-open',      label: 'Homework',             id: 'homework' },
+          { icon: 'arrow-up',       label: 'Promotion',            id: 'promotion' },
+          { icon: 'stethoscope',    label: 'Health Records',       id: 'health' },
+          { icon: 'bed',            label: 'Sick Bay',             id: 'sickbay' }
+        ]
+      },
+      {
+        title: 'FINANCE',
+        items: [
+          { icon: 'money-bill',       label: 'Fee Management',   id: 'fees' },
+          { icon: 'hand-holding-usd', label: 'Fee Allocation',   id: 'fee-allocation' },
+          { icon: 'credit-card',      label: 'Fee Collection',   id: 'fee-collection' },
+          { icon: 'receipt',          label: 'Receipt History',  id: 'receipt-history' },
+          { icon: 'plus-circle',      label: 'Other Income',     id: 'other-income' },
+          { icon: 'minus-circle',     label: 'Expenses',         id: 'expenses' },
+          { icon: 'file-invoice',     label: 'Reports',          id: 'reports' },
+          { icon: 'bell',             label: 'Fee Reminders',    id: 'fee-reminders' },
+          { icon: 'exchange-alt',     label: 'Fee Transfers',    id: 'fee-transfers' }
+        ]
+      },
+      {
+        title: 'HUMAN RESOURCES',
+        items: [
+          { icon: 'clipboard-list',   label: 'Staff Attendance', id: 'staff-attendance' },
+          { icon: 'money-bill-wave',  label: 'Payroll',          id: 'payroll' },
+          { icon: 'users',            label: 'Users',            id: 'users' }
+        ]
+      },
+      {
+        title: 'RESOURCES',
+        items: [
+          { icon: 'book-open',  label: 'Library',   id: 'library' },
+          { icon: 'bus',        label: 'Transport', id: 'transport' },
+          { icon: 'bed',        label: 'Hostel',    id: 'hostel' },
+          { icon: 'box',        label: 'Inventory', id: 'inventory' },
+          { icon: 'microscope', label: 'Labs',      id: 'labs' }
+        ]
+      },
+      {
+        title: 'ADVANCED TOOLS',
+        items: [
+          { icon: 'id-card',     label: 'Card Management', id: 'card-management' },
+          { icon: 'certificate', label: 'Certificates',    id: 'certificates' },
+          { icon: 'users',       label: 'Alumni',          id: 'alumni' },
+          { icon: 'video',       label: 'Live Classroom',  id: 'live-classroom' },
+          { icon: 'laptop',      label: 'Online Exams',    id: 'online-exams' }
+        ]
+      },
+      {
+        title: 'RECEPTION',
+        items: [
+          { icon: 'concierge',    label: 'Receptionist',  id: 'receptionist' },
+          { icon: 'calendar-alt', label: 'Events',        id: 'events' },
+          { icon: 'bullhorn',     label: 'Announcements', id: 'announcements' }
+        ]
+      },
+      {
+        title: 'COMMUNICATION',
+        items: [{ icon: 'envelope', label: 'SMS & Email', id: 'messages' }]
+      },
+      {
+        title: 'ADMIN',
+        items: [
+          { icon: 'user-shield', label: 'Roles',    id: 'roles' },
+          { icon: 'cog',         label: 'Settings', id: 'settings' }
         ]
       }
     );
   }
 
-  // ===== PRIMARY / SECONDARY SECTIONS =====
-  if (isPrimary || isSecondary) {
-    sections.push(
-      {
-        title: "SCHOOL",
-        items: [
-          { icon: "school", label: "Classes", id: 'classes' },
-          { icon: "book", label: "Subjects", id: 'subjects' },
-          { icon: "microscope", label: "Labs", id: 'labs' },
-          { icon: "user-graduate", label: "Students", id: 'students' },
-          { icon: "chalkboard-teacher", label: "Staff", id: 'staff' }
-        ]
-      }
-    );
-  }
-
-  // ===== ACADEMICS - Different for TVET vs Primary/Secondary =====
-  const academicsItems = [];
-  
-  if (isTVET || isUniversity) {
-    academicsItems.push(
-      { icon: "file-alt", label: "Exams", id: 'exams' },
-      { icon: "chart-line", label: "Results", id: 'results' },
-      { icon: "clock", label: "Timetable", id: 'timetable' },
-      { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' }
-    );
-  } else {
-    academicsItems.push(
-      { icon: "file-alt", label: "Exams", id: 'exams' },
-      { icon: "chart-line", label: "Results", id: 'results' },
-      { icon: "clock", label: "Timetable", id: 'timetable' },
-      { icon: "book", label: "Schemes of Work", id: 'schemes-of-work' }
-    );
-  }
-  
-  sections.push({ title: "ACADEMICS", items: academicsItems });
-
-  // ===== COMMON SECTIONS (All school types) =====
-  sections.push(
-    {
-      title: "STUDENT MANAGEMENT",
-      items: [
-        { icon: "user-check", label: "Student Arrival", id: 'student-arrival' },
-        { icon: "calendar-check", label: "Attendance", id: 'attendance' },
-        { icon: "id-card", label: "Exam Cards", id: 'exam-cards' },
-        { icon: "user-check", label: "Exam Card Overrides", id: 'exam-card-overrides' },
-        { icon: "book-open", label: "Homework", id: 'homework' },
-        { icon: "arrow-up", label: "Promotion", id: 'promotion' },
-        { icon: "stethoscope", label: "Health Records", id: 'health' },
-        { icon: "bed", label: "Sick Bay", id: 'sickbay' }
-      ]
-    },
-    {
-      title: "FINANCE",
-      items: [
-        { icon: "money-bill", label: "Fee Management", id: 'fees' },
-        { icon: "hand-holding-usd", label: "Fee Allocation", id: 'fee-allocation' },
-        { icon: "credit-card", label: "Fee Collection", id: 'fee-collection' },
-        { icon: "receipt", label: "Receipt History", id: 'receipt-history' },
-        { icon: "plus-circle", label: "Other Income", id: 'other-income' },
-        { icon: "minus-circle", label: "Expenses", id: 'expenses' },
-        { icon: "file-invoice", label: "Reports", id: 'reports' },
-        { icon: "bell", label: "Fee Reminders", id: 'fee-reminders' },
-           { icon: "exchange-alt", label: "Fee Transfers", id: 'fee-transfers' }
-      ]
-    },
-    {
-      title: "HUMAN RESOURCES",
-      items: [
-        { icon: "clipboard-list", label: "Staff Attendance", id: 'staff-attendance' },
-        { icon: "money-bill-wave", label: "Payroll", id: 'payroll' },
-        { icon: "users", label: "Users", id: 'users' }
-      ]
-    },
-    {
-      title: "RESOURCES",
-      items: [
-        { icon: "book-open", label: "Library", id: 'library' },
-        { icon: "bus", label: "Transport", id: 'transport' },
-        { icon: "bed", label: "Hostel", id: 'hostel' },
-        { icon: "box", label: "Inventory", id: 'inventory' },
-        { icon: "microscope", label: "Labs", id: 'labs' }  // ✅ Added labs here
-      ]
-    },
-    {
-      title: "ADVANCED TOOLS",
-      items: [
-        { icon: "id-card", label: "Card Management", id: 'card-management' },
-        { icon: "certificate", label: "Certificates", id: 'certificates' },
-        { icon: "users", label: "Alumni", id: 'alumni' },
-        { icon: "video", label: "Live Classroom", id: 'live-classroom' },
-        { icon: "laptop", label: "Online Exams", id: 'online-exams' }
-      ]
-    },
-    {
-      title: "RECEPTION",
-      items: [
-        { icon: "concierge", label: "Receptionist", id: 'receptionist' },
-        { icon: "calendar-alt", label: "Events", id: 'events' },
-        { icon: "bullhorn", label: "Announcements", id: 'announcements' }
-      ]
-    },
-    {
-      title: "COMMUNICATION",
-      items: [
-        { icon: "envelope", label: "SMS & Email", id: 'messages' }
-      ]
-    },
-    {
-      title: "ADMIN",
-      items: [
-        { icon: "user-shield", label: "Roles", id: 'roles' },
-        { icon: "cog", label: "Settings", id: 'settings' }
-      ]
-    }
-  );
-
-  return sections;
-}
   // ============================================
   // SUPER ADMIN VIEW
   // ============================================
-  if (user.role === 'SUPER_ADMIN') {
-    return [
+  else if (user.role === 'SUPER_ADMIN') {
+    sections = [
       dashboardSection,
       {
-        title: "SUPER ADMIN",
+        title: 'SUPER ADMIN',
+        items: [{ icon: 'crown', label: 'Super Admin', id: 'super-admin' }]
+      },
+      {
+        title: 'SYSTEM MANAGEMENT',
         items: [
-          { icon: "crown", label: "Super Admin", id: 'super-admin' }
+          { icon: 'university',   label: 'Schools',  id: 'schools' },
+          { icon: 'users',        label: 'Users',    id: 'users' },
+          { icon: 'user-shield',  label: 'Roles',    id: 'roles' },
+          { icon: 'cog',          label: 'Settings', id: 'settings' }
         ]
       },
       {
-        title: "SYSTEM MANAGEMENT",
+        title: 'SYSTEM REPORTS',
         items: [
-          { icon: "university", label: "Schools", id: 'schools' },
-          { icon: "users", label: "Users", id: 'users' },
-          { icon: "user-shield", label: "Roles", id: 'roles' },
-          { icon: "cog", label: "Settings", id: 'settings' }
-        ]
-      },
-      {
-        title: "SYSTEM REPORTS",
-        items: [
-          { icon: "chart-line", label: "Reports", id: 'reports' },
-          { icon: "history", label: "Audit Logs", id: 'audit-logs' }
+          { icon: 'chart-line', label: 'Reports',    id: 'reports' },
+          { icon: 'history',    label: 'Audit Logs', id: 'audit-logs' }
         ]
       }
     ];
   }
+
   // ============================================
   // FALLBACK
   // ============================================
-  return [
-    {
-      title: "MAIN",
-      items: [
-        { icon: "tachometer-alt", label: "Dashboard", id: 'dashboard' }
-      ]
-    }
-  ];
+  else {
+    sections = [
+      { title: 'MAIN', items: [{ icon: 'tachometer-alt', label: 'Dashboard', id: 'dashboard' }] }
+    ];
+  }
+
+  // ------------------------------------------------------------------
+  // ✅ THE ACTUAL FIX
+  // ------------------------------------------------------------------
+  // Filter every section's items through canAccessModule. Also drop
+  // any section that ends up empty (e.g., the whole section was
+  // gated by a feature the school doesn't have).
+  // ------------------------------------------------------------------
+  return sections
+    .map(section => ({
+      ...section,
+      items: (section.items || []).filter(item => canAccessModule(user, item.id))
+    }))
+    .filter(section => section.items.length > 0);
 };
+
+
 const fetchUser = async () => {
   try {
     const res = await api.get('/auth/me');
