@@ -48550,7 +48550,8 @@ const UnitRegistrationModule = ({
   unitRegistrations: propUnitRegistrations,
   courseEnrollments,
   setUnitRegistrations,
-  setActiveModule
+  setActiveModule,
+  setCurrentSchool  
 }) => {
   const [state, setState] = React.useState({
     selectedStudent: '',
@@ -49196,40 +49197,59 @@ const UnitRegistrationModule = ({
     );
   }, [state.availableUnits, state.searchTerm]);
 
-  React.useEffect(() => {
-    if (state.selectedStudent || userRole.isStudent) {
-      const studentId = getStudentId();
-      if (studentId) {
-        loadEnrolledPrograms(studentId);
+// ✅ Refresh the school object on mount so settings like payment % are never stale
+React.useEffect(() => {
+  if (!currentSchool?.id) return;
+  let cancelled = false;
+  (async () => {
+    try {
+      const res = await api.get(`/schools/${currentSchool.id}`);
+      if (!cancelled && res.data?.school && typeof setCurrentSchool === 'function') {
+        setCurrentSchool(res.data.school);
       }
+    } catch (err) {
+      // silent — parent may already have the correct value
     }
-  }, [state.selectedStudent, userRole.isStudent]);
+  })();
+  return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [currentSchool?.id]);
 
-  React.useEffect(() => {
-    if (state.selectedProgram) {
-      loadRegisteredUnits();
-      const studentId = getStudentId();
-      if (studentId) {
-        checkPaymentStatus(studentId, state.selectedProgram);
-      }
+React.useEffect(() => {
+  if (state.selectedStudent || userRole.isStudent) {
+    const studentId = getStudentId();
+    if (studentId) {
+      loadEnrolledPrograms(studentId);
     }
-  }, [state.selectedProgram, state.moduleLevel, state.semester, state.refreshKey]);
+  }
+}, [state.selectedStudent, userRole.isStudent]);
 
-  React.useEffect(() => {
-    if (userRole.canApprove) {
-      loadPendingRegistrations();
+React.useEffect(() => {
+  if (state.selectedProgram) {
+    loadRegisteredUnits();
+    const studentId = getStudentId();
+    if (studentId) {
+      checkPaymentStatus(studentId, state.selectedProgram);
     }
-  }, [userRole.canApprove]);
+  }
+}, [state.selectedProgram, state.moduleLevel, state.semester, state.refreshKey]);
 
-  React.useEffect(() => {
-    const handleSwitchModule = (event) => {
-      if (event.detail === 'unit-registration') {
-        setState(prev => ({ ...prev, refreshKey: prev.refreshKey + 1 }));
-      }
-    };
-    window.addEventListener('switchModule', handleSwitchModule);
-    return () => window.removeEventListener('switchModule', handleSwitchModule);
-  }, []);
+React.useEffect(() => {
+  if (userRole.canApprove) {
+    loadPendingRegistrations();
+  }
+}, [userRole.canApprove]);
+
+React.useEffect(() => {
+  const handleSwitchModule = (event) => {
+    if (event.detail === 'unit-registration') {
+      setState(prev => ({ ...prev, refreshKey: prev.refreshKey + 1 }));
+    }
+  };
+  window.addEventListener('switchModule', handleSwitchModule);
+  return () => window.removeEventListener('switchModule', handleSwitchModule);
+}, []);
+
 
   const unitType = getUnitType();
   const canRegister = !schoolSettings.requiresPayment || state.paymentStatus?.canRegister;
