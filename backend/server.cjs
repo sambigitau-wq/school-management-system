@@ -7008,6 +7008,123 @@ app.get('/api/super-admin/features', authenticate, requireSuperAdmin, async (req
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
+
+// ============================================================
+//  GET /api/super-admin/schools/:id/features
+//  Returns the FULL feature catalogue + which features are
+//  currently enabled for THIS school.
+// ============================================================
+app.get('/api/super-admin/schools/:id/features', authenticate, requireSuperAdmin, async (req, res) => {
+  try {
+    const school = await School.findByPk(req.params.id, {
+      attributes: ['id', 'name', 'code', 'category', 'features']
+    });
+
+    if (!school) {
+      return res.status(404).json({ success: false, message: 'School not found' });
+    }
+
+    // Normalize the school's enabled features to an array of keys
+    let enabled = [];
+    if (Array.isArray(school.features)) {
+      enabled = school.features;
+    } else if (school.features && typeof school.features === 'object') {
+      // Legacy shape: { sms: true, email: false, ... } → convert to array
+      enabled = Object.entries(school.features)
+        .filter(([_, v]) => v === true)
+        .map(([k]) => k);
+    }
+
+    // Always include locked/core features so the UI can render them
+    const lockedKeys = ALL_FEATURES.filter(f => f.locked).map(f => f.key);
+    for (const k of lockedKeys) {
+      if (!enabled.includes(k)) enabled.push(k);
+    }
+    enabled = Array.from(new Set(enabled));
+
+    // The preset for this school's category (used as a "recommended" baseline)
+    const preset = presetForCategory(school.category);
+
+    res.json({
+      success: true,
+      school: {
+        id: school.id,
+        name: school.name,
+        code: school.code,
+        category: school.category
+      },
+      enabledFeatures: enabled,
+      catalogue: FEATURE_CATALOG,      // grouped by category
+      allFeatures: ALL_FEATURES,       // flat list
+      presets: FEATURE_PRESETS,
+      preset,                          // this school's category preset
+      lockedFeatures: lockedKeys
+    });
+  } catch (err) {
+    console.error('❌ GET /api/super-admin/schools/:id/features error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ============================================================
+//  PATCH /api/super-admin/schools/:id/features
+//  Update the enabled feature keys for a school.
+//  Body: { features: ['dashboard', 'students', ...] }
+// ============================================================
+app.patch('/api/super-admin/schools/:id/features', authenticate, requireSuperAdmin, async (req, res) => {
+  try {
+    const { features } = req.body;
+
+    if (!Array.isArray(features)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Body must include a "features" array of feature keys'
+      });
+    }
+
+    const school = await School.findByPk(req.params.id);
+    if (!school) {
+      return res.status(404).json({ success: false, message: 'School not found' });
+    }
+
+    // Only allow known feature keys
+    const knownKeys = new Set(ALL_FEATURES.map(f => f.key));
+    const sanitized = features.filter(k => knownKeys.has(k));
+
+    // Always include locked features
+    const lockedKeys = ALL_FEATURES.filter(f => f.locked).map(f => f.key);
+    for (const k of lockedKeys) {
+      if (!sanitized.includes(k)) sanitized.push(k);
+    }
+
+    const finalFeatures = Array.from(new Set(sanitized));
+
+    const oldSnapshot = Array.isArray(school.features) ? [...school.features] : [];
+    await school.update({ features: finalFeatures });
+
+    // Audit log — platform-scoped (schoolId = null so school admin never sees it)
+    await createPlatformAuditLog(req, 'UPDATE_FEATURES', 'SCHOOL', school.id, {
+      features: oldSnapshot
+    }, {
+      features: finalFeatures,
+      schoolName: school.name
+    });
+
+    res.json({
+      success: true,
+      school: {
+        id: school.id,
+        name: school.name,
+        features: finalFeatures
+      },
+      message: `Updated features for ${school.name}`
+    });
+  } catch (err) {
+    console.error('❌ PATCH /api/super-admin/schools/:id/features error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 // ==================== USER ROUTES ====================
 app.get('/api/users', authenticate, async (req, res) => {
   try {
