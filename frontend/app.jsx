@@ -40265,12 +40265,46 @@ const SuperAdminModule = ({ user }) => {
     return map[status] || 'bg-gray-100 text-gray-700';
   };
 
+  // ============================================================
+  //   SAFETY: Bail out if we're not actually a Super Admin.
+  //   This prevents the 403 storms that happen when a school-admin
+  //   token is in localStorage.
+  // ============================================================
+  useEffect(() => {
+    let currentUser = user;
+    if (!currentUser) {
+      try { currentUser = JSON.parse(localStorage.getItem('user') || 'null'); }
+      catch { currentUser = null; }
+    }
+
+    if (!currentUser || currentUser.role !== 'SUPER_ADMIN') {
+      console.warn('[SuperAdminModule] Not a super admin — redirecting');
+      const superToken = localStorage.getItem('superAdminToken');
+      if (superToken) {
+        // We were impersonating — restore super admin session
+        localStorage.setItem('token', superToken);
+        const superUser = localStorage.getItem('superAdminUser');
+        if (superUser) localStorage.setItem('user', superUser);
+        localStorage.removeItem('superAdminToken');
+        localStorage.removeItem('superAdminUser');
+        localStorage.removeItem('impersonatedSchool');
+        window.location.href = '/super-admin';
+      } else {
+        window.location.href = '/dashboard';
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ==================== LOADERS ====================
   const loadOverview = async () => {
     try {
       const res = await api.get('/super-admin/overview');
       setOverview(res.data.overview);
-    } catch (err) { setError(err.response?.data?.message || 'Failed'); }
+    } catch (err) {
+      if (err.response?.status === 403) return; // handled by interceptor
+      setError(err.response?.data?.message || 'Failed to load overview');
+    }
   };
 
   const loadSchools = async () => {
@@ -40281,12 +40315,13 @@ const SuperAdminModule = ({ user }) => {
       if (schoolStatusFilter) params.status = schoolStatusFilter;
       const res = await api.get('/super-admin/schools', { params });
       setSchools(res.data.schools || []);
-    } catch (err) { setError(err.response?.data?.message || 'Failed'); }
-    finally { setLoading(false); }
+    } catch (err) {
+      if (err.response?.status === 403) return;
+      setError(err.response?.data?.message || 'Failed to load schools');
+    } finally { setLoading(false); }
   };
 
-  // ✅ FIX: read BOTH `catalogue` (backend) and `catalog` (alias),
-  //    and surface a clear error instead of hanging forever.
+  // Read BOTH `catalogue` (backend) and `catalog`, surface a real error.
   const loadFeatureCatalog = async (force = false) => {
     if (featureCatalog && !force) return;
 
@@ -40295,40 +40330,33 @@ const SuperAdminModule = ({ user }) => {
       const res = await api.get('/super-admin/features');
       const data = res.data || {};
 
-      // Backend sends `catalogue`; fall back to `catalog`, then `allFeatures`.
       const catalogue =
         data.catalogue ||
         data.catalog ||
         data.featureCatalogue ||
-        data.allFeatures ||
         null;
 
-      if (!catalogue) {
-        // Try to derive a grouped object from `allFeatures` if present
-        if (Array.isArray(data.allFeatures) && data.allFeatures.length > 0) {
-          const grouped = {};
-          for (const f of data.allFeatures) {
-            const g = f.group || 'Other';
-            if (!grouped[g]) grouped[g] = [];
-            grouped[g].push(f);
-          }
-          setFeatureCatalog(grouped);
-        } else {
-          setFeatureCatalogError(
-            'Backend returned no catalogue. Check that the /api/super-admin/features route is deployed.'
-          );
-          return;
+      if (!catalogue && Array.isArray(data.allFeatures)) {
+        // Derive a grouped object
+        const grouped = {};
+        for (const f of data.allFeatures) {
+          const g = f.group || 'Other';
+          if (!grouped[g]) grouped[g] = [];
+          grouped[g].push(f);
         }
-      } else {
+        setFeatureCatalog(grouped);
+      } else if (catalogue) {
         setFeatureCatalog(catalogue);
+      } else {
+        setFeatureCatalogError('Backend returned no catalogue.');
+        return;
       }
 
       setFeaturePresets(data.presets || {});
     } catch (err) {
-      console.error('loadFeatureCatalog error:', err);
+      if (err.response?.status === 403) return;
       setFeatureCatalogError(
-        err.response?.data?.message ||
-        'Failed to load feature catalogue. Check your network tab.'
+        err.response?.data?.message || 'Failed to load feature catalogue.'
       );
     }
   };
@@ -40350,8 +40378,10 @@ const SuperAdminModule = ({ user }) => {
         maxStaff: res.data.school.maxStaff || 50,
         billingNotes: res.data.school.billingNotes || ''
       });
-    } catch (err) { setError(err.response?.data?.message || 'Failed'); }
-    finally { setLoading(false); }
+    } catch (err) {
+      if (err.response?.status === 403) return;
+      setError(err.response?.data?.message || 'Failed to load school details');
+    } finally { setLoading(false); }
   };
 
   // ==================== SUBSCRIPTION ====================
@@ -40369,8 +40399,9 @@ const SuperAdminModule = ({ user }) => {
       setSuccess('Subscription updated');
       await loadSchoolDetail(selectedSchool.id);
       await loadSchools();
-    } catch (err) { setError(err.response?.data?.message || 'Failed'); }
-    finally { setLoading(false); setTimeout(() => setSuccess(''), 3000); }
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed');
+    } finally { setLoading(false); setTimeout(() => setSuccess(''), 3000); }
   };
 
   const recordPayment = async () => {
@@ -40389,8 +40420,9 @@ const SuperAdminModule = ({ user }) => {
       setSuccess('Payment recorded');
       await loadSchoolDetail(selectedSchool.id);
       await loadSchools();
-    } catch (err) { setError(err.response?.data?.message || 'Failed'); }
-    finally { setLoading(false); setTimeout(() => setSuccess(''), 3000); }
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed');
+    } finally { setLoading(false); setTimeout(() => setSuccess(''), 3000); }
   };
 
   const suspendSchool = async () => {
@@ -40421,10 +40453,21 @@ const SuperAdminModule = ({ user }) => {
     finally { setLoading(false); }
   };
 
-  // ✅ Impersonate — swap token, remember super admin, reload so
-  //    the school admin's /api/auth/me fires with the correct feature list.
+  // Impersonate — checks we're actually super admin first
   const impersonateSchool = async (schoolId) => {
-    if (!window.confirm('Enter this school\'s portal as its admin?')) return;
+    if (!window.confirm("Enter this school's portal as its admin?")) return;
+
+    const currentUser = (() => {
+      try { return JSON.parse(localStorage.getItem('user') || 'null'); }
+      catch { return null; }
+    })();
+
+    if (!currentUser || currentUser.role !== 'SUPER_ADMIN') {
+      alert('Your session is no longer a Super Admin session. Please log out and log back in.');
+      window.location.href = '/dashboard';
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await api.post(`/super-admin/schools/${schoolId}/impersonate`);
@@ -40432,22 +40475,20 @@ const SuperAdminModule = ({ user }) => {
         throw new Error(res.data?.message || 'Impersonation failed');
       }
 
-      // Remember the super admin session so we can restore it later
       localStorage.setItem('superAdminToken', localStorage.getItem('token') || '');
-      localStorage.setItem('superAdminUser', localStorage.getItem('user') || '');
+      localStorage.setItem('superAdminUser',  localStorage.getItem('user')  || '');
       localStorage.setItem('impersonatedSchool', JSON.stringify(res.data.school || {}));
-
-      // Swap in the school admin session
       localStorage.setItem('token', res.data.token);
-      localStorage.setItem('user', JSON.stringify(res.data.user));
+      localStorage.setItem('user',  JSON.stringify(res.data.user));
 
-      // Clear cached feature state so the school admin's own list loads fresh
-      localStorage.removeItem('featureCatalogCache');
-
-      // Full reload → /api/auth/me runs with the new token
       window.location.href = '/dashboard';
     } catch (err) {
       console.error('impersonate error:', err);
+      if (err.response?.status === 403) {
+        alert('You are no longer signed in as Super Admin. Please log out and log back in.');
+        window.location.href = '/dashboard';
+        return;
+      }
       alert(err.response?.data?.message || err.message || 'Failed to impersonate');
       setLoading(false);
     }
@@ -40455,13 +40496,10 @@ const SuperAdminModule = ({ user }) => {
 
   // ==================== FEATURES ====================
   const openFeatureModal = async (school) => {
-    // Make sure the catalogue is loaded BEFORE opening the modal
     await loadFeatureCatalog();
-
     setLoading(true);
     try {
       const res = await api.get(`/super-admin/schools/${school.id}/features`);
-      // Backend may return enabledFeatures or enabled — accept both.
       const enabled =
         res.data.enabledFeatures ||
         res.data.enabled ||
@@ -40470,10 +40508,9 @@ const SuperAdminModule = ({ user }) => {
       setFeatureModalSchool(school);
       setFeatureModalSelected(Array.isArray(enabled) ? enabled : []);
     } catch (err) {
+      if (err.response?.status === 403) return;
       setError(err.response?.data?.message || 'Failed to load school features');
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   const saveFeatures = async () => {
@@ -40505,6 +40542,74 @@ const SuperAdminModule = ({ user }) => {
     setFeatureModalSelected([...preset]);
   };
 
+  // ============================================================
+  //   BULK TOGGLES — Select All / Clear All (both global + per group)
+  // ============================================================
+  const getAllFeatureKeys = () => {
+    if (!featureCatalog) return [];
+    const keys = [];
+    for (const group of Object.values(featureCatalog)) {
+      for (const f of group) keys.push(f.key);
+    }
+    return Array.from(new Set(keys));
+  };
+
+  const getGroupFeatureKeys = (groupFeatures) => {
+    return groupFeatures.map(f => f.key);
+  };
+
+  // ---- Global (all groups) ----
+  const selectAllFeatures = () => {
+    const keys = getAllFeatureKeys();
+    // Locked features are always included
+    const locked = [];
+    for (const group of Object.values(featureCatalog || {})) {
+      for (const f of group) if (f.locked) locked.push(f.key);
+    }
+    setFeatureModalSelected(Array.from(new Set([...keys, ...locked])));
+  };
+
+  const clearAllFeatures = () => {
+    // Keep locked features only
+    const locked = [];
+    for (const group of Object.values(featureCatalog || {})) {
+      for (const f of group) if (f.locked) locked.push(f.key);
+    }
+    setFeatureModalSelected(locked);
+  };
+
+  // ---- Per group ----
+  const selectGroupFeatures = (groupFeatures) => {
+    const groupKeys = getGroupFeatureKeys(groupFeatures);
+    setFeatureModalSelected(prev => Array.from(new Set([...prev, ...groupKeys])));
+  };
+
+  const clearGroupFeatures = (groupFeatures) => {
+    const groupKeys = new Set(getGroupFeatureKeys(groupFeatures));
+    setFeatureModalSelected(prev => prev.filter(k => !groupKeys.has(k)));
+  };
+
+  const groupSelectedCount = (groupFeatures) => {
+    return groupFeatures.filter(f => featureModalSelected.includes(f.key)).length;
+  };
+
+  const allFeaturesSelected = () => {
+    const keys = getAllFeatureKeys();
+    if (keys.length === 0) return false;
+    return keys.every(k => featureModalSelected.includes(k));
+  };
+
+  const noFeaturesSelected = () => {
+    return featureModalSelected.filter(k => {
+      // Ignore locked features — those are always on
+      for (const group of Object.values(featureCatalog || {})) {
+        const f = group.find(x => x.key === k);
+        if (f?.locked) return false;
+      }
+      return true;
+    }).length === 0;
+  };
+
   // ==================== CREATE SCHOOL ====================
   const applyCreatePreset = (category) => {
     if (!featurePresets) return;
@@ -40519,6 +40624,43 @@ const SuperAdminModule = ({ user }) => {
       features: prev.features.includes(key)
         ? prev.features.filter(k => k !== key)
         : [...prev.features, key]
+    }));
+  };
+
+  // ---- Create-form bulk toggles ----
+  const selectAllCreateFeatures = () => {
+    const keys = getAllFeatureKeys();
+    const locked = [];
+    for (const group of Object.values(featureCatalog || {})) {
+      for (const f of group) if (f.locked) locked.push(f.key);
+    }
+    setCreateForm(prev => ({
+      ...prev,
+      features: Array.from(new Set([...keys, ...locked]))
+    }));
+  };
+
+  const clearAllCreateFeatures = () => {
+    const locked = [];
+    for (const group of Object.values(featureCatalog || {})) {
+      for (const f of group) if (f.locked) locked.push(f.key);
+    }
+    setCreateForm(prev => ({ ...prev, features: locked }));
+  };
+
+  const selectGroupCreateFeatures = (groupFeatures) => {
+    const groupKeys = groupFeatures.map(f => f.key);
+    setCreateForm(prev => ({
+      ...prev,
+      features: Array.from(new Set([...prev.features, ...groupKeys]))
+    }));
+  };
+
+  const clearGroupCreateFeatures = (groupFeatures) => {
+    const groupKeys = new Set(groupFeatures.map(f => f.key));
+    setCreateForm(prev => ({
+      ...prev,
+      features: prev.features.filter(k => !groupKeys.has(k))
     }));
   };
 
@@ -40859,13 +41001,13 @@ const SuperAdminModule = ({ user }) => {
                 <input
                   value={createForm.admin.phone}
                   onChange={(e) => setCreateForm({ ...createForm, admin: { ...createForm.admin, phone: e.target.value } })}
-                  className="w-full px-3 py-2 border rounded-lg"
+                  className="w-full px-3 py-2 rounded-lg border"
                 />
               </div>
             </div>
           </div>
 
-          {/* Feature picker */}
+          {/* Feature picker (create form) */}
           <div className="border-t pt-4">
             <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
               <h3 className="text-md font-semibold flex items-center gap-2">
@@ -40875,7 +41017,23 @@ const SuperAdminModule = ({ user }) => {
                   ({createForm.features.length} selected)
                 </span>
               </h3>
+
+              {/* Global + preset buttons */}
               <div className="flex gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={selectAllCreateFeatures}
+                  className="text-xs px-2 py-1 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                >
+                  <i className="fas fa-check-double mr-1"></i>Select All
+                </button>
+                <button
+                  type="button"
+                  onClick={clearAllCreateFeatures}
+                  className="text-xs px-2 py-1 rounded bg-red-100 text-red-700 hover:bg-red-200"
+                >
+                  <i className="fas fa-times-circle mr-1"></i>Clear All
+                </button>
                 {featurePresets && Object.keys(featurePresets).map(presetKey => (
                   <button
                     key={presetKey}
@@ -40891,30 +41049,64 @@ const SuperAdminModule = ({ user }) => {
 
             {featureCatalog ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {Object.entries(featureCatalog).map(([groupKey, features]) => (
-                  <div key={groupKey} className="border rounded-lg p-3 bg-gray-50">
-                    <h4 className="text-sm font-semibold capitalize mb-2">{groupKey}</h4>
-                    <div className="space-y-1">
-                      {features.map(f => (
-                        <label key={f.key} className={`flex items-center gap-2 text-xs ${f.locked ? 'opacity-60' : 'cursor-pointer'}`}>
-                          <input
-                            type="checkbox"
-                            checked={createForm.features.includes(f.key) || f.locked}
-                            disabled={f.locked}
-                            onChange={() => toggleCreateFeature(f.key, f.locked)}
-                            className="rounded"
-                          />
-                          <span>{f.label}</span>
-                        </label>
-                      ))}
+                {Object.entries(featureCatalog).map(([groupKey, features]) => {
+                  const selectedCount = features.filter(f =>
+                    createForm.features.includes(f.key) || f.locked
+                  ).length;
+                  const allSelected = selectedCount === features.length;
+
+                  return (
+                    <div key={groupKey} className="border rounded-lg p-3 bg-gray-50">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-sm font-semibold capitalize">{groupKey}</h4>
+                        <span className="text-[10px] text-gray-500">
+                          {selectedCount}/{features.length}
+                        </span>
+                      </div>
+                      <div className="flex gap-1 mb-2">
+                        <button
+                          type="button"
+                          onClick={() => selectGroupCreateFeatures(features)}
+                          className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                        >
+                          Select All
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => clearGroupCreateFeatures(features)}
+                          className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 hover:bg-red-200"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                      <div className="space-y-1">
+                        {features.map(f => (
+                          <label key={f.key} className={`flex items-center gap-2 text-xs ${f.locked ? 'opacity-60' : 'cursor-pointer'}`}>
+                            <input
+                              type="checkbox"
+                              checked={createForm.features.includes(f.key) || f.locked}
+                              disabled={f.locked}
+                              onChange={() => toggleCreateFeature(f.key, f.locked)}
+                              className="rounded"
+                            />
+                            <span>{f.label}</span>
+                          </label>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : featureCatalogError ? (
               <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
                 <i className="fas fa-exclamation-triangle mr-2"></i>
                 {featureCatalogError}
+                <button
+                  onClick={() => loadFeatureCatalog(true)}
+                  className="ml-3 underline text-red-700 hover:text-red-900"
+                >
+                  Retry
+                </button>
               </div>
             ) : (
               <p className="text-sm text-gray-500">Loading feature catalogue…</p>
@@ -40958,7 +41150,7 @@ const SuperAdminModule = ({ user }) => {
         </div>
       )}
 
-      {/* ==================== SCHOOL DETAIL (subscription modal) ==================== */}
+      {/* ==================== SCHOOL DETAIL MODAL ==================== */}
       {selectedSchool && tab === 'schools' && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-auto p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl p-6 max-h-[92vh] overflow-auto">
@@ -41199,9 +41391,38 @@ const SuperAdminModule = ({ user }) => {
               </button>
             </div>
 
+            {/* ============ GLOBAL CONTROLS ============ */}
+            {featureCatalog && (
+              <div className="mb-4 p-3 bg-gray-50 rounded-lg flex flex-wrap gap-2 items-center">
+                <span className="text-xs font-semibold text-gray-700 mr-2">
+                  All Modules:
+                </span>
+                <button
+                  type="button"
+                  onClick={selectAllFeatures}
+                  className="text-xs px-3 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700"
+                >
+                  <i className="fas fa-check-double mr-1"></i>Select All
+                </button>
+                <button
+                  type="button"
+                  onClick={clearAllFeatures}
+                  className="text-xs px-3 py-1 rounded bg-red-600 text-white hover:bg-red-700"
+                >
+                  <i className="fas fa-times-circle mr-1"></i>Clear All
+                </button>
+
+                <span className="ml-auto text-xs text-gray-600">
+                  <strong className="text-indigo-600">{featureModalSelected.length}</strong>
+                  {" / "}
+                  {getAllFeatureKeys().length} features selected
+                </span>
+              </div>
+            )}
+
             {/* Preset buttons */}
             {featurePresets && Object.keys(featurePresets).length > 0 && (
-              <div className="mb-4 flex flex-wrap gap-2">
+              <div className="mb-4 flex flex-wrap gap-2 items-center">
                 <span className="text-xs text-gray-500 py-1">Apply preset:</span>
                 {Object.keys(featurePresets).map(presetKey => (
                   <button
@@ -41218,25 +41439,53 @@ const SuperAdminModule = ({ user }) => {
             {/* Feature grid or error */}
             {featureCatalog ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
-                {Object.entries(featureCatalog).map(([groupKey, features]) => (
-                  <div key={groupKey} className="border rounded-lg p-3 bg-gray-50">
-                    <h4 className="text-sm font-semibold capitalize mb-2">{groupKey}</h4>
-                    <div className="space-y-1">
-                      {features.map(f => (
-                        <label key={f.key} className={`flex items-center gap-2 text-xs ${f.locked ? 'opacity-60' : 'cursor-pointer'}`}>
-                          <input
-                            type="checkbox"
-                            checked={featureModalSelected.includes(f.key) || f.locked}
-                            disabled={f.locked}
-                            onChange={() => toggleFeature(f.key, f.locked)}
-                            className="rounded"
-                          />
-                          <span>{f.label}</span>
-                        </label>
-                      ))}
+                {Object.entries(featureCatalog).map(([groupKey, features]) => {
+                  const selectedCount = features.filter(f =>
+                    featureModalSelected.includes(f.key) || f.locked
+                  ).length;
+                  const allSelected = selectedCount === features.length;
+
+                  return (
+                    <div key={groupKey} className="border rounded-lg p-3 bg-gray-50">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-sm font-semibold capitalize">{groupKey}</h4>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${allSelected ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-200 text-gray-600'}`}>
+                          {selectedCount}/{features.length}
+                        </span>
+                      </div>
+                      <div className="flex gap-1 mb-2">
+                        <button
+                          type="button"
+                          onClick={() => selectGroupFeatures(features)}
+                          className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                        >
+                          Select All
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => clearGroupFeatures(features)}
+                          className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 hover:bg-red-200"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                      <div className="space-y-1">
+                        {features.map(f => (
+                          <label key={f.key} className={`flex items-center gap-2 text-xs ${f.locked ? 'opacity-60' : 'cursor-pointer'}`}>
+                            <input
+                              type="checkbox"
+                              checked={featureModalSelected.includes(f.key) || f.locked}
+                              disabled={f.locked}
+                              onChange={() => toggleFeature(f.key, f.locked)}
+                              className="rounded"
+                            />
+                            <span>{f.label}{f.locked && <span className="ml-1 text-[9px] text-gray-400">(locked)</span>}</span>
+                          </label>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : featureCatalogError ? (
               <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3 mb-6">
