@@ -2187,7 +2187,7 @@ const DashboardModule = ({
   useEffect(() => {
     if (currentSchool) {
       setRequiresPayment(currentSchool.requiresPaymentForUnits !== false);
-      setPaymentRequiredPercentage(currentSchool.paymentPercentageRequired || 30);
+     setPaymentRequiredPercentage(currentSchool.paymentPercentageRequired ?? 30);
       setRequiresApproval(currentSchool.unitApprovalRequired !== false);
       setApprovalRoles(currentSchool.unitApprovalRoles || ['admin', 'hod', 'dean']);
     }
@@ -15168,27 +15168,48 @@ const ReportsModule = ({
     return () => document.head.removeChild(style);
   }, []);
 
-  // ==================== SELF-FETCH ====================
+  // ==================== SELF-FETCH (returns the data) ====================
   const fetchOnce = async (key) => {
-    if (fetchedOnce[key]) return;
+    // If already fetched, return the current state value
+    if (fetchedOnce[key]) {
+      if (key === 'fees')            return fees;
+      if (key === 'attendance')      return attendance;
+      if (key === 'staff')           return staff;
+      if (key === 'discounts')       return discounts;
+      if (key === 'allocations')     return allocations;
+      if (key === 'inventory')       return inventory;
+      if (key === 'transportRoutes') return transportRoutes;
+      if (key === 'vehicles')        return vehicles;
+      if (key === 'hostels')         return hostels;
+      if (key === 'books')           return books;
+      if (key === 'borrows')         return borrows;
+      if (key === 'feeTransfers')    return feeTransfers;
+      return null;
+    }
+
     try {
       let res;
-      if (key === 'fees')            { res = await api.get('/fees');                                     setFees(res.data.fees || []); }
-      if (key === 'attendance')      { res = await api.get('/attendance', { params: { limit: 5000 } });  setAttendance(res.data.attendance || []); }
-      if (key === 'staff')           { res = await api.get('/staff');                                    setStaff(res.data.staff || []); }
-      if (key === 'discounts')       { res = await api.get('/discounts');                                setDiscounts(res.data.discounts || []); }
-      if (key === 'allocations')     { res = await api.get('/fee-allocations');                          setAllocations(res.data.allocations || []); }
-      if (key === 'inventory')       { res = await api.get('/inventory');                                setInventory(res.data.items || []); }
-      if (key === 'transportRoutes') { res = await api.get('/transport-routes');                         setTransportRoutes(res.data.routes || []); }
-      if (key === 'vehicles')        { res = await api.get('/vehicles');                                 setVehicles(res.data.vehicles || []); }
-      if (key === 'hostels')         { res = await api.get('/hostels');                                  setHostels(res.data.hostels || []); }
-      if (key === 'books')           { res = await api.get('/books');                                    setBooks(res.data.books || []); }
-      if (key === 'borrows')         { res = await api.get('/borrows');                                  setBorrows(res.data.borrows || []); }
-      if (key === 'feeTransfers')    { res = await api.get('/fee-transfers');                            setFeeTransfers(res.data.transfers || []); }
+      let data = null;
+
+      if (key === 'fees')            { res = await api.get('/fees');                                     data = res.data.fees || [];          setFees(data); }
+      if (key === 'attendance')      { res = await api.get('/attendance', { params: { limit: 5000 } });  data = res.data.attendance || [];    setAttendance(data); }
+      if (key === 'staff')           { res = await api.get('/staff');                                    data = res.data.staff || [];         setStaff(data); }
+      if (key === 'discounts')       { res = await api.get('/discounts');                                data = res.data.discounts || [];     setDiscounts(data); }
+      if (key === 'allocations')     { res = await api.get('/fee-allocations');                          data = res.data.allocations || [];   setAllocations(data); }
+      if (key === 'inventory')       { res = await api.get('/inventory');                                data = res.data.items || [];         setInventory(data); }
+      if (key === 'transportRoutes') { res = await api.get('/transport-routes');                         data = res.data.routes || [];        setTransportRoutes(data); }
+      if (key === 'vehicles')        { res = await api.get('/vehicles');                                 data = res.data.vehicles || [];      setVehicles(data); }
+      if (key === 'hostels')         { res = await api.get('/hostels');                                  data = res.data.hostels || [];       setHostels(data); }
+      if (key === 'books')           { res = await api.get('/books');                                    data = res.data.books || [];         setBooks(data); }
+      if (key === 'borrows')         { res = await api.get('/borrows');                                  data = res.data.borrows || [];       setBorrows(data); }
+      if (key === 'feeTransfers')    { res = await api.get('/fee-transfers');                            data = res.data.transfers || [];     setFeeTransfers(data); }
+
       setFetchedOnce(prev => ({ ...prev, [key]: true }));
+      return data;
     } catch (err) {
       console.warn(`Optional data fetch failed (${key}):`, err?.response?.data || err.message);
       setFetchedOnce(prev => ({ ...prev, [key]: true }));
+      return null;
     }
   };
 
@@ -15570,11 +15591,13 @@ const ReportsModule = ({
     finally { setLoading(false); }
   };
 
-  // ==================== FEE (FIXED per-student fee matching) ====================
+  // ==================== FEE — per-student fee matching, data fetched upfront ====================
   const generateFeeReport = async () => {
     setLoading(true);
     try {
-      await fetchOnce('fees');
+      // ✅ Fetch fees FIRST and use the returned array directly
+      const fetchedFees = (await fetchOnce('fees')) || fees;
+
       const start = feeDateRange.start || firstOfMonthStr();
       const end = feeDateRange.end || todayStr();
 
@@ -15583,7 +15606,6 @@ const ReportsModule = ({
         return d >= start && d <= end;
       });
 
-      // Report filters only narrow WHICH students appear in the report
       let targetStudents = students;
       if (isUniversity && feeCourseId) targetStudents = students.filter(s => s.courseId === feeCourseId);
       if (isTVET && feeProgramId) targetStudents = students.filter(s => s.programId === feeProgramId);
@@ -15593,9 +15615,8 @@ const ReportsModule = ({
       const paymentsForStudents = filteredPayments.filter(p => studentIds.has(p.studentId));
       const totalCollected = paymentsForStudents.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
 
-      // Per-student rows — match fees to EACH student's own scope
       const perStudent = targetStudents.map(s => {
-        const applicableFees = fees.filter(f => {
+        const applicableFees = fetchedFees.filter(f => {
           if (isUniversity) return f.courseId === s.courseId;
           if (isTVET) return f.programId === s.programId;
           return f.classId === s.classId;
@@ -15659,13 +15680,15 @@ const ReportsModule = ({
   const generateOutstandingReport = async () => {
     setLoading(true);
     try {
-      await fetchOnce('fees');
+      const fetchedFees = (await fetchOnce('fees')) || fees;
+
       let target = students;
       if (isUniversity && outstandingCourseId) target = target.filter(s => s.courseId === outstandingCourseId);
       if (isTVET && outstandingProgramId) target = target.filter(s => s.programId === outstandingProgramId);
       if (isRegularSchool && outstandingClassId) target = target.filter(s => s.classId === outstandingClassId);
+
       const rows = target.map(s => {
-        const applicableFees = fees.filter(f => {
+        const applicableFees = fetchedFees.filter(f => {
           if (isUniversity) return f.courseId === s.courseId;
           if (isTVET) return f.programId === s.programId;
           return f.classId === s.classId;
@@ -15683,6 +15706,7 @@ const ReportsModule = ({
           daysSinceLastPayment: lastPayment?.date ? Math.floor((new Date() - new Date(lastPayment.date)) / (1000 * 60 * 60 * 24)) : 999
         };
       }).filter(r => r.balance >= outstandingMinBalance).sort((a, b) => b.balance - a.balance);
+
       const buckets = { '0-30 days': 0, '31-60 days': 0, '61-90 days': 0, '90+ days': 0 };
       rows.forEach(r => {
         if (r.daysSinceLastPayment <= 30) buckets['0-30 days'] += r.balance;
@@ -15707,9 +15731,9 @@ const ReportsModule = ({
   const generateFeeTransferReport = async () => {
     setLoading(true);
     try {
-      await fetchOnce('feeTransfers');
+      const fetchedTransfers = (await fetchOnce('feeTransfers')) || feeTransfers;
 
-      let rows = feeTransfers;
+      let rows = fetchedTransfers;
 
       if (transferStatus) {
         rows = rows.filter(t => t.status === transferStatus);
@@ -15929,10 +15953,11 @@ const ReportsModule = ({
   const generateAttendanceReport = async () => {
     setLoading(true);
     try {
-      await fetchOnce('attendance');
+      const fetchedAttendance = (await fetchOnce('attendance')) || attendance;
+
       const start = attendanceDateRange.start || firstOfMonthStr();
       const end = attendanceDateRange.end || todayStr();
-      let target = attendance.filter(a => a.date >= start && a.date <= end);
+      let target = fetchedAttendance.filter(a => a.date >= start && a.date <= end);
       if (isUniversity && attendanceCourseId) target = target.filter(a => a.courseId === attendanceCourseId);
       if (isTVET && attendanceProgramId) target = target.filter(a => a.programId === attendanceProgramId);
       if (isRegularSchool && attendanceClassId) target = target.filter(a => a.classId === attendanceClassId);
@@ -15987,8 +16012,9 @@ const ReportsModule = ({
   const generateStaffReport = async () => {
     setLoading(true);
     try {
-      await fetchOnce('staff');
-      let target = staff;
+      const fetchedStaff = (await fetchOnce('staff')) || staff;
+
+      let target = fetchedStaff;
       if (staffDepartment) target = target.filter(s => s.department === staffDepartment);
       if (staffType) target = target.filter(s => s.staffType === staffType);
       const total = target.length;
@@ -16022,9 +16048,10 @@ const ReportsModule = ({
   const generateDiscountReport = async () => {
     setLoading(true);
     try {
-      await fetchOnce('discounts');
-      await fetchOnce('fees');
-      let target = discounts;
+      const fetchedDiscounts = (await fetchOnce('discounts')) || discounts;
+      const fetchedFees = (await fetchOnce('fees')) || fees;
+
+      let target = fetchedDiscounts;
       if (discountSearch) {
         const q = discountSearch.toLowerCase();
         target = target.filter(d => {
@@ -16041,7 +16068,7 @@ const ReportsModule = ({
       const typeChart = Object.keys(byType).map(t => ({ name: t, value: byType[t] }));
       const rows = target.map(d => {
         const s = students.find(x => x.id === d.studentId);
-        const f = fees.find(x => x.id === d.feeId);
+        const f = fetchedFees.find(x => x.id === d.feeId);
         return {
           student: s ? `${s.firstName} ${s.lastName}` : '—',
           admissionNumber: s?.admissionNumber || '—',
@@ -16061,9 +16088,10 @@ const ReportsModule = ({
   const generateAllocationReport = async () => {
     setLoading(true);
     try {
-      await fetchOnce('fees');
-      await fetchOnce('allocations');
-      const feeFiltered = allocationFeeId ? allocations.filter(a => a.feeId === allocationFeeId) : allocations;
+      const fetchedFees = (await fetchOnce('fees')) || fees;
+      const fetchedAllocations = (await fetchOnce('allocations')) || allocations;
+
+      const feeFiltered = allocationFeeId ? fetchedAllocations.filter(a => a.feeId === allocationFeeId) : fetchedAllocations;
       const allocatedCount = feeFiltered.length;
       const totalAllocated = feeFiltered.reduce((s, a) => s + parseFloat(a.amount || 0), 0);
       const paidAmounts = feeFiltered.map(a => {
@@ -16074,7 +16102,7 @@ const ReportsModule = ({
       const totalOutstanding = Math.max(0, totalAllocated - totalPaid);
       const byFee = {};
       feeFiltered.forEach(a => {
-        const f = fees.find(x => x.id === a.feeId);
+        const f = fetchedFees.find(x => x.id === a.feeId);
         const key = f?.name || 'Unspecified';
         if (!byFee[key]) byFee[key] = { name: key, allocated: 0, count: 0 };
         byFee[key].allocated += parseFloat(a.amount || 0);
@@ -16083,7 +16111,7 @@ const ReportsModule = ({
       const feeChart = Object.values(byFee);
       const rows = feeFiltered.map(a => {
         const s = students.find(x => x.id === a.studentId);
-        const f = fees.find(x => x.id === a.feeId);
+        const f = fetchedFees.find(x => x.id === a.feeId);
         const paid = payments.filter(x => x.studentId === a.studentId && x.feeId === a.feeId).reduce((sum, x) => sum + parseFloat(x.amount || 0), 0);
         const balance = Math.max(0, parseFloat(a.amount || 0) - paid);
         return {
@@ -16111,8 +16139,9 @@ const ReportsModule = ({
   const generateInventoryReport = async () => {
     setLoading(true);
     try {
-      await fetchOnce('inventory');
-      let target = inventory;
+      const fetchedInventory = (await fetchOnce('inventory')) || inventory;
+
+      let target = fetchedInventory;
       if (inventoryCategory) target = target.filter(i => i.category === inventoryCategory);
       if (inventoryLowStockOnly) target = target.filter(i => (i.quantity || 0) <= (i.reorderLevel || 0));
       const totalItems = target.length;
@@ -16156,15 +16185,16 @@ const ReportsModule = ({
   const generateTransportReport = async () => {
     setLoading(true);
     try {
-      await fetchOnce('transportRoutes');
-      await fetchOnce('vehicles');
-      let routes = transportRoutes;
+      const fetchedRoutes = (await fetchOnce('transportRoutes')) || transportRoutes;
+      const fetchedVehicles = (await fetchOnce('vehicles')) || vehicles;
+
+      let routes = fetchedRoutes;
       if (transportSearch) {
         const q = transportSearch.toLowerCase();
         routes = routes.filter(r => (r.name || '').toLowerCase().includes(q));
       }
       const totalRoutes = routes.length;
-      const totalVehicles = vehicles.length;
+      const totalVehicles = fetchedVehicles.length;
       const totalStudents = routes.reduce((s, r) => s + (Array.isArray(r.students) ? r.students.length : 0), 0);
       const monthlyRevenue = routes.reduce((s, r) => {
         const cnt = Array.isArray(r.students) ? r.students.length : 0;
@@ -16175,7 +16205,7 @@ const ReportsModule = ({
         students: Array.isArray(r.students) ? r.students.length : 0
       }));
       const capacityChart = routes.map(r => {
-        const v = vehicles.find(x => x.id === r.vehicleId);
+        const v = fetchedVehicles.find(x => x.id === r.vehicleId);
         const cap = v?.capacity || 0;
         const used = Array.isArray(r.students) ? r.students.length : 0;
         return {
@@ -16185,7 +16215,7 @@ const ReportsModule = ({
         };
       });
       const routeRows = routes.map(r => {
-        const v = vehicles.find(x => x.id === r.vehicleId);
+        const v = fetchedVehicles.find(x => x.id === r.vehicleId);
         const cnt = Array.isArray(r.students) ? r.students.length : 0;
         return {
           route: r.name || '—',
@@ -16202,7 +16232,7 @@ const ReportsModule = ({
 
       const studentRows = [];
       routes.forEach(r => {
-        const v = vehicles.find(x => x.id === r.vehicleId);
+        const v = fetchedVehicles.find(x => x.id === r.vehicleId);
         const sids = Array.isArray(r.students) ? r.students : [];
         sids.forEach(sid => {
           const s = students.find(x => x.id === sid);
@@ -16235,8 +16265,9 @@ const ReportsModule = ({
   const generateHostelReport = async () => {
     setLoading(true);
     try {
-      await fetchOnce('hostels');
-      let target = hostels;
+      const fetchedHostels = (await fetchOnce('hostels')) || hostels;
+
+      let target = fetchedHostels;
       if (hostelGenderFilter) target = target.filter(h => h.gender === hostelGenderFilter);
       const totalHostels = target.length;
       let totalBeds = 0, totalOccupied = 0;
@@ -16310,10 +16341,10 @@ const ReportsModule = ({
   const generateLibraryReport = async () => {
     setLoading(true);
     try {
-      await fetchOnce('books');
-      await fetchOnce('borrows');
+      const fetchedBooks = (await fetchOnce('books')) || books;
+      const fetchedBorrows = (await fetchOnce('borrows')) || borrows;
 
-      let target = books;
+      let target = fetchedBooks;
       if (libraryCategory) target = target.filter(b => b.category === libraryCategory);
 
       const totalTitles = target.length;
@@ -16321,8 +16352,8 @@ const ReportsModule = ({
       const availableCopies = target.reduce((s, b) => s + (b.available || 0), 0);
       const borrowedCopies = totalCopies - availableCopies;
 
-      const overdueBorrows = borrows.filter(b => b.status === 'BORROWED' && b.dueDate && new Date(b.dueDate) < new Date());
-      const totalFines = borrows.reduce((s, b) => s + parseFloat(b.fine || 0), 0);
+      const overdueBorrows = fetchedBorrows.filter(b => b.status === 'BORROWED' && b.dueDate && new Date(b.dueDate) < new Date());
+      const totalFines = fetchedBorrows.reduce((s, b) => s + parseFloat(b.fine || 0), 0);
 
       const byCategory = {};
       target.forEach(b => {
@@ -16334,16 +16365,16 @@ const ReportsModule = ({
       const categoryChart = Object.values(byCategory);
 
       const borrowCountByBook = {};
-      borrows.forEach(br => { borrowCountByBook[br.bookId] = (borrowCountByBook[br.bookId] || 0) + 1; });
+      fetchedBorrows.forEach(br => { borrowCountByBook[br.bookId] = (borrowCountByBook[br.bookId] || 0) + 1; });
       const topBorrowed = Object.keys(borrowCountByBook)
         .map(bookId => {
-          const b = books.find(x => x.id === bookId);
+          const b = fetchedBooks.find(x => x.id === bookId);
           return { name: b?.title?.substring(0, 20) || 'Unknown', count: borrowCountByBook[bookId] };
         })
         .sort((a, b) => b.count - a.count).slice(0, 10);
 
       const bookRows = target.map(b => {
-        const timesBorrowed = borrows.filter(br => br.bookId === b.id).length;
+        const timesBorrowed = fetchedBorrows.filter(br => br.bookId === b.id).length;
         return {
           title: b.title || '—',
           author: b.author || '—',
@@ -16357,9 +16388,9 @@ const ReportsModule = ({
         };
       }).sort((a, b) => b.timesBorrowed - a.timesBorrowed);
 
-      const borrowRows = borrows.map(br => {
+      const borrowRows = fetchedBorrows.map(br => {
         const student = students.find(s => s.id === br.studentId);
-        const book = books.find(b => b.id === br.bookId);
+        const book = fetchedBooks.find(b => b.id === br.bookId);
         const today = new Date();
         const due = br.dueDate ? new Date(br.dueDate) : null;
         const isOverdue = br.status === 'BORROWED' && due && due < today;
@@ -17806,7 +17837,6 @@ const ReportsModule = ({
     </div>
   );
 };
-
 // ==================== EXAM CARD PRINT MODAL ====================
 const ExamCardPrintModal = ({ student, units, currentSchool, onClose }) => {
   console.log('🖨️ ExamCardPrintModal rendered');
@@ -48775,19 +48805,19 @@ const UnitRegistrationModule = ({
   }, [user?.role]);
 
   const schoolSettings = React.useMemo(() => {
-    return {
-      isUniversity,
-      isTVET,
-      isRegularSchool,
-      requiresPayment: currentSchool?.requiresPaymentForUnits !== false,
-      paymentRequiredPercentage: currentSchool?.paymentPercentageRequired || 30,
-      requiresApproval: currentSchool?.unitApprovalRequired !== false,
-      approvalRoles: currentSchool?.unitApprovalRoles || ['admin', 'hod', 'dean'],
-      entityLabel: isTVET ? 'Program' : isUniversity ? 'Course' : 'Class',
-      itemLabel: isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject',
-      itemLabelPlural: isTVET ? 'Modules' : isUniversity ? 'Units' : 'Subjects'
-    };
-  }, [currentSchool, isUniversity, isTVET, isRegularSchool]);
+  return {
+    isUniversity,
+    isTVET,
+    isRegularSchool,
+    requiresPayment: currentSchool?.requiresPaymentForUnits !== false,
+    paymentRequiredPercentage: currentSchool?.paymentPercentageRequired ?? 30,   // ← FIX
+    requiresApproval: currentSchool?.unitApprovalRequired !== false,
+    approvalRoles: currentSchool?.unitApprovalRoles || ['admin', 'hod', 'dean'],
+    entityLabel: isTVET ? 'Program' : isUniversity ? 'Course' : 'Class',
+    itemLabel: isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject',
+    itemLabelPlural: isTVET ? 'Modules' : isUniversity ? 'Units' : 'Subjects'
+  };
+}, [currentSchool, isUniversity, isTVET, isRegularSchool]);
 
   const studentOptions = useMemo(() => {
     const opts = [{ value: '', label: '' }];
