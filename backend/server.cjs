@@ -6653,12 +6653,7 @@ const PLATFORM_AUDIT_ACTIONS = [
   'RECORD_SUBSCRIPTION_PAYMENT'
 ];
 
-const requireSuperAdmin = (req, res, next) => {
-  if (req.user?.role !== 'SUPER_ADMIN') {
-    return res.status(403).json({ success: false, message: 'Super admin only' });
-  }
-  next();
-};
+
 
 // ✅ Platform-scoped audit log — always writes schoolId = null
 const createPlatformAuditLog = async (req, action, entity, entityId, oldValue = null, newValue = null) => {
