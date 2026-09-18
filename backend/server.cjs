@@ -21036,7 +21036,7 @@ app.post('/api/unit-registrations', authenticate, async (req, res) => {
     
     // Check payment status if required
     const requiresPayment = school.requiresPaymentForUnits !== false;
-    const paymentRequiredPercentage = school.paymentPercentageRequired || 30;
+const paymentRequiredPercentage = school.paymentPercentageRequired ?? 30;
     
     if (requiresPayment) {
       // Calculate fees for this course/program
