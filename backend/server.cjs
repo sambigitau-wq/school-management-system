@@ -45,43 +45,108 @@ if (!fs.existsSync(publicDir)) {
 // Simple user cache to prevent repeated queries
 const userCache = new Map();
 
+// ==================== SUBSCRIPTION ENFORCEMENT ====================
+const SUBSCRIPTION_GRACE_DAYS = 7;
+
+const checkSubscription = async (req, res, next) => {
+  try {
+    if (req.user?.role === 'SUPER_ADMIN') return next();
+    if (!req.user?.schoolId) return next();
+
+    const allowedPaths = [
+      '/api/auth/me',
+      '/api/auth/login',
+      '/api/auth/logout',
+      '/api/auth/change-password',
+      '/api/billing/status',
+      '/api/super-admin'
+    ];
+    if (allowedPaths.some(p => req.originalUrl.startsWith(p))) {
+      return next();
+    }
+
+    const school = await School.findByPk(req.user.schoolId, {
+      attributes: ['id', 'name', 'subscriptionStatus', 'subscriptionPlan', 'trialEndsAt', 'subscriptionEndsAt']
+    });
+
+    if (!school) return next();
+
+    const plan = (school.subscriptionPlan || 'FREE').toUpperCase();
+    const status = (school.subscriptionStatus || 'TRIAL').toUpperCase();
+
+    // FREE plan never expires
+    if (plan === 'FREE') return next();
+
+    // Suspended / cancelled = hard block
+    if (status === 'SUSPENDED' || status === 'CANCELLED') {
+      return res.status(402).json({
+        success: false,
+        code: 'SUBSCRIPTION_BLOCKED',
+        status,
+        message: `Your school account is ${status.toLowerCase()}. Please contact support.`,
+        schoolName: school.name
+      });
+    }
+
+    let periodEnd = null;
+    if (status === 'TRIAL' && school.trialEndsAt) periodEnd = new Date(school.trialEndsAt);
+    else if (school.subscriptionEndsAt) periodEnd = new Date(school.subscriptionEndsAt);
+
+    if (!periodEnd) return next();   // no expiry set → allow
+
+    const now = new Date();
+    if (now > periodEnd) {
+      const graceEnd = new Date(periodEnd);
+      graceEnd.setDate(graceEnd.getDate() + SUBSCRIPTION_GRACE_DAYS);
+
+      if (now > graceEnd) {
+        return res.status(402).json({
+          success: false,
+          code: 'SUBSCRIPTION_EXPIRED',
+          status: 'EXPIRED',
+          expiredAt: periodEnd,
+          message: 'Your subscription has expired. Please renew to continue.',
+          schoolName: school.name
+        });
+      }
+      // in grace period — allow but flag
+      res.setHeader('X-Subscription-Warning', 'Subscription expired — grace period active');
+    }
+
+    next();
+  } catch (err) {
+    console.error('checkSubscription error:', err);
+    next();   // fail open so a DB hiccup doesn't lock everyone out
+  }
+};
+
 const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
-  
-  if (!token) {
-    return res.status(401).json({ success: false, message: 'Access token required' });
-  }
-  
+
+  if (!token) return res.status(401).json({ success: false, message: 'Access token required' });
+
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const userId = decoded.id;
-    
-    // ✅ Check cache first
+
+    let user;
     if (userCache.has(userId)) {
-      req.user = userCache.get(userId);
-      return next();
+      user = userCache.get(userId);
+    } else {
+      user = await User.findByPk(userId, {
+        attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'schoolId', 'roleId']
+      });
+      if (!user) return res.status(401).json({ success: false, message: 'User not found' });
+      userCache.set(userId, user);
     }
-    
-    // ✅ Fetch only what we need - NO associations!
-    const user = await User.findByPk(userId, {
-      attributes: ['id', 'email', 'firstName', 'lastName', 'role', 'schoolId', 'roleId']
-      // NO includes!
-    });
-    
-    if (!user) {
-      return res.status(401).json({ success: false, message: 'User not found' });
-    }
-    
-    // ✅ Cache the user
-    userCache.set(userId, user);
+
     req.user = user;
-    next();
+    return checkSubscription(req, res, next);
   } catch (error) {
     return res.status(403).json({ success: false, message: 'Invalid or expired token' });
   }
 };
-
 // Clean cache every 5 minutes
 setInterval(() => {
   userCache.clear();
@@ -1379,7 +1444,47 @@ const School = sequelize.define('School', {
       apiVersion: '1.0.0'
     }
   },
-  
+  // ==================== SUBSCRIPTION ====================
+trialEndsAt: {
+  type: DataTypes.DATE,
+  allowNull: true
+},
+subscriptionEndsAt: {
+  type: DataTypes.DATE,
+  allowNull: true
+},
+subscriptionStatus: {
+  type: DataTypes.STRING(20),
+  allowNull: false,
+  defaultValue: 'TRIAL'
+},
+subscriptionPlan: {
+  type: DataTypes.STRING(20),
+  allowNull: false,
+  defaultValue: 'FREE'
+},
+maxStudents: {
+  type: DataTypes.INTEGER,
+  allowNull: false,
+  defaultValue: 100
+},
+maxStaff: {
+  type: DataTypes.INTEGER,
+  allowNull: false,
+  defaultValue: 20
+},
+lastPaymentAt: {
+  type: DataTypes.DATE,
+  allowNull: true
+},
+lastPaymentAmount: {
+  type: DataTypes.DECIMAL(10, 2),
+  allowNull: true
+},
+billingNotes: {
+  type: DataTypes.TEXT,
+  allowNull: true
+},
   // ==================== AUDIT & METADATA ====================
   createdBy: { 
     type: DataTypes.UUID, 
@@ -2303,6 +2408,24 @@ const AuditLog = sequelize.define('AuditLog', {
   ipAddress: DataTypes.STRING,
   userAgent: DataTypes.STRING,
   timestamp: { type: DataTypes.DATE, defaultValue: DataTypes.NOW }
+});
+
+// ==================== SUBSCRIPTION PAYMENT ====================
+const SubscriptionPayment = sequelize.define('SubscriptionPayment', {
+  id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+  schoolId: { type: DataTypes.UUID, allowNull: false },
+  amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+  currency: { type: DataTypes.STRING, defaultValue: 'KES' },
+  plan: { type: DataTypes.STRING(20), allowNull: false },
+  periodStart: { type: DataTypes.DATE, allowNull: false },
+  periodEnd: { type: DataTypes.DATE, allowNull: false },
+  paymentMethod: { type: DataTypes.STRING, allowNull: true },
+  reference: { type: DataTypes.STRING, allowNull: true },
+  notes: { type: DataTypes.TEXT, allowNull: true },
+  recordedBy: { type: DataTypes.UUID, allowNull: true }
+}, {
+  timestamps: true,
+  tableName: 'SubscriptionPayments'
 });
 // ==================== DYNAMIC ROLES & PERMISSIONS MODELS ====================
 const Role = sequelize.define('Role', {
@@ -5061,8 +5184,6 @@ const checkStudentAccess = async (studentId, user) => {
   return true;
 };
 
-// ==================== MIDDLEWARE ====================
-
 const authenticate = async (req, res, next) => {
   try {
     const token = req.header('Authorization')?.replace('Bearer ', '');
@@ -5070,16 +5191,14 @@ const authenticate = async (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findByPk(decoded.id);
-    
     if (!user || !user.isActive) return res.status(401).json({ message: 'User not found or inactive' });
 
     req.user = user;
-    next();
+    return checkSubscription(req, res, next);
   } catch (error) {
     res.status(401).json({ message: 'Invalid or expired token' });
   }
 };
-
 const requireSchoolAdmin = (req, res, next) => {
   if (req.user.role !== 'SCHOOL_ADMIN' && req.user.role !== 'SUPER_ADMIN') {
     return res.status(403).json({ message: 'Access denied. School admin only.' });
@@ -5343,13 +5462,36 @@ app.get('/api/auth/me', authenticate, async (req, res) => {
       permissions = getPermissionsForRole(effectiveRole);
     }
 
+    // ============================================================
+    // ✅ NEW — fetch the school's enabled features
+    // ============================================================
+    // SUPER_ADMIN has no schoolId, so schoolFeatures stays null
+    // (the frontend treats null as "no feature gating").
+    let schoolFeatures = null;
+    if (user.schoolId) {
+      try {
+        const schoolRow = await School.findByPk(user.schoolId, {
+          attributes: ['id', 'features']
+        });
+        if (schoolRow) {
+          schoolFeatures = Array.isArray(schoolRow.features) ? schoolRow.features : [];
+        } else {
+          schoolFeatures = [];
+        }
+      } catch (featureErr) {
+        console.warn('Could not fetch school features:', featureErr.message);
+        schoolFeatures = [];
+      }
+    }
+
     res.json({
       success: true,
       user: {
         ...user.toJSON(),
         role: effectiveRole,       // ✅ override with effective role
         roleObject,
-        permissions
+        permissions,
+        schoolFeatures             // ✅ NEW — array of feature keys, or null for super admin
       }
     });
   } catch (error) {
@@ -5599,7 +5741,17 @@ app.post('/api/auth/reset-password', async (req, res) => {
 app.post('/api/schools', authenticate, requireSuperAdmin, async (req, res) => {
   const t = await sequelize.transaction();
   try {
-    const { name, category, subscription, contact, motto, established, gradingSystem } = req.body;
+    const {
+      name,
+      category,
+      subscription,
+      contact,
+      motto,
+      established,
+      gradingSystem,
+      features,          // ✅ NEW — array of feature keys from the UI
+      admin              // ✅ NEW — optional inline admin creation
+    } = req.body;
 
     if (!name || !category) {
       await t.rollback();
@@ -5608,7 +5760,32 @@ app.post('/api/schools', authenticate, requireSuperAdmin, async (req, res) => {
 
     const code = name.substring(0, 3).toUpperCase() + Date.now().toString().slice(-4);
 
-    // 1. Create the school
+    // ============================================================
+    //  1. Resolve the feature set
+    // ============================================================
+    // If the UI sent features → sanitize and use them.
+    // Otherwise → use the preset for this category.
+    const knownKeys = new Set(ALL_FEATURES.map(f => f.key));
+    const lockedKeys = ALL_FEATURES.filter(f => f.locked).map(f => f.key);
+
+    let resolvedFeatures;
+    if (Array.isArray(features) && features.length > 0) {
+      // Only allow known keys
+      resolvedFeatures = features.filter(k => knownKeys.has(k));
+    } else {
+      // Fall back to preset for this school category
+      resolvedFeatures = presetForCategory(category);
+    }
+    // Always include locked features
+    for (const k of lockedKeys) {
+      if (!resolvedFeatures.includes(k)) resolvedFeatures.push(k);
+    }
+    // De-dupe
+    resolvedFeatures = Array.from(new Set(resolvedFeatures));
+
+    // ============================================================
+    //  2. Create the school
+    // ============================================================
     const school = await School.create({
       name,
       code,
@@ -5626,10 +5803,15 @@ app.post('/api/schools', authenticate, requireSuperAdmin, async (req, res) => {
       contact,
       motto,
       established,
-      createdBy: req.user.id
+      createdBy: req.user.id,
+
+      // ✅ Store the feature keys as a JSONB array
+      features: resolvedFeatures
     }, { transaction: t });
 
-    // 2. Create default roles (category-aware)
+    // ============================================================
+    //  3. Create default roles (category-aware)
+    // ============================================================
     const templates = [
       ...DEFAULT_ROLE_TEMPLATES.universal,
       ...(DEFAULT_ROLE_TEMPLATES[category] || [])
@@ -5655,11 +5837,62 @@ app.post('/api/schools', authenticate, requireSuperAdmin, async (req, res) => {
     const createdRoles = await Role.bulkCreate(defaultRoles, { transaction: t });
     console.log(`✅ Created ${createdRoles.length} default roles for ${school.name} (${category})`);
 
-    // 3. Default features
+    // ============================================================
+    //  4. Optional: create a school admin inline
+    // ============================================================
+    let createdAdmin = null;
+    if (admin && admin.email && admin.password) {
+      try {
+        const existing = await User.findOne({
+          where: { email: admin.email },
+          transaction: t
+        });
+        if (existing) {
+          // Link the existing user to this school as SCHOOL_ADMIN
+          await existing.update(
+            { schoolId: school.id, role: 'SCHOOL_ADMIN' },
+            { transaction: t }
+          );
+          createdAdmin = existing;
+        } else {
+          const hashed = await bcrypt.hash(admin.password, 10);
+          createdAdmin = await User.create({
+            email: admin.email,
+            password: hashed,
+            firstName: admin.firstName || 'School',
+            lastName: admin.lastName || 'Admin',
+            phone: admin.phone || null,
+            role: 'SCHOOL_ADMIN',
+            schoolId: school.id,
+            isActive: true
+          }, { transaction: t });
+        }
+        console.log(`✅ Admin created/linked: ${admin.email}`);
+      } catch (adminErr) {
+        // Don't fail the whole school creation if the admin fails — log and continue
+        console.warn('⚠️  Admin creation failed:', adminErr.message);
+      }
+    }
+
+    // ============================================================
+    //  5. Seed legacy Feature rows (kept for backwards compat)
+    // ============================================================
+    // The new source of truth is School.features (JSONB array above).
+    // We still seed the Feature table so any legacy code that reads
+    // from /api/features keeps working.
     const defaultFeatures = [
-      { name: 'SMS Notifications', code: 'SMS', category: 'COMMUNICATION', description: '...', isEnabled: true },
-      { name: 'Email Notifications', code: 'EMAIL', category: 'COMMUNICATION', description: '...', isEnabled: true },
-      // ... rest unchanged
+      { name: 'SMS Notifications',   code: 'SMS',      category: 'COMMUNICATION', description: 'Send SMS to parents and staff', isEnabled: resolvedFeatures.includes('messages') },
+      { name: 'Email Notifications', code: 'EMAIL',    category: 'COMMUNICATION', description: 'Send email notifications',      isEnabled: resolvedFeatures.includes('messages') },
+      { name: 'Online Payments',     code: 'ONLINE_PAYMENTS', category: 'FINANCE', description: 'Accept online fee payments', isEnabled: resolvedFeatures.includes('fee_collection') },
+      { name: 'Exam Portal',         code: 'EXAM_PORTAL',     category: 'ACADEMIC', description: 'Online exam submission and grading', isEnabled: resolvedFeatures.includes('online_exams') },
+      { name: 'Parent Portal',       code: 'PARENT_PORTAL',   category: 'ACCESS',   description: 'Parent login to view student progress', isEnabled: resolvedFeatures.includes('parents_portal') },
+      { name: 'Student Portal',      code: 'STUDENT_PORTAL',  category: 'ACCESS',   description: 'Student login to view results', isEnabled: resolvedFeatures.includes('student_portal') },
+      { name: 'Library Management',  code: 'LIBRARY',         category: 'RESOURCES', description: 'Complete library management system', isEnabled: resolvedFeatures.includes('library') },
+      { name: 'Transport Tracking',  code: 'TRANSPORT',       category: 'LOGISTICS', description: 'Vehicle and route management', isEnabled: resolvedFeatures.includes('transport') },
+      { name: 'Hostel Management',   code: 'HOSTEL',          category: 'ACCOMMODATION', description: 'Hostel room allocation', isEnabled: resolvedFeatures.includes('hostel') },
+      { name: 'Inventory Management',code: 'INVENTORY',       category: 'RESOURCES', description: 'Stock and inventory tracking', isEnabled: resolvedFeatures.includes('inventory') },
+      { name: 'Attendance Biometrics', code: 'BIOMETRICS',    category: 'ATTENDANCE', description: 'Biometric attendance marking', isEnabled: false },
+      { name: 'WhatsApp Integration', code: 'WHATSAPP',       category: 'COMMUNICATION', description: 'Send WhatsApp messages', isEnabled: false }
     ];
 
     const seededFeatures = [];
@@ -5672,34 +5905,45 @@ app.post('/api/schools', authenticate, requireSuperAdmin, async (req, res) => {
       if (created) seededFeatures.push(featureInstance);
     }
 
-    // 4. Commit
+    // ============================================================
+    //  6. Commit
+    // ============================================================
     await t.commit();
 
-    // 5. Audit log (best-effort, not part of transaction)
+    // ============================================================
+    //  7. Platform audit log
+    // ============================================================
     try {
-      await sequelize.query(
-        `INSERT INTO "AuditLogs" (id, "schoolId", "userId", action, entity, "entityId", "newValue", timestamp, "createdAt", "updatedAt")
-         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, NOW(), NOW())`,
-        {
-          bind: [
-            school.id, req.user.id, 'CREATE_SCHOOL', 'SCHOOL', school.id,
-            JSON.stringify({ name: school.name, code: school.code, category: school.category }),
-            new Date()
-          ],
-          type: sequelize.QueryTypes.INSERT
-        }
-      );
+      await createPlatformAuditLog(req, 'CREATE_SCHOOL', 'SCHOOL', school.id, null, {
+        name: school.name,
+        code: school.code,
+        category: school.category,
+        featureCount: resolvedFeatures.length,
+        features: resolvedFeatures,
+        adminCreated: !!createdAdmin
+      });
     } catch (logError) {
       console.warn('⚠️ Audit log failed (non-critical):', logError.message);
     }
 
+    // ============================================================
+    //  8. Respond
+    // ============================================================
     res.status(201).json({
       success: true,
       school,
+      admin: createdAdmin ? {
+        id: createdAdmin.id,
+        email: createdAdmin.email,
+        firstName: createdAdmin.firstName,
+        lastName: createdAdmin.lastName,
+        role: createdAdmin.role
+      } : null,
       seeding: {
         rolesCreated: createdRoles.length,
         featuresSeeded: seededFeatures.length,
-        message: `School created with ${createdRoles.length} roles and ${seededFeatures.length} features`
+        featuresEnabled: resolvedFeatures.length,
+        message: `School created with ${createdRoles.length} roles, ${resolvedFeatures.length} features enabled`
       }
     });
 
@@ -6136,6 +6380,599 @@ app.delete('/api/schools/:id', authenticate, requireSuperAdmin, async (req, res)
   } catch (error) {
     console.error('Delete school error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// ============================================================
+//  SUPER ADMIN — PLATFORM MANAGEMENT
+// ============================================================
+
+const SUBSCRIPTION_PLANS = {
+  FREE:       { name: 'Free',       price: 0,     maxStudents: 100,   maxStaff: 20 },
+  BASIC:      { name: 'Basic',      price: 2500,  maxStudents: 500,   maxStaff: 50 },
+  STANDARD:   { name: 'Standard',   price: 5000,  maxStudents: 1500,  maxStaff: 150 },
+  PREMIUM:    { name: 'Premium',    price: 10000, maxStudents: 5000,  maxStaff: 500 },
+  ENTERPRISE: { name: 'Enterprise', price: 25000, maxStudents: 99999, maxStaff: 99999 }
+};
+
+// ============================================================
+//  FEATURE CATALOGUE — every gateable module on the platform
+// ============================================================
+// Each entry maps a feature key (used in the UI) to the module id
+// that shows in the sidebar (see canAccessModule in app.jsx).
+
+const FEATURE_CATALOG = {
+  // ============ CORE — always on, cannot be disabled ============
+  core: [
+    { key: 'dashboard',            label: 'Dashboard',            moduleId: 'dashboard',           group: 'Core', locked: true },
+    { key: 'settings',             label: 'Settings',             moduleId: 'settings',            group: 'Core', locked: true },
+    { key: 'users',                label: 'User Management',      moduleId: 'users',               group: 'Core' },
+    { key: 'roles',                label: 'Roles & Permissions',  moduleId: 'roles',               group: 'Core' }
+  ],
+
+  // ============ ACADEMIC ============
+  academic: [
+    { key: 'classes',              label: 'Classes',              moduleId: 'classes',             group: 'Academic' },
+    { key: 'subjects',             label: 'Subjects',             moduleId: 'subjects',            group: 'Academic' },
+    { key: 'exams',                label: 'Exams',                moduleId: 'exams',               group: 'Academic' },
+    { key: 'results',              label: 'Results',              moduleId: 'results',             group: 'Academic' },
+    { key: 'attendance',           label: 'Attendance',           moduleId: 'attendance',          group: 'Academic' },
+    { key: 'timetable',            label: 'Timetable',            moduleId: 'timetable',           group: 'Academic' },
+    { key: 'schemes_of_work',      label: 'Schemes of Work',      moduleId: 'schemes-of-work',     group: 'Academic' },
+    { key: 'promotion',            label: 'Promotion',            moduleId: 'promotion',           group: 'Academic' },
+    { key: 'homework',             label: 'Homework',             moduleId: 'homework',            group: 'Academic' },
+    { key: 'online_exams',         label: 'Online Exams',         moduleId: 'online-exams',        group: 'Academic' },
+    { key: 'live_classroom',       label: 'Live Classroom',       moduleId: 'live-classroom',      group: 'Academic' }
+  ],
+
+  // ============ PEOPLE ============
+  people: [
+    { key: 'students',             label: 'Students',             moduleId: 'students',            group: 'People' },
+    { key: 'parents_portal',       label: 'Parents Portal',       moduleId: 'parents',             group: 'People' },
+    { key: 'student_portal',       label: 'Student Portal',       moduleId: 'student-portal',      group: 'People' },
+    { key: 'health',               label: 'Health Records',       moduleId: 'health',              group: 'People' },
+    { key: 'sickbay',              label: 'Sick Bay',             moduleId: 'sickbay',             group: 'People' },
+    { key: 'discipline',           label: 'Discipline',           moduleId: 'discipline',          group: 'People' },
+    { key: 'student_arrival',      label: 'Student Arrival',      moduleId: 'student-arrival',     group: 'People' },
+    { key: 'alumni',               label: 'Alumni',               moduleId: 'alumni',              group: 'People' }
+  ],
+
+  // ============ FINANCE ============
+  finance: [
+    { key: 'fees',                 label: 'Fee Management',       moduleId: 'fees',                group: 'Finance' },
+    { key: 'fee_allocation',       label: 'Fee Allocation',       moduleId: 'fee-allocation',      group: 'Finance' },
+    { key: 'fee_collection',       label: 'Fee Collection',       moduleId: 'fee-collection',      group: 'Finance' },
+    { key: 'fee_transfers',        label: 'Fee Transfers',        moduleId: 'fee-transfers',       group: 'Finance' },
+    { key: 'receipt_history',      label: 'Receipt History',      moduleId: 'receipt-history',     group: 'Finance' },
+    { key: 'other_income',         label: 'Other Income',         moduleId: 'other-income',        group: 'Finance' },
+    { key: 'expenses',             label: 'Expenses',             moduleId: 'expenses',            group: 'Finance' },
+    { key: 'fee_reminders',        label: 'Fee Reminders',        moduleId: 'fee-reminders',       group: 'Finance' },
+    { key: 'discounts',            label: 'Discounts',            moduleId: 'discounts',           group: 'Finance' }
+  ],
+
+  // ============ STAFF & HR ============
+  hr: [
+    { key: 'staff',                label: 'Staff Management',     moduleId: 'staff',               group: 'Staff & HR' },
+    { key: 'staff_attendance',     label: 'Staff Attendance',     moduleId: 'staff-attendance',    group: 'Staff & HR' },
+    { key: 'payroll',              label: 'Payroll',              moduleId: 'payroll',             group: 'Staff & HR' }
+  ],
+
+  // ============ RESOURCES ============
+  resources: [
+    { key: 'library',              label: 'Library',              moduleId: 'library',             group: 'Resources' },
+    { key: 'transport',            label: 'Transport',            moduleId: 'transport',           group: 'Resources' },
+    { key: 'hostel',               label: 'Hostel',               moduleId: 'hostel',              group: 'Resources' },
+    { key: 'inventory',            label: 'Inventory',            moduleId: 'inventory',           group: 'Resources' },
+    { key: 'labs',                 label: 'Labs',                 moduleId: 'labs',                group: 'Resources' }
+  ],
+
+  // ============ HIGHER ED ============
+  higherEd: [
+    { key: 'course_enrollment',    label: 'Course Enrollment',    moduleId: 'course-enrollment',   group: 'Higher Ed' },
+    { key: 'unit_registration',    label: 'Unit Registration',    moduleId: 'unit-registration',   group: 'Higher Ed' },
+    { key: 'course_units',         label: 'Units / Modules',      moduleId: 'course-units',        group: 'Higher Ed' },
+    { key: 'faculties',            label: 'Faculties',            moduleId: 'faculties',           group: 'Higher Ed' },
+    { key: 'departments',          label: 'Departments',          moduleId: 'departments',         group: 'Higher Ed' },
+    { key: 'courses',              label: 'Courses',              moduleId: 'courses',             group: 'Higher Ed' },
+    { key: 'programs',             label: 'Programs',             moduleId: 'programs',            group: 'Higher Ed' },
+    { key: 'research',             label: 'Research',             moduleId: 'research',            group: 'Higher Ed' }
+  ],
+
+  // ============ ENGAGEMENT ============
+  engagement: [
+    { key: 'announcements',        label: 'Announcements',        moduleId: 'announcements',       group: 'Engagement' },
+    { key: 'events',               label: 'Events',               moduleId: 'events',              group: 'Engagement' },
+    { key: 'messages',             label: 'SMS & Email',          moduleId: 'messages',            group: 'Engagement' },
+    { key: 'receptionist',         label: 'Receptionist',         moduleId: 'receptionist',        group: 'Engagement' }
+  ],
+
+  // ============ ADVANCED TOOLS ============
+  advanced: [
+    { key: 'card_management',      label: 'Card Management',      moduleId: 'card-management',     group: 'Advanced' },
+    { key: 'certificates',         label: 'Certificates',         moduleId: 'certificates',        group: 'Advanced' },
+    { key: 'exam_cards',           label: 'Exam Cards',           moduleId: 'exam-cards',          group: 'Advanced' },
+    { key: 'exam_card_overrides',  label: 'Exam Card Overrides',  moduleId: 'exam-card-overrides', group: 'Advanced' },
+    { key: 'reports',              label: 'Reports',              moduleId: 'reports',             group: 'Advanced' },
+    { key: 'audit_logs',           label: 'Audit Logs',           moduleId: 'audit-logs',          group: 'Advanced' }
+  ]
+};
+
+// Flattened helpers
+const ALL_FEATURES = Object.values(FEATURE_CATALOG).flat();
+const FEATURE_BY_KEY = Object.fromEntries(ALL_FEATURES.map(f => [f.key, f]));
+const FEATURE_BY_MODULE = Object.fromEntries(ALL_FEATURES.map(f => [f.moduleId, f]));
+
+// ============================================================
+//  FEATURE PRESETS — one per school type, plus a minimal base
+// ============================================================
+// Order matters: the first N are always included (dashboard, settings, users, roles).
+
+const COMMON_CORE = ['dashboard', 'settings', 'users', 'roles'];
+
+const FEATURE_PRESETS = {
+  // ============ ECDE / PRIMARY / JUNIOR SECONDARY ============
+  ECDE_PRIMARY_JSS: [
+    ...COMMON_CORE,
+    // Academic
+    'classes', 'subjects', 'exams', 'results', 'attendance', 'timetable',
+    'schemes_of_work', 'promotion', 'homework',
+    // People
+    'students', 'student_portal', 'parents_portal',
+    // Finance
+    'fees', 'fee_allocation', 'fee_collection', 'receipt_history',
+    'other_income', 'expenses', 'fee_reminders', 'discounts',
+    // Staff
+    'staff', 'staff_attendance',
+    // Resources
+    'library', 'transport', 'inventory',
+    // Engagement
+    'announcements', 'events', 'messages',
+    // Advanced
+    'exam_cards', 'reports'
+  ],
+
+  // ============ SENIOR SECONDARY ============
+  SENIOR_SECONDARY: [
+    ...COMMON_CORE,
+    // Academic
+    'classes', 'subjects', 'exams', 'results', 'attendance', 'timetable',
+    'schemes_of_work', 'promotion', 'homework',
+    // People
+    'students', 'student_portal', 'parents_portal', 'health', 'sickbay',
+    // Finance
+    'fees', 'fee_allocation', 'fee_collection', 'fee_transfers',
+    'receipt_history', 'other_income', 'expenses', 'fee_reminders', 'discounts',
+    // Staff
+    'staff', 'staff_attendance', 'payroll',
+    // Resources
+    'library', 'transport', 'hostel', 'inventory', 'labs',
+    // Engagement
+    'announcements', 'events', 'messages', 'receptionist',
+    // Advanced
+    'exam_cards', 'exam_card_overrides', 'reports',
+    'card_management', 'certificates'
+  ],
+
+  // ============ TVET / COLLEGE ============
+  COLLEGE_TVET: [
+    ...COMMON_CORE,
+    // Academic
+    'exams', 'results', 'attendance', 'timetable', 'schemes_of_work',
+    'homework', 'online_exams', 'live_classroom',
+    // People
+    'students', 'student_portal', 'parents_portal',
+    'student_arrival', 'health', 'sickbay',
+    // Finance
+    'fees', 'fee_allocation', 'fee_collection', 'fee_transfers',
+    'receipt_history', 'other_income', 'expenses', 'fee_reminders', 'discounts',
+    // Staff
+    'staff', 'staff_attendance', 'payroll',
+    // Resources
+    'library', 'transport', 'hostel', 'inventory', 'labs',
+    // Higher Ed
+    'course_enrollment', 'unit_registration', 'course_units',
+    'faculties', 'departments', 'programs', 'research',
+    // Engagement
+    'announcements', 'events', 'messages', 'receptionist',
+    // Advanced
+    'exam_cards', 'exam_card_overrides', 'reports',
+    'card_management', 'certificates'
+  ],
+
+  // ============ UNIVERSITY ============
+  UNIVERSITY: [
+    ...COMMON_CORE,
+    // Academic
+    'exams', 'results', 'attendance', 'timetable', 'schemes_of_work',
+    'homework', 'online_exams', 'live_classroom',
+    // People
+    'students', 'student_portal', 'parents_portal',
+    'student_arrival', 'health', 'sickbay',
+    // Finance
+    'fees', 'fee_allocation', 'fee_collection', 'fee_transfers',
+    'receipt_history', 'other_income', 'expenses', 'fee_reminders', 'discounts',
+    // Staff
+    'staff', 'staff_attendance', 'payroll',
+    // Resources
+    'library', 'transport', 'hostel', 'inventory', 'labs',
+    // Higher Ed
+    'course_enrollment', 'unit_registration', 'course_units',
+    'faculties', 'departments', 'courses', 'programs', 'research',
+    // Engagement
+    'announcements', 'events', 'messages', 'receptionist',
+    // Advanced
+    'exam_cards', 'exam_card_overrides', 'reports',
+    'card_management', 'certificates'
+  ],
+
+  // ============ INTERNATIONAL SCHOOLS ============
+  INTERNATIONAL: [
+    ...COMMON_CORE,
+    'classes', 'subjects', 'exams', 'results', 'attendance', 'timetable',
+    'schemes_of_work', 'promotion', 'homework', 'online_exams', 'live_classroom',
+    'students', 'student_portal', 'parents_portal', 'health', 'sickbay',
+    'fees', 'fee_allocation', 'fee_collection', 'fee_transfers',
+    'receipt_history', 'other_income', 'expenses', 'fee_reminders', 'discounts',
+    'staff', 'staff_attendance', 'payroll',
+    'library', 'transport', 'hostel', 'inventory', 'labs',
+    'announcements', 'events', 'messages', 'receptionist',
+    'exam_cards', 'exam_card_overrides', 'reports',
+    'card_management', 'certificates', 'alumni'
+  ],
+
+  // ============ TINY / STARTER (minimal set for small schools) ============
+  minimal: [
+    ...COMMON_CORE,
+    'classes', 'subjects', 'exams', 'results', 'attendance',
+    'students',
+    'fees', 'fee_collection',
+    'staff',
+    'announcements'
+  ]
+};
+
+// Helper: pick the right preset for a school category
+const presetForCategory = (category) => {
+  const map = {
+    ECDE_PRIMARY_JSS: FEATURE_PRESETS.ECDE_PRIMARY_JSS,
+    SENIOR_SECONDARY: FEATURE_PRESETS.SENIOR_SECONDARY,
+    COLLEGE_TVET:     FEATURE_PRESETS.COLLEGE_TVET,
+    UNIVERSITY:       FEATURE_PRESETS.UNIVERSITY,
+    INTERNATIONAL:    FEATURE_PRESETS.INTERNATIONAL
+  };
+  return map[category] || FEATURE_PRESETS.ECDE_PRIMARY_JSS;
+};
+// Audit actions that are platform-level and should NEVER be visible to school admins
+const PLATFORM_AUDIT_ACTIONS = [
+  'CREATE_SCHOOL',
+  'DELETE_SCHOOL',
+  'UPDATE_SUBSCRIPTION',
+  'SUSPEND_SCHOOL',
+  'REACTIVATE_SCHOOL',
+  'IMPERSONATE',
+  'RECORD_SUBSCRIPTION_PAYMENT'
+];
+
+const requireSuperAdmin = (req, res, next) => {
+  if (req.user?.role !== 'SUPER_ADMIN') {
+    return res.status(403).json({ success: false, message: 'Super admin only' });
+  }
+  next();
+};
+
+// ✅ Platform-scoped audit log — always writes schoolId = null
+const createPlatformAuditLog = async (req, action, entity, entityId, oldValue = null, newValue = null) => {
+  try {
+    await AuditLog.create({
+      schoolId: null,
+      userId: req?.user?.id || null,
+      action,
+      entity,
+      entityId,
+      oldValue: oldValue ? JSON.parse(JSON.stringify(oldValue)) : null,
+      newValue: newValue ? JSON.parse(JSON.stringify(newValue)) : null,
+      ipAddress: req?.ip || req?.connection?.remoteAddress || null,
+      userAgent: req?.get ? req.get('User-Agent') : null,
+      timestamp: new Date()
+    });
+  } catch (err) {
+    console.error('⚠️ Platform audit log failed:', err.message);
+  }
+};
+
+// ---------- Platform overview ----------
+app.get('/api/super-admin/overview', authenticate, requireSuperAdmin, async (req, res) => {
+  try {
+    const [totalSchools, activeSchools, trialSchools, expiredSchools, suspendedSchools] = await Promise.all([
+      School.count(),
+      School.count({ where: { subscriptionStatus: 'ACTIVE' } }),
+      School.count({ where: { subscriptionStatus: 'TRIAL' } }),
+      School.count({ where: { subscriptionStatus: 'EXPIRED' } }),
+      School.count({ where: { subscriptionStatus: 'SUSPENDED' } })
+    ]);
+    const totalUsers = await User.count();
+    const totalStudents = await Student.count();
+
+    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+    const revenueRow = await SubscriptionPayment.findAll({
+      where: { createdAt: { [Op.gte]: monthStart } },
+      attributes: [[sequelize.fn('SUM', sequelize.col('amount')), 'total']],
+      raw: true
+    });
+    const revenueThisMonth = parseFloat(revenueRow[0]?.total || 0);
+
+    res.json({
+      success: true,
+      overview: {
+        totalSchools, activeSchools, trialSchools, expiredSchools, suspendedSchools,
+        totalUsers, totalStudents, revenueThisMonth
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ---------- List schools ----------
+app.get('/api/super-admin/schools', authenticate, requireSuperAdmin, async (req, res) => {
+  try {
+    const { status, plan, search } = req.query;
+    const where = {};
+    if (status) where.subscriptionStatus = status;
+    if (plan) where.subscriptionPlan = plan;
+    if (search) {
+      where[Op.or] = [
+        { name: { [Op.iLike]: `%${search}%` } },
+        { code: { [Op.iLike]: `%${search}%` } }
+      ];
+    }
+
+    const schools = await School.findAll({
+      where,
+      attributes: [
+        'id', 'name', 'code', 'category', 'isActive',
+        'subscriptionStatus', 'subscriptionPlan',
+        'trialEndsAt', 'subscriptionEndsAt',
+        'maxStudents', 'maxStaff',
+        'lastPaymentAt', 'lastPaymentAmount',
+        'createdAt'
+      ],
+      order: [['createdAt', 'DESC']]
+    });
+
+    res.json({ success: true, schools });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ---------- School detail ----------
+app.get('/api/super-admin/schools/:id', authenticate, requireSuperAdmin, async (req, res) => {
+  try {
+    const school = await School.findByPk(req.params.id);
+    if (!school) return res.status(404).json({ success: false, message: 'School not found' });
+
+    const [userCount, studentCount, staffCount, payments] = await Promise.all([
+      User.count({ where: { schoolId: school.id } }),
+      Student.count({ where: { schoolId: school.id } }),
+      Staff.count({ where: { schoolId: school.id } }),
+      SubscriptionPayment.findAll({
+        where: { schoolId: school.id },
+        order: [['createdAt', 'DESC']],
+        limit: 20
+      })
+    ]);
+
+    res.json({
+      success: true,
+      school,
+      stats: { userCount, studentCount, staffCount },
+      payments
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ---------- Update subscription ----------
+app.patch('/api/super-admin/schools/:id/subscription', authenticate, requireSuperAdmin, async (req, res) => {
+  try {
+    const {
+      subscriptionPlan, subscriptionStatus, subscriptionEndsAt,
+      trialEndsAt, maxStudents, maxStaff, billingNotes
+    } = req.body;
+
+    const school = await School.findByPk(req.params.id);
+    if (!school) return res.status(404).json({ success: false, message: 'School not found' });
+
+    const updates = {};
+    if (subscriptionPlan) updates.subscriptionPlan = subscriptionPlan;
+    if (subscriptionStatus) updates.subscriptionStatus = subscriptionStatus;
+    if (subscriptionEndsAt !== undefined) updates.subscriptionEndsAt = subscriptionEndsAt ? new Date(subscriptionEndsAt) : null;
+    if (trialEndsAt !== undefined) updates.trialEndsAt = trialEndsAt ? new Date(trialEndsAt) : null;
+    if (maxStudents !== undefined) updates.maxStudents = parseInt(maxStudents, 10);
+    if (maxStaff !== undefined) updates.maxStaff = parseInt(maxStaff, 10);
+    if (billingNotes !== undefined) updates.billingNotes = billingNotes;
+
+    await school.update(updates);
+    userCache.clear();
+
+    // ✅ Platform-scoped audit — schoolId = null
+    await createPlatformAuditLog(req, 'UPDATE_SUBSCRIPTION', 'SCHOOL', school.id, null, {
+      ...updates,
+      schoolName: school.name
+    });
+
+    res.json({ success: true, school });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ---------- Record payment ----------
+app.post('/api/super-admin/schools/:id/subscription-payment', authenticate, requireSuperAdmin, async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const { amount, plan, periodStart, periodEnd, paymentMethod, reference, notes } = req.body;
+
+    const school = await School.findByPk(req.params.id, { transaction: t });
+    if (!school) {
+      await t.rollback();
+      return res.status(404).json({ success: false, message: 'School not found' });
+    }
+
+    const payment = await SubscriptionPayment.create({
+      schoolId: school.id,
+      amount: parseFloat(amount),
+      plan: plan || school.subscriptionPlan,
+      periodStart: new Date(periodStart),
+      periodEnd: new Date(periodEnd),
+      paymentMethod: paymentMethod || 'MANUAL',
+      reference: reference || null,
+      notes: notes || null,
+      recordedBy: req.user.id
+    }, { transaction: t });
+
+    await school.update({
+      subscriptionStatus: 'ACTIVE',
+      subscriptionPlan: plan || school.subscriptionPlan,
+      subscriptionEndsAt: new Date(periodEnd),
+      lastPaymentAt: new Date(),
+      lastPaymentAmount: parseFloat(amount)
+    }, { transaction: t });
+
+    await t.commit();
+    userCache.clear();
+
+    // ✅ Platform-scoped audit — schoolId = null
+    await createPlatformAuditLog(req, 'RECORD_SUBSCRIPTION_PAYMENT', 'SCHOOL', school.id, null, {
+      amount: parseFloat(amount),
+      plan: plan || school.subscriptionPlan,
+      periodEnd,
+      schoolName: school.name
+    });
+
+    res.json({ success: true, payment, school });
+  } catch (err) {
+    await t.rollback();
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ---------- Suspend ----------
+app.patch('/api/super-admin/schools/:id/suspend', authenticate, requireSuperAdmin, async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const school = await School.findByPk(req.params.id);
+    if (!school) return res.status(404).json({ success: false, message: 'School not found' });
+
+    await school.update({
+      subscriptionStatus: 'SUSPENDED',
+      billingNotes: reason || school.billingNotes
+    });
+    userCache.clear();
+
+    // ✅ Platform-scoped audit — schoolId = null
+    await createPlatformAuditLog(req, 'SUSPEND_SCHOOL', 'SCHOOL', school.id, null, {
+      reason,
+      schoolName: school.name
+    });
+
+    res.json({ success: true, school });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ---------- Reactivate ----------
+app.patch('/api/super-admin/schools/:id/reactivate', authenticate, requireSuperAdmin, async (req, res) => {
+  try {
+    const { subscriptionEndsAt } = req.body;
+    const school = await School.findByPk(req.params.id);
+    if (!school) return res.status(404).json({ success: false, message: 'School not found' });
+
+    await school.update({
+      subscriptionStatus: 'ACTIVE',
+      subscriptionEndsAt: subscriptionEndsAt ? new Date(subscriptionEndsAt) : school.subscriptionEndsAt
+    });
+    userCache.clear();
+
+    // ✅ Platform-scoped audit — schoolId = null
+    await createPlatformAuditLog(req, 'REACTIVATE_SCHOOL', 'SCHOOL', school.id, null, {
+      subscriptionEndsAt,
+      schoolName: school.name
+    });
+
+    res.json({ success: true, school });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ---------- Impersonate (enter school as its admin) ----------
+app.post('/api/super-admin/schools/:id/impersonate', authenticate, requireSuperAdmin, async (req, res) => {
+  try {
+    const school = await School.findByPk(req.params.id);
+    if (!school) return res.status(404).json({ success: false, message: 'School not found' });
+
+    // Find the primary admin of this school
+    const admin = await User.findOne({
+      where: {
+        schoolId: school.id,
+        role: { [Op.in]: ['SCHOOL_ADMIN', 'PRINCIPAL'] }
+      },
+      order: [['createdAt', 'ASC']]
+    });
+
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: 'This school has no admin user to impersonate.'
+      });
+    }
+
+    const token = jwt.sign(
+      { id: admin.id, email: admin.email, role: admin.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '4h' }
+    );
+
+    // ✅ Platform-scoped audit — schoolId = null so school admin never sees it
+    await createPlatformAuditLog(req, 'IMPERSONATE', 'SCHOOL', school.id, null, {
+      impersonatedBy: req.user.id,
+      impersonatedByEmail: req.user.email,
+      impersonatedUserId: admin.id,
+      schoolName: school.name
+    });
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: admin.id,
+        email: admin.email,
+        firstName: admin.firstName,
+        lastName: admin.lastName,
+        role: admin.role,
+        schoolId: school.id
+      },
+      school
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ---------- Billing status (for locked-out users) ----------
+app.get('/api/billing/status', authenticateToken, async (req, res) => {
+  try {
+    if (!req.user?.schoolId) return res.json({ success: true, status: null });
+    const school = await School.findByPk(req.user.schoolId, {
+      attributes: ['id', 'name', 'subscriptionStatus', 'subscriptionPlan', 'trialEndsAt', 'subscriptionEndsAt', 'lastPaymentAt']
+    });
+    res.json({ success: true, status: school });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -16141,63 +16978,71 @@ app.patch('/api/features/:code/toggle', authenticate, requireSchoolAdmin, async 
 
 // ==================== AUDIT LOGS ROUTE ====================
 
+// ==================== AUDIT LOGS ROUTE ====================
 app.get('/api/audit-logs', authenticate, async (req, res) => {
   try {
     const { entity, action, startDate, endDate, limit = 100 } = req.query;
     const where = {};
-    
+
     if (req.user.role !== 'SUPER_ADMIN') {
       where.schoolId = req.user.schoolId;
+
+      // ✅ Hide platform-level actions from school admins
+      where.action = {
+        [Op.notIn]: PLATFORM_AUDIT_ACTIONS
+      };
+    } else {
+      // SUPER_ADMIN: no school filter — sees everything
+      // Optionally, if you want to scope to one school from a filter:
+      if (req.query.schoolId) where.schoolId = req.query.schoolId;
     }
 
     if (entity) where.entity = entity;
-    if (action) where.action = action;
+    if (action && !where.action) where.action = action;
     if (startDate && endDate) {
-      where.timestamp = { 
-        [Op.between]: [new Date(startDate), new Date(endDate)] 
+      where.timestamp = {
+        [Op.between]: [new Date(startDate), new Date(endDate)]
       };
     }
 
     const logs = await AuditLog.findAll({
       where,
       include: [
-        { 
-          model: User, 
+        {
+          model: User,
           attributes: ['id', 'firstName', 'lastName', 'email', 'role'],
           required: false
         }
       ],
       order: [['timestamp', 'DESC']],
-      limit: parseInt(limit)
+      limit: parseInt(limit, 10)
     });
-    
+
     const formattedLogs = logs.map(log => {
       const logJson = log.toJSON();
-      
       if (logJson.User) {
-        logJson.userName = `${logJson.User.firstName || ''} ${logJson.User.lastName || ''}`.trim() || logJson.User.email || 'Unknown';
-      } 
-      else if (logJson.userId) {
-        logJson.userName = `User ${logJson.userId.substring(0, 8)}...`;
-      }
-      else {
+        logJson.userName = `${logJson.User.firstName || ''} ${logJson.User.lastName || ''}`.trim()
+          || logJson.User.email
+          || 'Unknown';
+      } else if (logJson.userId) {
+        logJson.userName = `User ${String(logJson.userId).substring(0, 8)}...`;
+      } else {
         logJson.userName = 'System';
       }
-      
       return logJson;
     });
-    
-    res.json({ 
-      success: true, 
+
+    res.json({
+      success: true,
       logs: formattedLogs,
       count: formattedLogs.length
     });
   } catch (error) {
     console.error('❌ Get audit logs error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error', 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
     });
   }
 });
@@ -26678,7 +27523,42 @@ const PORT = process.env.PORT || 5000;
     } catch (err) {
       console.error('⚠️  School migration failed:', err.message);
     }
+// ============================================================
+//  3D. School — Subscription columns
+// ============================================================
+try {
+  const hasSchool = await tableExists('Schools');
+  if (hasSchool) {
+    const cols = [
+      ['trialEndsAt',        { type: DataTypes.DATE, allowNull: true }],
+      ['subscriptionEndsAt', { type: DataTypes.DATE, allowNull: true }],
+      ['subscriptionStatus', { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'TRIAL' }],
+      ['subscriptionPlan',   { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'FREE' }],
+      ['maxStudents',        { type: DataTypes.INTEGER, allowNull: false, defaultValue: 100 }],
+      ['maxStaff',           { type: DataTypes.INTEGER, allowNull: false, defaultValue: 20 }],
+      ['lastPaymentAt',      { type: DataTypes.DATE, allowNull: true }],
+      ['lastPaymentAmount',  { type: DataTypes.DECIMAL(10, 2), allowNull: true }],
+      ['billingNotes',       { type: DataTypes.TEXT, allowNull: true }]
+    ];
+    for (const [name, def] of cols) {
+      if (!(await columnExists('Schools', name))) {
+        await queryInterface.addColumn('Schools', name, def);
+        console.log(`✅ Migration: added Schools.${name}`);
+      }
+    }
+  }
+} catch (err) {
+  console.error('⚠️  Subscription migration failed:', err.message);
+}
 
+try {
+  if (!(await tableExists('SubscriptionPayments'))) {
+    await SubscriptionPayment.sync();
+    console.log('✅ Migration: created SubscriptionPayments table');
+  }
+} catch (err) {
+  console.error('⚠️  SubscriptionPayments migration failed:', err.message);
+}
     // ============================================================
     //  3B. ExamCardOverrides table
     // ============================================================
