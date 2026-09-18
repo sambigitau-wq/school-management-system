@@ -15,6 +15,49 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' }
 });
 
+// ✅ Global 402 handler — subscription expired / blocked
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 402) {
+      const code = error.response.data?.code;
+      const message = error.response.data?.message || 'Your subscription has expired.';
+
+      if (error.config?.url?.includes('/billing/status')) {
+        return Promise.reject(error);
+      }
+
+      if (!document.getElementById('__subscription_block')) {
+        const block = document.createElement('div');
+        block.id = '__subscription_block';
+        block.style.cssText = `
+          position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+          z-index: 99999; display: flex; align-items: center; justify-content: center;
+          color: white; font-family: system-ui, sans-serif; padding: 20px;
+        `;
+        block.innerHTML = `
+          <div style="max-width: 480px; text-align: center;">
+            <div style="font-size: 64px; margin-bottom: 16px;">🔒</div>
+            <h1 style="font-size: 24px; margin-bottom: 12px;">Subscription Expired</h1>
+            <p style="opacity: 0.8; margin-bottom: 24px;">${message}</p>
+            <p style="opacity: 0.6; font-size: 14px; margin-bottom: 24px;">
+              Code: ${code || 'SUBSCRIPTION_EXPIRED'}<br>
+              Contact your school administrator to renew.
+            </p>
+            <button onclick="localStorage.clear(); window.location.href='/'" 
+              style="background: #4f46e5; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer;">
+              Log Out
+            </button>
+          </div>
+        `;
+        document.body.appendChild(block);
+      }
+      return Promise.reject(error);
+    }
+    return Promise.reject(error);
+  }
+);
+
 // ✅ ADD THIS REQUEST INTERCEPTOR - REQUIRED FOR AUTH!
 api.interceptors.request.use(
   config => {
@@ -40041,6 +40084,1103 @@ const ExamCardOverridesModule = ({
   );
 };
 
+
+// ==================== FEATURE PICKER ====================
+const FeaturePicker = ({ value = [], onChange, disabled }) => {
+  const selected = new Set(value);
+
+  const toggle = (key) => {
+    if (disabled) return;
+    const next = new Set(selected);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    onChange(Array.from(next));
+  };
+
+  const selectAll = () => {
+    if (disabled) return;
+    const all = [];
+    Object.values(FEATURE_GROUPS).forEach(g => g.features.forEach(f => all.push(f.key)));
+    onChange(all);
+  };
+
+  const clearAll = () => {
+    if (disabled) return;
+    // keep locked ones
+    const locked = [];
+    Object.values(FEATURE_GROUPS).forEach(g =>
+      g.features.forEach(f => { if (f.locked) locked.push(f.key); })
+    );
+    onChange(locked);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="text-sm text-gray-600">
+          <i className="fas fa-sliders-h mr-1"></i>
+          Selected: <strong className="text-indigo-600">{selected.size}</strong> features
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={selectAll}
+            disabled={disabled}
+            className="text-xs px-3 py-1 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+          >
+            Select all
+          </button>
+          <button
+            type="button"
+            onClick={clearAll}
+            disabled={disabled}
+            className="text-xs px-3 py-1 rounded bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+          >
+            Clear all
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {Object.entries(FEATURE_GROUPS).map(([groupKey, group]) => (
+          <div key={groupKey} className="border rounded-lg p-3 bg-gray-50">
+            <h5 className="font-semibold text-sm text-gray-800 mb-2">
+              {group.label}
+            </h5>
+            <div className="space-y-1">
+              {group.features.map(f => (
+                <label
+                  key={f.key}
+                  className={`flex items-center gap-2 text-sm ${
+                    f.locked || disabled ? 'opacity-70' : 'cursor-pointer'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(f.key) || f.locked}
+                    disabled={f.locked || disabled}
+                    onChange={() => toggle(f.key)}
+                    className="rounded"
+                  />
+                  <span>{f.label}</span>
+                  {f.locked && (
+                    <span className="text-[10px] text-indigo-500 font-medium">LOCKED</span>
+                  )}
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+// ==================== SUPER ADMIN MODULE ====================
+const SuperAdminModule = ({ user }) => {
+  const [tab, setTab] = useState('overview');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  // Overview + schools
+  const [overview, setOverview] = useState(null);
+  const [schools, setSchools] = useState([]);
+  const [schoolSearch, setSchoolSearch] = useState('');
+  const [schoolStatusFilter, setSchoolStatusFilter] = useState('');
+
+  // School detail (subscription + billing)
+  const [selectedSchool, setSelectedSchool] = useState(null);
+  const [schoolDetail, setSchoolDetail] = useState(null);
+  const [editForm, setEditForm] = useState({
+    subscriptionPlan: 'BASIC',
+    subscriptionStatus: 'ACTIVE',
+    subscriptionEndsAt: '',
+    trialEndsAt: '',
+    maxStudents: 500,
+    maxStaff: 50,
+    billingNotes: ''
+  });
+  const [paymentForm, setPaymentForm] = useState({
+    amount: '',
+    plan: 'BASIC',
+    periodStart: new Date().toISOString().split('T')[0],
+    periodEnd: '',
+    paymentMethod: 'MANUAL',
+    reference: '',
+    notes: ''
+  });
+
+  // Features modal
+  const [featureModalSchool, setFeatureModalSchool] = useState(null);
+  const [featureModalSelected, setFeatureModalSelected] = useState([]);
+  const [featureCatalog, setFeatureCatalog] = useState(null);
+  const [featurePresets, setFeaturePresets] = useState(null);
+
+  // Create school form
+  const [createForm, setCreateForm] = useState({
+    name: '',
+    category: 'ECDE_PRIMARY_JSS',
+    contact: {
+      email: '', phone: '', address: '', logo: '',
+      county: '', constituency: '', ward: '',
+      postalAddress: '', website: ''
+    },
+    motto: '',
+    established: '',
+    admin: {
+      firstName: '', lastName: '', email: '', password: '', phone: ''
+    },
+    features: []
+  });
+
+  const PLAN_INFO = {
+    FREE:       { name: 'Free',       price: 0,     color: 'gray' },
+    BASIC:      { name: 'Basic',      price: 2500,  color: 'blue' },
+    STANDARD:   { name: 'Standard',   price: 5000,  color: 'indigo' },
+    PREMIUM:    { name: 'Premium',    price: 10000, color: 'purple' },
+    ENTERPRISE: { name: 'Enterprise', price: 25000, color: 'amber' }
+  };
+
+  const fmt = (n) => new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 }).format(n || 0);
+  const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+
+  const statusBadge = (status) => {
+    const map = {
+      ACTIVE:    'bg-green-100 text-green-800',
+      TRIAL:     'bg-blue-100 text-blue-800',
+      PAST_DUE:  'bg-yellow-100 text-yellow-800',
+      EXPIRED:   'bg-red-100 text-red-800',
+      SUSPENDED: 'bg-red-200 text-red-900',
+      CANCELLED: 'bg-gray-200 text-gray-800'
+    };
+    return map[status] || 'bg-gray-100 text-gray-700';
+  };
+
+  // ==================== LOADERS ====================
+  const loadOverview = async () => {
+    try {
+      const res = await api.get('/super-admin/overview');
+      setOverview(res.data.overview);
+    } catch (err) { setError(err.response?.data?.message || 'Failed'); }
+  };
+
+  const loadSchools = async () => {
+    setLoading(true);
+    try {
+      const params = {};
+      if (schoolSearch) params.search = schoolSearch;
+      if (schoolStatusFilter) params.status = schoolStatusFilter;
+      const res = await api.get('/super-admin/schools', { params });
+      setSchools(res.data.schools || []);
+    } catch (err) { setError(err.response?.data?.message || 'Failed'); }
+    finally { setLoading(false); }
+  };
+
+  const loadFeatureCatalog = async () => {
+    if (featureCatalog) return;
+    try {
+      const res = await api.get('/super-admin/features');
+      setFeatureCatalog(res.data.catalog);
+      setFeaturePresets(res.data.presets);
+    } catch (err) { setError(err.response?.data?.message || 'Failed to load features'); }
+  };
+
+  const loadSchoolDetail = async (id) => {
+    setLoading(true);
+    try {
+      const res = await api.get(`/super-admin/schools/${id}`);
+      setSchoolDetail(res.data);
+      setSelectedSchool(res.data.school);
+      setEditForm({
+        subscriptionPlan: res.data.school.subscriptionPlan || 'BASIC',
+        subscriptionStatus: res.data.school.subscriptionStatus || 'ACTIVE',
+        subscriptionEndsAt: res.data.school.subscriptionEndsAt
+          ? new Date(res.data.school.subscriptionEndsAt).toISOString().split('T')[0] : '',
+        trialEndsAt: res.data.school.trialEndsAt
+          ? new Date(res.data.school.trialEndsAt).toISOString().split('T')[0] : '',
+        maxStudents: res.data.school.maxStudents || 500,
+        maxStaff: res.data.school.maxStaff || 50,
+        billingNotes: res.data.school.billingNotes || ''
+      });
+    } catch (err) { setError(err.response?.data?.message || 'Failed'); }
+    finally { setLoading(false); }
+  };
+
+  // ==================== SUBSCRIPTION ====================
+  const saveSubscription = async () => {
+    if (!selectedSchool) return;
+    setLoading(true); setError(''); setSuccess('');
+    try {
+      await api.patch(`/super-admin/schools/${selectedSchool.id}/subscription`, {
+        ...editForm,
+        subscriptionEndsAt: editForm.subscriptionEndsAt || null,
+        trialEndsAt: editForm.trialEndsAt || null,
+        maxStudents: parseInt(editForm.maxStudents, 10),
+        maxStaff: parseInt(editForm.maxStaff, 10)
+      });
+      setSuccess('Subscription updated');
+      await loadSchoolDetail(selectedSchool.id);
+      await loadSchools();
+    } catch (err) { setError(err.response?.data?.message || 'Failed'); }
+    finally { setLoading(false); setTimeout(() => setSuccess(''), 3000); }
+  };
+
+  const recordPayment = async () => {
+    if (!selectedSchool) return;
+    setLoading(true); setError(''); setSuccess('');
+    try {
+      await api.post(`/super-admin/schools/${selectedSchool.id}/subscription-payment`, {
+        amount: parseFloat(paymentForm.amount),
+        plan: paymentForm.plan,
+        periodStart: paymentForm.periodStart,
+        periodEnd: paymentForm.periodEnd,
+        paymentMethod: paymentForm.paymentMethod,
+        reference: paymentForm.reference,
+        notes: paymentForm.notes
+      });
+      setSuccess('Payment recorded');
+      await loadSchoolDetail(selectedSchool.id);
+      await loadSchools();
+    } catch (err) { setError(err.response?.data?.message || 'Failed'); }
+    finally { setLoading(false); setTimeout(() => setSuccess(''), 3000); }
+  };
+
+  const suspendSchool = async () => {
+    if (!selectedSchool) return;
+    const reason = prompt('Reason for suspension:');
+    if (!reason) return;
+    setLoading(true);
+    try {
+      await api.patch(`/super-admin/schools/${selectedSchool.id}/suspend`, { reason });
+      setSuccess('School suspended');
+      await loadSchoolDetail(selectedSchool.id);
+      await loadSchools();
+    } catch (err) { setError(err.response?.data?.message || 'Failed'); }
+    finally { setLoading(false); }
+  };
+
+  const reactivateSchool = async () => {
+    if (!selectedSchool) return;
+    const end = prompt('New subscription end date (YYYY-MM-DD):', editForm.subscriptionEndsAt || '');
+    if (!end) return;
+    setLoading(true);
+    try {
+      await api.patch(`/super-admin/schools/${selectedSchool.id}/reactivate`, { subscriptionEndsAt: end });
+      setSuccess('School reactivated');
+      await loadSchoolDetail(selectedSchool.id);
+      await loadSchools();
+    } catch (err) { setError(err.response?.data?.message || 'Failed'); }
+    finally { setLoading(false); }
+  };
+
+  const impersonateSchool = async (schoolId) => {
+    if (!window.confirm('Enter this school\'s portal as its admin?')) return;
+    setLoading(true);
+    try {
+      const res = await api.post(`/super-admin/schools/${schoolId}/impersonate`);
+      localStorage.setItem('superAdminToken', localStorage.getItem('token'));
+      localStorage.setItem('superAdminUser', localStorage.getItem('user'));
+      localStorage.setItem('token', res.data.token);
+      localStorage.setItem('user', JSON.stringify(res.data.user));
+      window.location.reload();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to impersonate');
+      setLoading(false);
+    }
+  };
+
+  // ==================== FEATURES ====================
+  const openFeatureModal = async (school) => {
+    await loadFeatureCatalog();
+    try {
+      const res = await api.get(`/super-admin/schools/${school.id}/features`);
+      setFeatureModalSchool(school);
+      setFeatureModalSelected(res.data.enabled || []);
+    } catch (err) { setError(err.response?.data?.message || 'Failed'); }
+  };
+
+  const saveFeatures = async () => {
+    if (!featureModalSchool) return;
+    setLoading(true); setError(''); setSuccess('');
+    try {
+      await api.patch(`/super-admin/schools/${featureModalSchool.id}/features`, {
+        features: featureModalSelected
+      });
+      setSuccess(`Features updated for ${featureModalSchool.name}. Users will see the change on next login.`);
+      setFeatureModalSchool(null);
+    } catch (err) { setError(err.response?.data?.message || 'Failed'); }
+    finally { setLoading(false); setTimeout(() => setSuccess(''), 4000); }
+  };
+
+  const toggleFeature = (key, locked) => {
+    if (locked) return;
+    setFeatureModalSelected(prev =>
+      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+    );
+  };
+
+  const applyPreset = (presetKey) => {
+    const preset = featurePresets?.[presetKey];
+    if (!preset) return;
+    setFeatureModalSelected([...preset]);
+  };
+
+  // ==================== CREATE SCHOOL ====================
+  const applyCreatePreset = (category) => {
+    if (!featurePresets) return;
+    const preset = featurePresets[category] || featurePresets.ECDE_PRIMARY_JSS || [];
+    setCreateForm(prev => ({ ...prev, category, features: [...preset] }));
+  };
+
+  const toggleCreateFeature = (key, locked) => {
+    if (locked) return;
+    setCreateForm(prev => ({
+      ...prev,
+      features: prev.features.includes(key)
+        ? prev.features.filter(k => k !== key)
+        : [...prev.features, key]
+    }));
+  };
+
+  const createSchool = async () => {
+    setLoading(true); setError(''); setSuccess('');
+    try {
+      if (!createForm.name.trim()) throw new Error('School name is required');
+      if (!createForm.admin.email.trim()) throw new Error('Admin email is required');
+      if (!createForm.admin.password || createForm.admin.password.length < 6) {
+        throw new Error('Admin password must be at least 6 characters');
+      }
+
+      const res = await api.post('/schools', {
+        name: createForm.name,
+        category: createForm.category,
+        contact: createForm.contact,
+        motto: createForm.motto,
+        established: createForm.established,
+        features: createForm.features,
+        admin: createForm.admin,
+        subscription: { plan: 'BASIC' }
+      });
+
+      setSuccess(`✅ School "${res.data.school.name}" created with ${res.data.seeding?.featuresEnabled || createForm.features.length} features.`);
+      setCreateForm({
+        name: '',
+        category: 'ECDE_PRIMARY_JSS',
+        contact: { email: '', phone: '', address: '', logo: '', county: '', constituency: '', ward: '', postalAddress: '', website: '' },
+        motto: '',
+        established: '',
+        admin: { firstName: '', lastName: '', email: '', password: '', phone: '' },
+        features: featurePresets?.ECDE_PRIMARY_JSS || []
+      });
+      await loadSchools();
+      await loadOverview();
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || 'Failed to create school');
+    } finally {
+      setLoading(false);
+      setTimeout(() => setSuccess(''), 6000);
+    }
+  };
+
+  // ==================== EFFECTS ====================
+  useEffect(() => { loadOverview(); loadSchools(); loadFeatureCatalog(); }, []);
+  useEffect(() => { if (schoolSearch || schoolStatusFilter) loadSchools(); }, [schoolSearch, schoolStatusFilter]);
+
+  // Pre-fill features when category changes on the create form
+  useEffect(() => {
+    if (featurePresets) {
+      const preset = featurePresets[createForm.category] || featurePresets.ECDE_PRIMARY_JSS || [];
+      setCreateForm(prev => ({ ...prev, features: [...preset] }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [createForm.category, featurePresets]);
+
+  // ==================== RENDER ====================
+  return (
+    <div className="space-y-6">
+      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50" />}
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
+          <span><i className="fas fa-exclamation-circle mr-2"></i>{error}</span>
+          <button onClick={() => setError('')}><i className="fas fa-times"></i></button>
+        </div>
+      )}
+      {success && (
+        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center justify-between">
+          <span><i className="fas fa-check-circle mr-2"></i>{success}</span>
+          <button onClick={() => setSuccess('')}><i className="fas fa-times"></i></button>
+        </div>
+      )}
+
+      <div className="flex justify-between items-center flex-wrap gap-3">
+        <h1 className="text-2xl font-bold flex items-center gap-2">
+          <i className="fas fa-crown text-amber-500"></i>
+          Super Admin
+        </h1>
+        <span className="text-sm text-gray-500">
+          Signed in as <strong>{user?.email}</strong>
+        </span>
+      </div>
+
+      {/* TABS */}
+      <div className="bg-white rounded-xl shadow-sm p-1 flex flex-wrap gap-1">
+        {[
+          { key: 'overview', label: 'Overview',       icon: 'fa-chart-pie' },
+          { key: 'schools',  label: 'Schools',        icon: 'fa-school' },
+          { key: 'create',   label: 'Create School',  icon: 'fa-plus-circle' },
+          { key: 'revenue',  label: 'Revenue',        icon: 'fa-coins' }
+        ].map(t => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${tab === t.key ? 'bg-indigo-600 text-white' : 'text-gray-700 hover:bg-gray-100'}`}
+          >
+            <i className={`fas ${t.icon} mr-2`}></i>{t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ==================== OVERVIEW ==================== */}
+      {tab === 'overview' && overview && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            { label: 'Total Schools',   value: overview.totalSchools,     color: 'blue' },
+            { label: 'Active',          value: overview.activeSchools,    color: 'green' },
+            { label: 'Trial',           value: overview.trialSchools,     color: 'indigo' },
+            { label: 'Expired',         value: overview.expiredSchools,   color: 'red' },
+            { label: 'Suspended',       value: overview.suspendedSchools, color: 'orange' },
+            { label: 'Total Users',     value: overview.totalUsers,       color: 'purple' },
+            { label: 'Total Students',  value: overview.totalStudents,    color: 'cyan' },
+            { label: 'Revenue (Month)', value: fmt(overview.revenueThisMonth), color: 'emerald' }
+          ].map((s, i) => (
+            <div key={i} className={`bg-gradient-to-br from-${s.color}-500 to-${s.color}-600 rounded-xl p-5 text-white`}>
+              <p className="text-xs opacity-90 uppercase tracking-wide">{s.label}</p>
+              <p className="text-2xl font-bold mt-1">{s.value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ==================== SCHOOLS ==================== */}
+      {tab === 'schools' && (
+        <div className="space-y-4">
+          <div className="bg-white p-4 rounded-xl shadow-sm flex flex-wrap gap-3 items-end">
+            <div className="flex-1 min-w-[200px]">
+              <label className="block text-sm font-medium mb-1">Search</label>
+              <input
+                value={schoolSearch}
+                onChange={(e) => setSchoolSearch(e.target.value)}
+                placeholder="School name or code"
+                className="w-full px-3 py-2 border rounded-lg"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Status</label>
+              <select
+                value={schoolStatusFilter}
+                onChange={(e) => setSchoolStatusFilter(e.target.value)}
+                className="px-3 py-2 border rounded-lg"
+              >
+                <option value="">All</option>
+                <option value="TRIAL">Trial</option>
+                <option value="ACTIVE">Active</option>
+                <option value="PAST_DUE">Past Due</option>
+                <option value="EXPIRED">Expired</option>
+                <option value="SUSPENDED">Suspended</option>
+                <option value="CANCELLED">Cancelled</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-3 py-2 text-left">School</th>
+                  <th className="px-3 py-2 text-left">Plan</th>
+                  <th className="px-3 py-2 text-left">Status</th>
+                  <th className="px-3 py-2 text-left">Ends</th>
+                  <th className="px-3 py-2 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {schools.map(s => (
+                  <tr key={s.id} className="hover:bg-gray-50">
+                    <td className="px-3 py-2">
+                      <div className="font-medium">{s.name}</div>
+                      <div className="text-xs text-gray-500">{s.code} • {s.category}</div>
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={`px-2 py-0.5 rounded-full text-xs bg-${PLAN_INFO[s.subscriptionPlan]?.color || 'gray'}-100`}>
+                        {PLAN_INFO[s.subscriptionPlan]?.name || s.subscriptionPlan}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={`px-2 py-0.5 rounded-full text-xs ${statusBadge(s.subscriptionStatus)}`}>
+                        {s.subscriptionStatus}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-xs">{fmtDate(s.subscriptionEndsAt)}</td>
+                    <td className="px-3 py-2 text-right space-x-2">
+                      <button
+                        onClick={() => openFeatureModal(s)}
+                        className="text-xs px-3 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200"
+                        title="Manage features"
+                      >
+                        <i className="fas fa-sliders-h mr-1"></i>Features
+                      </button>
+                      <button
+                        onClick={() => loadSchoolDetail(s.id)}
+                        className="text-xs px-3 py-1 bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200"
+                      >
+                        Manage
+                      </button>
+                      <button
+                        onClick={() => impersonateSchool(s.id)}
+                        className="text-xs px-3 py-1 bg-amber-100 text-amber-700 rounded hover:bg-amber-200"
+                        title="Enter this school's portal"
+                      >
+                        Enter
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {schools.length === 0 && !loading && (
+                  <tr><td colSpan="5" className="px-3 py-8 text-center text-gray-500">No schools found</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== CREATE SCHOOL ==================== */}
+      {tab === 'create' && (
+        <div className="bg-white rounded-xl shadow-sm p-6 space-y-6">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h2 className="text-lg font-semibold">Create a New School</h2>
+            <span className="text-xs text-gray-500">
+              Features are pre-filled based on the category.
+            </span>
+          </div>
+
+          {/* Basic info */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium mb-1">School Name *</label>
+              <input
+                value={createForm.name}
+                onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
+                className="w-full px-3 py-2 border rounded-lg"
+                placeholder="e.g., Green Valley Academy"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Category *</label>
+              <select
+                value={createForm.category}
+                onChange={(e) => setCreateForm({ ...createForm, category: e.target.value })}
+                className="w-full px-3 py-2 border rounded-lg"
+              >
+                <option value="ECDE_PRIMARY_JSS">ECDE + Primary + JSS</option>
+                <option value="SENIOR_SECONDARY">Senior Secondary</option>
+                <option value="COLLEGE_TVET">College / TVET</option>
+                <option value="UNIVERSITY">University</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Motto</label>
+              <input
+                value={createForm.motto}
+                onChange={(e) => setCreateForm({ ...createForm, motto: e.target.value })}
+                className="w-full px-3 py-2 border rounded-lg"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Contact Email</label>
+              <input
+                type="email"
+                value={createForm.contact.email}
+                onChange={(e) => setCreateForm({ ...createForm, contact: { ...createForm.contact, email: e.target.value } })}
+                className="w-full px-3 py-2 border rounded-lg"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Contact Phone</label>
+              <input
+                value={createForm.contact.phone}
+                onChange={(e) => setCreateForm({ ...createForm, contact: { ...createForm.contact, phone: e.target.value } })}
+                className="w-full px-3 py-2 border rounded-lg"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Established</label>
+              <input
+                value={createForm.established}
+                onChange={(e) => setCreateForm({ ...createForm, established: e.target.value })}
+                className="w-full px-3 py-2 border rounded-lg"
+                placeholder="e.g., 2010"
+              />
+            </div>
+          </div>
+
+          {/* Admin account */}
+          <div className="border-t pt-4">
+            <h3 className="text-md font-semibold mb-3 flex items-center gap-2">
+              <i className="fas fa-user-shield text-indigo-600"></i>
+              School Admin Account
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">First Name</label>
+                <input
+                  value={createForm.admin.firstName}
+                  onChange={(e) => setCreateForm({ ...createForm, admin: { ...createForm.admin, firstName: e.target.value } })}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Last Name</label>
+                <input
+                  value={createForm.admin.lastName}
+                  onChange={(e) => setCreateForm({ ...createForm, admin: { ...createForm.admin, lastName: e.target.value } })}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Email *</label>
+                <input
+                  type="email"
+                  value={createForm.admin.email}
+                  onChange={(e) => setCreateForm({ ...createForm, admin: { ...createForm.admin, email: e.target.value } })}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Password * (min 6 chars)</label>
+                <input
+                  type="text"
+                  value={createForm.admin.password}
+                  onChange={(e) => setCreateForm({ ...createForm, admin: { ...createForm.admin, password: e.target.value } })}
+                  className="w-full px-3 py-2 border rounded-lg font-mono"
+                  placeholder="Temporary password"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium mb-1">Phone</label>
+                <input
+                  value={createForm.admin.phone}
+                  onChange={(e) => setCreateForm({ ...createForm, admin: { ...createForm.admin, phone: e.target.value } })}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Feature picker */}
+          <div className="border-t pt-4">
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <h3 className="text-md font-semibold flex items-center gap-2">
+                <i className="fas fa-sliders-h text-purple-600"></i>
+                Enabled Features
+                <span className="text-xs text-gray-500 font-normal">
+                  ({createForm.features.length} selected)
+                </span>
+              </h3>
+              <div className="flex gap-2">
+                {featurePresets && Object.keys(featurePresets).map(presetKey => (
+                  <button
+                    key={presetKey}
+                    type="button"
+                    onClick={() => applyCreatePreset(presetKey)}
+                    className="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200"
+                  >
+                    {presetKey}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {featureCatalog ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {Object.entries(featureCatalog).map(([groupKey, features]) => (
+                  <div key={groupKey} className="border rounded-lg p-3 bg-gray-50">
+                    <h4 className="text-sm font-semibold capitalize mb-2">{groupKey}</h4>
+                    <div className="space-y-1">
+                      {features.map(f => (
+                        <label key={f.key} className={`flex items-center gap-2 text-xs ${f.locked ? 'opacity-60' : 'cursor-pointer'}`}>
+                          <input
+                            type="checkbox"
+                            checked={createForm.features.includes(f.key) || f.locked}
+                            disabled={f.locked}
+                            onChange={() => toggleCreateFeature(f.key, f.locked)}
+                            className="rounded"
+                          />
+                          <span>{f.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500">Loading feature catalogue…</p>
+            )}
+          </div>
+
+          <div className="flex justify-end pt-4 border-t">
+            <button
+              onClick={createSchool}
+              disabled={loading}
+              className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {loading ? (
+                <><i className="fas fa-spinner fa-spin mr-2"></i>Creating…</>
+              ) : (
+                <><i className="fas fa-plus-circle mr-2"></i>Create School</>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== REVENUE ==================== */}
+      {tab === 'revenue' && overview && (
+        <div className="bg-white rounded-xl shadow-sm p-6">
+          <h2 className="text-lg font-semibold mb-4">Revenue Overview</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-emerald-50 p-5 rounded-lg">
+              <p className="text-sm text-emerald-600">Revenue This Month</p>
+              <p className="text-2xl font-bold text-emerald-800">{fmt(overview.revenueThisMonth)}</p>
+            </div>
+            <div className="bg-blue-50 p-5 rounded-lg">
+              <p className="text-sm text-blue-600">Active Schools</p>
+              <p className="text-2xl font-bold text-blue-800">{overview.activeSchools}</p>
+            </div>
+            <div className="bg-purple-50 p-5 rounded-lg">
+              <p className="text-sm text-purple-600">Total Schools</p>
+              <p className="text-2xl font-bold text-purple-800">{overview.totalSchools}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== SCHOOL DETAIL (subscription modal) ==================== */}
+      {selectedSchool && tab === 'schools' && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-auto p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl p-6 max-h-[92vh] overflow-auto">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <h2 className="text-xl font-bold">{selectedSchool.name}</h2>
+                <p className="text-sm text-gray-500">{selectedSchool.code} • {selectedSchool.category}</p>
+              </div>
+              <button onClick={() => { setSelectedSchool(null); setSchoolDetail(null); }} className="text-gray-500 hover:text-gray-700">
+                <i className="fas fa-times text-xl"></i>
+              </button>
+            </div>
+
+            {schoolDetail?.stats && (
+              <div className="grid grid-cols-3 gap-3 mb-4">
+                <div className="bg-blue-50 p-3 rounded-lg text-center">
+                  <div className="text-xs text-blue-600">Users</div>
+                  <div className="text-xl font-bold text-blue-800">{schoolDetail.stats.userCount}</div>
+                </div>
+                <div className="bg-green-50 p-3 rounded-lg text-center">
+                  <div className="text-xs text-green-600">Students</div>
+                  <div className="text-xl font-bold text-green-800">{schoolDetail.stats.studentCount}</div>
+                </div>
+                <div className="bg-purple-50 p-3 rounded-lg text-center">
+                  <div className="text-xs text-purple-600">Staff</div>
+                  <div className="text-xl font-bold text-purple-800">{schoolDetail.stats.staffCount}</div>
+                </div>
+              </div>
+            )}
+
+            <h3 className="font-semibold mb-3">Subscription</h3>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Plan</label>
+                <select
+                  value={editForm.subscriptionPlan}
+                  onChange={(e) => setEditForm({ ...editForm, subscriptionPlan: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg"
+                >
+                  {Object.keys(PLAN_INFO).map(p => (
+                    <option key={p} value={p}>{PLAN_INFO[p].name} — {fmt(PLAN_INFO[p].price)}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Status</label>
+                <select
+                  value={editForm.subscriptionStatus}
+                  onChange={(e) => setEditForm({ ...editForm, subscriptionStatus: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg"
+                >
+                  <option value="TRIAL">Trial</option>
+                  <option value="ACTIVE">Active</option>
+                  <option value="PAST_DUE">Past Due</option>
+                  <option value="EXPIRED">Expired</option>
+                  <option value="SUSPENDED">Suspended</option>
+                  <option value="CANCELLED">Cancelled</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Subscription ends</label>
+                <input
+                  type="date"
+                  value={editForm.subscriptionEndsAt}
+                  onChange={(e) => setEditForm({ ...editForm, subscriptionEndsAt: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Trial ends</label>
+                <input
+                  type="date"
+                  value={editForm.trialEndsAt}
+                  onChange={(e) => setEditForm({ ...editForm, trialEndsAt: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Max students</label>
+                <input
+                  type="number"
+                  value={editForm.maxStudents}
+                  onChange={(e) => setEditForm({ ...editForm, maxStudents: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Max staff</label>
+                <input
+                  type="number"
+                  value={editForm.maxStaff}
+                  onChange={(e) => setEditForm({ ...editForm, maxStaff: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-sm font-medium mb-1">Billing notes</label>
+                <textarea
+                  value={editForm.billingNotes}
+                  onChange={(e) => setEditForm({ ...editForm, billingNotes: e.target.value })}
+                  rows={2}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2 mb-6 flex-wrap">
+              <button onClick={saveSubscription} disabled={loading} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                <i className="fas fa-save mr-2"></i>Save Subscription
+              </button>
+              <button onClick={() => { setSelectedSchool(null); openFeatureModal(selectedSchool); }} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700">
+                <i className="fas fa-sliders-h mr-2"></i>Manage Features
+              </button>
+              <button onClick={suspendSchool} disabled={loading} className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700">
+                <i className="fas fa-ban mr-2"></i>Suspend
+              </button>
+              <button onClick={reactivateSchool} disabled={loading} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">
+                <i className="fas fa-check mr-2"></i>Reactivate
+              </button>
+              <button onClick={() => impersonateSchool(selectedSchool.id)} disabled={loading} className="bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700">
+                <i className="fas fa-sign-in-alt mr-2"></i>Enter School Portal
+              </button>
+            </div>
+
+            <h3 className="font-semibold mb-3 mt-6">Record Payment</h3>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Amount</label>
+                <input
+                  type="number"
+                  value={paymentForm.amount}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg"
+                  placeholder="e.g., 5000"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Plan</label>
+                <select
+                  value={paymentForm.plan}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, plan: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg"
+                >
+                  {Object.keys(PLAN_INFO).map(p => (
+                    <option key={p} value={p}>{PLAN_INFO[p].name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Period start</label>
+                <input
+                  type="date"
+                  value={paymentForm.periodStart}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, periodStart: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Period end</label>
+                <input
+                  type="date"
+                  value={paymentForm.periodEnd}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, periodEnd: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Reference</label>
+                <input
+                  value={paymentForm.reference}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, reference: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg"
+                  placeholder="M-Pesa code, invoice #..."
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Notes</label>
+                <input
+                  value={paymentForm.notes}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+            </div>
+            <button onClick={recordPayment} disabled={loading || !paymentForm.amount || !paymentForm.periodEnd} className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+              <i className="fas fa-money-bill-wave mr-2"></i>Record Payment & Extend Subscription
+            </button>
+
+            {schoolDetail?.payments?.length > 0 && (
+              <>
+                <h3 className="font-semibold mb-3 mt-6">Payment History</h3>
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Date</th>
+                        <th className="px-3 py-2 text-left">Amount</th>
+                        <th className="px-3 py-2 text-left">Plan</th>
+                        <th className="px-3 py-2 text-left">Period</th>
+                        <th className="px-3 py-2 text-left">Reference</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {schoolDetail.payments.map(p => (
+                        <tr key={p.id}>
+                          <td className="px-3 py-2">{fmtDate(p.createdAt)}</td>
+                          <td className="px-3 py-2 font-bold">{fmt(p.amount)}</td>
+                          <td className="px-3 py-2">{p.plan}</td>
+                          <td className="px-3 py-2 text-xs">{fmtDate(p.periodStart)} → {fmtDate(p.periodEnd)}</td>
+                          <td className="px-3 py-2 text-xs">{p.reference || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ==================== FEATURES MODAL ==================== */}
+      {featureModalSchool && featureCatalog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-auto p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl p-6 max-h-[92vh] overflow-auto">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <h2 className="text-xl font-bold flex items-center gap-2">
+                  <i className="fas fa-sliders-h text-purple-600"></i>
+                  Manage Features — {featureModalSchool.name}
+                </h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  Check what this school can use. Users will see the change on next login.
+                </p>
+              </div>
+              <button onClick={() => setFeatureModalSchool(null)} className="text-gray-500 hover:text-gray-700">
+                <i className="fas fa-times text-xl"></i>
+              </button>
+            </div>
+
+            {/* Preset buttons */}
+            {featurePresets && (
+              <div className="mb-4 flex flex-wrap gap-2">
+                <span className="text-xs text-gray-500 py-1">Apply preset:</span>
+                {Object.keys(featurePresets).map(presetKey => (
+                  <button
+                    key={presetKey}
+                    onClick={() => applyPreset(presetKey)}
+                    className="text-xs px-3 py-1 rounded bg-gray-100 hover:bg-gray-200"
+                  >
+                    {presetKey}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Feature grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+              {Object.entries(featureCatalog).map(([groupKey, features]) => (
+                <div key={groupKey} className="border rounded-lg p-3 bg-gray-50">
+                  <h4 className="text-sm font-semibold capitalize mb-2">{groupKey}</h4>
+                  <div className="space-y-1">
+                    {features.map(f => (
+                      <label key={f.key} className={`flex items-center gap-2 text-xs ${f.locked ? 'opacity-60' : 'cursor-pointer'}`}>
+                        <input
+                          type="checkbox"
+                          checked={featureModalSelected.includes(f.key) || f.locked}
+                          disabled={f.locked}
+                          onChange={() => toggleFeature(f.key, f.locked)}
+                          className="rounded"
+                        />
+                        <span>{f.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-between items-center pt-4 border-t">
+              <span className="text-sm text-gray-500">
+                <strong className="text-indigo-600">{featureModalSelected.length}</strong> features will be enabled
+              </span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setFeatureModalSchool(null)}
+                  className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveFeatures}
+                  disabled={loading}
+                  className="bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                >
+                  {loading ? (
+                    <><i className="fas fa-spinner fa-spin mr-2"></i>Saving…</>
+                  ) : (
+                    <><i className="fas fa-save mr-2"></i>Save Features</>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 // ==================== COMPLETE SETTINGS MODULE ====================
 const SettingsModule = ({ 
   user, 
@@ -66915,6 +68055,65 @@ const unitOptions = useMemo(() => {
     </div>
   );
 };
+
+const MODULE_TO_FEATURE = {
+  'students':              'students',
+  'parents':               'parents_portal',
+  'classes':               'classes',
+  'subjects':              'subjects',
+  'exams':                 'exams',
+  'results':               'results',
+  'attendance':            'attendance',
+  'timetable':             'timetable',
+  'schemes-of-work':       'schemes_of_work',
+  'promotion':             'promotion',
+  'homework':              'homework',
+  'health':                'health',
+  'sickbay':               'sickbay',
+  'discipline':            'discipline',
+  'student-arrival':       'student_arrival',
+  'fees':                  'fees',
+  'fee-allocation':        'fee_allocation',
+  'fee-collection':        'fee_collection',
+  'fee-transfers':         'fee_transfers',
+  'receipt-history':       'receipt_history',
+  'other-income':          'other_income',
+  'expenses':              'expenses',
+  'fee-reminders':         'fee_reminders',
+  'staff':                 'staff',
+  'staff-attendance':      'staff_attendance',
+  'payroll':               'payroll',
+  'library':               'library',
+  'transport':             'transport',
+  'hostel':                'hostel',
+  'inventory':             'inventory',
+  'labs':                  'labs',
+  'course-enrollment':     'course_enrollment',
+  'unit-registration':     'unit_registration',
+  'course-units':          'course_units',
+  'faculties':             'faculties',
+  'departments':           'departments',
+  'courses':               'courses',
+  'programs':              'programs',
+  'research':              'research',
+  'announcements':         'announcements',
+  'events':                'events',
+  'messages':              'messages',
+  'live-classroom':        'live_classroom',
+  'online-exams':          'online_exams',
+  'receptionist':          'receptionist',
+  'alumni':                'alumni',
+  'card-management':       'card_management',
+  'certificates':          'certificates',
+  'exam-cards':            'exam_cards',
+  'exam-card-overrides':   'exam_card_overrides',
+  'reports':               'reports',
+  'audit-logs':            'audit_logs',
+  'users':                 'users',
+  'roles':                 'roles'
+
+};
+
 // ==================== MAIN APP COMPONENT ====================
 function App() {
   // ===== RESET PASSWORD ROUTE =====
@@ -67153,45 +68352,62 @@ const [examCardOverrides, setExamCardOverrides] = useState([]);
 const canAccessModule = (user, moduleId) => {
   if (!user) return false;
   if (user.role === 'SUPER_ADMIN') return true;
-  
+
+  // ============================================================
+  // ✅ FEATURE GATE — runs BEFORE the role gate.
+  // If the school doesn't have this feature enabled, the module
+  // is hidden regardless of the user's role.
+  // ============================================================
+  const requiredFeature = MODULE_TO_FEATURE[moduleId];
+  if (requiredFeature) {
+    // schoolFeatures is null for users without a school (rare).
+    // Only enforce when we actually have a list to compare against.
+    if (Array.isArray(user.schoolFeatures)) {
+      if (!user.schoolFeatures.includes(requiredFeature)) {
+        return false;
+      }
+    }
+  }
+
+  // ---------- ROLE GATE ----------
   // Role-based module access
   const roleModules = {
     'STUDENT': [
       'dashboard', 'results', 'attendance', 'exam-cards', 'timetable',
       'course-units', 'fee-statement', 'library', 'events', 'announcements',
       'settings', 'course-enrollment', 'unit-registration', 'live-classroom',
-      'online-exams','homework' 
+      'online-exams','homework'
     ],
     'PARENT': [
       'dashboard', 'students', 'attendance', 'results', 'exam-cards',
       'fee-statement', 'library', 'timetable', 'events', 'announcements',
-      'settings','homework' 
+      'settings','homework'
     ],
     'TEACHER': [
       'dashboard', 'students', 'classes', 'subjects', 'exams', 'results',
       'attendance', 'timetable', 'schemes-of-work', 'student-arrival',
       'unit-registration', 'card-management', 'certificates', 'alumni',
       'live-classroom', 'online-exams', 'receptionist', 'announcements',
-      'events', 'settings', 'labs','homework' 
+      'events', 'settings', 'labs','homework'
     ],
     'CLASS_TEACHER': [
       'dashboard', 'students', 'classes', 'subjects', 'exams', 'results',
       'attendance', 'timetable', 'schemes-of-work', 'student-arrival',
       'card-management', 'certificates', 'alumni', 'live-classroom',
       'online-exams', 'receptionist', 'announcements', 'events', 'settings',
-      'labs','homework' 
+      'labs','homework'
     ],
     'SUBJECT_TEACHER': [
       'dashboard', 'students', 'subjects', 'exams', 'results', 'attendance',
       'timetable', 'schemes-of-work', 'student-arrival', 'live-classroom',
-      'online-exams', 'settings', 'labs','homework' 
+      'online-exams', 'settings', 'labs','homework'
     ],
     'SENIOR_TEACHER': [
       'dashboard', 'students', 'classes', 'subjects', 'exams', 'results',
       'attendance', 'timetable', 'schemes-of-work', 'student-arrival',
       'card-management', 'certificates', 'alumni', 'live-classroom',
       'online-exams', 'receptionist', 'announcements', 'events', 'settings',
-      'labs','homework' 
+      'labs','homework'
     ],
     'LECTURER': [
       'dashboard', 'students', 'attendance', 'results', 'exams', 'timetable',
@@ -67218,14 +68434,14 @@ const canAccessModule = (user, moduleId) => {
       'exams', 'results', 'timetable', 'attendance', 'promotion',
       'course-enrollment', 'unit-registration', 'card-management',
       'certificates', 'alumni', 'live-classroom', 'online-exams',
-      'receptionist', 'events', 'announcements', 'settings', 'labs','exam-card-overrides' 
+      'receptionist', 'events', 'announcements', 'settings', 'labs','exam-card-overrides'
     ],
     'HOD': [
       'dashboard', 'courses', 'course-units', 'students', 'staff',
       'student-arrival', 'exams', 'results', 'timetable', 'attendance',
       'schemes-of-work', 'promotion', 'course-enrollment', 'unit-registration',
       'card-management', 'certificates', 'alumni', 'live-classroom',
-      'online-exams', 'receptionist', 'events', 'announcements', 'settings','exam-card-overrides' ,
+      'online-exams', 'receptionist', 'events', 'announcements', 'settings','exam-card-overrides',
       'labs'
     ],
     'HEAD_OF_DEPARTMENT': [
@@ -67233,7 +68449,7 @@ const canAccessModule = (user, moduleId) => {
       'student-arrival', 'exams', 'results', 'timetable', 'attendance',
       'schemes-of-work', 'promotion', 'course-enrollment', 'unit-registration',
       'card-management', 'certificates', 'alumni', 'live-classroom',
-      'online-exams', 'receptionist', 'events', 'announcements', 'settings','exam-card-overrides' ,
+      'online-exams', 'receptionist', 'events', 'announcements', 'settings','exam-card-overrides',
       'labs'
     ],
     'PRINCIPAL': [
@@ -67244,19 +68460,19 @@ const canAccessModule = (user, moduleId) => {
       'staff-attendance', 'payroll', 'card-management', 'certificates',
       'alumni', 'live-classroom', 'online-exams', 'receptionist', 'events',
       'announcements', 'messages', 'settings', 'course-enrollment',
-      'unit-registration', 'health', 'sickbay', 'labs','homework' ,'exam-card-overrides' 
+      'unit-registration', 'health', 'sickbay', 'labs','homework','exam-card-overrides'
     ],
     'DEPUTY_PRINCIPAL': [
       'dashboard', 'students', 'attendance', 'timetable', 'exams', 'results',
       'schemes-of-work', 'promotion', 'exam-cards', 'student-arrival',
       'card-management', 'certificates', 'alumni', 'live-classroom',
       'online-exams', 'receptionist', 'events', 'announcements', 'settings',
-      'course-enrollment', 'unit-registration', 'labs','homework' ,'exam-card-overrides' 
+      'course-enrollment', 'unit-registration', 'labs','homework','exam-card-overrides'
     ],
     'ACCOUNTANT': [
       'dashboard', 'fees', 'fee-allocation', 'fee-collection', 'receipt-history',
       'other-income', 'expenses', 'reports', 'fee-reminders',  'fee-transfers', 'payroll',
-      'receptionist', 'events', 'announcements', 'settings','exam-card-overrides' 
+      'receptionist', 'events', 'announcements', 'settings','exam-card-overrides'
     ],
     'LIBRARIAN': [
       'dashboard', 'library', 'students', 'announcements', 'events',
@@ -67285,7 +68501,7 @@ const canAccessModule = (user, moduleId) => {
     'SCHOOL_ADMIN': [
       'dashboard', 'schools', 'users', 'roles', 'classes', 'subjects',
       'students', 'exams', 'results', 'attendance', 'timetable',
-      'schemes-of-work', 'course-units', 'promotion', 'exam-cards','exam-card-overrides' ,
+      'schemes-of-work', 'course-units', 'promotion', 'exam-cards','exam-card-overrides',
       'student-arrival', 'fees', 'fee-allocation', 'fee-collection',
       'receipt-history', 'other-income', 'expenses', 'reports',
       'fee-reminders','fee-transfers', 'staff', 'staff-attendance', 'payroll',
@@ -67293,13 +68509,13 @@ const canAccessModule = (user, moduleId) => {
       'certificates', 'alumni', 'live-classroom', 'online-exams',
       'receptionist', 'events', 'announcements', 'messages', 'settings',
       'course-enrollment', 'unit-registration', 'health', 'sickbay',
-      'faculties', 'departments', 'courses', 'programs', 'labs', 'research','homework' 
+      'faculties', 'departments', 'courses', 'programs', 'labs', 'research','homework'
     ]
   };
 
   // Get modules for this role, fallback to empty array
   const allowedModules = roleModules[user.role] || ['dashboard'];
-  
+
   // Check if the module is allowed
   return allowedModules.includes(moduleId);
 };
@@ -68190,6 +69406,12 @@ if (isTVET) {
     return [
       dashboardSection,
       {
+        title: "SUPER ADMIN",
+        items: [
+          { icon: "crown", label: "Super Admin", id: 'super-admin' }
+        ]
+      },
+      {
         title: "SYSTEM MANAGEMENT",
         items: [
           { icon: "university", label: "Schools", id: 'schools' },
@@ -68207,7 +69429,6 @@ if (isTVET) {
       }
     ];
   }
-
   // ============================================
   // FALLBACK
   // ============================================
@@ -70061,7 +71282,28 @@ if (!token) {
 return (
   <div className="min-h-screen bg-gray-100 flex">
     <GlobalLoadingIndicator loading={loading} />
-    
+
+    {/* ✅ IMPERSONATION BANNER — shows only when impersonating */}
+    {localStorage.getItem('superAdminToken') && (
+      <div className="fixed top-0 left-0 right-0 z-[9999] bg-amber-500 text-white px-4 py-2 flex items-center justify-between shadow-lg">
+        <span className="text-sm">
+          <i className="fas fa-user-secret mr-2"></i>
+          You are impersonating a school account.
+        </span>
+        <button
+          onClick={() => {
+            localStorage.setItem('token', localStorage.getItem('superAdminToken'));
+            localStorage.setItem('user', localStorage.getItem('superAdminUser'));
+            localStorage.removeItem('superAdminToken');
+            localStorage.removeItem('superAdminUser');
+            window.location.reload();
+          }}
+          className="bg-white text-amber-700 px-3 py-1 rounded text-sm font-medium hover:bg-amber-50"
+        >
+          Exit & Return to Super Admin
+        </button>
+      </div>
+    )}
     {showStudentAdmissionModal && (
       <StudentAdmissionModal 
         message="dashboard"
@@ -70220,6 +71462,11 @@ return (
             courseEnrollments={courseEnrollments}
           />
         )}
+
+        {/* ✅ SUPER ADMIN MODULE */}
+{activeModule === 'super-admin' && user?.role === 'SUPER_ADMIN' && (
+  <SuperAdminModule user={user} />
+)}
 
         {activeModule === 'students' && canAccessModule(user, 'students') && (
           <StudentModule 
