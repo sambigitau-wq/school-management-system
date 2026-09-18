@@ -40215,6 +40215,7 @@ const SuperAdminModule = ({ user }) => {
   const [featureModalSelected, setFeatureModalSelected] = useState([]);
   const [featureCatalog, setFeatureCatalog] = useState(null);
   const [featurePresets, setFeaturePresets] = useState(null);
+  const [featureCatalogError, setFeatureCatalogError] = useState('');
 
   // Create school form
   const [createForm, setCreateForm] = useState({
@@ -40240,6 +40241,14 @@ const SuperAdminModule = ({ user }) => {
     PREMIUM:    { name: 'Premium',    price: 10000, color: 'purple' },
     ENTERPRISE: { name: 'Enterprise', price: 25000, color: 'amber' }
   };
+
+  // Categories the backend DB enum actually supports
+  const SCHOOL_CATEGORIES = [
+    { value: 'ECDE_PRIMARY_JSS', label: 'ECDE + Primary + JSS' },
+    { value: 'SENIOR_SECONDARY', label: 'Senior Secondary' },
+    { value: 'COLLEGE_TVET',     label: 'College / TVET' },
+    { value: 'UNIVERSITY',       label: 'University' }
+  ];
 
   const fmt = (n) => new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 }).format(n || 0);
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
@@ -40276,13 +40285,52 @@ const SuperAdminModule = ({ user }) => {
     finally { setLoading(false); }
   };
 
-  const loadFeatureCatalog = async () => {
-    if (featureCatalog) return;
+  // ✅ FIX: read BOTH `catalogue` (backend) and `catalog` (alias),
+  //    and surface a clear error instead of hanging forever.
+  const loadFeatureCatalog = async (force = false) => {
+    if (featureCatalog && !force) return;
+
+    setFeatureCatalogError('');
     try {
       const res = await api.get('/super-admin/features');
-      setFeatureCatalog(res.data.catalog);
-      setFeaturePresets(res.data.presets);
-    } catch (err) { setError(err.response?.data?.message || 'Failed to load features'); }
+      const data = res.data || {};
+
+      // Backend sends `catalogue`; fall back to `catalog`, then `allFeatures`.
+      const catalogue =
+        data.catalogue ||
+        data.catalog ||
+        data.featureCatalogue ||
+        data.allFeatures ||
+        null;
+
+      if (!catalogue) {
+        // Try to derive a grouped object from `allFeatures` if present
+        if (Array.isArray(data.allFeatures) && data.allFeatures.length > 0) {
+          const grouped = {};
+          for (const f of data.allFeatures) {
+            const g = f.group || 'Other';
+            if (!grouped[g]) grouped[g] = [];
+            grouped[g].push(f);
+          }
+          setFeatureCatalog(grouped);
+        } else {
+          setFeatureCatalogError(
+            'Backend returned no catalogue. Check that the /api/super-admin/features route is deployed.'
+          );
+          return;
+        }
+      } else {
+        setFeatureCatalog(catalogue);
+      }
+
+      setFeaturePresets(data.presets || {});
+    } catch (err) {
+      console.error('loadFeatureCatalog error:', err);
+      setFeatureCatalogError(
+        err.response?.data?.message ||
+        'Failed to load feature catalogue. Check your network tab.'
+      );
+    }
   };
 
   const loadSchoolDetail = async (id) => {
@@ -40373,30 +40421,59 @@ const SuperAdminModule = ({ user }) => {
     finally { setLoading(false); }
   };
 
+  // ✅ Impersonate — swap token, remember super admin, reload so
+  //    the school admin's /api/auth/me fires with the correct feature list.
   const impersonateSchool = async (schoolId) => {
     if (!window.confirm('Enter this school\'s portal as its admin?')) return;
     setLoading(true);
     try {
       const res = await api.post(`/super-admin/schools/${schoolId}/impersonate`);
-      localStorage.setItem('superAdminToken', localStorage.getItem('token'));
-      localStorage.setItem('superAdminUser', localStorage.getItem('user'));
+      if (!res.data?.success || !res.data?.token) {
+        throw new Error(res.data?.message || 'Impersonation failed');
+      }
+
+      // Remember the super admin session so we can restore it later
+      localStorage.setItem('superAdminToken', localStorage.getItem('token') || '');
+      localStorage.setItem('superAdminUser', localStorage.getItem('user') || '');
+      localStorage.setItem('impersonatedSchool', JSON.stringify(res.data.school || {}));
+
+      // Swap in the school admin session
       localStorage.setItem('token', res.data.token);
       localStorage.setItem('user', JSON.stringify(res.data.user));
-      window.location.reload();
+
+      // Clear cached feature state so the school admin's own list loads fresh
+      localStorage.removeItem('featureCatalogCache');
+
+      // Full reload → /api/auth/me runs with the new token
+      window.location.href = '/dashboard';
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to impersonate');
+      console.error('impersonate error:', err);
+      alert(err.response?.data?.message || err.message || 'Failed to impersonate');
       setLoading(false);
     }
   };
 
   // ==================== FEATURES ====================
   const openFeatureModal = async (school) => {
+    // Make sure the catalogue is loaded BEFORE opening the modal
     await loadFeatureCatalog();
+
+    setLoading(true);
     try {
       const res = await api.get(`/super-admin/schools/${school.id}/features`);
+      // Backend may return enabledFeatures or enabled — accept both.
+      const enabled =
+        res.data.enabledFeatures ||
+        res.data.enabled ||
+        res.data.features ||
+        [];
       setFeatureModalSchool(school);
-      setFeatureModalSelected(res.data.enabled || []);
-    } catch (err) { setError(err.response?.data?.message || 'Failed'); }
+      setFeatureModalSelected(Array.isArray(enabled) ? enabled : []);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to load school features');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const saveFeatures = async () => {
@@ -40406,7 +40483,10 @@ const SuperAdminModule = ({ user }) => {
       await api.patch(`/super-admin/schools/${featureModalSchool.id}/features`, {
         features: featureModalSelected
       });
-      setSuccess(`Features updated for ${featureModalSchool.name}. Users will see the change on next login.`);
+      setSuccess(
+        `Features updated for ${featureModalSchool.name}. ` +
+        `Users will see the change on next login.`
+      );
       setFeatureModalSchool(null);
     } catch (err) { setError(err.response?.data?.message || 'Failed'); }
     finally { setLoading(false); setTimeout(() => setSuccess(''), 4000); }
@@ -40462,7 +40542,10 @@ const SuperAdminModule = ({ user }) => {
         subscription: { plan: 'BASIC' }
       });
 
-      setSuccess(`✅ School "${res.data.school.name}" created with ${res.data.seeding?.featuresEnabled || createForm.features.length} features.`);
+      setSuccess(
+        `✅ School "${res.data.school.name}" created with ` +
+        `${res.data.seeding?.featuresEnabled ?? createForm.features.length} features.`
+      );
       setCreateForm({
         name: '',
         category: 'ECDE_PRIMARY_JSS',
@@ -40684,10 +40767,9 @@ const SuperAdminModule = ({ user }) => {
                 onChange={(e) => setCreateForm({ ...createForm, category: e.target.value })}
                 className="w-full px-3 py-2 border rounded-lg"
               >
-                <option value="ECDE_PRIMARY_JSS">ECDE + Primary + JSS</option>
-                <option value="SENIOR_SECONDARY">Senior Secondary</option>
-                <option value="COLLEGE_TVET">College / TVET</option>
-                <option value="UNIVERSITY">University</option>
+                {SCHOOL_CATEGORIES.map(c => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
+                ))}
               </select>
             </div>
 
@@ -40793,7 +40875,7 @@ const SuperAdminModule = ({ user }) => {
                   ({createForm.features.length} selected)
                 </span>
               </h3>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
                 {featurePresets && Object.keys(featurePresets).map(presetKey => (
                   <button
                     key={presetKey}
@@ -40828,6 +40910,11 @@ const SuperAdminModule = ({ user }) => {
                     </div>
                   </div>
                 ))}
+              </div>
+            ) : featureCatalogError ? (
+              <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
+                <i className="fas fa-exclamation-triangle mr-2"></i>
+                {featureCatalogError}
               </div>
             ) : (
               <p className="text-sm text-gray-500">Loading feature catalogue…</p>
@@ -40982,7 +41069,7 @@ const SuperAdminModule = ({ user }) => {
               <button onClick={saveSubscription} disabled={loading} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
                 <i className="fas fa-save mr-2"></i>Save Subscription
               </button>
-              <button onClick={() => { setSelectedSchool(null); openFeatureModal(selectedSchool); }} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700">
+              <button onClick={() => { const s = selectedSchool; setSelectedSchool(null); openFeatureModal(s); }} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700">
                 <i className="fas fa-sliders-h mr-2"></i>Manage Features
               </button>
               <button onClick={suspendSchool} disabled={loading} className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700">
@@ -41094,7 +41181,7 @@ const SuperAdminModule = ({ user }) => {
       )}
 
       {/* ==================== FEATURES MODAL ==================== */}
-      {featureModalSchool && featureCatalog && (
+      {featureModalSchool && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 overflow-auto p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl p-6 max-h-[92vh] overflow-auto">
             <div className="flex justify-between items-start mb-4">
@@ -41113,7 +41200,7 @@ const SuperAdminModule = ({ user }) => {
             </div>
 
             {/* Preset buttons */}
-            {featurePresets && (
+            {featurePresets && Object.keys(featurePresets).length > 0 && (
               <div className="mb-4 flex flex-wrap gap-2">
                 <span className="text-xs text-gray-500 py-1">Apply preset:</span>
                 {Object.keys(featurePresets).map(presetKey => (
@@ -41128,28 +41215,43 @@ const SuperAdminModule = ({ user }) => {
               </div>
             )}
 
-            {/* Feature grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
-              {Object.entries(featureCatalog).map(([groupKey, features]) => (
-                <div key={groupKey} className="border rounded-lg p-3 bg-gray-50">
-                  <h4 className="text-sm font-semibold capitalize mb-2">{groupKey}</h4>
-                  <div className="space-y-1">
-                    {features.map(f => (
-                      <label key={f.key} className={`flex items-center gap-2 text-xs ${f.locked ? 'opacity-60' : 'cursor-pointer'}`}>
-                        <input
-                          type="checkbox"
-                          checked={featureModalSelected.includes(f.key) || f.locked}
-                          disabled={f.locked}
-                          onChange={() => toggleFeature(f.key, f.locked)}
-                          className="rounded"
-                        />
-                        <span>{f.label}</span>
-                      </label>
-                    ))}
+            {/* Feature grid or error */}
+            {featureCatalog ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+                {Object.entries(featureCatalog).map(([groupKey, features]) => (
+                  <div key={groupKey} className="border rounded-lg p-3 bg-gray-50">
+                    <h4 className="text-sm font-semibold capitalize mb-2">{groupKey}</h4>
+                    <div className="space-y-1">
+                      {features.map(f => (
+                        <label key={f.key} className={`flex items-center gap-2 text-xs ${f.locked ? 'opacity-60' : 'cursor-pointer'}`}>
+                          <input
+                            type="checkbox"
+                            checked={featureModalSelected.includes(f.key) || f.locked}
+                            disabled={f.locked}
+                            onChange={() => toggleFeature(f.key, f.locked)}
+                            className="rounded"
+                          />
+                          <span>{f.label}</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : featureCatalogError ? (
+              <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3 mb-6">
+                <i className="fas fa-exclamation-triangle mr-2"></i>
+                {featureCatalogError}
+                <button
+                  onClick={() => loadFeatureCatalog(true)}
+                  className="ml-3 underline text-red-700 hover:text-red-900"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500 mb-6">Loading feature catalogue…</p>
+            )}
 
             <div className="flex justify-between items-center pt-4 border-t">
               <span className="text-sm text-gray-500">
@@ -41164,7 +41266,7 @@ const SuperAdminModule = ({ user }) => {
                 </button>
                 <button
                   onClick={saveFeatures}
-                  disabled={loading}
+                  disabled={loading || !featureCatalog}
                   className="bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 disabled:opacity-50"
                 >
                   {loading ? (
