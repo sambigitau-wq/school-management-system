@@ -34854,12 +34854,199 @@ const filtered = useMemo(() => {
     </div>
   );
 };
-// ==================== FEE ALLOCATION MODULE WITH SEARCHABLE SELECT + DISCOUNTS ====================
-const FeeAllocationModule = ({ 
-  fees, students, courses, classes, programs, currentSchool, user,
-  // ✅ NEW: discounts passed from parent
+// ============================================================
+//  FEE ALLOCATION SEARCHABLE SELECT — module scope, stable identity
+// ============================================================
+const FeeAllocationSearchableSelect = ({
+  label,
+  value,
+  onChange,
+  options = [],
+  placeholder = 'Search and select...',
+  disabled,
+  required,
+  className,
+  showClear = true,
+  emptyMessage = 'No options available'
+}) => {
+  const [search, setSearch] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const dropdownRef = useRef(null);
+  const inputRef = useRef(null);
+
+  const safeOptions = useMemo(() => {
+    const list = Array.isArray(options) ? options.filter(Boolean) : [];
+    const hasEmpty = list.some(opt => opt.value === '' || opt.value === null || opt.value === undefined);
+    return hasEmpty ? list : [{ value: '', label: '' }, ...list];
+  }, [options]);
+
+  const filteredOptions = useMemo(() => {
+    if (!String(search ?? '').trim()) return safeOptions;
+    const s = String(search).toLowerCase();
+    return safeOptions.filter(opt => {
+      const lbl = String(opt.label ?? '').toLowerCase();
+      const sub = String(opt.subLabel ?? '').toLowerCase();
+      const val = String(opt.value ?? '').toLowerCase();
+      return lbl.includes(s) || sub.includes(s) || val.includes(s);
+    });
+  }, [safeOptions, search]);
+
+  const selectedOption = useMemo(
+    () => safeOptions.find(opt => String(opt.value) === String(value)) || null,
+    [safeOptions, value]
+  );
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setIsOpen(false);
+        setIsFocused(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  useEffect(() => {
+    if (isFocused) return;
+    setSearch(selectedOption ? String(selectedOption.label ?? '') : '');
+  }, [selectedOption, isFocused]);
+
+  const handleSelect = (selectedValue) => {
+    onChange({ target: { value: selectedValue } });
+    const picked = safeOptions.find(opt => String(opt.value) === String(selectedValue));
+    setSearch(picked ? String(picked.label ?? '') : '');
+    setIsOpen(false);
+    setIsFocused(false);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const handleInputChange = (e) => {
+    const v = e.target.value;
+    setSearch(v);
+    setIsOpen(true);
+    setIsFocused(true);
+    if (v === '') onChange({ target: { value: '' } });
+  };
+
+  const handleFocus = () => {
+    setIsFocused(true);
+    setIsOpen(true);
+    if (selectedOption && inputRef.current) {
+      setSearch(String(selectedOption.label ?? ''));
+    }
+  };
+
+  const handleBlur = () => {
+    setTimeout(() => {
+      if (dropdownRef.current && dropdownRef.current.contains(document.activeElement)) return;
+      setIsOpen(false);
+      setIsFocused(false);
+      setSearch(selectedOption ? String(selectedOption.label ?? '') : '');
+    }, 150);
+  };
+
+  const handleClear = (e) => {
+    e.stopPropagation();
+    onChange({ target: { value: '' } });
+    setSearch('');
+    setIsOpen(false);
+    setIsFocused(false);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const display = isFocused ? search : (selectedOption ? String(selectedOption.label ?? '') : '');
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      {label && (
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          {label}
+          {required && <span className="text-red-500 ml-1">*</span>}
+        </label>
+      )}
+      <div className="relative">
+        <input
+          ref={inputRef}
+          type="text"
+          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
+            disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
+          } ${className || ''}`}
+          value={display}
+          onChange={handleInputChange}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
+          placeholder={placeholder}
+          disabled={disabled}
+          autoComplete="off"
+        />
+        {value && showClear && !disabled && (
+          <button
+            type="button"
+            onClick={handleClear}
+            className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 z-10"
+            title="Clear selection"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
+        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+          <svg
+            className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </div>
+      {isOpen && !disabled && (
+        <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
+          {safeOptions.length === 0 ? (
+            <div className="px-3 py-4 text-center text-gray-500 text-sm">{emptyMessage}</div>
+          ) : filteredOptions.length > 0 ? (
+            filteredOptions.map((opt, i) => (
+              <div
+                key={String(opt.value ?? i)}
+                className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
+                  String(opt.value) === String(value) ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
+                }`}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handleSelect(opt.value)}
+              >
+                <div className="font-medium">{String(opt.label ?? '')}</div>
+                {opt.subLabel && <div className="text-xs text-gray-500">{String(opt.subLabel)}</div>}
+              </div>
+            ))
+          ) : (
+            <div className="px-3 py-4 text-center text-gray-500 text-sm">
+              {String(search ?? '').trim() ? 'No results found' : 'Type to search...'}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ============================================================
+//  FEE ALLOCATION MODULE
+// ============================================================
+const FeeAllocationModule = ({
+  fees,
+  students,
+  courses,
+  classes,
+  programs,
+  currentSchool,
+  user,
   discounts = []
 }) => {
+  // ---- Alias for the module-scope component ----
+  const SearchableSelect = FeeAllocationSearchableSelect;
+
   const [selectedProgram, setSelectedProgram] = useState('');
   const [selectedCourse, setSelectedCourse] = useState('');
   const [selectedClass, setSelectedClass] = useState('');
@@ -34881,27 +35068,36 @@ const FeeAllocationModule = ({
   const isTVET = schoolCategory === 'COLLEGE_TVET';
   const isPrimarySecondary = !isUniversity && !isTVET;
 
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-KE', {
+  // ==================== HELPERS ====================
+  const formatCurrency = (amount) =>
+    new Intl.NumberFormat('en-KE', {
       style: 'currency',
       currency: 'KES',
       minimumFractionDigits: 0
     }).format(amount || 0);
+
+  // Normalize UUID/string comparison
+  const sameId = (a, b) => {
+    if (a === null || a === undefined || b === null || b === undefined) return false;
+    return String(a).toLowerCase() === String(b).toLowerCase();
   };
 
-  // ✅ NEW: Compute the discount amount for a given fee + student
-  // Priority: per-student discount → student-wide discount → fee-level default → 0
+  // Discount lookup for a fee + student (per-student > student-wide > fee default)
   const getDiscountForFee = (fee, studentId = null) => {
     if (!fee) return 0;
 
-    // 1) Per-student discount
+    // 1) Per-student or student-wide discount
     if (studentId && Array.isArray(discounts)) {
       const perFee = discounts.find(d =>
-        d.studentId === studentId && d.feeId === fee.id && d.isActive !== false
+        sameId(d.studentId, studentId) &&
+        sameId(d.feeId, fee.id) &&
+        d.isActive !== false
       );
       const studentWide = !perFee
         ? discounts.find(d =>
-            d.studentId === studentId && d.feeId === null && d.isActive !== false
+            sameId(d.studentId, studentId) &&
+            (d.feeId === null || d.feeId === undefined) &&
+            d.isActive !== false
           )
         : null;
 
@@ -34914,204 +35110,20 @@ const FeeAllocationModule = ({
       }
     }
 
-    // 2) Fee-level default discount (applies to everyone)
+    // 2) Fee-level default discount
     const amount = parseFloat(fee.amount) || 0;
     const pct = parseFloat(fee.discountPercent) || 0;
     if (pct > 0) return amount * (pct / 100);
     return parseFloat(fee.discountAmount) || 0;
   };
 
-  // ==================== SEARCHABLE SELECT COMPONENT ====================
-  const SearchableSelect = ({ 
-    label, 
-    value, 
-    onChange, 
-    options, 
-    placeholder, 
-    disabled, 
-    required, 
-    className,
-    showClear = true 
-  }) => {
-    const [search, setSearch] = useState('');
-    const [isOpen, setIsOpen] = useState(false);
-    const [isFocused, setIsFocused] = useState(false);
-    const dropdownRef = useRef(null);
-    const inputRef = useRef(null);
-
-    const optionsWithEmpty = useMemo(() => {
-      const hasEmpty = options.some(opt => opt.value === '' || opt.value === null || opt.value === undefined);
-      if (hasEmpty) return options;
-      return [{ value: '', label: '' }, ...options];
-    }, [options]);
-
-    const filteredOptions = useMemo(() => {
-      if (!search.trim()) return optionsWithEmpty;
-      const searchLower = search.toLowerCase();
-      return optionsWithEmpty.filter(opt => 
-        opt.label?.toLowerCase().includes(searchLower) ||
-        opt.subLabel?.toLowerCase().includes(searchLower) ||
-        opt.value?.toString().toLowerCase().includes(searchLower)
-      );
-    }, [optionsWithEmpty, search]);
-
-    const selectedOption = optionsWithEmpty.find(opt => opt.value === value);
-
-    useEffect(() => {
-      const handleClickOutside = (event) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-          setIsOpen(false);
-          setIsFocused(false);
-        }
-      };
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
-
-    useEffect(() => {
-      if (selectedOption && !isFocused) {
-        setSearch(selectedOption.label);
-      } else if (!selectedOption && !isFocused) {
-        setSearch('');
-      }
-    }, [value, selectedOption, isFocused]);
-
-    const handleSelect = (selectedValue) => {
-      onChange({ target: { value: selectedValue } });
-      const selected = optionsWithEmpty.find(opt => opt.value === selectedValue);
-      setSearch(selected ? selected.label : '');
-      setIsOpen(false);
-      setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
-    };
-
-    const handleInputChange = (e) => {
-      const newValue = e.target.value;
-      setSearch(newValue);
-      setIsOpen(true);
-      setIsFocused(true);
-      if (newValue === '') {
-        onChange({ target: { value: '' } });
-      }
-    };
-
-    const handleFocus = () => {
-      setIsFocused(true);
-      setIsOpen(true);
-    };
-
-    const handleBlur = (e) => {
-      const relatedTarget = e.relatedTarget;
-      if (dropdownRef.current && dropdownRef.current.contains(relatedTarget)) {
-        return;
-      }
-      setTimeout(() => {
-        if (document.activeElement !== inputRef.current) {
-          setIsOpen(false);
-          setIsFocused(false);
-          if (selectedOption) {
-            setSearch(selectedOption.label);
-          } else {
-            setSearch('');
-          }
-        }
-      }, 150);
-    };
-
-    const handleClear = (e) => {
-      e.stopPropagation();
-      onChange({ target: { value: '' } });
-      setSearch('');
-      setIsOpen(false);
-      setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
-    };
-
-    const getDisplayValue = () => {
-      if (isFocused) return search;
-      if (selectedOption) return selectedOption.label;
-      return placeholder || '';
-    };
-
-    return (
-      <div className="relative" ref={dropdownRef}>
-        {label && (
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-        )}
-        <div className="relative">
-          <input
-            ref={inputRef}
-            type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
-            } ${className || ''}`}
-            value={getDisplayValue()}
-            onChange={handleInputChange}
-            onFocus={handleFocus}
-            onBlur={handleBlur}
-            placeholder={placeholder || "Search and select..."}
-            disabled={disabled}
-            autoComplete="off"
-          />
-          {value && showClear && !disabled && (
-            <button
-              type="button"
-              onClick={handleClear}
-              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-red-500 z-10"
-              title="Clear selection"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-        </div>
-        {isOpen && !disabled && (
-          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-            {filteredOptions.length > 0 ? (
-              filteredOptions.map((opt) => (
-                <div
-                  key={opt.value || Math.random().toString()}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
-                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
-                  }`}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => handleSelect(opt.value)}
-                >
-                  <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
-                </div>
-              ))
-            ) : (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {search.trim() ? 'No results found' : 'Type to search...'}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // ==================== OPTIONS GENERATORS ====================
+  // ==================== OPTION BUILDERS ====================
   const programOptions = useMemo(() => {
     const opts = [{ value: '', label: '' }];
     (programs || []).forEach(p => {
       opts.push({
         value: p.id,
-        label: p.name,
+        label: String(p.name ?? ''),
         subLabel: p.code || p.level || 'Program'
       });
     });
@@ -35123,7 +35135,7 @@ const FeeAllocationModule = ({
     (courses || []).forEach(c => {
       opts.push({
         value: c.id,
-        label: c.name,
+        label: String(c.name ?? ''),
         subLabel: c.code || 'Course'
       });
     });
@@ -35133,10 +35145,18 @@ const FeeAllocationModule = ({
   const classOptions = useMemo(() => {
     const opts = [{ value: '', label: '' }];
     (classes || []).forEach(c => {
+      let sub = 'Class';
+      if (Array.isArray(c.streams) && c.streams.length > 0) {
+        sub = `Streams: ${c.streams.join(', ')}`;
+      } else if (typeof c.streams === 'string' && c.streams.trim()) {
+        sub = c.streams;
+      } else if (c.capacity) {
+        sub = `Capacity: ${c.capacity}`;
+      }
       opts.push({
         value: c.id,
-        label: c.name,
-        subLabel: c.capacity ? `Capacity: ${c.capacity}` : 'Class'
+        label: String(c.name ?? ''),
+        subLabel: sub
       });
     });
     return opts;
@@ -35144,16 +35164,37 @@ const FeeAllocationModule = ({
 
   // ==================== FILTERED FEES ====================
   const filteredFees = useMemo(() => {
-    return fees.filter(fee => {
+    const allFees = Array.isArray(fees) ? fees : [];
+    if (allFees.length === 0) return [];
+
+    return allFees.filter(fee => {
+      // Always show fees with no scope at all (school-wide)
+      const hasScope =
+        fee.courseId || fee.programId || fee.classId ||
+        fee.moduleId || fee.facultyId || fee.departmentId;
+
+      if (!hasScope) return true;
+
       if (isUniversity) {
-        return !selectedCourse || fee.courseId === selectedCourse;
-      } else if (isTVET) {
-        const programMatch = !selectedProgram || fee.programId === selectedProgram;
-        const moduleMatch = !selectedModule || fee.module?.toString() === selectedModule;
-        return programMatch && moduleMatch;
-      } else {
-        return !selectedClass || fee.classId === selectedClass;
+        if (!selectedCourse) return true;
+        return sameId(fee.courseId, selectedCourse) || !fee.courseId;
       }
+
+      if (isTVET) {
+        const programMatch = !selectedProgram
+          ? true
+          : sameId(fee.programId, selectedProgram) || !fee.programId;
+
+        const moduleMatch = !selectedModule
+          ? true
+          : !fee.module || String(fee.module) === String(selectedModule);
+
+        return programMatch && moduleMatch;
+      }
+
+      // Regular schools
+      if (!selectedClass) return true;
+      return sameId(fee.classId, selectedClass) || !fee.classId;
     });
   }, [fees, selectedCourse, selectedProgram, selectedModule, selectedClass, isUniversity, isTVET]);
 
@@ -35166,29 +35207,40 @@ const FeeAllocationModule = ({
       if (isTVET && f.module) label += ` (Module ${f.module})`;
       if (isUniversity && f.semester) label += ` (Sem ${f.semester})`;
       if (f.academicYear) label += ` (${f.academicYear})`;
-      // ✅ Show default discount badge in the option sublabel
+
       const discount = getDiscountForFee(f);
-      const subLabel = discount > 0
-        ? `Default discount: −${formatCurrency(discount)}`
-        : (f.category || 'Fee');
-      opts.push({
-        value: f.id,
-        label: label,
-        subLabel
-      });
+      let subLabel = '';
+      if (discount > 0) {
+        subLabel = `Default discount: −${formatCurrency(discount)}`;
+      } else if (isTVET) {
+        const prog = (programs || []).find(p => sameId(p.id, f.programId));
+        subLabel = prog
+          ? `${prog.name}${f.module ? ` • Module ${f.module}` : ''}`
+          : (f.category || 'Fee');
+      } else if (isUniversity) {
+        const course = (courses || []).find(c => sameId(c.id, f.courseId));
+        subLabel = course
+          ? `${course.name}${f.semester ? ` • Sem ${f.semester}` : ''}`
+          : (f.category || 'Fee');
+      } else {
+        subLabel = f.category || 'Fee';
+      }
+
+      opts.push({ value: f.id, label, subLabel });
     });
     return opts;
-  }, [filteredFees, isTVET, isUniversity, discounts]);
+  }, [filteredFees, isTVET, isUniversity, discounts, programs, courses]);
 
+  // ==================== MODULE OPTIONS (TVET only) ====================
   const moduleOptions = useMemo(() => {
     const opts = [{ value: '', label: '' }];
     if (!isTVET || !selectedProgram) return opts;
-    const modules = fees
-      .filter(f => f.programId === selectedProgram && f.module)
+    const modules = (fees || [])
+      .filter(f => sameId(f.programId, selectedProgram) && f.module)
       .map(f => f.module)
       .filter((v, i, a) => a.indexOf(v) === i)
       .sort((a, b) => a - b);
-    
+
     modules.forEach(m => {
       opts.push({
         value: m.toString(),
@@ -35203,7 +35255,11 @@ const FeeAllocationModule = ({
   const checkFeeAllocated = async (studentId, feeId) => {
     try {
       const res = await api.get(`/students/${studentId}/fee-allocations`);
-      return res.data.allocations?.some(a => a.feeId === feeId && a.isActive !== false) || false;
+      return (
+        res.data.allocations?.some(a =>
+          sameId(a.feeId, feeId) && a.isActive !== false
+        ) || false
+      );
     } catch (error) {
       return false;
     }
@@ -35215,30 +35271,39 @@ const FeeAllocationModule = ({
       setLoading(true);
       try {
         let filtered = [];
-        
+
         if (isTVET && selectedProgram) {
-          filtered = students.filter(s => s.programId === selectedProgram);
+          filtered = students.filter(s => sameId(s.programId, selectedProgram));
           if (selectedModule) {
-            filtered = filtered.filter(s => 
-              s.currentModule?.toString() === selectedModule || 
-              s.currentModule === `Module ${selectedModule}`
-            );
+            filtered = filtered.filter(s => {
+              const mod = s.currentModule;
+              if (mod === null || mod === undefined) return false;
+              const modStr = String(mod);
+              return (
+                modStr === String(selectedModule) ||
+                modStr === `Module ${selectedModule}` ||
+                modStr.replace(/\D/g, '') === String(selectedModule)
+              );
+            });
           }
         } else if (isUniversity && selectedCourse) {
-          filtered = students.filter(s => s.courseId === selectedCourse);
+          filtered = students.filter(s => sameId(s.courseId, selectedCourse));
         } else if (isPrimarySecondary && selectedClass) {
-          filtered = students.filter(s => s.classId === selectedClass);
+          filtered = students.filter(s => sameId(s.classId, selectedClass));
         }
-        
+
         const studentsWithBalances = await Promise.all(filtered.map(async (student) => {
           const paymentsRes = await api.get(`/payments?studentId=${student.id}`);
           const studentPayments = paymentsRes.data.payments || [];
-          const totalPaid = studentPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-          // ✅ NEW: also sum discounts recorded on past payments
-          const totalPaidDiscounts = studentPayments.reduce(
-            (sum, p) => sum + parseFloat(p.discountAmount || 0), 0
+          const totalPaid = studentPayments.reduce(
+            (sum, p) => sum + parseFloat(p.amount || 0),
+            0
           );
-          
+          const totalPaidDiscounts = studentPayments.reduce(
+            (sum, p) => sum + parseFloat(p.discountAmount || 0),
+            0
+          );
+
           let applicableFees = [];
           if (isTVET && student.programId) {
             const feesRes = await api.get('/fees', { params: { programId: student.programId } });
@@ -35250,19 +35315,23 @@ const FeeAllocationModule = ({
             const feesRes = await api.get('/fees', { params: { classId: student.classId } });
             applicableFees = feesRes.data.fees || [];
           }
-          
-          const totalFees = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
 
-          // ✅ NEW: compute all applicable discounts for this student
-          const totalApplicableDiscounts = applicableFees.reduce((sum, f) => {
-            return sum + getDiscountForFee(f, student.id);
-          }, 0);
+          const totalFees = applicableFees.reduce(
+            (sum, f) => sum + parseFloat(f.amount || 0),
+            0
+          );
 
-          // ✅ Final balance = fees − discounts (fee-level + per-student) − paid discounts − paid
+          const totalApplicableDiscounts = applicableFees.reduce(
+            (sum, f) => sum + getDiscountForFee(f, student.id),
+            0
+          );
+
           const balance = totalFees - totalApplicableDiscounts - totalPaidDiscounts - totalPaid;
 
-          const feeAllocated = selectedFee ? await checkFeeAllocated(student.id, selectedFee) : false;
-          
+          const feeAllocated = selectedFee
+            ? await checkFeeAllocated(student.id, selectedFee)
+            : false;
+
           return {
             ...student,
             totalFees,
@@ -35273,7 +35342,7 @@ const FeeAllocationModule = ({
             currentModule: student.currentModule || ''
           };
         }));
-        
+
         setAvailableStudents(studentsWithBalances);
       } catch (error) {
         console.error('Error loading students:', error);
@@ -35281,29 +35350,36 @@ const FeeAllocationModule = ({
         setLoading(false);
       }
     };
-    
+
     loadStudents();
     setSelectedStudents([]);
     setSelectAll(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     selectedProgram, selectedCourse, selectedClass, selectedModule,
     students, isTVET, isUniversity, isPrimarySecondary, selectedFee,
-    // ✅ re-run when discounts change so balance stays accurate
     discounts
   ]);
 
   // ==================== FILTERED STUDENTS ====================
-  const filteredStudents = availableStudents.filter(student => 
-    `${student.firstName} ${student.lastName}`.toLowerCase().includes(studentSearch.toLowerCase()) ||
-    student.admissionNumber.toLowerCase().includes(studentSearch.toLowerCase())
-  );
+  const filteredStudents = useMemo(() => {
+    const term = String(studentSearch ?? '').toLowerCase().trim();
+    if (!term) return availableStudents;
+    return availableStudents.filter(student => {
+      const name = `${student.firstName || ''} ${student.lastName || ''}`.toLowerCase();
+      const adm = String(student.admissionNumber || '').toLowerCase();
+      return name.includes(term) || adm.includes(term);
+    });
+  }, [availableStudents, studentSearch]);
 
-  // ==================== HANDLE SELECT ALL ====================
+  // ==================== SELECTION HANDLERS ====================
   const handleSelectAll = (checked) => {
     if (!canAllocate) return;
     setSelectAll(checked);
     if (checked) {
-      setSelectedStudents(filteredStudents.map(s => s.id));
+      setSelectedStudents(
+        filteredStudents.filter(s => !s.feeAllocated).map(s => s.id)
+      );
     } else {
       setSelectedStudents([]);
     }
@@ -35337,7 +35413,7 @@ const FeeAllocationModule = ({
     const alreadyAllocated = availableStudents
       .filter(s => selectedStudents.includes(s.id) && s.feeAllocated)
       .map(s => `${s.firstName} ${s.lastName}`);
-    
+
     if (alreadyAllocated.length > 0) {
       if (!window.confirm(
         `⚠️ ${alreadyAllocated.length} student(s) already have this fee allocated:\n${alreadyAllocated.join('\n')}\n\nContinue anyway?`
@@ -35352,7 +35428,7 @@ const FeeAllocationModule = ({
       const res = await api.post(`/fees/${selectedFee}/manual-allocate`, {
         studentIds: selectedStudents
       });
-      
+
       setAllocationResult({
         fee: fee.name,
         amount: formatCurrency(fee.amount),
@@ -35360,12 +35436,12 @@ const FeeAllocationModule = ({
         skipped: res.data.skipped || 0,
         total: selectedStudents.length
       });
-      
+
       alert(`✅ Fee manually allocated to ${res.data.allocated || 0} students!${res.data.skipped > 0 ? ` (${res.data.skipped} already had it)` : ''}`);
-      
+
       setSelectedStudents([]);
       setSelectAll(false);
-      
+
     } catch (error) {
       console.error('Allocation error:', error);
       alert('❌ Failed to allocate fees: ' + (error.response?.data?.message || error.message));
@@ -35384,14 +35460,14 @@ const FeeAllocationModule = ({
     );
   }
 
-  // Selected fee details (for the info banner)
   const selectedFeeObj = fees.find(f => f.id === selectedFee);
+  const hasScopeSelected = Boolean(selectedProgram || selectedCourse || selectedClass);
 
   return (
     <div className="space-y-6">
       {allocating && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse"></div>}
-      
-      <div className="flex justify-between items-center">
+
+      <div className="flex justify-between items-center flex-wrap gap-3">
         <h2 className="text-2xl font-bold">Manual Fee Allocation</h2>
         <div className="bg-yellow-50 px-4 py-2 rounded-lg">
           <span className="text-sm text-yellow-700">
@@ -35400,10 +35476,9 @@ const FeeAllocationModule = ({
           </span>
         </div>
       </div>
-      
+
       <div className="bg-white p-6 rounded-xl shadow-sm">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          
           {isTVET && (
             <>
               <SearchableSelect
@@ -35417,7 +35492,7 @@ const FeeAllocationModule = ({
                 options={programOptions}
                 placeholder="Search program..."
               />
-              
+
               {moduleOptions.length > 1 && (
                 <SearchableSelect
                   label="Module"
@@ -35464,7 +35539,8 @@ const FeeAllocationModule = ({
             value={selectedFee}
             onChange={(e) => setSelectedFee(e.target.value)}
             options={feeOptions}
-            placeholder="Select fee..."
+            placeholder={feeOptions.length > 1 ? 'Select fee...' : 'No fees available'}
+            emptyMessage="No fees match the current selection"
           />
         </div>
 
@@ -35472,12 +35548,11 @@ const FeeAllocationModule = ({
           <div className="mb-4 p-3 bg-indigo-50 rounded-lg">
             <p className="text-sm text-indigo-800">
               <i className="fas fa-info-circle mr-2"></i>
-              Allocating: <strong>{selectedFeeObj.name}</strong> — 
+              Allocating: <strong>{selectedFeeObj.name}</strong> —{' '}
               {formatCurrency(selectedFeeObj.amount)}
               {isTVET && selectedFeeObj.module && ` (Module ${selectedFeeObj.module})`}
             </p>
 
-            {/* ✅ NEW: default discount preview for the selected fee */}
             {(() => {
               const defaultDiscount = getDiscountForFee(selectedFeeObj);
               if (defaultDiscount <= 0) return null;
@@ -35500,7 +35575,7 @@ const FeeAllocationModule = ({
           </div>
         )}
 
-        {selectedFee && (selectedProgram || selectedCourse || selectedClass) && (
+        {selectedFee && hasScopeSelected && (
           <>
             <div className="mb-4">
               <input
@@ -35521,11 +35596,11 @@ const FeeAllocationModule = ({
               </h3>
               {filteredStudents.length > 0 && canAllocate && (
                 <label className="flex items-center space-x-2">
-                  <input 
-                    type="checkbox" 
-                    checked={selectAll} 
-                    onChange={(e) => handleSelectAll(e.target.checked)} 
-                    className="rounded" 
+                  <input
+                    type="checkbox"
+                    checked={selectAll}
+                    onChange={(e) => handleSelectAll(e.target.checked)}
+                    className="rounded"
                   />
                   <span>Select All</span>
                 </label>
@@ -35544,7 +35619,6 @@ const FeeAllocationModule = ({
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Admission</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Balance</th>
-                    {/* ✅ NEW: Discount column */}
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Discount</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                     {isTVET && (
@@ -35561,16 +35635,16 @@ const FeeAllocationModule = ({
                     </tr>
                   ) : (
                     filteredStudents.map(student => (
-                      <tr 
-                        key={student.id} 
+                      <tr
+                        key={student.id}
                         className={`hover:bg-gray-50 ${student.feeAllocated ? 'bg-green-50' : ''}`}
                       >
                         {canAllocate && (
                           <td className="px-4 py-2">
-                            <input 
-                              type="checkbox" 
-                              checked={selectedStudents.includes(student.id)} 
-                              onChange={(e) => handleStudentSelect(student.id, e.target.checked)} 
+                            <input
+                              type="checkbox"
+                              checked={selectedStudents.includes(student.id)}
+                              onChange={(e) => handleStudentSelect(student.id, e.target.checked)}
                               className="rounded"
                               disabled={student.feeAllocated}
                             />
@@ -35580,14 +35654,13 @@ const FeeAllocationModule = ({
                         <td className="px-4 py-2">{student.firstName} {student.lastName}</td>
                         <td className="px-4 py-2">
                           <span className={`font-medium ${
-                            student.balance > 0 ? 'text-red-600' : 
-                            student.balance < 0 ? 'text-orange-600' : 
+                            student.balance > 0 ? 'text-red-600' :
+                            student.balance < 0 ? 'text-orange-600' :
                             'text-green-600'
                           }`}>
                             {formatCurrency(student.balance)}
                           </span>
                         </td>
-                        {/* ✅ NEW: Discount cell */}
                         <td className="px-4 py-2">
                           {student.totalDiscounts > 0 ? (
                             <span className="inline-flex items-center px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-medium">
@@ -35611,10 +35684,9 @@ const FeeAllocationModule = ({
                         </td>
                         {isTVET && (
                           <td className="px-4 py-2">
-                            {student.currentModule ? 
-                              `Module ${student.currentModule}` : 
-                              <span className="text-gray-400">Not assigned</span>
-                            }
+                            {student.currentModule
+                              ? `Module ${student.currentModule}`
+                              : <span className="text-gray-400">Not assigned</span>}
                           </td>
                         )}
                       </tr>
@@ -35625,7 +35697,7 @@ const FeeAllocationModule = ({
             </div>
 
             {canAllocate && (
-              <div className="mt-6 flex justify-between items-center">
+              <div className="mt-6 flex justify-between items-center flex-wrap gap-3">
                 <div className="text-sm text-gray-600">
                   Selected: <span className="font-bold text-indigo-600">{selectedStudents.length}</span> students
                   {availableStudents.filter(s => selectedStudents.includes(s.id) && s.feeAllocated).length > 0 && (
@@ -35663,10 +35735,19 @@ const FeeAllocationModule = ({
           </>
         )}
 
-        {(!selectedProgram && !selectedCourse && !selectedClass) && (
+        {!hasScopeSelected && (
           <div className="text-center py-12 text-gray-500">
             <i className="fas fa-arrow-left text-4xl text-gray-300 mb-2"></i>
-            <p className="text-lg">Select a {isTVET ? 'program' : isUniversity ? 'course' : 'class'} to view students</p>
+            <p className="text-lg">
+              Select a {isTVET ? 'program' : isUniversity ? 'course' : 'class'} to view students
+            </p>
+          </div>
+        )}
+
+        {loading && (
+          <div className="text-center py-4 text-gray-500">
+            <i className="fas fa-spinner fa-spin mr-2"></i>
+            Loading students...
           </div>
         )}
       </div>
