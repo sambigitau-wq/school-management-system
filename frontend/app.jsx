@@ -40290,7 +40290,8 @@ const SuperAdminModule = ({ user }) => {
         localStorage.removeItem('impersonatedSchool');
         window.location.href = '/super-admin';
       } else {
-        window.location.href = '/dashboard';
+    window.location.replace('/dashboard');
+window.location.reload();
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
