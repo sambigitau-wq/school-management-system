@@ -33282,15 +33282,27 @@ const FeesModule = ({
     return classes?.find(c => c.id === classId)?.name || 'N/A';
   };
 
-  // ==================== 6a. DISCOUNT RESOLUTION HELPERS ====================
-  // Get the list of fees a specific student is liable for
+  // ==================== 6a. DISCOUNT RESOLUTION HELPERS (with string-safe IDs) ====================
+  // Get the list of fees a specific student is liable for.
+  // Uses String() comparison so numeric-vs-string IDs still match.
   const getApplicableFeesForStudent = (student) => {
     if (!student) return [];
     return (fees || []).filter(f => {
-      if (isUniversity) return f.courseId === student.courseId;
-      if (isTVET)       return f.programId === student.programId;
-      return f.classId === student.classId;
+      if (isUniversity) return String(f.courseId) === String(student.courseId);
+      if (isTVET)       return String(f.programId) === String(student.programId);
+      return String(f.classId) === String(student.classId);
     });
+  };
+
+  // Treat null, undefined, 0, and 'false' as inactive; anything else = active.
+  const isDiscountActive = (d) => {
+    if (!d) return false;
+    const v = d.isActive;
+    if (v === false) return false;
+    if (v === 0) return false;
+    if (v === 'false') return false;
+    if (v === '0') return false;
+    return true;  // true, 1, 'true', undefined, null → active
   };
 
   // Resolve the effective discount (in KES) that applies to a given fee
@@ -33298,26 +33310,28 @@ const FeesModule = ({
   //   1. per-student + per-fee discount
   //   2. per-student + student-wide discount
   //   3. fee-level default discount (amount or percent)
-  // Returns 0 if no discount applies.
   const getResolvedDiscount = (fee, studentId) => {
     if (!fee || !studentId) return 0;
 
     const list = Array.isArray(discounts) ? discounts : [];
     const feeAmount = parseFloat(fee.amount) || 0;
+    const sid = String(studentId);
+    const fid = String(fee.id);
 
     // 1. Per-student, per-fee
     const perFee = list.find(d =>
-      d.studentId === studentId &&
-      d.feeId === fee.id &&
-      d.isActive !== false
+      isDiscountActive(d) &&
+      String(d.studentId) === sid &&
+      d.feeId !== null && d.feeId !== undefined &&
+      String(d.feeId) === fid
     );
 
     // 2. Per-student, student-wide
     const studentWide = !perFee
       ? list.find(d =>
-          d.studentId === studentId &&
-          (d.feeId === null || d.feeId === undefined) &&
-          d.isActive !== false
+          isDiscountActive(d) &&
+          String(d.studentId) === sid &&
+          (d.feeId === null || d.feeId === undefined)
         )
       : null;
 
@@ -33352,7 +33366,10 @@ const FeesModule = ({
   const getPaidForFee = (fee, studentId = null) => {
     if (!fee || !Array.isArray(payments)) return 0;
     return payments
-      .filter(p => p.feeId === fee.id && (!studentId || p.studentId === studentId))
+      .filter(p =>
+        String(p.feeId) === String(fee.id) &&
+        (!studentId || String(p.studentId) === String(studentId))
+      )
       .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
   };
 
@@ -33411,7 +33428,7 @@ const FeesModule = ({
     if (!deleteConfirm) return;
     setLoading(true); setApiError('');
     try {
-      const paymentsForFee = payments?.filter(p => p.feeId === deleteConfirm.id) || [];
+      const paymentsForFee = payments?.filter(p => String(p.feeId) === String(deleteConfirm.id)) || [];
       if (paymentsForFee.length > 0) {
         if (!window.confirm(`This fee has ${paymentsForFee.length} payment(s) associated with it. Continue?`)) {
           setDeleteConfirm(null); setLoading(false); return;
@@ -33447,8 +33464,6 @@ const FeesModule = ({
       if (isTVET && submitData.term) submitData.module = parseInt(submitData.term);
       submitData.discountAmount = parseFloat(submitData.discountAmount) || 0;
       submitData.discountPercent = parseFloat(submitData.discountPercent) || 0;
-
-      console.log('📤 Submitting fee data:', submitData);
 
       if (editingId) {
         await handleUpdate('/fees', editingId, submitData, setFees, fees);
@@ -33504,9 +33519,9 @@ const FeesModule = ({
     if (student) {
       if (Array.isArray(discounts)) {
         existing = discounts.find(d =>
-          d.studentId === student.id &&
-          ((d.feeId || null) === (fee?.id || null)) &&
-          d.isActive !== false
+          isDiscountActive(d) &&
+          String(d.studentId) === String(student.id) &&
+          String(d.feeId || '') === String(fee?.id || '')
         );
       }
     }
@@ -33529,9 +33544,9 @@ const FeesModule = ({
 
     const existing = Array.isArray(discounts)
       ? discounts.find(d =>
-          d.studentId === discountStudent.id &&
-          ((d.feeId || null) === (discountFee?.id || null)) &&
-          d.isActive !== false
+          isDiscountActive(d) &&
+          String(d.studentId) === String(discountStudent.id) &&
+          String(d.feeId || '') === String(discountFee?.id || '')
         )
       : null;
 
@@ -33573,9 +33588,9 @@ const FeesModule = ({
 
       const existing = Array.isArray(discounts)
         ? discounts.find(d =>
-            d.studentId === discountStudent.id &&
-            ((d.feeId || null) === (discountFee?.id || null)) &&
-            d.isActive !== false
+            isDiscountActive(d) &&
+            String(d.studentId) === String(discountStudent.id) &&
+            String(d.feeId || '') === String(discountFee?.id || '')
           )
         : null;
 
@@ -33633,12 +33648,48 @@ const FeesModule = ({
   const totals = useMemo(() => {
     let grossBilled = 0;
     let totalDiscounts = 0;
+    const studentDiscountDetails = [];
 
     (students || []).forEach(student => {
       const applicable = getApplicableFeesForStudent(student);
+      let studentDiscount = 0;
+
       applicable.forEach(fee => {
         grossBilled += parseFloat(fee.amount) || 0;
-        totalDiscounts += getResolvedDiscount(fee, student.id);
+        const d = getResolvedDiscount(fee, student.id);
+        studentDiscount += d;
+        totalDiscounts += d;
+      });
+
+      // ✅ Catch student-wide discounts that have no matching applicable fee
+      // (e.g., discount was created before the fee was set up, or the fee
+      // was deleted but the discount record is still around)
+      if (applicable.length === 0) {
+        const orphan = (discounts || []).find(d =>
+          isDiscountActive(d) &&
+          String(d.studentId) === String(student.id) &&
+          (d.feeId === null || d.feeId === undefined)
+        );
+        if (orphan) {
+          const v = parseFloat(orphan.value) || 0;
+          // For PERCENT with no fee, we can't resolve — treat as 0 to avoid
+          // counting a phantom discount. For AMOUNT, count it.
+          if (String(orphan.type).toUpperCase() !== 'PERCENT') {
+            studentDiscount += v;
+            totalDiscounts += v;
+          }
+        }
+      }
+
+      studentDiscountDetails.push({
+        name: `${student.firstName || ''} ${student.lastName || ''}`.trim(),
+        admissionNumber: student.admissionNumber,
+        studentId: student.id,
+        programId: student.programId,
+        courseId: student.courseId,
+        classId: student.classId,
+        applicableFeesCount: applicable.length,
+        studentDiscount
       });
     });
 
@@ -33648,14 +33699,13 @@ const FeesModule = ({
       (sum, p) => sum + (parseFloat(p.amount) || 0), 0
     );
 
-    // Per-student outstanding — each row clamped at 0, sum not clamped
     const outstandingPerStudent = (students || []).map(student => {
       const applicable = getApplicableFeesForStudent(student);
       const studentGross = applicable.reduce((s, f) => s + (parseFloat(f.amount) || 0), 0);
-      const studentDiscount = applicable.reduce((s, f) => s + getResolvedDiscount(f, student.id), 0);
-      const studentNet = Math.max(0, studentGross - studentDiscount);
+      const studentDisc = applicable.reduce((s, f) => s + getResolvedDiscount(f, student.id), 0);
+      const studentNet = Math.max(0, studentGross - studentDisc);
       const studentPaid = (payments || [])
-        .filter(p => p.studentId === student.id)
+        .filter(p => String(p.studentId) === String(student.id))
         .reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
       return Math.max(0, studentNet - studentPaid);
     });
@@ -33672,7 +33722,8 @@ const FeesModule = ({
       netBilled,
       totalPaid,
       outstanding,
-      collectionRate
+      collectionRate,
+      studentDiscountDetails
     };
   }, [fees, discounts, students, payments, isUniversity, isTVET]);
 
@@ -33683,6 +33734,26 @@ const FeesModule = ({
   const outstanding = totals.outstanding;
   const totalDiscounts = totals.totalDiscounts;
   const collectionRate = totals.collectionRate;
+
+  // ==================== 8a. DEBUG LOG ====================
+  useEffect(() => {
+    console.log('===== FEES SUMMARY DEBUG =====');
+    console.log('Students prop length:', (students || []).length);
+    console.log('Fees length:', (fees || []).length);
+    console.log('Discounts length:', (discounts || []).length);
+    console.log('Raw discounts array:', discounts);
+    console.log('Total Discounts (from totals):', totals.totalDiscounts);
+    console.log('Per-student discount totals:');
+    totals.studentDiscountDetails.forEach(s => {
+      console.log(
+        `  ${s.name} (${s.admissionNumber}) ` +
+        `[id=${s.studentId}, program=${s.programId}, course=${s.courseId}, class=${s.classId}] ` +
+        `→ applicable fees: ${s.applicableFeesCount}, discount: ${s.studentDiscount}`
+      );
+    });
+    console.log('==============================');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fees, discounts, students]);
 
   // ==================== 9. RENDER ====================
   if (!canView) {
@@ -33934,7 +34005,7 @@ const FeesModule = ({
                 label="Student *"
                 value={discountStudent?.id || ''}
                 onChange={(e) => {
-                  const s = (students || []).find(x => x.id === e.target.value);
+                  const s = (students || []).find(x => String(x.id) === String(e.target.value));
                   setDiscountStudent(s || null);
                 }}
                 options={studentOptions}
@@ -33948,7 +34019,7 @@ const FeesModule = ({
                 <select
                   value={discountFee?.id || ''}
                   onChange={(e) => {
-                    const f = fees.find(x => x.id === e.target.value);
+                    const f = fees.find(x => String(x.id) === String(e.target.value));
                     setDiscountFee(f || null);
                   }}
                   className="w-full px-3 py-2 border rounded-lg"
@@ -34086,13 +34157,11 @@ const FeesModule = ({
 
       {/* ==================== SUMMARY CARDS (6 cards, no minus sign) ==================== */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        {/* 1. Fee definitions */}
         <div className="bg-white p-4 rounded-xl shadow-sm">
           <p className="text-sm text-gray-500">Fee Definitions</p>
           <p className="text-2xl font-bold">{fees.length}</p>
         </div>
 
-        {/* 2. Gross billed (per student) */}
         <div className="bg-white p-4 rounded-xl shadow-sm">
           <p className="text-sm text-gray-500">Gross Billed</p>
           <p className="text-2xl font-bold text-green-600">
@@ -34101,7 +34170,6 @@ const FeesModule = ({
           <p className="text-xs text-gray-400 mt-1">Sum across all students</p>
         </div>
 
-        {/* 3. Discounts (no minus sign) */}
         <div className="bg-white p-4 rounded-xl shadow-sm border border-purple-200">
           <p className="text-sm text-gray-500">Discounts</p>
           <p className="text-2xl font-bold text-purple-600">
@@ -34114,7 +34182,6 @@ const FeesModule = ({
           )}
         </div>
 
-        {/* 4. Net billed */}
         <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-200">
           <p className="text-sm text-gray-500">Net Billed</p>
           <p className="text-2xl font-bold text-indigo-600">
@@ -34123,7 +34190,6 @@ const FeesModule = ({
           <p className="text-xs text-gray-400 mt-1">Gross − Discounts</p>
         </div>
 
-        {/* 5. Collected */}
         <div className="bg-white p-4 rounded-xl shadow-sm">
           <p className="text-sm text-gray-500">Collected</p>
           <p className="text-2xl font-bold text-blue-600">
@@ -34134,7 +34200,6 @@ const FeesModule = ({
           </p>
         </div>
 
-        {/* 6. Outstanding */}
         <div className="bg-white p-4 rounded-xl shadow-sm">
           <p className="text-sm text-gray-500">Outstanding</p>
           <p className="text-2xl font-bold text-red-600">
@@ -34192,7 +34257,11 @@ const FeesModule = ({
                 fees.map(fee => {
                   const feeLevelDiscount = getFeeLevelDiscount(fee);
                   const hasPerStudentDiscounts = Array.isArray(discounts)
-                    ? discounts.some(d => d.feeId === fee.id && d.isActive !== false)
+                    ? discounts.some(d =>
+                        isDiscountActive(d) &&
+                        d.feeId !== null && d.feeId !== undefined &&
+                        String(d.feeId) === String(fee.id)
+                      )
                     : false;
 
                   return (
@@ -34302,7 +34371,6 @@ const FeesModule = ({
     </div>
   );
 };
-
 
 // ==================== FEE TRANSFER MODULE ====================
 const FeeTransferModule = ({
