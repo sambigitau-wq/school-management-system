@@ -15126,6 +15126,39 @@ const ReportsModule = ({
     return s.class?.name || classes.find(c => c.id === s.classId)?.name || 'N/A';
   };
 
+  /**
+   * ✅ Compute total discount (in KES) for a student's bill.
+   * Handles FIXED, AMOUNT, PERCENTAGE, PERCENT types.
+   * Only counts discounts where isActive !== false.
+   */
+  const computeDiscountKES = (studentDiscounts, grossBilled) => {
+    if (!Array.isArray(studentDiscounts) || studentDiscounts.length === 0) return 0;
+    let total = 0;
+    studentDiscounts.forEach(d => {
+      if (d.isActive === false) return;
+      const type = String(d.type || '').toUpperCase();
+      const value = parseFloat(d.value || 0);
+      if (type === 'PERCENTAGE' || type === 'PERCENT') {
+        total += (grossBilled * value) / 100;
+      } else {
+        // FIXED / AMOUNT / anything else
+        total += value;
+      }
+    });
+    return Math.min(total, grossBilled); // Never discount more than the gross
+  };
+
+  /** Get all active discounts for a student (optionally scoped to a fee) */
+  const getStudentDiscounts = (studentId, fetchedDiscounts, feeId = null) => {
+    if (!Array.isArray(fetchedDiscounts)) return [];
+    return fetchedDiscounts.filter(d => {
+      if (d.studentId !== studentId) return false;
+      if (d.isActive === false) return false;
+      if (feeId && d.feeId && d.feeId !== feeId) return false;
+      return true;
+    });
+  };
+
   // ==================== PRINT STYLES ====================
   useEffect(() => {
     const style = document.createElement('style');
@@ -15211,9 +15244,8 @@ const ReportsModule = ({
     return () => document.head.removeChild(style);
   }, []);
 
-  // ==================== SELF-FETCH (returns the data) ====================
+  // ==================== SELF-FETCH ====================
   const fetchOnce = async (key) => {
-    // If already fetched, return the current state value
     if (fetchedOnce[key]) {
       if (key === 'fees')            return fees;
       if (key === 'attendance')      return attendance;
@@ -15634,12 +15666,12 @@ const ReportsModule = ({
     finally { setLoading(false); }
   };
 
-  // ==================== FEE — per-student fee matching, data fetched upfront ====================
+  // ==================== FEE REPORT (WITH DISCOUNTS) ====================
   const generateFeeReport = async () => {
     setLoading(true);
     try {
-      // ✅ Fetch fees FIRST and use the returned array directly
       const fetchedFees = (await fetchOnce('fees')) || fees;
+      const fetchedDiscounts = (await fetchOnce('discounts')) || discounts;
 
       const start = feeDateRange.start || firstOfMonthStr();
       const end = feeDateRange.end || todayStr();
@@ -15656,7 +15688,6 @@ const ReportsModule = ({
 
       const studentIds = new Set(targetStudents.map(s => s.id));
       const paymentsForStudents = filteredPayments.filter(p => studentIds.has(p.studentId));
-      const totalCollected = paymentsForStudents.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
 
       const perStudent = targetStudents.map(s => {
         const applicableFees = fetchedFees.filter(f => {
@@ -15664,15 +15695,24 @@ const ReportsModule = ({
           if (isTVET) return f.programId === s.programId;
           return f.classId === s.classId;
         });
-        const billed = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
+        const grossBilled = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
+
+        // ✅ APPLY DISCOUNTS
+        const studentDiscounts = getStudentDiscounts(s.id, fetchedDiscounts);
+        const discountAmount = computeDiscountKES(studentDiscounts, grossBilled);
+        const billed = Math.max(0, grossBilled - discountAmount);
+
         const paid = paymentsForStudents
           .filter(p => p.studentId === s.id)
           .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
         const balance = Math.max(0, billed - paid);
+
         return {
           admissionNumber: s.admissionNumber,
           name: `${s.firstName || ''} ${s.lastName || ''}`.trim(),
           entity: getStudentEntityName(s),
+          grossBilled,
+          discountAmount,
           billed,
           paid,
           balance,
@@ -15680,8 +15720,11 @@ const ReportsModule = ({
         };
       }).sort((a, b) => b.balance - a.balance);
 
-      const totalBilled = perStudent.reduce((s, r) => s + r.billed, 0);
-      const totalOutstanding = perStudent.reduce((s, r) => s + r.balance, 0);
+      const totalCollected    = paymentsForStudents.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+      const totalGrossBilled  = perStudent.reduce((s, r) => s + r.grossBilled, 0);
+      const totalDiscounts    = perStudent.reduce((s, r) => s + r.discountAmount, 0);
+      const totalBilled       = perStudent.reduce((s, r) => s + r.billed, 0);
+      const totalOutstanding  = perStudent.reduce((s, r) => s + r.balance, 0);
 
       const monthly = {};
       paymentsForStudents.forEach(p => {
@@ -15702,6 +15745,8 @@ const ReportsModule = ({
         summary: {
           totalCollected,
           totalBilled,
+          totalGrossBilled,
+          totalDiscounts,
           totalOutstanding,
           collectionRate: totalBilled > 0 ? ((totalCollected / totalBilled) * 100).toFixed(2) : '0.00',
           paymentCount: paymentsForStudents.length,
@@ -15719,11 +15764,12 @@ const ReportsModule = ({
     }
   };
 
-  // ==================== OUTSTANDING ====================
+  // ==================== OUTSTANDING (WITH DISCOUNTS) ====================
   const generateOutstandingReport = async () => {
     setLoading(true);
     try {
       const fetchedFees = (await fetchOnce('fees')) || fees;
+      const fetchedDiscounts = (await fetchOnce('discounts')) || discounts;
 
       let target = students;
       if (isUniversity && outstandingCourseId) target = target.filter(s => s.courseId === outstandingCourseId);
@@ -15736,19 +15782,39 @@ const ReportsModule = ({
           if (isTVET) return f.programId === s.programId;
           return f.classId === s.classId;
         });
-        const billed = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
-        const paid = payments.filter(p => p.studentId === s.id).reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+        const grossBilled = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
+
+        // ✅ APPLY DISCOUNTS
+        const studentDiscounts = getStudentDiscounts(s.id, fetchedDiscounts);
+        const discountAmount = computeDiscountKES(studentDiscounts, grossBilled);
+        const billed = Math.max(0, grossBilled - discountAmount);
+
+        const studentPayments = payments.filter(p => p.studentId === s.id);
+        const paid = studentPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
         const balance = Math.max(0, billed - paid);
-        const lastPayment = payments.filter(p => p.studentId === s.id).sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+
+        const lastPayment = [...studentPayments].sort(
+          (a, b) => new Date(b.date || b.paymentDate) - new Date(a.date || a.paymentDate)
+        )[0];
+
         return {
-          studentId: s.id, admissionNumber: s.admissionNumber,
+          studentId: s.id,
+          admissionNumber: s.admissionNumber,
           name: `${s.firstName || ''} ${s.lastName || ''}`.trim(),
           entity: getStudentEntityName(s),
-          billed, paid, balance,
+          grossBilled,
+          discountAmount,
+          billed,
+          paid,
+          balance,
           lastPaymentDate: lastPayment?.date ? new Date(lastPayment.date).toLocaleDateString() : 'Never',
-          daysSinceLastPayment: lastPayment?.date ? Math.floor((new Date() - new Date(lastPayment.date)) / (1000 * 60 * 60 * 24)) : 999
+          daysSinceLastPayment: lastPayment?.date
+            ? Math.floor((new Date() - new Date(lastPayment.date)) / (1000 * 60 * 60 * 24))
+            : 999
         };
-      }).filter(r => r.balance >= outstandingMinBalance).sort((a, b) => b.balance - a.balance);
+      })
+      .filter(r => r.balance >= outstandingMinBalance)
+      .sort((a, b) => b.balance - a.balance);
 
       const buckets = { '0-30 days': 0, '31-60 days': 0, '61-90 days': 0, '90+ days': 0 };
       rows.forEach(r => {
@@ -15758,13 +15824,23 @@ const ReportsModule = ({
         else buckets['90+ days'] += r.balance;
       });
       const agingChart = Object.keys(buckets).map(b => ({ name: b, amount: buckets[b] }));
+
       const totalOutstanding = rows.reduce((s, r) => s + r.balance, 0);
-      const avgBalance = rows.length ? totalOutstanding / rows.length : 0;
-      const highest = rows[0]?.balance || 0;
+      const totalDiscounts   = rows.reduce((s, r) => s + r.discountAmount, 0);
+      const avgBalance       = rows.length ? totalOutstanding / rows.length : 0;
+      const highest          = rows[0]?.balance || 0;
+
       setReportData({
         type: 'outstanding',
-        summary: { totalOutstanding, studentsWithBalance: rows.length, averageBalance: avgBalance, highestBalance: highest },
-        charts: { agingChart }, rows
+        summary: {
+          totalOutstanding,
+          totalDiscounts,
+          studentsWithBalance: rows.length,
+          averageBalance: avgBalance,
+          highestBalance: highest
+        },
+        charts: { agingChart },
+        rows
       });
     } catch (err) { console.error(err); alert('Failed to generate outstanding report'); }
     finally { setLoading(false); }
@@ -15778,15 +15854,8 @@ const ReportsModule = ({
 
       let rows = fetchedTransfers;
 
-      if (transferStatus) {
-        rows = rows.filter(t => t.status === transferStatus);
-      }
-      if (transferStudentId) {
-        rows = rows.filter(t =>
-          t.fromStudentId === transferStudentId ||
-          t.toStudentId === transferStudentId
-        );
-      }
+      if (transferStatus) rows = rows.filter(t => t.status === transferStatus);
+      if (transferStudentId) rows = rows.filter(t => t.fromStudentId === transferStudentId || t.toStudentId === transferStudentId);
       if (String(transferSearch ?? '').trim()) {
         const q = String(transferSearch).toLowerCase();
         rows = rows.filter(t => {
@@ -15820,9 +15889,7 @@ const ReportsModule = ({
         .filter(t => t.status === 'APPROVED')
         .reduce((s, t) => s + parseFloat(t.amount || 0), 0);
 
-      const statusChart = Object.entries(byStatus)
-        .filter(([_, v]) => v > 0)
-        .map(([name, value]) => ({ name, value }));
+      const statusChart = Object.entries(byStatus).filter(([_, v]) => v > 0).map(([name, value]) => ({ name, value }));
 
       const monthly = {};
       rows.filter(t => t.status === 'APPROVED').forEach(t => {
@@ -15844,17 +15911,11 @@ const ReportsModule = ({
           toStudent: `${to.firstName || ''} ${to.lastName || ''}`.trim() || '—',
           toAdmission: to.admissionNumber || '—',
           reason: t.reason || '—',
-          requestedBy: t.requestedByUser
-            ? `${t.requestedByUser.firstName || ''} ${t.requestedByUser.lastName || ''}`.trim()
-            : '—',
+          requestedBy: t.requestedByUser ? `${t.requestedByUser.firstName || ''} ${t.requestedByUser.lastName || ''}`.trim() : '—',
           requestedAt: t.requestedAt ? new Date(t.requestedAt).toLocaleString() : '—',
-          approvedBy: t.approvedByUser
-            ? `${t.approvedByUser.firstName || ''} ${t.approvedByUser.lastName || ''}`.trim()
-            : '—',
+          approvedBy: t.approvedByUser ? `${t.approvedByUser.firstName || ''} ${t.approvedByUser.lastName || ''}`.trim() : '—',
           approvedAt: t.approvedAt ? new Date(t.approvedAt).toLocaleString() : '—',
-          rejectedBy: t.rejectedByUser
-            ? `${t.rejectedByUser.firstName || ''} ${t.rejectedByUser.lastName || ''}`.trim()
-            : '—',
+          rejectedBy: t.rejectedByUser ? `${t.rejectedByUser.firstName || ''} ${t.rejectedByUser.lastName || ''}`.trim() : '—',
           rejectedAt: t.rejectedAt ? new Date(t.rejectedAt).toLocaleString() : '—',
           rejectReason: t.rejectReason || '—'
         };
@@ -15882,12 +15943,8 @@ const ReportsModule = ({
         charts: { statusChart, monthlyChart },
         rows: tableRows
       });
-    } catch (err) {
-      console.error(err);
-      alert('Failed to generate fee transfers report');
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { console.error(err); alert('Failed to generate fee transfers report'); }
+    finally { setLoading(false); }
   };
 
   // ==================== ADMISSIONS ====================
@@ -16823,7 +16880,7 @@ const ReportsModule = ({
         </div>
       )}
 
-      {/* ==================== TAB: FEE ==================== */}
+      {/* ==================== TAB: FEE (WITH DISCOUNTS) ==================== */}
       {activeTab === 'fee' && (
         <div className="space-y-6">
           <Card className="no-print">
@@ -16840,12 +16897,13 @@ const ReportsModule = ({
 
           {reportData?.type === 'fee' && (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 no-print">
-                <StatCard label="Billed" value={formatCurrency(reportData.summary.totalBilled)} color="blue" />
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-4 no-print">
+                <StatCard label="Gross Billed" value={formatCurrency(reportData.summary.totalGrossBilled)} color="gray" />
+                <StatCard label="Discounts" value={formatCurrency(reportData.summary.totalDiscounts)} color="orange" />
+                <StatCard label="Net Billed" value={formatCurrency(reportData.summary.totalBilled)} color="blue" />
                 <StatCard label="Collected" value={formatCurrency(reportData.summary.totalCollected)} color="green" />
                 <StatCard label="Outstanding" value={formatCurrency(reportData.summary.totalOutstanding)} color="red" />
                 <StatCard label="Collection Rate" value={`${reportData.summary.collectionRate}%`} color="purple" />
-                <StatCard label="Payments" value={reportData.summary.paymentCount} color="yellow" />
               </div>
 
               {showCharts && (
@@ -16876,15 +16934,27 @@ const ReportsModule = ({
                 <Card>
                   <div className="flex justify-between items-center mb-3">
                     <h3 className="font-semibold">Per-Student Fee Status ({reportData.rows.length})</h3>
-                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'fee_report.csv')} />
+                    <ExportBtn onClick={() => exportCSV(reportData.rows.map(r => ({
+                      admissionNumber: r.admissionNumber,
+                      name: r.name,
+                      entity: r.entity,
+                      grossBilled: r.grossBilled,
+                      discount: r.discountAmount,
+                      netBilled: r.billed,
+                      paid: r.paid,
+                      balance: r.balance,
+                      status: r.status
+                    })), 'fee_report.csv')} />
                   </div>
-                  <TableWrap headers={['Admission','Student', entityColumnLabel,'Billed','Paid','Balance','Status']}>
+                  <TableWrap headers={['Admission','Student', entityColumnLabel,'Gross Billed','Discount','Net Billed','Paid','Balance','Status']}>
                     {reportData.rows.map((r, i) => (
                       <tr key={i} className="hover:bg-gray-50">
                         <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
                         <td className="px-3 py-2">{r.name}</td>
                         <td className="px-3 py-2 text-xs">{r.entity}</td>
-                        <td className="px-3 py-2">{formatCurrency(r.billed)}</td>
+                        <td className="px-3 py-2 text-gray-500 line-through">{formatCurrency(r.grossBilled)}</td>
+                        <td className="px-3 py-2 text-orange-600 font-medium">-{formatCurrency(r.discountAmount)}</td>
+                        <td className="px-3 py-2 font-medium">{formatCurrency(r.billed)}</td>
                         <td className="px-3 py-2 text-green-700">{formatCurrency(r.paid)}</td>
                         <td className="px-3 py-2 text-red-700 font-medium">{formatCurrency(r.balance)}</td>
                         <td className="px-3 py-2">
@@ -16900,7 +16970,7 @@ const ReportsModule = ({
         </div>
       )}
 
-      {/* ==================== TAB: OUTSTANDING ==================== */}
+      {/* ==================== TAB: OUTSTANDING (WITH DISCOUNTS) ==================== */}
       {activeTab === 'outstanding' && (
         <div className="space-y-6">
           <Card className="no-print">
@@ -16919,8 +16989,9 @@ const ReportsModule = ({
 
           {reportData?.type === 'outstanding' && (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 no-print">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 no-print">
                 <StatCard label="Total Outstanding" value={formatCurrency(reportData.summary.totalOutstanding)} color="red" />
+                <StatCard label="Total Discounts" value={formatCurrency(reportData.summary.totalDiscounts)} color="orange" />
                 <StatCard label="Students" value={reportData.summary.studentsWithBalance} color="blue" />
                 <StatCard label="Average Balance" value={formatCurrency(reportData.summary.averageBalance)} color="yellow" />
                 <StatCard label="Highest Balance" value={formatCurrency(reportData.summary.highestBalance)} color="purple" />
@@ -16942,15 +17013,27 @@ const ReportsModule = ({
                 <Card>
                   <div className="flex justify-between items-center mb-3">
                     <h3 className="font-semibold">Students with Balances ({reportData.rows.length})</h3>
-                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'outstanding.csv')} />
+                    <ExportBtn onClick={() => exportCSV(reportData.rows.map(r => ({
+                      admissionNumber: r.admissionNumber,
+                      name: r.name,
+                      entity: r.entity,
+                      grossBilled: r.grossBilled,
+                      discount: r.discountAmount,
+                      netBilled: r.billed,
+                      paid: r.paid,
+                      balance: r.balance,
+                      lastPayment: r.lastPaymentDate
+                    })), 'outstanding.csv')} />
                   </div>
-                  <TableWrap headers={['Admission','Student', entityColumnLabel,'Billed','Paid','Balance','Last Payment']}>
+                  <TableWrap headers={['Admission','Student', entityColumnLabel,'Gross Billed','Discount','Net Billed','Paid','Balance','Last Payment']}>
                     {reportData.rows.map((r, i) => (
                       <tr key={i} className="hover:bg-gray-50">
                         <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
                         <td className="px-3 py-2">{r.name}</td>
                         <td className="px-3 py-2 text-xs">{r.entity}</td>
-                        <td className="px-3 py-2">{formatCurrency(r.billed)}</td>
+                        <td className="px-3 py-2 text-gray-500 line-through">{formatCurrency(r.grossBilled)}</td>
+                        <td className="px-3 py-2 text-orange-600 font-medium">-{formatCurrency(r.discountAmount)}</td>
+                        <td className="px-3 py-2 font-medium">{formatCurrency(r.billed)}</td>
                         <td className="px-3 py-2 text-green-700">{formatCurrency(r.paid)}</td>
                         <td className="px-3 py-2 text-red-700 font-bold">{formatCurrency(r.balance)}</td>
                         <td className="px-3 py-2 text-xs">{r.lastPaymentDate}</td>
@@ -17880,6 +17963,8 @@ const ReportsModule = ({
     </div>
   );
 };
+
+
 // ==================== EXAM CARD PRINT MODAL ====================
 const ExamCardPrintModal = ({ student, units, currentSchool, onClose }) => {
   console.log('🖨️ ExamCardPrintModal rendered');
