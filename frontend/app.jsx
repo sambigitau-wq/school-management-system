@@ -32921,99 +32921,85 @@ const AttendanceModule = ({
     </div>
   );
 };
-// ==================== SHARED: SEARCHABLE SELECT (MODULE SCOPE) ====================
-// ⚠️ MUST be at module scope — defining this inside FeesModule causes remounts on
-//    every render, which destroys focus and makes typing impossible.
-const FeesSearchableSelect = ({ 
-  label, value, onChange, options = [], placeholder, 
-  disabled, required, className, showClear = true 
-}) => {
-  const [search, setSearch] = useState('');
-  const [isOpen, setIsOpen] = useState(false);
-  const [isFocused, setIsFocused] = useState(false);
-  const dropdownRef = useRef(null);
-  const inputRef = useRef(null);
 
-  const optionsWithEmpty = useMemo(() => {
-    const hasEmpty = options.some(opt => opt.value === '' || opt.value === null || opt.value === undefined);
-    if (hasEmpty) return options;
-    return [{ value: '', label: '' }, ...options];
-  }, [options]);
 
-  const filteredOptions = useMemo(() => {
-    if (!search.trim()) return optionsWithEmpty;
-    const searchLower = search.toLowerCase();
-    return optionsWithEmpty.filter(opt => 
-      opt.label?.toLowerCase().includes(searchLower) ||
-      opt.subLabel?.toLowerCase().includes(searchLower) ||
-      opt.value?.toString().toLowerCase().includes(searchLower)
+// ==================== SHARED COMPONENTS ====================
+const FeesInputField = ({ label, type = 'text', value, onChange, required, placeholder, disabled, min, max, step, textarea, rows }) => {
+  if (textarea) {
+    return (
+      <div>
+        {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
+        <textarea
+          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+          value={value || ''}
+          onChange={onChange}
+          required={required}
+          placeholder={placeholder}
+          rows={rows || 3}
+          disabled={disabled}
+        />
+      </div>
     );
-  }, [optionsWithEmpty, search]);
+  }
+  return (
+    <div>
+      {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
+      <input
+        type={type}
+        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+        value={value === '' ? '' : (value ?? '')}
+        onChange={onChange}
+        required={required}
+        placeholder={placeholder}
+        disabled={disabled}
+        min={min}
+        max={max}
+        step={step}
+      />
+    </div>
+  );
+};
 
-  const selectedOption = optionsWithEmpty.find(opt => opt.value === value);
+const FeesSearchableSelect = ({
+  label, value, onChange, options = [], placeholder = 'Search...',
+  disabled, required, className, emptyMessage = 'No options available'
+}) => {
+  const [search, setSearch] = React.useState('');
+  const [isOpen, setIsOpen] = React.useState(false);
+  const [isFocused, setIsFocused] = React.useState(false);
+  const dropdownRef = React.useRef(null);
 
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setIsOpen(false);
-        setIsFocused(false);
+  const filteredOptions = React.useMemo(() => {
+    if (!options?.length) return [];
+    if (!String(search ?? '').trim()) return options;
+    const s = String(search).toLowerCase();
+    return options.filter(o => {
+      if (!o) return false;
+      const lbl = String(o.label ?? '').toLowerCase();
+      const sub = String(o.subLabel ?? '').toLowerCase();
+      const val = String(o.value ?? '').toLowerCase();
+      return lbl.includes(s) || sub.includes(s) || val.includes(s);
+    });
+  }, [options, search]);
+
+  const selected = React.useMemo(() => {
+    if (!value && value !== 0) return null;
+    return options.find(o => o.value === value) || null;
+  }, [options, value]);
+
+  React.useEffect(() => {
+    const h = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setIsOpen(false); setIsFocused(false);
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
   }, []);
 
-  // Sync input text with selected value ONLY when not focused.
-  // Never push the placeholder into the input's value.
-  useEffect(() => {
-    if (isFocused) return;
-    if (selectedOption && selectedOption.label) {
-      setSearch(selectedOption.label);
-    } else {
-      setSearch('');
-    }
-  }, [value, selectedOption, isFocused]);
+  React.useEffect(() => { if (!isOpen) setSearch(''); }, [isOpen]);
 
-  const handleSelect = (selectedValue) => {
-    onChange({ target: { value: selectedValue } });
-    const selected = optionsWithEmpty.find(opt => opt.value === selectedValue);
-    setSearch(selected ? selected.label : '');
-    setIsOpen(false);
-    setIsFocused(false);
-    if (inputRef.current) inputRef.current.focus();
-  };
-
-  const handleInputChange = (e) => {
-    // Keep typing purely local — do NOT call parent onChange here
-    setSearch(e.target.value);
-    setIsOpen(true);
-    setIsFocused(true);
-  };
-
-  const handleFocus = () => { 
-    setIsFocused(true); 
-    setIsOpen(true); 
-  };
-
-  const handleBlur = () => {
-    setTimeout(() => {
-      if (!dropdownRef.current?.contains(document.activeElement)) {
-        setIsOpen(false);
-        setIsFocused(false);
-      }
-    }, 150);
-  };
-
-  const handleClear = (e) => {
-    e.stopPropagation();
-    onChange({ target: { value: '' } });
-    setSearch(''); 
-    setIsOpen(false); 
-    setIsFocused(false);
-    if (inputRef.current) inputRef.current.focus();
-  };
-
-  const displayValue = isFocused ? search : (selectedOption?.label || '');
+  const display = isFocused ? search : (selected ? String(selected.label ?? '') : '');
 
   return (
     <div className="relative" ref={dropdownRef}>
@@ -33024,52 +33010,72 @@ const FeesSearchableSelect = ({
       )}
       <div className="relative">
         <input
-          ref={inputRef}
           type="text"
-          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-            disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
-          } ${className || ''}`}
-          value={displayValue}
-          onChange={handleInputChange}
-          onFocus={handleFocus}
-          onBlur={handleBlur}
-          placeholder={placeholder || "Search and select..."}
+          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 transition-all ${disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'} ${className || ''}`}
+          value={display}
+          onChange={(e) => {
+            const v = e.target.value;
+            setSearch(v); setIsOpen(true); setIsFocused(true);
+            if (v === '') onChange({ target: { value: '' } });
+          }}
+          onFocus={() => {
+            if (!disabled) {
+              setIsFocused(true); setIsOpen(true);
+              if (selected) setSearch(String(selected.label ?? ''));
+            }
+          }}
+          onBlur={() => setTimeout(() => {
+            if (!dropdownRef.current?.contains(document.activeElement)) {
+              setIsOpen(false); setIsFocused(false);
+            }
+          }, 200)}
+          placeholder={placeholder}
           disabled={disabled}
           autoComplete="off"
         />
-        {value && showClear && !disabled && (
-          <button type="button" onClick={handleClear}
-            className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-red-500 z-10"
-            title="Clear selection">
+        {value && !disabled && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onChange({ target: { value: '' } });
+              setSearch('');
+            }}
+            className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+          >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         )}
-        <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-          <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+          <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+            fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
           </svg>
         </div>
       </div>
       {isOpen && !disabled && (
         <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-          {filteredOptions.length > 0 ? (
-            filteredOptions.map((opt, idx) => (
-              <div key={opt.value || `empty-${idx}`}
-                className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
-                  opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
-                }`}
+          {!options?.length ? (
+            <div className="px-3 py-4 text-center text-gray-500 text-sm">{emptyMessage}</div>
+          ) : filteredOptions.length > 0 ? (
+            filteredOptions.map((opt, i) => (
+              <div
+                key={String(opt.value ?? i)}
+                className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 ${opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'}`}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => handleSelect(opt.value)}>
-                <div className="font-medium">{opt.label || '\u00A0'}</div>
-                {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+                onClick={() => {
+                  onChange({ target: { value: opt.value } });
+                  setSearch(''); setIsOpen(false); setIsFocused(false);
+                }}
+              >
+                <div className="font-medium">{String(opt.label ?? '')}</div>
+                {opt.subLabel && <div className="text-xs text-gray-500">{String(opt.subLabel)}</div>}
               </div>
             ))
           ) : (
-            <div className="px-3 py-4 text-center text-gray-500 text-sm">
-              {search.trim() ? 'No results found' : 'Type to search...'}
-            </div>
+            <div className="px-3 py-4 text-center text-gray-500 text-sm">No results for "{search}"</div>
           )}
         </div>
       )}
@@ -33077,38 +33083,18 @@ const FeesSearchableSelect = ({
   );
 };
 
-// ==================== SHARED: INPUT FIELD (MODULE SCOPE) ====================
-const FeesInputField = ({ label, type, value, onChange, placeholder, required, disabled, min, step }) => (
-  <div>
-    <label className="block text-sm font-medium text-gray-700 mb-1">
-      {label}{required && <span className="text-red-500 ml-1">*</span>}
-    </label>
-    <input
-      type={type || 'text'}
-      value={value !== undefined && value !== null ? value : ''}
-      onChange={onChange}
-      placeholder={placeholder}
-      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-      disabled={disabled}
-      min={min}
-      step={step}
-    />
-  </div>
-);
-
-
 // ==================== FEES MODULE ====================
-const FeesModule = ({ 
-  fees, setFees, 
-  payments, setPayments, 
+const FeesModule = ({
+  fees, setFees,
+  payments, setPayments,
   classes, students, routes,
-  courses, programs, 
+  courses, programs,
   departments, faculties,
   form, setForm, onCreate, onDelete,
   handleUpdate,
   currentSchool, user,
   admissionNumber: propAdmissionNumber,
-  // ✅ Optional: discounts array + setter passed from parent
+  // ✅ Discounts array + setter passed from parent (App.jsx)
   discounts = [], setDiscounts
 }) => {
   // ==================== 1. STATE DECLARATIONS ====================
@@ -33123,15 +33109,8 @@ const FeesModule = ({
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [allocationType, setAllocationType] = useState('AUTO');
   const [allocationMessage, setAllocationMessage] = useState('');
-  const [myStudentId, setMyStudentId] = useState(null);
-  const [myFeeStatement, setMyFeeStatement] = useState(null);
-  const [myPayments, setMyPayments] = useState([]);
-  const [myStudentRecord, setMyStudentRecord] = useState(null);
-  const [showAdmissionModal, setShowAdmissionModal] = useState(false);
-  const [admissionNumber, setAdmissionNumber] = useState(propAdmissionNumber);
-  const [admissionMessage, setAdmissionMessage] = useState('');
 
-  // ✅ Discount modal state
+  // Discount modal state
   const [showDiscountModal, setShowDiscountModal] = useState(false);
   const [discountStudent, setDiscountStudent] = useState(null);
   const [discountFee, setDiscountFee] = useState(null);
@@ -33150,9 +33129,17 @@ const FeesModule = ({
   const isPrimarySecondary = !isUniversity && !isTVET;
 
   // ==================== 3. LOCAL ALIASES FOR SHARED COMPONENTS ====================
-  // Keeps the rest of the file unchanged — JSX still uses <SearchableSelect> / <InputField>.
   const SearchableSelect = FeesSearchableSelect;
   const InputField = FeesInputField;
+
+  // ==================== 4. PERMISSIONS ====================
+  const isStudent = user?.role === 'STUDENT';
+  const isParent = user?.role === 'PARENT';
+  const canManage = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
+  const canDelete = ['SCHOOL_ADMIN', 'PRINCIPAL'].includes(user?.role);
+  const canEdit = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
+  const canGrantDiscount = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
+  const canView = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'ACCOUNTANT', 'PARENT', 'STUDENT'].includes(user?.role);
 
   // ==================== 5. OPTIONS GENERATORS ====================
   const termOptions = useMemo(() => {
@@ -33181,9 +33168,9 @@ const FeesModule = ({
   }, [isUniversity, isTVET]);
 
   const categoryOptions = useMemo(() => {
-    const categories = isUniversity 
+    const categories = isUniversity
       ? ['TUITION', 'REGISTRATION', 'LIBRARY', 'LABORATORY', 'EXAMINATION', 'GRADUATION', 'OTHER']
-      : isTVET 
+      : isTVET
         ? ['TUITION', 'REGISTRATION', 'WORKSHOP', 'MATERIALS', 'ASSESSMENT', 'ATTACHMENT', 'GRADUATION', 'OTHER']
         : ['TUITION', 'TRANSPORT', 'BOARDING', 'LIBRARY', 'ACTIVITY', 'UNIFORM', 'EXAMINATION', 'OTHER'];
     return [{ value: '', label: '' }, ...categories.map(c => ({ value: c, label: c }))];
@@ -33262,16 +33249,7 @@ const FeesModule = ({
     return opts;
   }, [students]);
 
-  // ==================== 6. PERMISSIONS ====================
-  const isStudent = user?.role === 'STUDENT';
-  const isParent = user?.role === 'PARENT';
-  const canManage = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
-  const canDelete = ['SCHOOL_ADMIN', 'PRINCIPAL'].includes(user?.role);
-  const canEdit = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
-  const canGrantDiscount = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
-  const canView = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'ACCOUNTANT', 'PARENT', 'STUDENT'].includes(user?.role);
-
-  // ==================== 7. HELPERS ====================
+  // ==================== 6. HELPERS ====================
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-KE', {
       style: 'currency', currency: 'KES', minimumFractionDigits: 0
@@ -33305,17 +33283,28 @@ const FeesModule = ({
     return classes?.find(c => c.id === classId)?.name || 'N/A';
   };
 
+  // ✅ Fee-level default discount ONLY
+  const getFeeLevelDiscount = (fee) => {
+    if (!fee) return 0;
+    const amount = parseFloat(fee.amount) || 0;
+    const pct = parseFloat(fee.discountPercent) || 0;
+    if (pct > 0) return amount * (pct / 100);
+    return parseFloat(fee.discountAmount) || 0;
+  };
+
   // ✅ Compute discount amount for a given fee (optionally per student)
   const getDiscountForFee = (fee, studentId = null) => {
     if (!fee) return 0;
 
     if (studentId && Array.isArray(discounts)) {
+      // Try fee-specific discount first
       const perFeeDiscount = discounts.find(d =>
         d.studentId === studentId && d.feeId === fee.id && d.isActive !== false
       );
+      // Fall back to student-wide discount (feeId is null/undefined)
       const studentWideDiscount = !perFeeDiscount
         ? discounts.find(d =>
-            d.studentId === studentId && d.feeId === null && d.isActive !== false
+            d.studentId === studentId && !d.feeId && d.isActive !== false
           )
         : null;
 
@@ -33329,15 +33318,6 @@ const FeesModule = ({
     }
 
     return getFeeLevelDiscount(fee);
-  };
-
-  // ✅ Fee-level default discount ONLY
-  const getFeeLevelDiscount = (fee) => {
-    if (!fee) return 0;
-    const amount = parseFloat(fee.amount) || 0;
-    const pct = parseFloat(fee.discountPercent) || 0;
-    if (pct > 0) return amount * (pct / 100);
-    return parseFloat(fee.discountAmount) || 0;
   };
 
   const getPaidForFee = (fee, studentId = null) => {
@@ -33354,10 +33334,10 @@ const FeesModule = ({
     return amount - discount - paid;
   };
 
-  // ==================== 8. HANDLERS ====================
+  // ==================== 7. HANDLERS ====================
   const handleEdit = (fee) => {
     if (!canEdit) { alert('You do not have permission to edit fees'); return; }
-    
+
     setForm({
       name: fee.name || '',
       amount: fee.amount || '',
@@ -33381,14 +33361,14 @@ const FeesModule = ({
       discountAmount: fee.discountAmount || 0,
       discountPercent: fee.discountPercent || 0
     });
-    
+
     setAllocationType(fee.allocationType || 'AUTO');
     if (isUniversity && fee.facultyId) setSelectedFaculty(fee.facultyId);
     if (isUniversity && fee.departmentId) setSelectedDepartment(fee.departmentId);
     if (isUniversity && fee.courseId) setSelectedCourse(fee.courseId);
     if (isTVET && fee.departmentId) setSelectedDepartment(fee.departmentId);
     if (isTVET && fee.programId) setSelectedProgram(fee.programId);
-    
+
     setEditingId(fee.id);
     setShowForm(true);
   };
@@ -33429,7 +33409,7 @@ const FeesModule = ({
       if (isPrimarySecondary && !form.classId) { alert('Please select a class'); setLoading(false); return; }
       if (!form.name) { alert('Please enter a fee name'); setLoading(false); return; }
       if (!form.amount || parseFloat(form.amount) <= 0) { alert('Please enter a valid amount'); setLoading(false); return; }
-      
+
       const submitData = { ...form, allocationType };
       const uuidFields = ['classId', 'courseId', 'programId', 'facultyId', 'departmentId', 'transportRouteId'];
       uuidFields.forEach(field => { if (submitData[field] === '') submitData[field] = null; });
@@ -33438,21 +33418,21 @@ const FeesModule = ({
       if (isTVET && submitData.term) submitData.module = parseInt(submitData.term);
       submitData.discountAmount = parseFloat(submitData.discountAmount) || 0;
       submitData.discountPercent = parseFloat(submitData.discountPercent) || 0;
-      
+
       console.log('📤 Submitting fee data:', submitData);
-      
+
       if (editingId) {
         await handleUpdate('/fees', editingId, submitData, setFees, fees);
         alert('✅ Fee updated successfully!');
       } else {
         await onCreate(e, submitData);
-        const msg = allocationType === 'AUTO' 
-          ? '✅ Fee created and AUTO-allocated to all eligible students!' 
+        const msg = allocationType === 'AUTO'
+          ? '✅ Fee created and AUTO-allocated to all eligible students!'
           : '✅ Fee created successfully! Use the Fee Allocation module to manually assign to students.';
         setAllocationMessage(msg);
         alert(msg);
       }
-      
+
       setShowForm(false);
       setEditingId(null);
       setSelectedFaculty(''); setSelectedDepartment('');
@@ -33492,10 +33472,14 @@ const FeesModule = ({
     setDiscountFee(fee || null);
 
     let existing = null;
-    if (student && fee && Array.isArray(discounts)) {
-      existing = discounts.find(d =>
-        d.studentId === student.id && d.feeId === fee.id && d.isActive !== false
-      );
+    if (student) {
+      if (Array.isArray(discounts)) {
+        existing = discounts.find(d =>
+          d.studentId === student.id &&
+          ((d.feeId || null) === (fee?.id || null)) &&
+          d.isActive !== false
+        );
+      }
     }
 
     setDiscountForm({
@@ -33509,15 +33493,15 @@ const FeesModule = ({
     setShowDiscountModal(true);
   };
 
+  // Auto-fill existing discount when student/fee changes inside modal
   useEffect(() => {
     if (!showDiscountModal) return;
     if (!discountStudent) return;
-    if (discountForm.value) return;
 
     const existing = Array.isArray(discounts)
       ? discounts.find(d =>
           d.studentId === discountStudent.id &&
-          (d.feeId || null) === (discountFee?.id || null) &&
+          ((d.feeId || null) === (discountFee?.id || null)) &&
           d.isActive !== false
         )
       : null;
@@ -33530,9 +33514,14 @@ const FeesModule = ({
         academicYear: existing.academicYear || new Date().getFullYear().toString(),
         term: existing.term || ''
       });
+    } else {
+      setDiscountForm({
+        type: 'AMOUNT', value: '', reason: '',
+        academicYear: new Date().getFullYear().toString(), term: ''
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showDiscountModal, discountStudent, discountFee]);
+  }, [showDiscountModal, discountStudent?.id, discountFee?.id]);
 
   const handleSaveDiscount = async () => {
     if (!canGrantDiscount) { alert('You do not have permission to grant discounts'); return; }
@@ -33556,23 +33545,21 @@ const FeesModule = ({
       const existing = Array.isArray(discounts)
         ? discounts.find(d =>
             d.studentId === discountStudent.id &&
-            (d.feeId || null) === (discountFee?.id || null) &&
+            ((d.feeId || null) === (discountFee?.id || null)) &&
             d.isActive !== false
           )
         : null;
 
-      let response;
       if (existing && existing.id) {
-        response = await api.put(`/discounts/${existing.id}`, payload);
+        const response = await api.put(`/discounts/${existing.id}`, payload);
+        const updated = response.data?.discount || { ...existing, ...payload };
         if (setDiscounts) {
-          setDiscounts(discounts.map(d =>
-            d.id === existing.id ? { ...d, ...payload } : d
-          ));
+          setDiscounts(discounts.map(d => d.id === existing.id ? updated : d));
         }
         alert('✅ Discount updated successfully!');
       } else {
-        response = await api.post('/discounts', payload);
-        const newDiscount = response.data?.discount || { id: `temp-${Date.now()}`, ...payload };
+        const response = await api.post('/discounts', payload);
+        const newDiscount = response.data?.discount || { id: `temp-${Date.now()}`, ...payload, isActive: true };
         if (setDiscounts) setDiscounts([...(discounts || []), newDiscount]);
         alert('✅ Discount applied successfully!');
       }
@@ -33613,6 +33600,63 @@ const FeesModule = ({
     }
   };
 
+  // ==================== 8. COMPUTED TOTALS ====================
+  // ✅ FIXED: Total discounts = fee-level + ALL active per-student discounts
+  //    (handles both fee-specific AND student-wide discounts)
+  const totalDiscounts = useMemo(() => {
+    let sum = 0;
+
+    // 1. Fee-level default discounts
+    (fees || []).forEach(f => {
+      sum += getFeeLevelDiscount(f);
+    });
+
+    // 2. Per-student discounts (fee-specific OR student-wide)
+    if (Array.isArray(discounts)) {
+      discounts.forEach(d => {
+        if (d.isActive === false) return;
+
+        const val = parseFloat(d.value) || 0;
+
+        // Resolve the base amount for PERCENT discounts
+        let baseAmount = 0;
+        if (d.feeId) {
+          const f = fees.find(x => x.id === d.feeId);
+          baseAmount = parseFloat(f?.amount) || 0;
+        } else {
+          // Student-wide: base = total of all fees the student is liable for
+          const s = (students || []).find(x => x.id === d.studentId);
+          if (s) {
+            baseAmount = (fees || [])
+              .filter(f => {
+                if (isUniversity) return f.courseId === s.courseId;
+                if (isTVET) return f.programId === s.programId;
+                return f.classId === s.classId;
+              })
+              .reduce((acc, f) => acc + (parseFloat(f.amount) || 0), 0);
+          }
+        }
+
+        sum += d.type === 'PERCENT' ? baseAmount * (val / 100) : val;
+      });
+    }
+
+    return sum;
+  }, [fees, discounts, students, isUniversity, isTVET]);
+
+  const totalBilled = useMemo(
+    () => (fees || []).reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0),
+    [fees]
+  );
+
+  const totalPaid = useMemo(
+    () => (payments || []).reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0),
+    [payments]
+  );
+
+  const netBilled = Math.max(0, totalBilled - totalDiscounts);
+  const outstanding = Math.max(0, netBilled - totalPaid);
+
   // ==================== 9. RENDER ====================
   if (!canView) {
     return (
@@ -33623,42 +33667,23 @@ const FeesModule = ({
     );
   }
 
-  const totalBilled = fees.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
-
-  const totalDiscounts = fees.reduce((sum, f) => {
-    const feeLevel = getFeeLevelDiscount(f);
-    const perStudent = Array.isArray(discounts)
-      ? discounts
-          .filter(d => d.feeId === f.id && d.isActive !== false)
-          .reduce((s, d) => {
-            const v = parseFloat(d.value) || 0;
-            return s + (d.type === 'PERCENT'
-              ? (parseFloat(f.amount) || 0) * (v / 100)
-              : v);
-          }, 0)
-      : 0;
-    return sum + feeLevel + perStudent;
-  }, 0);
-
-  const totalPaid = payments?.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0) || 0;
-
   return (
     <div className="space-y-6">
       {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
-      
+
       {apiError && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
           <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
         </div>
       )}
-      
+
       {allocationMessage && (
         <div className={`p-4 rounded-lg ${allocationType === 'AUTO' ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-blue-50 border border-blue-200 text-blue-700'}`}>
           <i className={`fas ${allocationType === 'AUTO' ? 'fa-check-circle' : 'fa-info-circle'} mr-2`}></i>
           {allocationMessage}
         </div>
       )}
-      
+
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">{getFeeTitle()}</h2>
         <div className="flex space-x-2">
@@ -33671,8 +33696,8 @@ const FeesModule = ({
             </button>
           )}
           {canManage && (
-            <button 
-              onClick={() => { handleCancel(); setShowForm(true); }} 
+            <button
+              onClick={() => { handleCancel(); setShowForm(true); }}
               className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center"
             >
               <i className="fas fa-plus mr-2"></i>
@@ -33690,84 +33715,84 @@ const FeesModule = ({
           </h3>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-              <InputField 
-                label="Fee Name *" 
-                value={form.name || ''} 
-                onChange={(e) => setForm({...form, name: e.target.value})} 
-                placeholder={isUniversity ? "e.g., Semester 1 Tuition" : (isTVET ? "e.g., Module 1 Workshop Fee" : "e.g., Term 1 Tuition")} 
-                required disabled={loading} 
+              <InputField
+                label="Fee Name *"
+                value={form.name || ''}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder={isUniversity ? "e.g., Semester 1 Tuition" : (isTVET ? "e.g., Module 1 Workshop Fee" : "e.g., Term 1 Tuition")}
+                required disabled={loading}
               />
-              
+
               {isUniversity && (<>
                 <SearchableSelect label="Faculty" value={form.facultyId || ''}
-                  onChange={(e) => { setForm({...form, facultyId: e.target.value, departmentId: '', courseId: ''}); setSelectedFaculty(e.target.value); setSelectedDepartment(''); setSelectedCourse(''); }}
+                  onChange={(e) => { setForm({ ...form, facultyId: e.target.value, departmentId: '', courseId: '' }); setSelectedFaculty(e.target.value); setSelectedDepartment(''); setSelectedCourse(''); }}
                   options={facultyOptions} required disabled={loading} placeholder="Search faculty..." />
                 <SearchableSelect label="Department" value={form.departmentId || ''}
-                  onChange={(e) => { setForm({...form, departmentId: e.target.value, courseId: ''}); setSelectedDepartment(e.target.value); setSelectedCourse(''); }}
+                  onChange={(e) => { setForm({ ...form, departmentId: e.target.value, courseId: '' }); setSelectedDepartment(e.target.value); setSelectedCourse(''); }}
                   options={departmentOptions} required disabled={loading || !selectedFaculty} placeholder="Search department..." />
                 <SearchableSelect label="Course *" value={form.courseId || ''}
-                  onChange={(e) => { setForm({...form, courseId: e.target.value}); setSelectedCourse(e.target.value); }}
+                  onChange={(e) => { setForm({ ...form, courseId: e.target.value }); setSelectedCourse(e.target.value); }}
                   options={courseOptions} required disabled={loading || !selectedDepartment} placeholder="Search course..." />
                 <SearchableSelect label="Year of Study *" value={form.year || ''}
-                  onChange={(e) => setForm({...form, year: parseInt(e.target.value) || ''})}
+                  onChange={(e) => setForm({ ...form, year: parseInt(e.target.value) || '' })}
                   options={yearOptions} required disabled={loading} placeholder="Select year..." />
                 <SearchableSelect label="Semester *" value={form.term || ''}
-                  onChange={(e) => setForm({...form, term: e.target.value})}
+                  onChange={(e) => setForm({ ...form, term: e.target.value })}
                   options={termOptions} required disabled={loading} placeholder="Select semester..." />
               </>)}
-              
+
               {isTVET && (<>
                 <SearchableSelect label="Department" value={form.departmentId || ''}
-                  onChange={(e) => { setForm({...form, departmentId: e.target.value, programId: ''}); setSelectedDepartment(e.target.value); setSelectedProgram(''); }}
+                  onChange={(e) => { setForm({ ...form, departmentId: e.target.value, programId: '' }); setSelectedDepartment(e.target.value); setSelectedProgram(''); }}
                   options={departmentOptions} required disabled={loading} placeholder="Search department..." />
                 <SearchableSelect label="Program *" value={form.programId || ''}
-                  onChange={(e) => { setForm({...form, programId: e.target.value}); setSelectedProgram(e.target.value); }}
+                  onChange={(e) => { setForm({ ...form, programId: e.target.value }); setSelectedProgram(e.target.value); }}
                   options={programOptions} required disabled={loading || !selectedDepartment} placeholder="Search program..." />
                 <SearchableSelect label="Module Level *" value={form.term || ''}
-                  onChange={(e) => setForm({...form, term: e.target.value})}
+                  onChange={(e) => setForm({ ...form, term: e.target.value })}
                   options={termOptions} required disabled={loading || !form.programId} placeholder="Select module..." />
                 <SearchableSelect label="Level" value={form.level || ''}
-                  onChange={(e) => setForm({...form, level: e.target.value})}
+                  onChange={(e) => setForm({ ...form, level: e.target.value })}
                   options={levelOptions} disabled={loading} placeholder="Select level..." />
               </>)}
-              
+
               {isPrimarySecondary && (<>
                 <SearchableSelect label="Class *" value={form.classId || ''}
-                  onChange={(e) => setForm({...form, classId: e.target.value})}
+                  onChange={(e) => setForm({ ...form, classId: e.target.value })}
                   options={classOptions} required disabled={loading} placeholder="Search class..." />
                 <SearchableSelect label="Term *" value={form.term || ''}
-                  onChange={(e) => setForm({...form, term: e.target.value})}
+                  onChange={(e) => setForm({ ...form, term: e.target.value })}
                   options={termOptions} required disabled={loading} placeholder="Select term..." />
               </>)}
-              
+
               <InputField label="Amount (KES) *" type="number"
                 value={form.amount === '' ? '' : form.amount}
-                onChange={(e) => setForm({...form, amount: e.target.value === '' ? '' : parseFloat(e.target.value)})}
+                onChange={(e) => setForm({ ...form, amount: e.target.value === '' ? '' : parseFloat(e.target.value) })}
                 required disabled={loading} min="0" step="0.01" />
-              
+
               <InputField label="Academic Year"
                 value={form.academicYear || new Date().getFullYear().toString()}
-                onChange={(e) => setForm({...form, academicYear: e.target.value})}
+                onChange={(e) => setForm({ ...form, academicYear: e.target.value })}
                 placeholder="2026" required disabled={loading} />
-              
+
               <InputField label="Due Date" type="date"
                 value={form.dueDate || ''}
-                onChange={(e) => setForm({...form, dueDate: e.target.value})}
+                onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
                 required disabled={loading} />
-              
+
               <SearchableSelect label="Category" value={form.category || ''}
-                onChange={(e) => setForm({...form, category: e.target.value})}
+                onChange={(e) => setForm({ ...form, category: e.target.value })}
                 options={categoryOptions} disabled={loading} placeholder="Select category..." />
-              
+
               <SearchableSelect label="Transport Route" value={form.transportRouteId || ''}
-                onChange={(e) => setForm({...form, transportRouteId: e.target.value || null})}
+                onChange={(e) => setForm({ ...form, transportRouteId: e.target.value || null })}
                 options={routeOptions} disabled={loading} placeholder="Search route..." />
 
               <InputField
                 label="Default Discount Amount (KES)"
                 type="number"
                 value={form.discountAmount === '' ? '' : (form.discountAmount || 0)}
-                onChange={(e) => setForm({...form, discountAmount: e.target.value === '' ? '' : parseFloat(e.target.value)})}
+                onChange={(e) => setForm({ ...form, discountAmount: e.target.value === '' ? '' : parseFloat(e.target.value) })}
                 placeholder="e.g., 3000 (applies to all students)"
                 disabled={loading} min="0" step="0.01"
               />
@@ -33775,17 +33800,17 @@ const FeesModule = ({
                 label="Default Discount (%)"
                 type="number"
                 value={form.discountPercent === '' ? '' : (form.discountPercent || 0)}
-                onChange={(e) => setForm({...form, discountPercent: e.target.value === '' ? '' : parseFloat(e.target.value)})}
+                onChange={(e) => setForm({ ...form, discountPercent: e.target.value === '' ? '' : parseFloat(e.target.value) })}
                 placeholder="e.g., 10 (takes precedence over amount)"
                 disabled={loading} min="0" max="100" step="0.01"
               />
             </div>
-            
+
             {/* ===== ALLOCATION TYPE SELECTOR ===== */}
             <div className="border-t pt-4 mt-2">
               <label className="block text-sm font-medium text-gray-700 mb-3">Allocation Type</label>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div 
+                <div
                   className={`border rounded-lg p-4 cursor-pointer transition-all ${
                     allocationType === 'AUTO' ? 'border-green-500 bg-green-50 ring-2 ring-green-500' : 'border-gray-200 hover:border-green-300'
                   }`}
@@ -33804,7 +33829,7 @@ const FeesModule = ({
                     </div>
                   </div>
                 </div>
-                <div 
+                <div
                   className={`border rounded-lg p-4 cursor-pointer transition-all ${
                     allocationType === 'MANUAL' ? 'border-yellow-500 bg-yellow-50 ring-2 ring-yellow-500' : 'border-gray-200 hover:border-yellow-300'
                   }`}
@@ -33827,28 +33852,28 @@ const FeesModule = ({
               <div className="mt-3 p-3 bg-gray-50 rounded-lg">
                 <p className="text-xs text-gray-500">
                   <i className="fas fa-info-circle mr-1"></i>
-                  {allocationType === 'AUTO' 
-                    ? '🔹 Auto: Fee will appear on ALL students\' fee statements immediately after creation.' 
+                  {allocationType === 'AUTO'
+                    ? "🔹 Auto: Fee will appear on ALL students' fee statements immediately after creation."
                     : '🔸 Manual: Fee will NOT appear until manually allocated.'}
                 </p>
               </div>
             </div>
-            
+
             <div className="flex items-center space-x-4">
               <label className="flex items-center space-x-2">
                 <input type="checkbox" checked={form.isOptional || false}
-                  onChange={(e) => setForm({...form, isOptional: e.target.checked})}
+                  onChange={(e) => setForm({ ...form, isOptional: e.target.checked })}
                   className="rounded" disabled={loading} />
                 <span>This fee is optional</span>
               </label>
               <label className="flex items-center space-x-2">
                 <input type="checkbox" checked={form.isRecurring || false}
-                  onChange={(e) => setForm({...form, isRecurring: e.target.checked})}
+                  onChange={(e) => setForm({ ...form, isRecurring: e.target.checked })}
                   className="rounded" disabled={loading} />
                 <span>{isTVET ? 'Applies to all modules' : 'Recurring (charged every term/semester)'}</span>
               </label>
             </div>
-            
+
             <div className="flex space-x-2 pt-4 border-t">
               <button type="submit"
                 className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
@@ -34042,9 +34067,14 @@ const FeesModule = ({
           <p className="text-sm text-gray-500">Billed Amount</p>
           <p className="text-2xl font-bold text-green-600">{formatCurrency(totalBilled)}</p>
         </div>
-        <div className="bg-white p-4 rounded-xl shadow-sm">
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-purple-200">
           <p className="text-sm text-gray-500">Discounts</p>
           <p className="text-2xl font-bold text-purple-600">−{formatCurrency(totalDiscounts)}</p>
+          {totalDiscounts > 0 && (
+            <p className="text-xs text-gray-500 mt-1">
+              Net: {formatCurrency(netBilled)}
+            </p>
+          )}
         </div>
         <div className="bg-white p-4 rounded-xl shadow-sm">
           <p className="text-sm text-gray-500">Collected</p>
@@ -34052,8 +34082,9 @@ const FeesModule = ({
         </div>
         <div className="bg-white p-4 rounded-xl shadow-sm">
           <p className="text-sm text-gray-500">Outstanding</p>
-          <p className="text-2xl font-bold text-red-600">
-            {formatCurrency(Math.max(0, totalBilled - totalDiscounts - totalPaid))}
+          <p className="text-2xl font-bold text-red-600">{formatCurrency(outstanding)}</p>
+          <p className="text-xs text-gray-500 mt-1">
+            (Billed − Discount − Paid)
           </p>
         </div>
       </div>
@@ -34103,6 +34134,10 @@ const FeesModule = ({
               ) : (
                 fees.map(fee => {
                   const feeLevelDiscount = getFeeLevelDiscount(fee);
+                  const hasPerStudentDiscounts = Array.isArray(discounts)
+                    ? discounts.some(d => d.feeId === fee.id && d.isActive !== false)
+                    : false;
+
                   return (
                     <tr key={fee.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap font-medium">{fee.name}</td>
@@ -34115,23 +34150,30 @@ const FeesModule = ({
                         {formatCurrency(fee.amount)}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        {feeLevelDiscount > 0 ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-medium">
-                            −{formatCurrency(feeLevelDiscount)}
-                            {canGrantDiscount && (
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveFeeLevelDiscount(fee)}
-                                className="text-red-600 hover:text-red-800 ml-1"
-                                title="Remove default discount"
-                              >
-                                ×
-                              </button>
-                            )}
-                          </span>
-                        ) : (
-                          <span className="text-gray-400 text-xs">—</span>
-                        )}
+                        <div className="flex flex-col gap-1">
+                          {feeLevelDiscount > 0 ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-medium">
+                              −{formatCurrency(feeLevelDiscount)}
+                              {canGrantDiscount && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveFeeLevelDiscount(fee)}
+                                  className="text-red-600 hover:text-red-800 ml-1"
+                                  title="Remove default discount"
+                                >
+                                  ×
+                                </button>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400 text-xs">—</span>
+                          )}
+                          {hasPerStudentDiscounts && (
+                            <span className="text-[10px] text-purple-600" title="Some students have per-student discounts on this fee">
+                              <i className="fas fa-user-tag mr-1"></i>has per-student discounts
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">{fee.academicYear}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -34183,7 +34225,7 @@ const FeesModule = ({
           </table>
         </div>
       </div>
-      
+
       {/* ==================== ALLOCATION INFO ==================== */}
       <div className="bg-gray-50 rounded-xl p-4 text-sm text-gray-500 border border-gray-200">
         <div className="flex items-start">
@@ -44356,21 +44398,26 @@ const StaffAttendanceModule = ({ staff, setStaffAttendance, currentSchool, user 
   );
 };
 
-// ==================== COMPLETE FEE STATEMENT MODULE WITH SEARCHABLE SELECT ====================
-const FeeStatementModule = ({ 
-  students, fees, payments, 
-  currentSchool, user,
+// ==================== FEE STATEMENT MODULE (with discounts) ====================
+const FeeStatementModule = ({
+  students = [],
+  fees = [],
+  payments = [],
+  discounts = [],                 // ✅ NEW: per-student discounts from parent
+  currentSchool,
+  user,
   admissionNumber: propAdmissionNumber,
-  programs,
-  courses,
-  classes
+  programs = [],
+  courses = [],
+  classes = []
 }) => {
   console.log('💰 FeeStatementModule initialized');
-  
+
   // ==================== STATE ====================
   const [myStudentRecord, setMyStudentRecord] = useState(null);
   const [myFeeStatement, setMyFeeStatement] = useState(null);
   const [myPayments, setMyPayments] = useState([]);
+  const [myDiscounts, setMyDiscounts] = useState([]);
   const [myChildren, setMyChildren] = useState([]);
   const [selectedChild, setSelectedChild] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -44380,7 +44427,6 @@ const FeeStatementModule = ({
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [selectedReceipt, setSelectedReceipt] = useState(null);
   const [apiError, setApiError] = useState('');
-  const [showStatementModal, setShowStatementModal] = useState(false);
 
   // ==================== SCHOOL TYPE DETECTION ====================
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
@@ -44390,400 +44436,226 @@ const FeeStatementModule = ({
   const isStudent = user?.role === 'STUDENT';
   const isParent = user?.role === 'PARENT';
 
-  // ==================== SEARCHABLE SELECT COMPONENT ====================
-  const SearchableSelect = ({ 
-    label, 
-    value, 
-    onChange, 
-    options, 
-    placeholder, 
-    disabled, 
-    required, 
-    className,
-    showClear = true 
-  }) => {
-    const [search, setSearch] = useState('');
-    const [isOpen, setIsOpen] = useState(false);
-    const [isFocused, setIsFocused] = useState(false);
-    const dropdownRef = useRef(null);
-    const inputRef = useRef(null);
-
-    const optionsWithEmpty = useMemo(() => {
-      const hasEmpty = options.some(opt => opt.value === '' || opt.value === null || opt.value === undefined);
-      if (hasEmpty) return options;
-      return [{ value: '', label: '' }, ...options];
-    }, [options]);
-
-    const filteredOptions = useMemo(() => {
-      if (!search.trim()) return optionsWithEmpty;
-      const searchLower = search.toLowerCase();
-      return optionsWithEmpty.filter(opt => 
-        opt.label?.toLowerCase().includes(searchLower) ||
-        opt.subLabel?.toLowerCase().includes(searchLower) ||
-        opt.value?.toString().toLowerCase().includes(searchLower)
-      );
-    }, [optionsWithEmpty, search]);
-
-    const selectedOption = optionsWithEmpty.find(opt => opt.value === value);
-
-    useEffect(() => {
-      const handleClickOutside = (event) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-          setIsOpen(false);
-          setIsFocused(false);
-        }
-      };
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
-
-    useEffect(() => {
-      if (selectedOption && !isFocused) {
-        setSearch(selectedOption.label);
-      } else if (!selectedOption && !isFocused) {
-        setSearch('');
-      }
-    }, [value, selectedOption, isFocused]);
-
-    const handleSelect = (selectedValue) => {
-      onChange({ target: { value: selectedValue } });
-      const selected = optionsWithEmpty.find(opt => opt.value === selectedValue);
-      setSearch(selected ? selected.label : '');
-      setIsOpen(false);
-      setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
-    };
-
-    const handleInputChange = (e) => {
-      const newValue = e.target.value;
-      setSearch(newValue);
-      setIsOpen(true);
-      setIsFocused(true);
-      if (newValue === '') {
-        onChange({ target: { value: '' } });
-      }
-    };
-
-    const handleFocus = () => {
-      setIsFocused(true);
-      setIsOpen(true);
-    };
-
-    const handleBlur = (e) => {
-      const relatedTarget = e.relatedTarget;
-      if (dropdownRef.current && dropdownRef.current.contains(relatedTarget)) {
-        return;
-      }
-      setTimeout(() => {
-        if (document.activeElement !== inputRef.current) {
-          setIsOpen(false);
-          setIsFocused(false);
-          if (selectedOption) {
-            setSearch(selectedOption.label);
-          } else {
-            setSearch('');
-          }
-        }
-      }, 150);
-    };
-
-    const handleClear = (e) => {
-      e.stopPropagation();
-      onChange({ target: { value: '' } });
-      setSearch('');
-      setIsOpen(false);
-      setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
-    };
-
-    const getDisplayValue = () => {
-      if (isFocused) return search;
-      if (selectedOption) return selectedOption.label;
-      return placeholder || '';
-    };
-
-    return (
-      <div className="relative" ref={dropdownRef}>
-        {label && (
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-        )}
-        <div className="relative">
-          <input
-            ref={inputRef}
-            type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
-            } ${className || ''}`}
-            value={getDisplayValue()}
-            onChange={handleInputChange}
-            onFocus={handleFocus}
-            onBlur={handleBlur}
-            placeholder={placeholder || "Search and select..."}
-            disabled={disabled}
-            autoComplete="off"
-          />
-          {value && showClear && !disabled && (
-            <button
-              type="button"
-              onClick={handleClear}
-              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-red-500 z-10"
-              title="Clear selection"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-        </div>
-        {isOpen && !disabled && (
-          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-            {filteredOptions.length > 0 ? (
-              filteredOptions.map((opt) => (
-                <div
-                  key={opt.value || Math.random().toString()}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
-                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
-                  }`}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => handleSelect(opt.value)}
-                >
-                  <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
-                </div>
-              ))
-            ) : (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {search.trim() ? 'No results found' : 'Type to search...'}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // ==================== HELPER FUNCTIONS ====================
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-KE', {
-      style: 'currency',
-      currency: 'KES',
-      minimumFractionDigits: 0
+  // ==================== HELPERS ====================
+  const formatCurrency = (amount) =>
+    new Intl.NumberFormat('en-KE', {
+      style: 'currency', currency: 'KES', minimumFractionDigits: 0
     }).format(amount || 0);
-  };
 
-  // ==================== GET ENTITY NAME (Program/Course/Class) ====================
   const getStudentEntityName = (student) => {
     if (!student) return 'N/A';
-    
-    // TVET - Program
     if (isTVET) {
-      if (student.program?.name) {
-        return student.program.name;
+      if (student.program?.name) return student.program.name;
+      if (student.programId && programs?.length) {
+        const p = programs.find(x => x.id === student.programId);
+        if (p?.name) return p.name;
       }
-      if (student.programId && programs && programs.length > 0) {
-        const program = programs.find(p => p.id === student.programId);
-        if (program && program.name) {
-          return program.name;
-        }
-      }
-      if (student.currentModule) {
-        const moduleClean = student.currentModule.replace('Module ', '');
-        return `Module ${moduleClean}`;
-      }
+      if (student.currentModule) return student.currentModule;
       return 'No Program Assigned';
     }
-    
-    // University - Course
     if (isUniversity) {
       if (student.course?.name) return student.course.name;
-      if (student.courseId && courses && courses.length > 0) {
-        const course = courses.find(c => c.id === student.courseId);
-        if (course) return course.name;
+      if (student.courseId && courses?.length) {
+        const c = courses.find(x => x.id === student.courseId);
+        if (c) return c.name;
       }
       return 'No Course Assigned';
     }
-    
-    // Primary/Secondary - Class
     if (student.class?.name) return student.class.name;
-    if (student.classId && classes && classes.length > 0) {
-      const classObj = classes.find(c => c.id === student.classId);
-      if (classObj) return classObj.name;
+    if (student.classId && classes?.length) {
+      const c = classes.find(x => x.id === student.classId);
+      if (c) return c.name;
     }
     return 'No Class Assigned';
   };
 
-  // ==================== GET ADDITIONAL INFO ====================
   const getAdditionalInfo = (student) => {
     if (!student) return '';
     const info = [];
-    
-    if (isTVET) {
-      if (student.currentYear) {
-        info.push(`Year ${student.currentYear}`);
-      }
-    } else if (isUniversity && student.currentYear) {
-      info.push(`Year ${student.currentYear}`);
+    if (isTVET && student.currentYear) info.push(`Year ${student.currentYear}`);
+    else if (isUniversity) {
+      if (student.currentYear) info.push(`Year ${student.currentYear}`);
       if (student.currentSemester) info.push(`Sem ${student.currentSemester}`);
-    } else if (student.currentYear) {
-      info.push(`Year ${student.currentYear}`);
-    }
-    
+    } else if (student.currentYear) info.push(`Year ${student.currentYear}`);
     return info.join(', ');
   };
 
-  // ==================== GET MODULE INFO ====================
-  const getModuleInfo = (student) => {
-    if (!student) return '';
-    if (isTVET && student.currentModule) {
-      return student.currentModule;
+  // ==================== DISCOUNT HELPERS ====================
+  // For a given student & fee, return { amount, source } — resolved discount
+  const resolveDiscount = (studentId, fee, discountList) => {
+    if (!fee) return { amount: 0, source: null, kind: null };
+
+    const list = Array.isArray(discountList) ? discountList : [];
+
+    // 1. Per-student, per-fee discount
+    const perFee = list.find(
+      d => d.studentId === studentId && d.feeId === fee.id && d.isActive !== false
+    );
+
+    // 2. Per-student, student-wide discount
+    const studentWide = !perFee
+      ? list.find(
+          d =>
+            d.studentId === studentId &&
+            (d.feeId === null || d.feeId === undefined) &&
+            d.isActive !== false
+        )
+      : null;
+
+    const active = perFee || studentWide;
+    if (active) {
+      const v = parseFloat(active.value) || 0;
+      const amount =
+        String(active.type).toUpperCase() === 'PERCENT'
+          ? (parseFloat(fee.amount) || 0) * (v / 100)
+          : v;
+      return {
+        amount,
+        source: active,
+        kind: perFee ? 'per-fee' : 'student-wide'
+      };
     }
-    return '';
+
+    // 3. Fee-level default discount
+    const feeAmount = parseFloat(fee.amount) || 0;
+    if (parseFloat(fee.discountPercent) > 0) {
+      return {
+        amount: feeAmount * (parseFloat(fee.discountPercent) / 100),
+        source: null,
+        kind: 'fee-level-percent'
+      };
+    }
+    if (parseFloat(fee.discountAmount) > 0) {
+      return {
+        amount: parseFloat(fee.discountAmount),
+        source: null,
+        kind: 'fee-level-amount'
+      };
+    }
+
+    return { amount: 0, source: null, kind: null };
   };
 
-  // ==================== CHILD OPTIONS GENERATOR ====================
-  const childOptions = useMemo(() => {
-    const opts = [{ value: '', label: '' }];
-    (myChildren || []).forEach(child => {
-      let label = `${child.firstName} ${child.lastName} (${child.admissionNumber})`;
-      if (child.entityName && child.entityName !== 'No Program Assigned') {
-        label += ` - ${child.entityName}`;
-      } else if (child.moduleInfo) {
-        label += ` - ${child.moduleInfo}`;
-      }
-      if (child.additionalInfo) {
-        label += ` • ${child.additionalInfo}`;
-      }
-      opts.push({
-        value: child.id,
-        label: label,
-        subLabel: child.admissionNumber
-      });
-    });
-    return opts;
-  }, [myChildren]);
-
-
-  // ==================== LOAD STUDENT FEE STATEMENT ====================
+  // ==================== LOAD FEE STATEMENT ====================
   const loadFeeStatement = async (studentId, studentAdmissionNumber = null) => {
     setLoading(true);
     setApiError('');
-    
     try {
       let studentData;
       if (studentAdmissionNumber) {
-        const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(studentAdmissionNumber)}`);
-        studentData = studentRes.data.student;
+        const res = await api.get(`/students/by-admission/${encodeURIComponent(studentAdmissionNumber)}`);
+        studentData = res.data.student;
       } else {
-        const studentRes = await api.get(`/students/${studentId}`);
-        studentData = studentRes.data.student;
+        const res = await api.get(`/students/${studentId}`);
+        studentData = res.data.student;
       }
-      
-      if (!studentData) {
-        setApiError('Student not found');
-        return;
-      }
-      
-      // Get applicable fees
+      if (!studentData) { setApiError('Student not found'); return; }
+
+      // ===== Get applicable fees =====
       let applicableFees = [];
-      
       if (isTVET) {
         if (studentData.programId) {
-          const feesRes = await api.get('/fees', { params: { programId: studentData.programId } });
-          applicableFees = feesRes.data.fees || [];
+          const r = await api.get('/fees', { params: { programId: studentData.programId } });
+          applicableFees = r.data.fees || [];
         }
         if (applicableFees.length === 0 && studentData.currentModule) {
-          const moduleNum = studentData.currentModule.replace('Module ', '');
-          const feesRes = await api.get('/fees', { params: { module: moduleNum } });
-          applicableFees = feesRes.data.fees || [];
+          const m = String(studentData.currentModule).replace('Module ', '');
+          const r = await api.get('/fees', { params: { module: m } });
+          applicableFees = r.data.fees || [];
         }
         if (applicableFees.length === 0 && studentData.currentYear) {
-          const feesRes = await api.get('/fees', { params: { year: studentData.currentYear } });
-          applicableFees = feesRes.data.fees || [];
+          const r = await api.get('/fees', { params: { year: studentData.currentYear } });
+          applicableFees = r.data.fees || [];
         }
-      } 
-      else if (isUniversity && studentData.courseId) {
-        const feesRes = await api.get('/fees', { params: { courseId: studentData.courseId } });
-        applicableFees = feesRes.data.fees || [];
-      } 
-      else if (studentData.classId) {
-        const feesRes = await api.get('/fees', { params: { classId: studentData.classId } });
-        applicableFees = feesRes.data.fees || [];
+      } else if (isUniversity && studentData.courseId) {
+        const r = await api.get('/fees', { params: { courseId: studentData.courseId } });
+        applicableFees = r.data.fees || [];
+      } else if (studentData.classId) {
+        const r = await api.get('/fees', { params: { classId: studentData.classId } });
+        applicableFees = r.data.fees || [];
       }
-      
-      // Get payments
-      const paymentsRes = await api.get(`/payments?studentId=${studentData.id}`);
-      const studentPayments = paymentsRes.data.payments || [];
-      
-      const totalFees = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
-      const totalPaid = studentPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-      const balance = totalFees - totalPaid;
-      
+
+      // ===== Get payments =====
+      const payRes = await api.get(`/payments?studentId=${studentData.id}`);
+      const studentPayments = payRes.data.payments || [];
+
+      // ===== ✅ Get discounts (prefer API, fall back to prop) =====
+      let studentDiscountList = [];
+      try {
+        const dRes = await api.get('/discounts', { params: { studentId: studentData.id } });
+        studentDiscountList = dRes.data.discounts || [];
+      } catch (err) {
+        console.warn('Discounts API unavailable, falling back to prop:', err.message);
+        studentDiscountList = (discounts || []).filter(d => d.studentId === studentData.id);
+      }
+      setMyDiscounts(studentDiscountList);
+
+      // ===== Gross fees =====
+      const grossFees = applicableFees.reduce((s, f) => s + (parseFloat(f.amount) || 0), 0);
+
+      // ===== Compute total discount =====
+      let totalDiscount = 0;
+      const feesWithDiscounts = applicableFees.map(fee => {
+        const { amount, source, kind } = resolveDiscount(studentData.id, fee, studentDiscountList);
+        totalDiscount += amount;
+        return {
+          ...fee,
+          _discountAmount: amount,
+          _discountSource: source,
+          _discountKind: kind,
+          _netAmount: Math.max(0, (parseFloat(fee.amount) || 0) - amount)
+        };
+      });
+
+      const totalPaid = studentPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+      const netFees = Math.max(0, grossFees - totalDiscount);
+      const balance = netFees - totalPaid;
+
       const entityName = getStudentEntityName(studentData);
       const additionalInfo = getAdditionalInfo(studentData);
-      const moduleInfo = getModuleInfo(studentData);
-      
-      setMyStudentRecord({
-        ...studentData,
-        entityName,
-        additionalInfo,
-        moduleInfo
-      });
+
+      setMyStudentRecord({ ...studentData, entityName, additionalInfo });
       setMyPayments(studentPayments);
       setMyFeeStatement({
         student: studentData,
-        applicableFees,
+        applicableFees: feesWithDiscounts,
         payments: studentPayments,
-        totalFees,
+        discounts: studentDiscountList,
+        grossFees,
+        totalDiscount,
+        totalFees: netFees,
         totalPaid,
         balance,
         isCleared: balance <= 0,
         entityName,
-        additionalInfo,
-        moduleInfo
+        additionalInfo
       });
-      
-    } catch (error) {
-      console.error('Error loading fee statement:', error);
-      setApiError(error.response?.data?.message || 'Failed to load fee statement');
+    } catch (err) {
+      console.error('Error loading fee statement:', err);
+      setApiError(err.response?.data?.message || 'Failed to load fee statement');
     } finally {
       setLoading(false);
     }
   };
 
-  // ==================== LOAD PARENT'S CHILDREN ====================
+  // ==================== LOAD PARENT CHILDREN ====================
   const loadMyChildren = async () => {
     setLoading(true);
     try {
       const res = await api.get('/parents/me/children');
       const children = res.data.children || [];
-      
-      const enhancedChildren = children.map(child => ({
-        ...child,
-        entityName: getStudentEntityName(child),
-        additionalInfo: getAdditionalInfo(child),
-        moduleInfo: getModuleInfo(child)
+      const enhanced = children.map(c => ({
+        ...c,
+        entityName: getStudentEntityName(c),
+        additionalInfo: getAdditionalInfo(c)
       }));
-      
-      setMyChildren(enhancedChildren);
-      
-      if (enhancedChildren.length > 0) {
-        setSelectedChild(enhancedChildren[0]);
-        loadFeeStatement(enhancedChildren[0].id);
+      setMyChildren(enhanced);
+      if (enhanced.length > 0) {
+        setSelectedChild(enhanced[0]);
+        loadFeeStatement(enhanced[0].id);
       }
-    } catch (error) {
-      console.error('Error loading children:', error);
+    } catch (err) {
+      console.error('Error loading children:', err);
       setApiError('Failed to load your children');
     } finally {
       setLoading(false);
@@ -44792,34 +44664,67 @@ const FeeStatementModule = ({
 
   // ==================== VIEW RECEIPT ====================
   const handleViewReceipt = (payment) => {
-    const formattedReceipt = {
+    setSelectedReceipt({
       type: 'single',
       date: new Date(payment.date || payment.createdAt).toLocaleString(),
       payment: {
         ...payment,
-        studentName: myStudentRecord ? `${myStudentRecord.firstName} ${myStudentRecord.lastName}` : 'Student',
-        admissionNumber: myStudentRecord?.admissionNumber || payment.admissionNumber || 'N/A',
+        studentName: myStudentRecord
+          ? `${myStudentRecord.firstName} ${myStudentRecord.lastName}`
+          : 'Student',
+        admissionNumber: myStudentRecord?.admissionNumber || 'N/A',
         feeName: payment.feeName || payment.Fee?.name || payment.description || 'Fee Payment',
         balance: myFeeStatement?.balance || 0
       },
       school: currentSchool
-    };
-    setSelectedReceipt(formattedReceipt);
+    });
     setShowReceiptModal(true);
   };
 
-  // ==================== PARENT VIEW WITH SEARCHABLE SELECT ====================
+  // ==================== CHILD OPTIONS ====================
+  const childOptions = useMemo(() => {
+    const opts = [{ value: '', label: '' }];
+    (myChildren || []).forEach(child => {
+      let label = `${child.firstName} ${child.lastName} (${child.admissionNumber})`;
+      if (child.entityName && child.entityName !== 'No Program Assigned') {
+        label += ` - ${child.entityName}`;
+      }
+      if (child.additionalInfo) label += ` • ${child.additionalInfo}`;
+      opts.push({ value: child.id, label, subLabel: child.admissionNumber });
+    });
+    return opts;
+  }, [myChildren]);
+
+  // ==================== SIMPLE SELECT ====================
+  const SimpleSelect = ({ label, value, onChange, options, placeholder }) => (
+    <div>
+      {label && (
+        <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      )}
+      <select
+        value={value}
+        onChange={onChange}
+        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+      >
+        {options.map(o => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+            {o.subLabel ? ` — ${o.subLabel}` : ''}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+
+  // ==================== PARENT VIEW ====================
   if (isParent) {
-    React.useEffect(() => {
-      loadMyChildren();
-    }, []);
-    
+    React.useEffect(() => { loadMyChildren(); }, []);
+
     return (
       <div className="space-y-6">
-        {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
-        
+        {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50" />}
         <h2 className="text-2xl font-bold">My Children's Fee Statements</h2>
-        
+
         {myChildren.length === 0 ? (
           <div className="bg-white p-12 rounded-xl shadow-sm text-center">
             <i className="fas fa-child text-6xl text-gray-300 mb-4"></i>
@@ -44827,9 +44732,8 @@ const FeeStatementModule = ({
           </div>
         ) : (
           <div className="space-y-6">
-            {/* Child Selector with Searchable Select */}
             <div className="bg-white p-6 rounded-xl shadow-sm">
-              <SearchableSelect
+              <SimpleSelect
                 label="Select Child"
                 value={selectedChild?.id || ''}
                 onChange={(e) => {
@@ -44838,13 +44742,11 @@ const FeeStatementModule = ({
                   if (child) loadFeeStatement(child.id);
                 }}
                 options={childOptions}
-                placeholder="Search child..."
               />
             </div>
-            
+
             {selectedChild && myFeeStatement && myStudentRecord && (
               <div className="space-y-6">
-                {/* Child Info Card */}
                 <div className="bg-gradient-to-r from-purple-500 to-pink-600 rounded-xl p-6 text-white">
                   <div className="flex items-center space-x-4">
                     <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center">
@@ -44853,42 +44755,56 @@ const FeeStatementModule = ({
                       </span>
                     </div>
                     <div>
-                      <h3 className="text-2xl font-bold">{myStudentRecord.firstName} {myStudentRecord.lastName}</h3>
+                      <h3 className="text-2xl font-bold">
+                        {myStudentRecord.firstName} {myStudentRecord.lastName}
+                      </h3>
                       <p className="text-purple-100">Admission: {myStudentRecord.admissionNumber}</p>
                       <div className="text-purple-200 text-sm mt-1 space-y-1">
-                        {myFeeStatement.entityName && myFeeStatement.entityName !== 'No Program Assigned' && (
-                          <p><i className="fas fa-graduation-cap mr-1 w-4"></i> {myFeeStatement.entityName}</p>
-                        )}
+                        {myFeeStatement.entityName &&
+                          myFeeStatement.entityName !== 'No Program Assigned' && (
+                            <p><i className="fas fa-graduation-cap mr-1 w-4"></i>{myFeeStatement.entityName}</p>
+                          )}
                         {myStudentRecord.currentModule && (
-                          <p><i className="fas fa-layer-group mr-1 w-4"></i> {myStudentRecord.currentModule}</p>
+                          <p><i className="fas fa-layer-group mr-1 w-4"></i>{myStudentRecord.currentModule}</p>
                         )}
                         {myFeeStatement.additionalInfo && (
-                          <p><i className="fas fa-calendar-alt mr-1 w-4"></i> {myFeeStatement.additionalInfo}</p>
+                          <p><i className="fas fa-calendar-alt mr-1 w-4"></i>{myFeeStatement.additionalInfo}</p>
                         )}
                       </div>
                     </div>
                   </div>
                 </div>
-                
-                {/* Balance Summary */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+                {/* Summary — NOW shows discount */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="bg-blue-50 p-4 rounded-lg text-center">
-                    <p className="text-sm text-blue-600">Total Fees</p>
-                    <p className="text-2xl font-bold text-blue-700">{formatCurrency(myFeeStatement.totalFees)}</p>
+                    <p className="text-sm text-blue-600">Gross Fees</p>
+                    <p className="text-2xl font-bold text-blue-700">{formatCurrency(myFeeStatement.grossFees)}</p>
+                  </div>
+                  <div className="bg-purple-50 p-4 rounded-lg text-center">
+                    <p className="text-sm text-purple-600">Discounts</p>
+                    <p className="text-2xl font-bold text-purple-700">−{formatCurrency(myFeeStatement.totalDiscount)}</p>
                   </div>
                   <div className="bg-green-50 p-4 rounded-lg text-center">
-                    <p className="text-sm text-green-600">Total Paid</p>
-                    <p className="text-2xl font-bold text-green-700">{formatCurrency(myFeeStatement.totalPaid)}</p>
+                    <p className="text-sm text-green-600">Net Fees</p>
+                    <p className="text-2xl font-bold text-green-700">{formatCurrency(myFeeStatement.totalFees)}</p>
+                    <p className="text-xs text-gray-500 mt-1">Paid: {formatCurrency(myFeeStatement.totalPaid)}</p>
                   </div>
-                  <div className={`p-4 rounded-lg text-center ${myFeeStatement.balance > 0 ? 'bg-red-50' : myFeeStatement.balance < 0 ? 'bg-orange-50' : 'bg-green-50'}`}>
+                  <div className={`p-4 rounded-lg text-center ${
+                    myFeeStatement.balance > 0 ? 'bg-red-50' :
+                    myFeeStatement.balance < 0 ? 'bg-orange-50' : 'bg-green-50'
+                  }`}>
                     <p className="text-sm text-gray-600">Balance</p>
-                    <p className={`text-2xl font-bold ${myFeeStatement.balance > 0 ? 'text-red-700' : myFeeStatement.balance < 0 ? 'text-orange-700' : 'text-green-700'}`}>
+                    <p className={`text-2xl font-bold ${
+                      myFeeStatement.balance > 0 ? 'text-red-700' :
+                      myFeeStatement.balance < 0 ? 'text-orange-700' : 'text-green-700'
+                    }`}>
                       {formatCurrency(myFeeStatement.balance)}
                     </p>
                   </div>
                 </div>
-                
-                {/* Fee Structure */}
+
+                {/* Fee Structure — shows discount column */}
                 <div className="bg-white rounded-xl shadow-sm overflow-hidden">
                   <div className="px-6 py-4 bg-gray-50 border-b">
                     <h3 className="font-semibold text-lg">Fee Structure</h3>
@@ -44898,24 +44814,32 @@ const FeeStatementModule = ({
                       <table className="w-full">
                         <thead className="bg-gray-50">
                           <tr>
-                            <th className="px-4 py-2 text-left">Fee Name</th>
-                            <th className="px-4 py-2 text-left">Amount</th>
-                            <th className="px-4 py-2 text-left">Due Date</th>
-                            <th className="px-4 py-2 text-left">Status</th>
+                            <th className="px-4 py-2 text-left">Fee</th>
+                            <th className="px-4 py-2 text-right">Amount</th>
+                            <th className="px-4 py-2 text-right">Discount</th>
+                            <th className="px-4 py-2 text-right">Net</th>
+                            <th className="px-4 py-2 text-right">Paid</th>
+                            <th className="px-4 py-2 text-center">Status</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y">
                           {myFeeStatement.applicableFees.map(fee => {
-                            const paymentsForFee = myPayments.filter(p => p.feeId === fee.id);
-                            const totalPaidForFee = paymentsForFee.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-                            const isPaid = totalPaidForFee >= parseFloat(fee.amount);
-                            
+                            const paidForFee = myPayments
+                              .filter(p => p.feeId === fee.id)
+                              .reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+                            const isPaid = paidForFee >= fee._netAmount;
                             return (
                               <tr key={fee.id} className="hover:bg-gray-50">
-                                <td className="px-4 py-2">{fee.name}</td>
-                                <td className="px-4 py-2 font-bold text-green-600">{formatCurrency(fee.amount)}</td>
-                                <td className="px-4 py-2">{fee.dueDate ? new Date(fee.dueDate).toLocaleDateString() : 'N/A'}</td>
-                                <td className="px-4 py-2">
+                                <td className="px-4 py-2 font-medium">{fee.name}</td>
+                                <td className="px-4 py-2 text-right">{formatCurrency(fee.amount)}</td>
+                                <td className="px-4 py-2 text-right text-purple-600">
+                                  {fee._discountAmount > 0 ? `−${formatCurrency(fee._discountAmount)}` : '—'}
+                                </td>
+                                <td className="px-4 py-2 text-right font-bold text-green-600">
+                                  {formatCurrency(fee._netAmount)}
+                                </td>
+                                <td className="px-4 py-2 text-right">{formatCurrency(paidForFee)}</td>
+                                <td className="px-4 py-2 text-center">
                                   {isPaid ? (
                                     <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">Paid</span>
                                   ) : (
@@ -44935,7 +44859,30 @@ const FeeStatementModule = ({
                     )}
                   </div>
                 </div>
-                
+
+                {/* Active discounts list */}
+                {myDiscounts.length > 0 && (
+                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                    <p className="font-medium text-purple-800 mb-2">
+                      <i className="fas fa-tags mr-2"></i>Active Discounts
+                    </p>
+                    <ul className="space-y-1 text-sm text-purple-700">
+                      {myDiscounts.map(d => {
+                        const fee = myFeeStatement.applicableFees.find(f => f.id === d.feeId);
+                        return (
+                          <li key={d.id}>
+                            • {fee ? fee.name : 'All fees'} —{' '}
+                            {String(d.type).toUpperCase() === 'PERCENT'
+                              ? `${parseFloat(d.value)}%`
+                              : formatCurrency(d.value)}
+                            {d.reason && <span className="text-purple-500"> ({d.reason})</span>}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+
                 {/* Payment History */}
                 {myPayments.length > 0 && (
                   <div className="bg-white rounded-xl shadow-sm overflow-hidden">
@@ -44949,28 +44896,22 @@ const FeeStatementModule = ({
                             <th className="px-4 py-2 text-left">Date</th>
                             <th className="px-4 py-2 text-left">Receipt No.</th>
                             <th className="px-4 py-2 text-left">Description</th>
-                            <th className="px-4 py-2 text-left">Amount</th>
+                            <th className="px-4 py-2 text-right">Amount</th>
                             <th className="px-4 py-2 text-left">Method</th>
-                            <th className="px-4 py-2 text-left">Actions</th>
+                            <th className="px-4 py-2 text-center">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y">
                           {myPayments.map(payment => (
                             <tr key={payment.id} className="hover:bg-gray-50">
                               <td className="px-4 py-2">{new Date(payment.date).toLocaleDateString()}</td>
-                              <td className="px-4 py-2 font-mono text-sm">{payment.receiptNo}</td>
+                              <td className="px-4 py-2 font-mono text-sm">{payment.receiptNo || '—'}</td>
                               <td className="px-4 py-2">{payment.description || payment.feeName || 'Fee Payment'}</td>
-                              <td className="px-4 py-2 font-bold text-green-600">{formatCurrency(payment.amount)}</td>
+                              <td className="px-4 py-2 font-bold text-green-600 text-right">{formatCurrency(payment.amount)}</td>
                               <td className="px-4 py-2">
-                                <span className={`px-2 py-1 rounded-full text-xs ${
-                                  payment.paymentMethod === 'CASH' ? 'bg-green-100 text-green-800' :
-                                  payment.paymentMethod === 'MPESA' ? 'bg-yellow-100 text-yellow-800' :
-                                  'bg-blue-100 text-blue-800'
-                                }`}>
-                                  {payment.paymentMethod}
-                                </span>
+                                <span className="px-2 py-1 rounded-full text-xs bg-gray-100">{payment.paymentMethod}</span>
                               </td>
-                              <td className="px-4 py-2">
+                              <td className="px-4 py-2 text-center">
                                 <button
                                   onClick={() => handleViewReceipt(payment)}
                                   className="text-indigo-600 hover:text-indigo-900 p-1"
@@ -44990,15 +44931,11 @@ const FeeStatementModule = ({
             )}
           </div>
         )}
-        
-        {/* Receipt Modal */}
+
         {showReceiptModal && selectedReceipt && (
           <ReceiptModal
             receipt={selectedReceipt}
-            onClose={() => {
-              setShowReceiptModal(false);
-              setSelectedReceipt(null);
-            }}
+            onClose={() => { setShowReceiptModal(false); setSelectedReceipt(null); }}
             students={students}
             user={user}
             school={currentSchool}
@@ -45011,14 +44948,12 @@ const FeeStatementModule = ({
   // ==================== STUDENT VIEW ====================
   if (isStudent) {
     React.useEffect(() => {
-      const savedAdmission = localStorage.getItem('studentAdmissionNumber');
-      if (savedAdmission) {
-        setAdmissionNumber(savedAdmission);
-        setTempAdmissionNumber(savedAdmission);
-        loadFeeStatement(null, savedAdmission);
+      const saved = localStorage.getItem('studentAdmissionNumber');
+      if (saved) {
+        setAdmissionNumber(saved); setTempAdmissionNumber(saved);
+        loadFeeStatement(null, saved);
       } else if (propAdmissionNumber) {
-        setAdmissionNumber(propAdmissionNumber);
-        setTempAdmissionNumber(propAdmissionNumber);
+        setAdmissionNumber(propAdmissionNumber); setTempAdmissionNumber(propAdmissionNumber);
         loadFeeStatement(null, propAdmissionNumber);
       } else {
         setShowAdmissionModal(true);
@@ -45026,40 +44961,30 @@ const FeeStatementModule = ({
     }, []);
 
     const handleAdmissionSubmit = async () => {
-      if (!tempAdmissionNumber) {
-        setApiError('Please enter your admission number');
-        return;
-      }
-      const admNumber = tempAdmissionNumber.toUpperCase().trim();
-      setAdmissionNumber(admNumber);
-      localStorage.setItem('studentAdmissionNumber', admNumber);
-      await loadFeeStatement(null, admNumber);
+      if (!tempAdmissionNumber) { setApiError('Please enter your admission number'); return; }
+      const adm = tempAdmissionNumber.toUpperCase().trim();
+      setAdmissionNumber(adm);
+      localStorage.setItem('studentAdmissionNumber', adm);
+      await loadFeeStatement(null, adm);
       setShowAdmissionModal(false);
     };
 
-    const clearSavedAdmission = () => {
+    const clearSaved = () => {
       localStorage.removeItem('studentAdmissionNumber');
-      setAdmissionNumber('');
-      setTempAdmissionNumber('');
-      setMyStudentRecord(null);
-      setMyFeeStatement(null);
-      setMyPayments([]);
+      setAdmissionNumber(''); setTempAdmissionNumber('');
+      setMyStudentRecord(null); setMyFeeStatement(null); setMyPayments([]); setMyDiscounts([]);
       setShowAdmissionModal(true);
     };
 
     return (
       <>
-        {/* Admission Modal */}
         {showAdmissionModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-2xl font-bold">View Fee Statement</h2>
                 {myStudentRecord && (
-                  <button 
-                    onClick={() => setShowAdmissionModal(false)} 
-                    className="text-gray-500 hover:text-gray-700"
-                  >
+                  <button onClick={() => setShowAdmissionModal(false)} className="text-gray-500 hover:text-gray-700">
                     <i className="fas fa-times"></i>
                   </button>
                 )}
@@ -45067,8 +44992,7 @@ const FeeStatementModule = ({
               <p className="text-gray-600 mb-4">Enter your admission number to view your fee statement.</p>
               {apiError && (
                 <div className="bg-red-50 p-3 rounded-lg text-red-600 text-sm mb-4">
-                  <i className="fas fa-exclamation-circle mr-2"></i>
-                  {apiError}
+                  <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
                 </div>
               )}
               <div className="space-y-4">
@@ -45096,23 +45020,18 @@ const FeeStatementModule = ({
         )}
 
         <div className="space-y-6">
-          {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
-          
+          {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50" />}
           <div className="flex justify-between items-center">
             <h2 className="text-2xl font-bold">My Fee Statement</h2>
             {myStudentRecord && (
-              <button
-                onClick={clearSavedAdmission}
-                className="text-indigo-600 hover:text-indigo-800 text-sm flex items-center"
-              >
+              <button onClick={clearSaved} className="text-indigo-600 hover:text-indigo-800 text-sm flex items-center">
                 <i className="fas fa-exchange-alt mr-1"></i>Switch Account
               </button>
             )}
           </div>
-          
+
           {myStudentRecord && myFeeStatement ? (
             <div className="space-y-6">
-              {/* Student Info Card */}
               <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl p-6 text-white">
                 <div className="flex items-center space-x-4">
                   <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center">
@@ -45121,42 +45040,54 @@ const FeeStatementModule = ({
                     </span>
                   </div>
                   <div>
-                    <h3 className="text-2xl font-bold">{myStudentRecord.firstName} {myStudentRecord.lastName}</h3>
+                    <h3 className="text-2xl font-bold">
+                      {myStudentRecord.firstName} {myStudentRecord.lastName}
+                    </h3>
                     <p className="text-indigo-100">Admission: {myStudentRecord.admissionNumber}</p>
                     <div className="text-indigo-200 text-sm mt-1 space-y-1">
-                      {myFeeStatement.entityName && myFeeStatement.entityName !== 'No Program Assigned' && (
-                        <p><i className="fas fa-graduation-cap mr-1 w-4"></i> {myFeeStatement.entityName}</p>
-                      )}
+                      {myFeeStatement.entityName &&
+                        myFeeStatement.entityName !== 'No Program Assigned' && (
+                          <p><i className="fas fa-graduation-cap mr-1 w-4"></i>{myFeeStatement.entityName}</p>
+                        )}
                       {myStudentRecord.currentModule && (
-                        <p><i className="fas fa-layer-group mr-1 w-4"></i> {myStudentRecord.currentModule}</p>
+                        <p><i className="fas fa-layer-group mr-1 w-4"></i>{myStudentRecord.currentModule}</p>
                       )}
                       {myFeeStatement.additionalInfo && (
-                        <p><i className="fas fa-calendar-alt mr-1 w-4"></i> {myFeeStatement.additionalInfo}</p>
+                        <p><i className="fas fa-calendar-alt mr-1 w-4"></i>{myFeeStatement.additionalInfo}</p>
                       )}
                     </div>
                   </div>
                 </div>
               </div>
-              
-              {/* Balance Summary */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div className="bg-blue-50 p-4 rounded-lg text-center">
-                  <p className="text-sm text-blue-600">Total Fees</p>
-                  <p className="text-2xl font-bold text-blue-700">{formatCurrency(myFeeStatement.totalFees)}</p>
+                  <p className="text-sm text-blue-600">Gross Fees</p>
+                  <p className="text-2xl font-bold text-blue-700">{formatCurrency(myFeeStatement.grossFees)}</p>
+                </div>
+                <div className="bg-purple-50 p-4 rounded-lg text-center">
+                  <p className="text-sm text-purple-600">Discounts</p>
+                  <p className="text-2xl font-bold text-purple-700">−{formatCurrency(myFeeStatement.totalDiscount)}</p>
                 </div>
                 <div className="bg-green-50 p-4 rounded-lg text-center">
-                  <p className="text-sm text-green-600">Total Paid</p>
-                  <p className="text-2xl font-bold text-green-700">{formatCurrency(myFeeStatement.totalPaid)}</p>
+                  <p className="text-sm text-green-600">Net Fees</p>
+                  <p className="text-2xl font-bold text-green-700">{formatCurrency(myFeeStatement.totalFees)}</p>
+                  <p className="text-xs text-gray-500 mt-1">Paid: {formatCurrency(myFeeStatement.totalPaid)}</p>
                 </div>
-                <div className={`p-4 rounded-lg text-center ${myFeeStatement.balance > 0 ? 'bg-red-50' : myFeeStatement.balance < 0 ? 'bg-orange-50' : 'bg-green-50'}`}>
+                <div className={`p-4 rounded-lg text-center ${
+                  myFeeStatement.balance > 0 ? 'bg-red-50' :
+                  myFeeStatement.balance < 0 ? 'bg-orange-50' : 'bg-green-50'
+                }`}>
                   <p className="text-sm text-gray-600">Balance</p>
-                  <p className={`text-2xl font-bold ${myFeeStatement.balance > 0 ? 'text-red-700' : myFeeStatement.balance < 0 ? 'text-orange-700' : 'text-green-700'}`}>
+                  <p className={`text-2xl font-bold ${
+                    myFeeStatement.balance > 0 ? 'text-red-700' :
+                    myFeeStatement.balance < 0 ? 'text-orange-700' : 'text-green-700'
+                  }`}>
                     {formatCurrency(myFeeStatement.balance)}
                   </p>
                 </div>
               </div>
-              
-              {/* Fee Structure */}
+
               <div className="bg-white rounded-xl shadow-sm overflow-hidden">
                 <div className="px-6 py-4 bg-gray-50 border-b">
                   <h3 className="font-semibold text-lg">Fee Structure</h3>
@@ -45166,24 +45097,30 @@ const FeeStatementModule = ({
                     <table className="w-full">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="px-4 py-2 text-left">Fee Name</th>
-                          <th className="px-4 py-2 text-left">Amount</th>
-                          <th className="px-4 py-2 text-left">Due Date</th>
-                          <th className="px-4 py-2 text-left">Status</th>
+                          <th className="px-4 py-2 text-left">Fee</th>
+                          <th className="px-4 py-2 text-right">Amount</th>
+                          <th className="px-4 py-2 text-right">Discount</th>
+                          <th className="px-4 py-2 text-right">Net</th>
+                          <th className="px-4 py-2 text-center">Status</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
                         {myFeeStatement.applicableFees.map(fee => {
-                          const paymentsForFee = myPayments.filter(p => p.feeId === fee.id);
-                          const totalPaidForFee = paymentsForFee.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-                          const isPaid = totalPaidForFee >= parseFloat(fee.amount);
-                          
+                          const paidForFee = myPayments
+                            .filter(p => p.feeId === fee.id)
+                            .reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+                          const isPaid = paidForFee >= fee._netAmount;
                           return (
                             <tr key={fee.id} className="hover:bg-gray-50">
                               <td className="px-4 py-2">{fee.name}</td>
-                              <td className="px-4 py-2 font-bold text-green-600">{formatCurrency(fee.amount)}</td>
-                              <td className="px-4 py-2">{fee.dueDate ? new Date(fee.dueDate).toLocaleDateString() : 'N/A'}</td>
-                              <td className="px-4 py-2">
+                              <td className="px-4 py-2 text-right">{formatCurrency(fee.amount)}</td>
+                              <td className="px-4 py-2 text-right text-purple-600">
+                                {fee._discountAmount > 0 ? `−${formatCurrency(fee._discountAmount)}` : '—'}
+                              </td>
+                              <td className="px-4 py-2 text-right font-bold text-green-600">
+                                {formatCurrency(fee._netAmount)}
+                              </td>
+                              <td className="px-4 py-2 text-center">
                                 {isPaid ? (
                                   <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">Paid</span>
                                 ) : (
@@ -45203,8 +45140,29 @@ const FeeStatementModule = ({
                   )}
                 </div>
               </div>
-              
-              {/* Payment History */}
+
+              {myDiscounts.length > 0 && (
+                <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                  <p className="font-medium text-purple-800 mb-2">
+                    <i className="fas fa-tags mr-2"></i>Your Discounts
+                  </p>
+                  <ul className="space-y-1 text-sm text-purple-700">
+                    {myDiscounts.map(d => {
+                      const fee = myFeeStatement.applicableFees.find(f => f.id === d.feeId);
+                      return (
+                        <li key={d.id}>
+                          • {fee ? fee.name : 'All fees'} —{' '}
+                          {String(d.type).toUpperCase() === 'PERCENT'
+                            ? `${parseFloat(d.value)}%`
+                            : formatCurrency(d.value)}
+                          {d.reason && <span className="text-purple-500"> ({d.reason})</span>}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+
               {myPayments.length > 0 && (
                 <div className="bg-white rounded-xl shadow-sm overflow-hidden">
                   <div className="px-6 py-4 bg-gray-50 border-b">
@@ -45215,34 +45173,27 @@ const FeeStatementModule = ({
                       <thead className="bg-gray-50">
                         <tr>
                           <th className="px-4 py-2 text-left">Date</th>
-                          <th className="px-4 py-2 text-left">Receipt No.</th>
+                          <th className="px-4 py-2 text-left">Receipt</th>
                           <th className="px-4 py-2 text-left">Description</th>
-                          <th className="px-4 py-2 text-left">Amount</th>
+                          <th className="px-4 py-2 text-right">Amount</th>
                           <th className="px-4 py-2 text-left">Method</th>
-                          <th className="px-4 py-2 text-left">Actions</th>
+                          <th className="px-4 py-2 text-center">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
-                        {myPayments.map(payment => (
-                          <tr key={payment.id} className="hover:bg-gray-50">
-                            <td className="px-4 py-2">{new Date(payment.date).toLocaleDateString()}</td>
-                            <td className="px-4 py-2 font-mono text-sm">{payment.receiptNo}</td>
-                            <td className="px-4 py-2">{payment.description || payment.feeName || 'Fee Payment'}</td>
-                            <td className="px-4 py-2 font-bold text-green-600">{formatCurrency(payment.amount)}</td>
+                        {myPayments.map(p => (
+                          <tr key={p.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-2">{new Date(p.date).toLocaleDateString()}</td>
+                            <td className="px-4 py-2 font-mono text-sm">{p.receiptNo || '—'}</td>
+                            <td className="px-4 py-2">{p.description || p.feeName || 'Fee Payment'}</td>
+                            <td className="px-4 py-2 font-bold text-green-600 text-right">{formatCurrency(p.amount)}</td>
                             <td className="px-4 py-2">
-                              <span className={`px-2 py-1 rounded-full text-xs ${
-                                payment.paymentMethod === 'CASH' ? 'bg-green-100 text-green-800' :
-                                payment.paymentMethod === 'MPESA' ? 'bg-yellow-100 text-yellow-800' :
-                                'bg-blue-100 text-blue-800'
-                              }`}>
-                                {payment.paymentMethod}
-                              </span>
+                              <span className="px-2 py-1 rounded-full text-xs bg-gray-100">{p.paymentMethod}</span>
                             </td>
-                            <td className="px-4 py-2">
+                            <td className="px-4 py-2 text-center">
                               <button
-                                onClick={() => handleViewReceipt(payment)}
+                                onClick={() => handleViewReceipt(p)}
                                 className="text-indigo-600 hover:text-indigo-900 p-1"
-                                title="View Receipt"
                               >
                                 <i className="fas fa-eye"></i>
                               </button>
@@ -45268,15 +45219,11 @@ const FeeStatementModule = ({
             </div>
           )}
         </div>
-        
-        {/* Receipt Modal */}
+
         {showReceiptModal && selectedReceipt && (
           <ReceiptModal
             receipt={selectedReceipt}
-            onClose={() => {
-              setShowReceiptModal(false);
-              setSelectedReceipt(null);
-            }}
+            onClose={() => { setShowReceiptModal(false); setSelectedReceipt(null); }}
             students={students}
             user={user}
             school={currentSchool}
@@ -45286,7 +45233,6 @@ const FeeStatementModule = ({
     );
   }
 
-  // ==================== UNAUTHORIZED ====================
   return (
     <div className="bg-white p-8 rounded-xl shadow-sm text-center">
       <i className="fas fa-lock text-5xl text-gray-400 mb-4"></i>
@@ -45294,6 +45240,8 @@ const FeeStatementModule = ({
     </div>
   );
 };
+
+
 // ==================== FEE STATEMENT PRINT MODAL ====================
 const FeeStatementPrintModal = ({ feeStatement, student, currentSchool, onClose }) => {
   const formatCurrency = (amount) => {
@@ -51913,16 +51861,17 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
     </div>
   );
 };
-const FeeCollectionModule = ({ 
-  students, 
-  fees, 
-  payments, 
-  setPayments, 
-  classes, 
-  courses, 
-  programs, 
-  currentSchool, 
-  parents, 
+// ==================== FEE COLLECTION MODULE (with discounts) ====================
+const FeeCollectionModule = ({
+  students = [],
+  fees = [],
+  payments = [],
+  setPayments,
+  classes = [],
+  courses = [],
+  programs = [],
+  currentSchool,
+  parents = [],
   user,
   discounts = [],
   setDiscounts
@@ -51933,10 +51882,10 @@ const FeeCollectionModule = ({
   const [paymentMethod, setPaymentMethod] = useState('CASH');
   const [paymentDate, setPaymentDate] = useState(() => {
     const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   });
   const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
@@ -51962,14 +51911,10 @@ const FeeCollectionModule = ({
     term: ''
   });
 
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-KE', { 
-      style: 'currency', 
-      currency: 'KES',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
+  const formatCurrency = (amount) =>
+    new Intl.NumberFormat('en-KE', {
+      style: 'currency', currency: 'KES', minimumFractionDigits: 0, maximumFractionDigits: 0
     }).format(amount || 0);
-  };
 
   const schoolCategory = currentSchool?.category || 'SENIOR_SECONDARY';
   const isUniversity = schoolCategory === 'UNIVERSITY';
@@ -51978,16 +51923,10 @@ const FeeCollectionModule = ({
 
   const canGrantDiscount = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
 
-  const SearchableSelect = ({ 
-    label, 
-    value, 
-    onChange, 
-    options, 
-    placeholder, 
-    disabled, 
-    required, 
-    className,
-    showClear = true 
+  // ==================== SEARCHABLE SELECT ====================
+  const SearchableSelect = ({
+    label, value, onChange, options = [], placeholder = 'Search...',
+    disabled, required, className, showClear = true
   }) => {
     const [search, setSearch] = useState('');
     const [isOpen, setIsOpen] = useState(false);
@@ -51996,82 +51935,56 @@ const FeeCollectionModule = ({
     const inputRef = useRef(null);
 
     const optionsWithEmpty = useMemo(() => {
-      const hasEmpty = options.some(opt => opt.value === '' || opt.value === null || opt.value === undefined);
-      if (hasEmpty) return options;
-      return [{ value: '', label: '' }, ...options];
+      const hasEmpty = options.some(o => o.value === '' || o.value === null || o.value === undefined);
+      return hasEmpty ? options : [{ value: '', label: '' }, ...options];
     }, [options]);
 
     const filteredOptions = useMemo(() => {
       if (!search.trim()) return optionsWithEmpty;
-      const searchLower = search.toLowerCase();
-      return optionsWithEmpty.filter(opt => 
-        opt.label?.toLowerCase().includes(searchLower) ||
-        opt.subLabel?.toLowerCase().includes(searchLower) ||
-        opt.value?.toString().toLowerCase().includes(searchLower)
+      const q = search.toLowerCase();
+      return optionsWithEmpty.filter(o =>
+        o.label?.toLowerCase().includes(q) ||
+        o.subLabel?.toLowerCase().includes(q) ||
+        o.value?.toString().toLowerCase().includes(q)
       );
     }, [optionsWithEmpty, search]);
 
-    const selectedOption = optionsWithEmpty.find(opt => opt.value === value);
+    const selectedOption = optionsWithEmpty.find(o => o.value === value);
 
     useEffect(() => {
-      const handleClickOutside = (event) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-          setIsOpen(false);
-          setIsFocused(false);
+      const h = (e) => {
+        if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+          setIsOpen(false); setIsFocused(false);
         }
       };
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
+      document.addEventListener('mousedown', h);
+      return () => document.removeEventListener('mousedown', h);
     }, []);
 
     useEffect(() => {
-      if (selectedOption && !isFocused) {
-        setSearch(selectedOption.label);
-      } else if (!selectedOption && !isFocused) {
-        setSearch('');
-      }
+      if (selectedOption && !isFocused) setSearch(selectedOption.label);
+      else if (!selectedOption && !isFocused) setSearch('');
     }, [value, selectedOption, isFocused]);
 
-    const handleSelect = (selectedValue) => {
-      onChange({ target: { value: selectedValue } });
-      const selected = optionsWithEmpty.find(opt => opt.value === selectedValue);
-      setSearch(selected ? selected.label : '');
-      setIsOpen(false);
-      setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
+    const handleSelect = (val) => {
+      onChange({ target: { value: val } });
+      const sel = optionsWithEmpty.find(o => o.value === val);
+      setSearch(sel ? sel.label : '');
+      setIsOpen(false); setIsFocused(false);
+      inputRef.current?.focus();
     };
 
-    const handleInputChange = (e) => {
-      const newValue = e.target.value;
-      setSearch(newValue);
-      setIsOpen(true);
-      setIsFocused(true);
-      if (newValue === '') {
-        onChange({ target: { value: '' } });
-      }
+    const handleChange = (e) => {
+      const v = e.target.value;
+      setSearch(v); setIsOpen(true); setIsFocused(true);
+      if (v === '') onChange({ target: { value: '' } });
     };
 
-    const handleFocus = () => {
-      setIsFocused(true);
-      setIsOpen(true);
-    };
-
-    const handleBlur = (e) => {
-      const relatedTarget = e.relatedTarget;
-      if (dropdownRef.current && dropdownRef.current.contains(relatedTarget)) {
-        return;
-      }
+    const handleBlur = () => {
       setTimeout(() => {
         if (document.activeElement !== inputRef.current) {
-          setIsOpen(false);
-          setIsFocused(false);
-          if (selectedOption) {
-            setSearch(selectedOption.label);
-          } else {
-            setSearch('');
-          }
+          setIsOpen(false); setIsFocused(false);
+          setSearch(selectedOption ? selectedOption.label : '');
         }
       }, 150);
     };
@@ -52079,40 +51992,31 @@ const FeeCollectionModule = ({
     const handleClear = (e) => {
       e.stopPropagation();
       onChange({ target: { value: '' } });
-      setSearch('');
-      setIsOpen(false);
-      setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
+      setSearch(''); setIsOpen(false); setIsFocused(false);
+      inputRef.current?.focus();
     };
 
-    const getDisplayValue = () => {
-      if (isFocused) return search;
-      if (selectedOption) return selectedOption.label;
-      return placeholder || '';
-    };
+    const displayValue = isFocused ? search : (selectedOption ? selectedOption.label : placeholder || '');
 
     return (
       <div className="relative" ref={dropdownRef}>
         {label && (
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
+            {label}{required && <span className="text-red-500 ml-1">*</span>}
           </label>
         )}
         <div className="relative">
           <input
             ref={inputRef}
             type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
+            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 transition-all ${
+              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
             } ${className || ''}`}
-            value={getDisplayValue()}
-            onChange={handleInputChange}
-            onFocus={handleFocus}
+            value={displayValue}
+            onChange={handleChange}
+            onFocus={() => { setIsFocused(true); setIsOpen(true); }}
             onBlur={handleBlur}
-            placeholder={placeholder || "Search and select..."}
+            placeholder={placeholder}
             disabled={disabled}
             autoComplete="off"
           />
@@ -52120,16 +52024,16 @@ const FeeCollectionModule = ({
             <button
               type="button"
               onClick={handleClear}
-              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-red-500 z-10"
-              title="Clear selection"
+              className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 z-10"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           )}
-          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+              fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </div>
@@ -52137,22 +52041,22 @@ const FeeCollectionModule = ({
         {isOpen && !disabled && (
           <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
             {filteredOptions.length > 0 ? (
-              filteredOptions.map((opt) => (
+              filteredOptions.map(o => (
                 <div
-                  key={opt.value || Math.random().toString()}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
-                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
+                  key={String(o.value || Math.random())}
+                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 ${
+                    o.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
                   }`}
                   onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => handleSelect(opt.value)}
+                  onClick={() => handleSelect(o.value)}
                 >
-                  <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+                  <div className="font-medium">{o.label}</div>
+                  {o.subLabel && <div className="text-xs text-gray-500">{o.subLabel}</div>}
                 </div>
               ))
             ) : (
               <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {search.trim() ? 'No results found' : 'Type to search...'}
+                {search.trim() ? 'No results' : 'Type to search...'}
               </div>
             )}
           </div>
@@ -52161,13 +52065,12 @@ const FeeCollectionModule = ({
     );
   };
 
+  // ==================== OPTIONS ====================
   const studentOptions = useMemo(() => {
     const opts = [{ value: '', label: '' }];
-    let studentList = students || [];
-    if (currentSchool?.id) {
-      studentList = studentList.filter(s => s.schoolId === currentSchool.id);
-    }
-    studentList.forEach(s => {
+    let list = students || [];
+    if (currentSchool?.id) list = list.filter(s => s.schoolId === currentSchool.id);
+    list.forEach(s => {
       opts.push({
         value: s.id,
         label: `${s.firstName} ${s.lastName}`,
@@ -52179,47 +52082,45 @@ const FeeCollectionModule = ({
 
   const filteredStudentOptions = useMemo(() => {
     if (!searchTerm) return studentOptions;
-    const term = searchTerm.toLowerCase();
-    return studentOptions.filter(opt => 
-      opt.label?.toLowerCase().includes(term) ||
-      opt.subLabel?.toLowerCase().includes(term)
+    const q = searchTerm.toLowerCase();
+    return studentOptions.filter(o =>
+      o.label?.toLowerCase().includes(q) || o.subLabel?.toLowerCase().includes(q)
     );
   }, [studentOptions, searchTerm]);
 
   const paymentMethodOptions = useMemo(() => [
-    { value: 'CASH', label: 'Cash', subLabel: 'Physical cash payment' },
-    { value: 'MPESA', label: 'M-Pesa', subLabel: 'Mobile money payment' },
-    { value: 'BANK', label: 'Bank Transfer', subLabel: 'Direct bank transfer' },
-    { value: 'CHEQUE', label: 'Cheque', subLabel: 'Cheque payment' },
-    { value: 'CARD', label: 'Card', subLabel: 'Debit/Credit card' }
+    { value: 'CASH', label: 'Cash' },
+    { value: 'MPESA', label: 'M-Pesa' },
+    { value: 'BANK', label: 'Bank Transfer' },
+    { value: 'CHEQUE', label: 'Cheque' },
+    { value: 'CARD', label: 'Card' }
   ], []);
 
   const feeOptions = useMemo(() => {
     const opts = [{ value: '', label: 'All fees for this student' }];
     (feeStructure || []).forEach(f => {
-      opts.push({
-        value: f.id,
-        label: f.name,
-        subLabel: `${formatCurrency(f.amount)}`
-      });
+      opts.push({ value: f.id, label: f.name, subLabel: formatCurrency(f.amount) });
     });
     return opts;
   }, [feeStructure]);
 
-  // ✅ FIXED: read from the freshest source (state populated from API)
-  //    and fall back to the prop only if state is empty.
-  const getDiscountForFee = (fee, studentId) => {
-    if (!fee || !studentId) return { amount: 0, source: null };
+  // ==================== DISCOUNT RESOLVER ====================
+  // Prefer API-fetched studentDiscounts (state), fall back to prop.
+  const resolveDiscount = (fee, studentId) => {
+    if (!fee || !studentId) return { amount: 0, source: null, kind: null };
 
-    const source = (studentDiscounts && studentDiscounts.length > 0)
+    const list = (studentDiscounts && studentDiscounts.length > 0)
       ? studentDiscounts
       : (discounts || []);
 
-    const perFee = source.find(d =>
+    // 1. Per-fee discount
+    const perFee = list.find(d =>
       d.studentId === studentId && d.feeId === fee.id && d.isActive !== false
     );
+
+    // 2. Student-wide discount
     const studentWide = !perFee
-      ? source.find(d =>
+      ? list.find(d =>
           d.studentId === studentId &&
           (d.feeId === null || d.feeId === undefined) &&
           d.isActive !== false
@@ -52228,110 +52129,93 @@ const FeeCollectionModule = ({
 
     const active = perFee || studentWide;
     if (active) {
-      const value = parseFloat(active.value) || 0;
-      const amount = active.type === 'PERCENT'
-        ? (parseFloat(fee.amount) || 0) * (value / 100)
-        : value;
-      return { amount, source: active };
+      const v = parseFloat(active.value) || 0;
+      const amount = String(active.type).toUpperCase() === 'PERCENT'
+        ? (parseFloat(fee.amount) || 0) * (v / 100)
+        : v;
+      return { amount, source: active, kind: perFee ? 'per-fee' : 'student-wide' };
     }
 
+    // 3. Fee-level default
     const feeAmount = parseFloat(fee.amount) || 0;
     if (parseFloat(fee.discountPercent) > 0) {
-      return { amount: feeAmount * (parseFloat(fee.discountPercent) / 100), source: null };
+      return {
+        amount: feeAmount * (parseFloat(fee.discountPercent) / 100),
+        source: null, kind: 'fee-level-percent'
+      };
     }
     if (parseFloat(fee.discountAmount) > 0) {
-      return { amount: parseFloat(fee.discountAmount), source: null };
+      return {
+        amount: parseFloat(fee.discountAmount),
+        source: null, kind: 'fee-level-amount'
+      };
     }
 
-    return { amount: 0, source: null };
+    return { amount: 0, source: null, kind: null };
   };
 
   const getPaidForFee = (fee, studentId) => {
     if (!fee || !studentId) return 0;
     return (payments || [])
       .filter(p => p.studentId === studentId && p.feeId === fee.id)
-      .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+      .reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
   };
 
+  // ==================== LOAD STUDENT FEE INFO ====================
   const loadStudentFeeInfo = async (studentId) => {
     setLoading(true);
     setApiError('');
     try {
       const student = students.find(s => s.id === studentId);
-      if (!student) {
-        setApiError('Student not found');
-        return;
-      }
+      if (!student) { setApiError('Student not found'); return; }
       setStudentDetails(student);
 
+      // Build fee filter
       let feeParams = {};
-      if (isTVET && student.programId) {
-        feeParams.programId = student.programId;
-      } else if (isUniversity && student.courseId) {
-        feeParams.courseId = student.courseId;
-      } else if (student.classId) {
-        feeParams.classId = student.classId;
-      }
+      if (isTVET && student.programId) feeParams.programId = student.programId;
+      else if (isUniversity && student.courseId) feeParams.courseId = student.courseId;
+      else if (student.classId) feeParams.classId = student.classId;
 
       const feesRes = await api.get('/fees', { params: feeParams });
       const studentFees = feesRes.data.fees || [];
       setFeeStructure(studentFees);
 
-      const totalFeesAmount = studentFees.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
-
-      const paymentsRes = await api.get('/payments', { params: { studentId: student.id } });
-      const studentPayments = paymentsRes.data.payments || [];
-      const totalPaidAmount = studentPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+      // Payments
+      const payRes = await api.get('/payments', { params: { studentId: student.id } });
+      const studentPayments = payRes.data.payments || [];
+      const totalPaidAmount = studentPayments.reduce(
+        (s, p) => s + (parseFloat(p.amount) || 0), 0
+      );
       setTotalPaid(totalPaidAmount);
 
-      let studentDiscountsList = [];
+      // ✅ Discounts — prefer API, fall back to prop
+      let list = [];
       try {
-        const discountsRes = await api.get('/discounts', { params: { studentId: student.id } });
-        studentDiscountsList = discountsRes.data.discounts || [];
+        const dRes = await api.get('/discounts', { params: { studentId: student.id } });
+        list = dRes.data.discounts || [];
       } catch (err) {
-        console.warn('Could not fetch discounts, using prop:', err.message);
-        studentDiscountsList = (discounts || []).filter(d => d.studentId === student.id);
+        console.warn('Discounts API unavailable, using prop:', err.message);
+        list = (discounts || []).filter(d => d.studentId === student.id);
       }
-      setStudentDiscounts(studentDiscountsList);
+      setStudentDiscounts(list);
 
-      // ✅ Now uses the freshly-fetched list directly (not the prop)
+      // Compute totals
+      const grossFees = studentFees.reduce((s, f) => s + (parseFloat(f.amount) || 0), 0);
+
       let totalDiscountAmount = 0;
       studentFees.forEach(fee => {
-        const perFee = studentDiscountsList.find(d =>
-          d.studentId === student.id && d.feeId === fee.id && d.isActive !== false
-        );
-        const studentWide = !perFee
-          ? studentDiscountsList.find(d =>
-              d.studentId === student.id &&
-              (d.feeId === null || d.feeId === undefined) &&
-              d.isActive !== false
-            )
-          : null;
-        const active = perFee || studentWide;
-
-        if (active) {
-          const value = parseFloat(active.value) || 0;
-          totalDiscountAmount += active.type === 'PERCENT'
-            ? (parseFloat(fee.amount) || 0) * (value / 100)
-            : value;
-        } else {
-          const feeAmount = parseFloat(fee.amount) || 0;
-          if (parseFloat(fee.discountPercent) > 0) {
-            totalDiscountAmount += feeAmount * (parseFloat(fee.discountPercent) / 100);
-          } else if (parseFloat(fee.discountAmount) > 0) {
-            totalDiscountAmount += parseFloat(fee.discountAmount);
-          }
-        }
+        const { amount } = resolveDiscount(fee, student.id);
+        totalDiscountAmount += amount;
       });
       setTotalDiscounts(totalDiscountAmount);
 
-      const newBalance = Math.max(0, totalFeesAmount - totalDiscountAmount - totalPaidAmount);
-      setOutstandingBalance(newBalance);
+      const netFees = Math.max(0, grossFees - totalDiscountAmount);
+      setOutstandingBalance(Math.max(0, netFees - totalPaidAmount));
 
-      const sortedPayments = [...studentPayments].sort((a, b) => new Date(b.date) - new Date(a.date));
-      setRecentPayments(sortedPayments.slice(0, 5));
-    } catch (error) {
-      console.error('Error loading student fee info:', error);
+      const sorted = [...studentPayments].sort((a, b) => new Date(b.date) - new Date(a.date));
+      setRecentPayments(sorted.slice(0, 5));
+    } catch (err) {
+      console.error('Error loading student fee info:', err);
       setApiError('Failed to load student information');
     } finally {
       setLoading(false);
@@ -52353,20 +52237,15 @@ const FeeCollectionModule = ({
     }
   };
 
+  // ==================== SUBMIT PAYMENT ====================
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!selectedStudent) {
-      setApiError('Please select a student');
-      return;
-    }
-    if (!amount || parseFloat(amount) <= 0) {
-      setApiError('Please enter a valid amount');
-      return;
-    }
+    if (!selectedStudent) { setApiError('Please select a student'); return; }
+    if (!amount || parseFloat(amount) <= 0) { setApiError('Please enter a valid amount'); return; }
     if (parseFloat(amount) > outstandingBalance && outstandingBalance > 0) {
-      if (!window.confirm(`Warning: Amount (${formatCurrency(amount)}) exceeds outstanding balance (${formatCurrency(outstandingBalance)}). Continue?`)) {
-        return;
-      }
+      if (!window.confirm(
+        `Warning: Amount (${formatCurrency(amount)}) exceeds outstanding balance (${formatCurrency(outstandingBalance)}). Continue?`
+      )) return;
     }
     setLoading(true);
     setApiError('');
@@ -52383,58 +52262,54 @@ const FeeCollectionModule = ({
         studentName: student ? `${student.firstName} ${student.lastName}` : null,
         admissionNumber: student?.admissionNumber || null
       };
-      const response = await fetchApi('/payments', {
+
+      const token = localStorage.getItem('token');
+      const res = await fetch('http://localhost:5000/api/payments', {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(paymentData)
       });
-      const data = await response.json();
+      const data = await res.json();
+
       if (data.success) {
         const receipt = {
           id: data.payment.id,
           receiptNumber: data.payment.receiptNo || `RCP-${String(data.payment.id).padStart(6, '0')}`,
-          student: student,
+          student,
           amount: parseFloat(amount),
           paymentMethod,
           date: paymentDate,
           reference: reference || data.payment.transactionId,
           notes,
           balanceAfter: outstandingBalance - parseFloat(amount),
-          collectedBy: (user?.firstName || '') + ' ' + (user?.lastName || '') || 'System'
+          collectedBy: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'System'
         };
         setLastReceipt(receipt);
         setShowReceipt(true);
-        setAmount('');
-        setReference('');
-        setNotes('');
-        setPaymentMethod('CASH');
+        setAmount(''); setReference(''); setNotes(''); setPaymentMethod('CASH');
         await loadStudentFeeInfo(selectedStudent);
-        if (setPayments) {
-          setPayments(prev => [data.payment, ...prev]);
-        }
+        if (setPayments) setPayments(prev => [data.payment, ...prev]);
         alert('✅ Payment recorded successfully!');
       } else {
         throw new Error(data.message || 'Payment failed');
       }
-    } catch (error) {
-      console.error('Error processing payment:', error);
-      setApiError(error.message || 'Failed to process payment');
+    } catch (err) {
+      console.error('Error processing payment:', err);
+      setApiError(err.message || 'Failed to process payment');
     } finally {
       setLoading(false);
     }
   };
 
+  // ==================== DISCOUNT MODAL ====================
   const openDiscountModal = () => {
-    if (!selectedStudent) {
-      alert('Please select a student first');
-      return;
-    }
+    if (!selectedStudent) { alert('Please select a student first'); return; }
     setDiscountForm({
-      feeId: '',
-      type: 'AMOUNT',
-      value: '',
-      reason: '',
-      academicYear: new Date().getFullYear().toString(),
-      term: ''
+      feeId: '', type: 'AMOUNT', value: '', reason: '',
+      academicYear: new Date().getFullYear().toString(), term: ''
     });
     setShowDiscountModal(true);
   };
@@ -52442,8 +52317,7 @@ const FeeCollectionModule = ({
   const handleSaveDiscount = async () => {
     if (!selectedStudent) { alert('Please select a student'); return; }
     if (!discountForm.value || parseFloat(discountForm.value) <= 0) {
-      alert('Please enter a valid discount value');
-      return;
+      alert('Please enter a valid discount value'); return;
     }
     setLoading(true);
     setApiError('');
@@ -52460,21 +52334,17 @@ const FeeCollectionModule = ({
       };
 
       const res = await api.post('/discounts', payload);
-      const savedDiscount = res.data?.discount;
+      const saved = res.data?.discount;
 
-      if (savedDiscount) {
+      if (saved) {
         setStudentDiscounts(prev => {
-          const exists = prev.find(d => d.id === savedDiscount.id);
-          return exists
-            ? prev.map(d => d.id === savedDiscount.id ? savedDiscount : d)
-            : [...prev, savedDiscount];
+          const exists = prev.find(d => d.id === saved.id);
+          return exists ? prev.map(d => d.id === saved.id ? saved : d) : [...prev, saved];
         });
         if (setDiscounts) {
           setDiscounts(prev => {
-            const exists = prev.find(d => d.id === savedDiscount.id);
-            return exists
-              ? prev.map(d => d.id === savedDiscount.id ? savedDiscount : d)
-              : [...prev, savedDiscount];
+            const exists = prev.find(d => d.id === saved.id);
+            return exists ? prev.map(d => d.id === saved.id ? saved : d) : [...prev, saved];
           });
         }
       }
@@ -52482,10 +52352,10 @@ const FeeCollectionModule = ({
       setShowDiscountModal(false);
       await loadStudentFeeInfo(selectedStudent);
       alert('✅ Discount applied successfully!');
-    } catch (error) {
-      console.error('Error saving discount:', error);
-      alert('❌ Failed to save discount: ' + (error.response?.data?.message || error.message));
-      setApiError(error.response?.data?.message || error.message);
+    } catch (err) {
+      console.error('Error saving discount:', err);
+      alert('❌ Failed to save discount: ' + (err.response?.data?.message || err.message));
+      setApiError(err.response?.data?.message || err.message);
     } finally {
       setLoading(false);
     }
@@ -52501,20 +52371,21 @@ const FeeCollectionModule = ({
       if (setDiscounts) setDiscounts(prev => prev.filter(d => d.id !== discountId));
       await loadStudentFeeInfo(selectedStudent);
       alert('✅ Discount removed');
-    } catch (error) {
-      console.error('Error removing discount:', error);
-      alert('❌ Failed to remove discount: ' + (error.response?.data?.message || error.message));
+    } catch (err) {
+      console.error('Error removing discount:', err);
+      alert('❌ Failed to remove discount: ' + (err.response?.data?.message || err.message));
     } finally {
       setLoading(false);
     }
   };
 
+  // ==================== RENDER ====================
   return (
     <div className="space-y-6">
       {showReceipt && lastReceipt && (
-        <ReceiptModal 
-          receipt={lastReceipt} 
-          onClose={() => setShowReceipt(false)} 
+        <ReceiptModal
+          receipt={lastReceipt}
+          onClose={() => setShowReceipt(false)}
           students={students}
           user={user}
           school={currentSchool}
@@ -52526,8 +52397,7 @@ const FeeCollectionModule = ({
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold text-gray-800">
-                <i className="fas fa-percent text-purple-600 mr-2"></i>
-                Grant Discount
+                <i className="fas fa-percent text-purple-600 mr-2"></i>Grant Discount
               </h3>
               <button onClick={() => setShowDiscountModal(false)} className="text-gray-400 hover:text-gray-600">
                 <i className="fas fa-times"></i>
@@ -52593,33 +52463,38 @@ const FeeCollectionModule = ({
                   value={discountForm.reason}
                   onChange={(e) => setDiscountForm({ ...discountForm, reason: e.target.value })}
                   placeholder="e.g., Bursary, Staff child, Sibling discount"
-                  className="w-full px-3 py-2 rounded-lg border"
+                  className="w-full px-3 py-2 border rounded-lg"
                 />
               </div>
             </div>
 
             <div className="flex space-x-2 mt-6 pt-4 border-t">
-              <button onClick={handleSaveDiscount} disabled={loading}
-                className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 disabled:opacity-50">
+              <button
+                onClick={handleSaveDiscount}
+                disabled={loading}
+                className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 disabled:opacity-50"
+              >
                 {loading ? 'Saving...' : 'Apply Discount'}
               </button>
-              <button onClick={() => setShowDiscountModal(false)}
-                className="flex-1 bg-gray-500 text-white py-2 rounded-lg hover:bg-gray-600">
+              <button
+                onClick={() => setShowDiscountModal(false)}
+                className="flex-1 bg-gray-500 text-white py-2 rounded-lg hover:bg-gray-600"
+              >
                 Cancel
               </button>
             </div>
           </div>
         </div>
       )}
-      
+
       {currentSchool && (
-        <div className="bg-blue-50 p-3 rounded-lg mb-4">
+        <div className="bg-blue-50 p-3 rounded-lg">
           <p className="text-sm text-blue-700">
             <i className="fas fa-school mr-2"></i>
             Fee collection for: <strong>{currentSchool.name}</strong>
             {!isRegularSchool && (
               <span className="ml-2 text-xs">
-                ({isTVET ? 'TVET Program Fee Collection' : isUniversity ? 'University Fee Collection' : ''})
+                ({isTVET ? 'TVET Program' : isUniversity ? 'University' : ''})
               </span>
             )}
           </p>
@@ -52628,67 +52503,63 @@ const FeeCollectionModule = ({
           </p>
         </div>
       )}
-      
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Payment form */}
         <div className="bg-white rounded-xl shadow-sm p-6">
           <h2 className="text-2xl font-bold mb-4">Fee Collection</h2>
-          
+
           {apiError && (
             <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
               <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
             </div>
           )}
-          
+
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <SearchableSelect
-                label="Select Student *"
-                value={selectedStudent}
-                onChange={(e) => handleStudentSelect(e.target.value)}
-                options={filteredStudentOptions}
-                placeholder="Search student by name or admission..."
-                required
-              />
-              {filteredStudentOptions.length === 1 && (
-                <p className="text-sm text-yellow-600 mt-1">
-                  No students found for this school. Please add students first.
-                </p>
-              )}
-            </div>
-            
+            <SearchableSelect
+              label="Select Student *"
+              value={selectedStudent}
+              onChange={(e) => handleStudentSelect(e.target.value)}
+              options={filteredStudentOptions}
+              placeholder="Search student by name or admission..."
+              required
+            />
+
             {studentDetails && (
               <div className="bg-gray-50 p-4 rounded-lg space-y-2">
                 <div className="flex justify-between">
                   <span className="text-gray-600">Student:</span>
-                  <span className="font-semibold">{studentDetails.firstName} {studentDetails.lastName}</span>
+                  <span className="font-semibold">
+                    {studentDetails.firstName} {studentDetails.lastName}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Admission:</span>
                   <span className="font-semibold">{studentDetails.admissionNumber}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Total Fees:</span>
+                  <span className="text-gray-600">Gross Fees:</span>
                   <span className="font-semibold">
-                    {formatCurrency(feeStructure.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0))}
+                    {formatCurrency(feeStructure.reduce((s, f) => s + (parseFloat(f.amount) || 0), 0))}
                   </span>
                 </div>
-
                 {totalDiscounts > 0 && (
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Discount:</span>
+                    <span className="text-gray-600">Discounts:</span>
                     <span className="font-semibold text-purple-600">
                       −{formatCurrency(totalDiscounts)}
                     </span>
                   </div>
                 )}
-
                 <div className="flex justify-between">
                   <span className="text-gray-600">Total Paid:</span>
                   <span className="font-semibold text-green-600">{formatCurrency(totalPaid)}</span>
                 </div>
                 <div className="flex justify-between border-t pt-2">
-                  <span className="text-gray-600">Outstanding Balance:</span>
-                  <span className={`font-bold ${outstandingBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                  <span className="text-gray-600">Outstanding:</span>
+                  <span className={`font-bold ${
+                    outstandingBalance > 0 ? 'text-red-600' : 'text-green-600'
+                  }`}>
                     {outstandingBalance > 0 ? formatCurrency(outstandingBalance) : '✅ CLEARED'}
                   </span>
                 </div>
@@ -52717,7 +52588,7 @@ const FeeCollectionModule = ({
                       <li key={d.id} className="flex justify-between items-center text-xs text-purple-800">
                         <span>
                           {fee ? fee.name : 'All fees'} —{' '}
-                          {d.type === 'PERCENT'
+                          {String(d.type).toUpperCase() === 'PERCENT'
                             ? `${parseFloat(d.value)}%`
                             : formatCurrency(d.value)}
                           {d.reason && <span className="text-purple-600"> ({d.reason})</span>}
@@ -52727,7 +52598,7 @@ const FeeCollectionModule = ({
                             type="button"
                             onClick={() => handleRemoveDiscount(d.id)}
                             className="text-red-500 hover:text-red-700 ml-2"
-                            title="Remove discount"
+                            title="Remove"
                           >
                             <i className="fas fa-times"></i>
                           </button>
@@ -52738,7 +52609,7 @@ const FeeCollectionModule = ({
                 </ul>
               </div>
             )}
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Amount *</label>
               <input
@@ -52763,18 +52634,16 @@ const FeeCollectionModule = ({
                 </p>
               )}
             </div>
-            
-            <div>
-              <SearchableSelect
-                label="Payment Method *"
-                value={paymentMethod}
-                onChange={(e) => setPaymentMethod(e.target.value)}
-                options={paymentMethodOptions}
-                placeholder="Select payment method..."
-                required
-              />
-            </div>
-            
+
+            <SearchableSelect
+              label="Payment Method *"
+              value={paymentMethod}
+              onChange={(e) => setPaymentMethod(e.target.value)}
+              options={paymentMethodOptions}
+              placeholder="Select payment method..."
+              required
+            />
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Payment Date</label>
               <input
@@ -52784,9 +52653,9 @@ const FeeCollectionModule = ({
                 className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
               />
             </div>
-            
+
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Reference Number (Optional)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Reference (Optional)</label>
               <input
                 type="text"
                 value={reference}
@@ -52795,7 +52664,7 @@ const FeeCollectionModule = ({
                 placeholder="M-Pesa ref, Cheque no, etc."
               />
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Notes (Optional)</label>
               <textarea
@@ -52803,10 +52672,9 @@ const FeeCollectionModule = ({
                 onChange={(e) => setNotes(e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                 rows="2"
-                placeholder="Additional notes..."
               />
             </div>
-            
+
             <button
               type="submit"
               disabled={loading || !selectedStudent || !amount}
@@ -52820,30 +52688,28 @@ const FeeCollectionModule = ({
             </button>
           </form>
         </div>
-        
+
+        {/* Recent payments */}
         <div className="bg-white rounded-xl shadow-sm p-6">
           <h2 className="text-2xl font-bold mb-4">Recent Payments</h2>
-          
           {recentPayments.length > 0 ? (
             <div className="space-y-3">
-              {recentPayments.map(payment => (
-                <div key={payment.id} className="border rounded-lg p-4 hover:bg-gray-50">
+              {recentPayments.map(p => (
+                <div key={p.id} className="border rounded-lg p-4 hover:bg-gray-50">
                   <div className="flex justify-between items-start">
                     <div>
-                      <p className="font-semibold text-green-600">{formatCurrency(payment.amount)}</p>
-                      <p className="text-sm text-gray-600">{payment.paymentMethod}</p>
-                      {payment.transactionId && (
-                        <p className="text-xs text-gray-500">Ref: {payment.transactionId}</p>
+                      <p className="font-semibold text-green-600">{formatCurrency(p.amount)}</p>
+                      <p className="text-sm text-gray-600">{p.paymentMethod}</p>
+                      {p.transactionId && (
+                        <p className="text-xs text-gray-500">Ref: {p.transactionId}</p>
                       )}
                     </div>
                     <div className="text-right">
-                      <p className="text-sm">{new Date(payment.date).toLocaleDateString()}</p>
-                      <p className="text-xs text-gray-500">Receipt: {payment.receiptNo || 'N/A'}</p>
+                      <p className="text-sm">{new Date(p.date).toLocaleDateString()}</p>
+                      <p className="text-xs text-gray-500">Receipt: {p.receiptNo || 'N/A'}</p>
                     </div>
                   </div>
-                  {payment.notes && (
-                    <p className="text-xs text-gray-500 mt-2">{payment.notes}</p>
-                  )}
+                  {p.notes && <p className="text-xs text-gray-500 mt-2">{p.notes}</p>}
                 </div>
               ))}
             </div>
@@ -52851,7 +52717,6 @@ const FeeCollectionModule = ({
             <div className="text-center py-8 text-gray-500">
               <i className="fas fa-receipt text-4xl mb-2"></i>
               <p>No recent payments</p>
-              <p className="text-sm">Select a student and make a payment</p>
             </div>
           )}
         </div>
@@ -52859,6 +52724,7 @@ const FeeCollectionModule = ({
     </div>
   );
 };
+
 
 const StudentArrivalModule = ({ 
   students, 
@@ -72213,6 +72079,9 @@ return (
             currentSchool={currentSchool} 
             user={user} 
             admissionNumber={studentAdmissionNumber}  
+            discounts={discounts}
+  setDiscounts={setDiscounts}    
+
           />
         )}
 
