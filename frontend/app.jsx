@@ -33082,7 +33082,6 @@ const FeesSearchableSelect = ({
     </div>
   );
 };
-
 // ==================== FEES MODULE ====================
 const FeesModule = ({
   fees, setFees,
@@ -33283,41 +33282,71 @@ const FeesModule = ({
     return classes?.find(c => c.id === classId)?.name || 'N/A';
   };
 
-  // ✅ Fee-level default discount ONLY
+  // ==================== 6a. DISCOUNT RESOLUTION HELPERS ====================
+  // Get the list of fees a specific student is liable for
+  const getApplicableFeesForStudent = (student) => {
+    if (!student) return [];
+    return (fees || []).filter(f => {
+      if (isUniversity) return f.courseId === student.courseId;
+      if (isTVET)       return f.programId === student.programId;
+      return f.classId === student.classId;
+    });
+  };
+
+  // Resolve the effective discount (in KES) that applies to a given fee
+  // for a given student. Priority:
+  //   1. per-student + per-fee discount
+  //   2. per-student + student-wide discount
+  //   3. fee-level default discount (amount or percent)
+  // Returns 0 if no discount applies.
+  const getResolvedDiscount = (fee, studentId) => {
+    if (!fee || !studentId) return 0;
+
+    const list = Array.isArray(discounts) ? discounts : [];
+    const feeAmount = parseFloat(fee.amount) || 0;
+
+    // 1. Per-student, per-fee
+    const perFee = list.find(d =>
+      d.studentId === studentId &&
+      d.feeId === fee.id &&
+      d.isActive !== false
+    );
+
+    // 2. Per-student, student-wide
+    const studentWide = !perFee
+      ? list.find(d =>
+          d.studentId === studentId &&
+          (d.feeId === null || d.feeId === undefined) &&
+          d.isActive !== false
+        )
+      : null;
+
+    const active = perFee || studentWide;
+    if (active) {
+      const v = parseFloat(active.value) || 0;
+      return String(active.type).toUpperCase() === 'PERCENT'
+        ? feeAmount * (v / 100)
+        : v;
+    }
+
+    // 3. Fee-level default
+    if (parseFloat(fee.discountPercent) > 0) {
+      return feeAmount * (parseFloat(fee.discountPercent) / 100);
+    }
+    if (parseFloat(fee.discountAmount) > 0) {
+      return parseFloat(fee.discountAmount);
+    }
+
+    return 0;
+  };
+
+  // Fee-level default only (used in the table's "Default Discount" column)
   const getFeeLevelDiscount = (fee) => {
     if (!fee) return 0;
     const amount = parseFloat(fee.amount) || 0;
     const pct = parseFloat(fee.discountPercent) || 0;
     if (pct > 0) return amount * (pct / 100);
     return parseFloat(fee.discountAmount) || 0;
-  };
-
-  // ✅ Compute discount amount for a given fee (optionally per student)
-  const getDiscountForFee = (fee, studentId = null) => {
-    if (!fee) return 0;
-
-    if (studentId && Array.isArray(discounts)) {
-      // Try fee-specific discount first
-      const perFeeDiscount = discounts.find(d =>
-        d.studentId === studentId && d.feeId === fee.id && d.isActive !== false
-      );
-      // Fall back to student-wide discount (feeId is null/undefined)
-      const studentWideDiscount = !perFeeDiscount
-        ? discounts.find(d =>
-            d.studentId === studentId && !d.feeId && d.isActive !== false
-          )
-        : null;
-
-      const active = perFeeDiscount || studentWideDiscount;
-      if (active) {
-        const val = parseFloat(active.value) || 0;
-        return active.type === 'PERCENT'
-          ? (parseFloat(fee.amount) || 0) * (val / 100)
-          : val;
-      }
-    }
-
-    return getFeeLevelDiscount(fee);
   };
 
   const getPaidForFee = (fee, studentId = null) => {
@@ -33329,7 +33358,7 @@ const FeesModule = ({
 
   const getBalanceForFee = (fee, studentId = null) => {
     const amount = parseFloat(fee?.amount) || 0;
-    const discount = getDiscountForFee(fee, studentId);
+    const discount = getResolvedDiscount(fee, studentId);
     const paid = getPaidForFee(fee, studentId);
     return amount - discount - paid;
   };
@@ -33600,62 +33629,60 @@ const FeesModule = ({
     }
   };
 
-  // ==================== 8. COMPUTED TOTALS ====================
-  // ✅ FIXED: Total discounts = fee-level + ALL active per-student discounts
-  //    (handles both fee-specific AND student-wide discounts)
-  const totalDiscounts = useMemo(() => {
-    let sum = 0;
+  // ==================== 8. COMPUTED TOTALS (per-student, correct) ====================
+  const totals = useMemo(() => {
+    let grossBilled = 0;
+    let totalDiscounts = 0;
 
-    // 1. Fee-level default discounts
-    (fees || []).forEach(f => {
-      sum += getFeeLevelDiscount(f);
+    (students || []).forEach(student => {
+      const applicable = getApplicableFeesForStudent(student);
+      applicable.forEach(fee => {
+        grossBilled += parseFloat(fee.amount) || 0;
+        totalDiscounts += getResolvedDiscount(fee, student.id);
+      });
     });
 
-    // 2. Per-student discounts (fee-specific OR student-wide)
-    if (Array.isArray(discounts)) {
-      discounts.forEach(d => {
-        if (d.isActive === false) return;
+    const netBilled = Math.max(0, grossBilled - totalDiscounts);
 
-        const val = parseFloat(d.value) || 0;
+    const totalPaid = (payments || []).reduce(
+      (sum, p) => sum + (parseFloat(p.amount) || 0), 0
+    );
 
-        // Resolve the base amount for PERCENT discounts
-        let baseAmount = 0;
-        if (d.feeId) {
-          const f = fees.find(x => x.id === d.feeId);
-          baseAmount = parseFloat(f?.amount) || 0;
-        } else {
-          // Student-wide: base = total of all fees the student is liable for
-          const s = (students || []).find(x => x.id === d.studentId);
-          if (s) {
-            baseAmount = (fees || [])
-              .filter(f => {
-                if (isUniversity) return f.courseId === s.courseId;
-                if (isTVET) return f.programId === s.programId;
-                return f.classId === s.classId;
-              })
-              .reduce((acc, f) => acc + (parseFloat(f.amount) || 0), 0);
-          }
-        }
+    // Per-student outstanding — each row clamped at 0, sum not clamped
+    const outstandingPerStudent = (students || []).map(student => {
+      const applicable = getApplicableFeesForStudent(student);
+      const studentGross = applicable.reduce((s, f) => s + (parseFloat(f.amount) || 0), 0);
+      const studentDiscount = applicable.reduce((s, f) => s + getResolvedDiscount(f, student.id), 0);
+      const studentNet = Math.max(0, studentGross - studentDiscount);
+      const studentPaid = (payments || [])
+        .filter(p => p.studentId === student.id)
+        .reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+      return Math.max(0, studentNet - studentPaid);
+    });
 
-        sum += d.type === 'PERCENT' ? baseAmount * (val / 100) : val;
-      });
-    }
+    const outstanding = outstandingPerStudent.reduce((a, b) => a + b, 0);
 
-    return sum;
-  }, [fees, discounts, students, isUniversity, isTVET]);
+    const collectionRate = netBilled > 0
+      ? ((totalPaid / netBilled) * 100).toFixed(2)
+      : '0.00';
 
-  const totalBilled = useMemo(
-    () => (fees || []).reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0),
-    [fees]
-  );
+    return {
+      grossBilled,
+      totalDiscounts,
+      netBilled,
+      totalPaid,
+      outstanding,
+      collectionRate
+    };
+  }, [fees, discounts, students, payments, isUniversity, isTVET]);
 
-  const totalPaid = useMemo(
-    () => (payments || []).reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0),
-    [payments]
-  );
-
-  const netBilled = Math.max(0, totalBilled - totalDiscounts);
-  const outstanding = Math.max(0, netBilled - totalPaid);
+  // Friendly aliases
+  const totalBilled = totals.grossBilled;
+  const netBilled = totals.netBilled;
+  const totalPaid = totals.totalPaid;
+  const outstanding = totals.outstanding;
+  const totalDiscounts = totals.totalDiscounts;
+  const collectionRate = totals.collectionRate;
 
   // ==================== 9. RENDER ====================
   if (!canView) {
@@ -34057,34 +34084,64 @@ const FeesModule = ({
         </div>
       )}
 
-      {/* ==================== SUMMARY CARDS ==================== */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+      {/* ==================== SUMMARY CARDS (6 cards, no minus sign) ==================== */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        {/* 1. Fee definitions */}
         <div className="bg-white p-4 rounded-xl shadow-sm">
-          <p className="text-sm text-gray-500">Total Fees</p>
+          <p className="text-sm text-gray-500">Fee Definitions</p>
           <p className="text-2xl font-bold">{fees.length}</p>
         </div>
+
+        {/* 2. Gross billed (per student) */}
         <div className="bg-white p-4 rounded-xl shadow-sm">
-          <p className="text-sm text-gray-500">Billed Amount</p>
-          <p className="text-2xl font-bold text-green-600">{formatCurrency(totalBilled)}</p>
+          <p className="text-sm text-gray-500">Gross Billed</p>
+          <p className="text-2xl font-bold text-green-600">
+            {formatCurrency(totalBilled)}
+          </p>
+          <p className="text-xs text-gray-400 mt-1">Sum across all students</p>
         </div>
+
+        {/* 3. Discounts (no minus sign) */}
         <div className="bg-white p-4 rounded-xl shadow-sm border border-purple-200">
           <p className="text-sm text-gray-500">Discounts</p>
-          <p className="text-2xl font-bold text-purple-600">−{formatCurrency(totalDiscounts)}</p>
+          <p className="text-2xl font-bold text-purple-600">
+            {formatCurrency(totalDiscounts)}
+          </p>
           {totalDiscounts > 0 && (
             <p className="text-xs text-gray-500 mt-1">
-              Net: {formatCurrency(netBilled)}
+              Net Billed: {formatCurrency(netBilled)}
             </p>
           )}
         </div>
+
+        {/* 4. Net billed */}
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-200">
+          <p className="text-sm text-gray-500">Net Billed</p>
+          <p className="text-2xl font-bold text-indigo-600">
+            {formatCurrency(netBilled)}
+          </p>
+          <p className="text-xs text-gray-400 mt-1">Gross − Discounts</p>
+        </div>
+
+        {/* 5. Collected */}
         <div className="bg-white p-4 rounded-xl shadow-sm">
           <p className="text-sm text-gray-500">Collected</p>
-          <p className="text-2xl font-bold text-blue-600">{formatCurrency(totalPaid)}</p>
+          <p className="text-2xl font-bold text-blue-600">
+            {formatCurrency(totalPaid)}
+          </p>
+          <p className="text-xs text-gray-400 mt-1">
+            Rate: {collectionRate}%
+          </p>
         </div>
+
+        {/* 6. Outstanding */}
         <div className="bg-white p-4 rounded-xl shadow-sm">
           <p className="text-sm text-gray-500">Outstanding</p>
-          <p className="text-2xl font-bold text-red-600">{formatCurrency(outstanding)}</p>
+          <p className="text-2xl font-bold text-red-600">
+            {formatCurrency(outstanding)}
+          </p>
           <p className="text-xs text-gray-500 mt-1">
-            (Billed − Discount − Paid)
+            Net Billed − Collected
           </p>
         </div>
       </div>
@@ -34153,7 +34210,7 @@ const FeesModule = ({
                         <div className="flex flex-col gap-1">
                           {feeLevelDiscount > 0 ? (
                             <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-medium">
-                              −{formatCurrency(feeLevelDiscount)}
+                              {formatCurrency(feeLevelDiscount)}
                               {canGrantDiscount && (
                                 <button
                                   type="button"
@@ -34237,7 +34294,7 @@ const FeesModule = ({
               <li><span className="font-medium text-yellow-600">Manual Allocation:</span> Fee is not assigned automatically. Use the Fee Allocation module to assign.</li>
               <li><span className="font-medium text-purple-600">Default Discount:</span> Set on the fee itself — applies to every student who gets that fee. Shown in the <em>Default Discount</em> column.</li>
               <li><span className="font-medium text-purple-600">Per-Student Discount:</span> Click the <i className="fas fa-percent"></i> button on any fee row to grant a discount to a specific student (bursary, scholarship, sibling, staff child).</li>
-              <li><span className="font-medium text-gray-700">Balance formula:</span> Outstanding = Amount − Discount − Paid. A student who pays the discounted amount shows as <strong>cleared</strong>.</li>
+              <li><span className="font-medium text-gray-700">Balance formula:</span> Outstanding = Net Billed − Collected. Gross Billed is the sum of all fee amounts across all eligible students.</li>
             </ul>
           </div>
         </div>
