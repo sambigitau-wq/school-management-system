@@ -14978,164 +14978,261 @@ import {
   PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
-const ReportsModule = ({
-  students = [], classes = [], results = [], exams = [], subjects = [], units = [],
-  payments = [], expenses = [], dateRange, setDateRange,
-  currentSchool, courses = [], programs = [], user
+
+// ==================== FEES MODULE ====================
+const FeesModule = ({
+  fees, setFees,
+  payments, setPayments,
+  classes, students, routes,
+  courses, programs,
+  departments, faculties,
+  form, setForm, onCreate, onDelete,
+  handleUpdate,
+  currentSchool, user,
+  admissionNumber: propAdmissionNumber,
+  // ✅ Discounts array + setter passed from parent (App.jsx)
+  discounts = [], setDiscounts
 }) => {
-  // ==================== SCHOOL TYPE ====================
+  // ==================== 1. STATE DECLARATIONS ====================
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [selectedFaculty, setSelectedFaculty] = useState('');
+  const [selectedDepartment, setSelectedDepartment] = useState('');
+  const [selectedCourse, setSelectedCourse] = useState('');
+  const [selectedProgram, setSelectedProgram] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [apiError, setApiError] = useState('');
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [allocationType, setAllocationType] = useState('AUTO');
+  const [allocationMessage, setAllocationMessage] = useState('');
+
+  // Discount modal state
+  const [showDiscountModal, setShowDiscountModal] = useState(false);
+  const [discountStudent, setDiscountStudent] = useState(null);
+  const [discountFee, setDiscountFee] = useState(null);
+  const [discountForm, setDiscountForm] = useState({
+    type: 'AMOUNT',
+    value: '',
+    reason: '',
+    academicYear: new Date().getFullYear().toString(),
+    term: ''
+  });
+
+  // ==================== 2. SCHOOL TYPE DETECTION ====================
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
   const isUniversity = schoolCategory === 'UNIVERSITY';
   const isTVET = schoolCategory === 'COLLEGE_TVET';
-  const isSecondary = schoolCategory === 'SENIOR_SECONDARY';
-  const isPrimary = schoolCategory === 'ECDE_PRIMARY_JSS';
-  const isRegularSchool = !isUniversity && !isTVET;
+  const isPrimarySecondary = !isUniversity && !isTVET;
 
-  // ==================== PERMISSIONS ====================
-  const canViewStudentReports   = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER', 'PARENT', 'STUDENT'].includes(user?.role);
-  const canViewClassReports     = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'CLASS_TEACHER'].includes(user?.role);
-  const canViewFinancialReports = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
-  const canViewAdmissionReports = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
-  const canViewStaffReports     = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'HR_MANAGER', 'HR'].includes(user?.role);
-  const canViewResourceReports  = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'LIBRARIAN', 'TRANSPORT_MANAGER', 'MATRON', 'ACCOUNTANT'].includes(user?.role);
+  // ==================== 3. LOCAL ALIASES FOR SHARED COMPONENTS ====================
+  const SearchableSelect = FeesSearchableSelect;
+  const InputField = FeesInputField;
 
-  // ==================== COLUMN LABELS ====================
-  const entityColumnLabel   = isUniversity ? 'Course'  : isTVET ? 'Program' : 'Class';
-  const academicColumnLabel = isUniversity ? 'Unit'    : isTVET ? 'Module'  : 'Subject';
+  // ==================== 4. PERMISSIONS ====================
+  const isStudent = user?.role === 'STUDENT';
+  const isParent = user?.role === 'PARENT';
+  const canManage = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
+  const canDelete = ['SCHOOL_ADMIN', 'PRINCIPAL'].includes(user?.role);
+  const canEdit = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
+  const canGrantDiscount = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
+  const canView = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'ACCOUNTANT', 'PARENT', 'STUDENT'].includes(user?.role);
 
-  // ==================== TABS ====================
-  const ALL_TABS = [
-    { key: 'student',     label: 'Student Report',        icon: 'fa-user-graduate',      allowed: canViewStudentReports },
-    { key: 'class',       label: isUniversity ? 'Course Report' : isTVET ? 'Program Report' : 'Class Report', icon: 'fa-users', allowed: canViewClassReports },
-    { key: 'academic',    label: 'Detailed Academic',     icon: 'fa-award',              allowed: canViewStudentReports },
-    { key: 'fee',         label: 'Fee Collection',        icon: 'fa-money-bill-wave',    allowed: canViewFinancialReports },
-    { key: 'outstanding', label: 'Outstanding Balances',  icon: 'fa-exclamation-circle', allowed: canViewFinancialReports },
-    { key: 'feeTransfer', label: 'Fee Transfers',         icon: 'fa-exchange-alt',       allowed: canViewFinancialReports },
-    { key: 'admission',   label: 'Admissions',            icon: 'fa-user-plus',          allowed: canViewAdmissionReports },
-    { key: 'financial',   label: 'Financial Summary',     icon: 'fa-chart-line',         allowed: canViewFinancialReports },
-    { key: 'attendance',  label: 'Attendance',            icon: 'fa-calendar-check',     allowed: canViewClassReports },
-    { key: 'staff',       label: 'Staff Report',          icon: 'fa-user-tie',           allowed: canViewStaffReports },
-    { key: 'discount',    label: 'Discounts',             icon: 'fa-tags',               allowed: canViewFinancialReports },
-    { key: 'allocation',  label: 'Fee Allocation',        icon: 'fa-tasks',              allowed: canViewFinancialReports },
-    { key: 'inventory',   label: 'Inventory',             icon: 'fa-boxes',              allowed: canViewResourceReports },
-    { key: 'transport',   label: 'Transport',             icon: 'fa-bus',                allowed: canViewResourceReports },
-    { key: 'hostel',      label: 'Hostel',                icon: 'fa-hotel',              allowed: canViewResourceReports },
-    { key: 'library',     label: 'Library',               icon: 'fa-book',               allowed: canViewResourceReports },
-  ].filter(t => t.allowed);
+  // ==================== 5. OPTIONS GENERATORS ====================
+  const termOptions = useMemo(() => {
+    const opts = [{ value: '', label: '' }];
+    if (isUniversity) {
+      opts.push(
+        { value: 'Semester 1', label: 'Semester 1' },
+        { value: 'Semester 2', label: 'Semester 2' },
+        { value: 'Semester 3', label: 'Semester 3' },
+        { value: 'Full Year', label: 'Full Year' }
+      );
+    } else if (isTVET) {
+      opts.push(
+        { value: '1', label: 'Module 1' }, { value: '2', label: 'Module 2' },
+        { value: '3', label: 'Module 3' }, { value: '4', label: 'Module 4' },
+        { value: '5', label: 'Module 5' }, { value: '6', label: 'Module 6' }
+      );
+    } else {
+      opts.push(
+        { value: 'Term 1', label: 'Term 1' },
+        { value: 'Term 2', label: 'Term 2' },
+        { value: 'Term 3', label: 'Term 3' }
+      );
+    }
+    return opts;
+  }, [isUniversity, isTVET]);
 
-  // ==================== STATE ====================
-  const [activeTab, setActiveTab] = useState(ALL_TABS[0]?.key || 'student');
-  const [loading, setLoading] = useState(false);
-  const [showCharts, setShowCharts] = useState(true);
-  const [reportData, setReportData] = useState(null);
+  const categoryOptions = useMemo(() => {
+    const categories = isUniversity
+      ? ['TUITION', 'REGISTRATION', 'LIBRARY', 'LABORATORY', 'EXAMINATION', 'GRADUATION', 'OTHER']
+      : isTVET
+        ? ['TUITION', 'REGISTRATION', 'WORKSHOP', 'MATERIALS', 'ASSESSMENT', 'ATTACHMENT', 'GRADUATION', 'OTHER']
+        : ['TUITION', 'TRANSPORT', 'BOARDING', 'LIBRARY', 'ACTIVITY', 'UNIFORM', 'EXAMINATION', 'OTHER'];
+    return [{ value: '', label: '' }, ...categories.map(c => ({ value: c, label: c }))];
+  }, [isUniversity, isTVET]);
 
-  const [fees, setFees] = useState([]);
-  const [attendance, setAttendance] = useState([]);
-  const [staff, setStaff] = useState([]);
-  const [discounts, setDiscounts] = useState([]);
-  const [allocations, setAllocations] = useState([]);
-  const [inventory, setInventory] = useState([]);
-  const [transportRoutes, setTransportRoutes] = useState([]);
-  const [vehicles, setVehicles] = useState([]);
-  const [hostels, setHostels] = useState([]);
-  const [books, setBooks] = useState([]);
-  const [borrows, setBorrows] = useState([]);
-  const [feeTransfers, setFeeTransfers] = useState([]);
-  const [fetchedOnce, setFetchedOnce] = useState({});
+  const facultyOptions = useMemo(() => {
+    const opts = [{ value: '', label: '' }];
+    (faculties || []).forEach(f => {
+      opts.push({ value: f.id, label: f.name, subLabel: f.dean ? `Dean: ${f.dean}` : 'Faculty' });
+    });
+    return opts;
+  }, [faculties]);
 
-  // Student
-  const [selectedStudent, setSelectedStudent] = useState('');
-  const [selectedExam, setSelectedExam] = useState('');
-  const [academicStudent, setAcademicStudent] = useState('');
+  const departmentOptions = useMemo(() => {
+    const opts = [{ value: '', label: '' }];
+    (departments || [])
+      .filter(d => !selectedFaculty || d.facultyId === selectedFaculty)
+      .forEach(d => opts.push({ value: d.id, label: d.name, subLabel: d.faculty?.name || 'Department' }));
+    return opts;
+  }, [departments, selectedFaculty]);
 
-  // Class
-  const [selectedClass, setSelectedClass] = useState('');
-  const [selectedCourse, setSelectedCourse] = useState('');
-  const [selectedProgram, setSelectedProgram] = useState('');
-  const [selectedYear, setSelectedYear] = useState('');
-  const [selectedModule, setSelectedModule] = useState('');
+  const courseOptions = useMemo(() => {
+    const opts = [{ value: '', label: '' }];
+    (courses || [])
+      .filter(c => !selectedDepartment || c.departmentId === selectedDepartment)
+      .forEach(c => opts.push({ value: c.id, label: c.name, subLabel: c.code || 'Course' }));
+    return opts;
+  }, [courses, selectedDepartment]);
 
-  // Fee
-  const [feeDateRange, setFeeDateRange] = useState(dateRange || { start: '', end: '' });
-  const [feeClassId, setFeeClassId] = useState('');
-  const [feeCourseId, setFeeCourseId] = useState('');
-  const [feeProgramId, setFeeProgramId] = useState('');
+  const programOptions = useMemo(() => {
+    const opts = [{ value: '', label: '' }];
+    (programs || [])
+      .filter(p => !selectedDepartment || p.departmentId === selectedDepartment)
+      .forEach(p => opts.push({ value: p.id, label: p.name, subLabel: p.code || p.level || 'Program' }));
+    return opts;
+  }, [programs, selectedDepartment]);
 
-  // Outstanding
-  const [outstandingMinBalance, setOutstandingMinBalance] = useState(0);
-  const [outstandingClassId, setOutstandingClassId] = useState('');
-  const [outstandingCourseId, setOutstandingCourseId] = useState('');
-  const [outstandingProgramId, setOutstandingProgramId] = useState('');
+  const classOptions = useMemo(() => {
+    const opts = [{ value: '', label: '' }];
+    (classes || []).forEach(c => {
+      opts.push({ value: c.id, label: c.name, subLabel: c.capacity ? `Capacity: ${c.capacity}` : 'Class' });
+    });
+    return opts;
+  }, [classes]);
 
-  // Fee Transfers
-  const [transferSearch, setTransferSearch] = useState('');
-  const [transferStatus, setTransferStatus] = useState('');
-  const [transferStudentId, setTransferStudentId] = useState('');
+  const routeOptions = useMemo(() => {
+    const opts = [{ value: '', label: '' }];
+    (routes || []).forEach(r => {
+      opts.push({ value: r.id, label: r.name, subLabel: r.fee ? `Fee: ${r.fee}` : 'Transport Route' });
+    });
+    return opts;
+  }, [routes]);
 
-  // Admission
-  const [admissionYear, setAdmissionYear] = useState(new Date().getFullYear().toString());
-  const [admissionClassId, setAdmissionClassId] = useState('');
-  const [admissionCourseId, setAdmissionCourseId] = useState('');
-  const [admissionProgramId, setAdmissionProgramId] = useState('');
-  const [admissionGender, setAdmissionGender] = useState('');
-  const [admissionBoarding, setAdmissionBoarding] = useState('');
+  const yearOptions = useMemo(() => {
+    const opts = [{ value: '', label: '' }];
+    for (let i = 1; i <= 6; i++) opts.push({ value: i, label: `Year ${i}` });
+    return opts;
+  }, []);
 
-  // Attendance
-  const [attendanceDateRange, setAttendanceDateRange] = useState(dateRange || { start: '', end: '' });
-  const [attendanceClassId, setAttendanceClassId] = useState('');
-  const [attendanceCourseId, setAttendanceCourseId] = useState('');
-  const [attendanceProgramId, setAttendanceProgramId] = useState('');
+  const levelOptions = useMemo(() => [
+    { value: '', label: '' },
+    { value: 'Certificate', label: 'Certificate' },
+    { value: 'Diploma', label: 'Diploma' },
+    { value: 'Higher Diploma', label: 'Higher Diploma' }
+  ], []);
 
-  // Staff
-  const [staffDepartment, setStaffDepartment] = useState('');
-  const [staffType, setStaffType] = useState('');
+  const studentOptions = useMemo(() => {
+    const opts = [{ value: '', label: '' }];
+    (students || []).forEach(s => {
+      opts.push({
+        value: s.id,
+        label: `${s.firstName || ''} ${s.lastName || ''}`.trim() || s.name || 'Student',
+        subLabel: s.admissionNumber || ''
+      });
+    });
+    return opts;
+  }, [students]);
 
-  // Discounts
-  const [discountSearch, setDiscountSearch] = useState('');
-
-  // Allocation
-  const [allocationFeeId, setAllocationFeeId] = useState('');
-
-  // Inventory
-  const [inventoryCategory, setInventoryCategory] = useState('');
-  const [inventoryLowStockOnly, setInventoryLowStockOnly] = useState(false);
-
-  // Transport
-  const [transportSearch, setTransportSearch] = useState('');
-  const [transportView, setTransportView] = useState('routes');
-
-  // Hostel
-  const [hostelGenderFilter, setHostelGenderFilter] = useState('');
-  const [hostelView, setHostelView] = useState('hostels');
-
-  // Library
-  const [libraryCategory, setLibraryCategory] = useState('');
-  const [libraryView, setLibraryView] = useState('books');
-
-  // ==================== COLORS ====================
-  const CHART_COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#14b8a6', '#6366f1', '#f97316'];
-
-  // ==================== HELPERS ====================
-  const formatCurrency = (amount) => new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 }).format(amount || 0);
-  const todayStr = () => new Date().toISOString().split('T')[0];
-  const firstOfMonthStr = () => new Date(new Date().setDate(1)).toISOString().split('T')[0];
-
-  const getStudentEntityName = (s) => {
-    if (isUniversity) return s.course?.name || courses.find(c => c.id === s.courseId)?.name || 'N/A';
-    if (isTVET) return s.program?.name || programs.find(p => p.id === s.programId)?.name || 'N/A';
-    return s.class?.name || classes.find(c => c.id === s.classId)?.name || 'N/A';
+  // ==================== 6. HELPERS ====================
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-KE', {
+      style: 'currency', currency: 'KES', minimumFractionDigits: 0
+    }).format(amount || 0);
   };
 
-  /**
-   * ✅ Compute total discount (in KES) for a student's bill.
-   * Handles FIXED, AMOUNT, PERCENTAGE, PERCENT types.
-   * Only counts discounts where isActive !== false.
-   */
+  const getFeeTitle = () => {
+    if (isUniversity) return 'University Fee Management';
+    if (isTVET) return 'TVET Program Fee Management';
+    return 'School Fee Management';
+  };
+
+  const getModuleDisplay = (fee) => {
+    if (isTVET) {
+      if (fee.module) return `Module ${fee.module}`;
+      if (fee.term && !isNaN(parseInt(fee.term))) return `Module ${fee.term}`;
+    }
+    return fee.term || 'N/A';
+  };
+
+  const getProgramName = (programId) => {
+    if (!programId) return 'N/A';
+    return programs?.find(p => p.id === programId)?.name || 'N/A';
+  };
+  const getCourseName = (courseId) => {
+    if (!courseId) return 'N/A';
+    return courses?.find(c => c.id === courseId)?.name || 'N/A';
+  };
+  const getClassName = (classId) => {
+    if (!classId) return 'N/A';
+    return classes?.find(c => c.id === classId)?.name || 'N/A';
+  };
+
+  // ==================== 6a. DISCOUNT RESOLUTION HELPERS ====================
+  // Same approach as ReportsModule — loop over ALL matching discount records
+  // (no .find()), percentages based on the student's bill, and cap at the bill.
+
+  // Get the list of fees a specific student is liable for
+  const getApplicableFeesForStudent = (student) => {
+    if (!student) return [];
+    return (fees || []).filter(f => {
+      if (isUniversity) return String(f.courseId) === String(student.courseId);
+      if (isTVET)       return String(f.programId) === String(student.programId);
+      return String(f.classId) === String(student.classId);
+    });
+  };
+
+  // Treat null, undefined, 0, 'false', '0' as inactive; anything else = active
+  const isDiscountActive = (d) => {
+    if (!d) return false;
+    const v = d.isActive;
+    if (v === false) return false;
+    if (v === 0) return false;
+    if (v === 'false') return false;
+    if (v === '0') return false;
+    return true;
+  };
+
+  // Get ALL active discount records for a student (mirrors ReportsModule's
+  // getStudentDiscounts, but does NOT filter to a single fee unless asked)
+  const getStudentDiscounts = (studentId, feeId = null) => {
+    if (!Array.isArray(discounts)) return [];
+    const sid = String(studentId);
+    return discounts.filter(d => {
+      if (!isDiscountActive(d)) return false;
+      if (String(d.studentId) !== sid) return false;
+      if (feeId !== null && feeId !== undefined) {
+        // Scoped to a specific fee: include fee-specific AND student-wide
+        if (d.feeId !== null && d.feeId !== undefined) {
+          if (String(d.feeId) !== String(feeId)) return false;
+        }
+      }
+      return true;
+    });
+  };
+
+  // ✅ Compute total discount (in KES) for a student's bill.
+  // EXACTLY mirrors ReportsModule's computeDiscountKES:
+  //   - loops over ALL matching discount records
+  //   - percentages are based on the student's gross bill
+  //   - caps at the gross bill
+  //   - handles both 'PERCENT' and 'PERCENTAGE' type strings
   const computeDiscountKES = (studentDiscounts, grossBilled) => {
     if (!Array.isArray(studentDiscounts) || studentDiscounts.length === 0) return 0;
     let total = 0;
     studentDiscounts.forEach(d => {
-      if (d.isActive === false) return;
+      if (!isDiscountActive(d)) return;
       const type = String(d.type || '').toUpperCase();
       const value = parseFloat(d.value || 0);
       if (type === 'PERCENTAGE' || type === 'PERCENT') {
@@ -15145,2825 +15242,1083 @@ const ReportsModule = ({
         total += value;
       }
     });
-    return Math.min(total, grossBilled); // Never discount more than the gross
+    return Math.min(total, grossBilled);
   };
 
-  /** Get all active discounts for a student (optionally scoped to a fee) */
-  const getStudentDiscounts = (studentId, fetchedDiscounts, feeId = null) => {
-    if (!Array.isArray(fetchedDiscounts)) return [];
-    return fetchedDiscounts.filter(d => {
-      if (d.studentId !== studentId) return false;
-      if (d.isActive === false) return false;
-      if (feeId && d.feeId && d.feeId !== feeId) return false;
-      return true;
-    });
-  };
-
-  // ==================== PRINT STYLES ====================
-  useEffect(() => {
-    const style = document.createElement('style');
-    style.innerHTML = `
-      .print-area { display: block; }
-
-      @media print {
-        body * { visibility: hidden !important; }
-        html, body {
-          background: white !important;
-          margin: 0 !important;
-          padding: 0 !important;
-        }
-
-        .print-area,
-        .print-area * { visibility: visible !important; }
-
-        .print-area {
-          position: absolute !important;
-          left: 0 !important;
-          top: 0 !important;
-          width: 100% !important;
-          padding: 12px !important;
-          margin: 0 !important;
-          background: white !important;
-          box-shadow: none !important;
-          border: none !important;
-          border-radius: 0 !important;
-        }
-
-        .no-print,
-        button,
-        input,
-        select,
-        textarea,
-        .recharts-wrapper,
-        .recharts-responsive-container,
-        .recharts-legend-wrapper,
-        .recharts-tooltip-wrapper { display: none !important; }
-
-        .print-area::before {
-          content: attr(data-print-title);
-          display: block;
-          font-size: 15px;
-          font-weight: bold;
-          color: #111;
-          margin-bottom: 10px;
-          padding-bottom: 6px;
-          border-bottom: 1px solid #d1d5db;
-        }
-
-        table {
-          border-collapse: collapse !important;
-          width: 100% !important;
-        }
-        thead { display: table-header-group; }
-        tr { page-break-inside: avoid; }
-        th, td {
-          border: 1px solid #d1d5db !important;
-          padding: 6px 8px !important;
-          font-size: 11px !important;
-          color: #111 !important;
-          background: white !important;
-        }
-        th {
-          background: #f3f4f6 !important;
-          font-weight: bold !important;
-          text-transform: uppercase !important;
-        }
-
-        .print-area .bg-white,
-        .print-area .rounded-xl,
-        .print-area .shadow-sm {
-          box-shadow: none !important;
-          border: none !important;
-          border-radius: 0 !important;
-          padding: 0 !important;
-          margin: 0 !important;
-        }
-      }
-    `;
-    document.head.appendChild(style);
-    return () => document.head.removeChild(style);
-  }, []);
-
-  // ==================== SELF-FETCH ====================
-  const fetchOnce = async (key) => {
-    if (fetchedOnce[key]) {
-      if (key === 'fees')            return fees;
-      if (key === 'attendance')      return attendance;
-      if (key === 'staff')           return staff;
-      if (key === 'discounts')       return discounts;
-      if (key === 'allocations')     return allocations;
-      if (key === 'inventory')       return inventory;
-      if (key === 'transportRoutes') return transportRoutes;
-      if (key === 'vehicles')        return vehicles;
-      if (key === 'hostels')         return hostels;
-      if (key === 'books')           return books;
-      if (key === 'borrows')         return borrows;
-      if (key === 'feeTransfers')    return feeTransfers;
-      return null;
-    }
-
-    try {
-      let res;
-      let data = null;
-
-      if (key === 'fees')            { res = await api.get('/fees');                                     data = res.data.fees || [];          setFees(data); }
-      if (key === 'attendance')      { res = await api.get('/attendance', { params: { limit: 5000 } });  data = res.data.attendance || [];    setAttendance(data); }
-      if (key === 'staff')           { res = await api.get('/staff');                                    data = res.data.staff || [];         setStaff(data); }
-      if (key === 'discounts')       { res = await api.get('/discounts');                                data = res.data.discounts || [];     setDiscounts(data); }
-      if (key === 'allocations')     { res = await api.get('/fee-allocations');                          data = res.data.allocations || [];   setAllocations(data); }
-      if (key === 'inventory')       { res = await api.get('/inventory');                                data = res.data.items || [];         setInventory(data); }
-      if (key === 'transportRoutes') { res = await api.get('/transport-routes');                         data = res.data.routes || [];        setTransportRoutes(data); }
-      if (key === 'vehicles')        { res = await api.get('/vehicles');                                 data = res.data.vehicles || [];      setVehicles(data); }
-      if (key === 'hostels')         { res = await api.get('/hostels');                                  data = res.data.hostels || [];       setHostels(data); }
-      if (key === 'books')           { res = await api.get('/books');                                    data = res.data.books || [];         setBooks(data); }
-      if (key === 'borrows')         { res = await api.get('/borrows');                                  data = res.data.borrows || [];       setBorrows(data); }
-      if (key === 'feeTransfers')    { res = await api.get('/fee-transfers');                            data = res.data.transfers || [];     setFeeTransfers(data); }
-
-      setFetchedOnce(prev => ({ ...prev, [key]: true }));
-      return data;
-    } catch (err) {
-      console.warn(`Optional data fetch failed (${key}):`, err?.response?.data || err.message);
-      setFetchedOnce(prev => ({ ...prev, [key]: true }));
-      return null;
-    }
-  };
-
-  // ==================== SEARCHABLE SELECT ====================
-  const SearchableSelect = ({
-    label, value, onChange, options = [], placeholder = "Search...",
-    disabled, required, className, emptyMessage = "No options available"
-  }) => {
-    const [search, setSearch] = useState('');
-    const [isOpen, setIsOpen] = useState(false);
-    const [isFocused, setIsFocused] = useState(false);
-    const dropdownRef = useRef(null);
-
-    const filteredOptions = useMemo(() => {
-      if (!options?.length) return [];
-      if (!String(search ?? '').trim()) return options;
-      const s = String(search).toLowerCase();
-      return options.filter(o => {
-        if (!o) return false;
-        const lbl = String(o.label ?? '').toLowerCase();
-        const sub = String(o.subLabel ?? '').toLowerCase();
-        const val = String(o.value ?? '').toLowerCase();
-        return lbl.includes(s) || sub.includes(s) || val.includes(s);
-      });
-    }, [options, search]);
-
-    const selected = useMemo(() => {
-      if (!value && value !== 0) return null;
-      return options.find(o => o.value === value) || null;
-    }, [options, value]);
-
-    useEffect(() => {
-      const h = (e) => { if (dropdownRef.current && !dropdownRef.current.contains(e.target)) { setIsOpen(false); setIsFocused(false); } };
-      document.addEventListener('mousedown', h);
-      return () => document.removeEventListener('mousedown', h);
-    }, []);
-
-    useEffect(() => { if (!isOpen) setSearch(''); }, [isOpen]);
-
-    const display = isFocused ? search : (selected ? String(selected.label ?? '') : '');
-
-    return (
-      <div className="relative" ref={dropdownRef}>
-        {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}{required && <span className="text-red-500 ml-1">*</span>}</label>}
-        <div className="relative">
-          <input
-            type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 transition-all ${disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'} ${className || ''}`}
-            value={display}
-            onChange={(e) => {
-              const v = e.target.value;
-              setSearch(v);
-              setIsOpen(true);
-              setIsFocused(true);
-              if (v === '') onChange({ target: { value: '' } });
-            }}
-            onFocus={() => { if (!disabled) { setIsFocused(true); setIsOpen(true); if (selected) setSearch(String(selected.label ?? '')); } }}
-            onBlur={() => setTimeout(() => { if (!dropdownRef.current?.contains(document.activeElement)) { setIsOpen(false); setIsFocused(false); } }, 200)}
-            placeholder={placeholder}
-            disabled={disabled}
-            autoComplete="off"
-          />
-          {value && !disabled && (
-            <button type="button" onClick={(e) => { e.stopPropagation(); onChange({ target: { value: '' } }); setSearch(''); }} className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-            </button>
-          )}
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-          </div>
-        </div>
-        {isOpen && !disabled && (
-          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-            {!options?.length ? (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">{emptyMessage}</div>
-            ) : filteredOptions.length > 0 ? (
-              filteredOptions.map((opt, i) => (
-                <div
-                  key={String(opt.value ?? i)}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 ${opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'}`}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => { onChange({ target: { value: opt.value } }); setSearch(''); setIsOpen(false); setIsFocused(false); }}
-                >
-                  <div className="font-medium">{String(opt.label ?? '')}</div>
-                  {opt.subLabel && <div className="text-xs text-gray-500">{String(opt.subLabel)}</div>}
-                </div>
-              ))
-            ) : (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">No results for "{search}"</div>
-            )}
-          </div>
-        )}
-      </div>
+  // ✅ Single source of truth: get a student's total resolved discount.
+  // Uses the same precedence as ReportsModule:
+  //   1. per-student discount records (all of them, added together)
+  //   2. fall back to fee-level default discounts if no student records exist
+  const getResolvedDiscountForStudent = (student) => {
+    if (!student) return 0;
+    const applicable = getApplicableFeesForStudent(student);
+    const grossBilled = applicable.reduce(
+      (s, f) => s + (parseFloat(f.amount) || 0), 0
     );
-  };
 
-  // ==================== EXPORT CSV ====================
-  const exportCSV = (rows, filename) => {
-    if (!rows || rows.length === 0) { alert('No data to export'); return; }
-    const headers = Object.keys(rows[0]);
-    const csv = [
-      headers.join(','),
-      ...rows.map(r => headers.map(h => {
-        const v = r[h];
-        if (v === null || v === undefined) return '';
-        const str = typeof v === 'object' ? JSON.stringify(v) : String(v);
-        return `"${str.replace(/"/g, '""')}"`;
-      }).join(','))
-    ].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+    // Get every active discount record for this student
+    const studentDiscounts = getStudentDiscounts(student.id);
 
-  // ==================== OPTIONS ====================
-  const studentOptions = useMemo(() => students.map(s => ({
-    value: s.id,
-    label: `${s.firstName || ''} ${s.lastName || ''}`.trim() || 'Unnamed',
-    subLabel: `${s.admissionNumber || ''} • ${getStudentEntityName(s)}`
-  })), [students, isUniversity, isTVET, classes, courses, programs]);
-
-  const classOptions = useMemo(() => classes.map(c => ({ value: c.id, label: c.name, subLabel: c.academicYear || '' })), [classes]);
-  const courseOptions = useMemo(() => courses.map(c => ({ value: c.id, label: c.name, subLabel: c.code || '' })), [courses]);
-  const programOptions = useMemo(() => programs.map(p => ({ value: p.id, label: p.name, subLabel: p.code || '' })), [programs]);
-  const yearOptions = useMemo(() => ['1','2','3','4','5','6'].map(y => ({ value: y, label: `Year ${y}` })), []);
-  const moduleOptions = useMemo(() => ['1','2','3','4'].map(m => ({ value: m, label: `Module ${m}` })), []);
-
-  const studentOptionsForTransfers = useMemo(() => [
-    { value: '', label: 'All students' },
-    ...students.map(s => ({
-      value: s.id,
-      label: `${s.firstName || ''} ${s.lastName || ''}`.trim() || 'Unnamed',
-      subLabel: s.admissionNumber || ''
-    }))
-  ], [students]);
-
-  const examOptionsForStudent = useMemo(() => {
-    if (!selectedStudent) return [];
-    const s = students.find(x => x.id === selectedStudent);
-    if (!s) return [];
-    let filtered = exams;
-    if (isUniversity) filtered = exams.filter(e => e.courseId === s.courseId);
-    else if (isTVET) filtered = exams.filter(e => e.programId === s.programId);
-    else filtered = exams.filter(e => e.classId === s.classId);
-    return filtered.map(e => ({ value: e.id, label: e.name, subLabel: `${e.type || ''} • ${e.date ? new Date(e.date).toLocaleDateString() : ''}` }));
-  }, [selectedStudent, students, exams, isUniversity, isTVET]);
-
-  // ==================== GRADE HELPER ====================
-  const getGradeDisplay = (grade, points) => {
-    if (!grade) return { grade: '-', points: '-', color: 'gray' };
-    if (isUniversity) {
-      const map = { 'A': ['5.0','green'], 'B': ['4.0','blue'], 'C': ['3.0','yellow'], 'D': ['2.0','orange'], 'E': ['1.0','red'] };
-      const [p, c] = map[grade] || ['-','gray'];
-      return { grade, points: p, color: c };
+    // If the student has explicit discount records, use them
+    if (studentDiscounts.length > 0) {
+      return computeDiscountKES(studentDiscounts, grossBilled);
     }
-    if (isTVET) {
-      const map = { DISTINCTION: ['5','green'], CREDIT: ['4','blue'], MERIT: ['3','yellow'], PASS: ['2','orange'], FAIL: ['1','red'] };
-      const [p, c] = map[grade] || ['-','gray'];
-      return { grade, points: p, color: c };
-    }
-    if (isSecondary) {
-      const map = { 'A':12,'A-':11,'B+':10,'B':9,'B-':8,'C+':7,'C':6,'C-':5,'D+':4,'D':3,'D-':2,'E':1 };
-      const p = map[grade];
-      if (p !== undefined) return { grade, points: p, color: p >= 8 ? 'green' : p >= 5 ? 'blue' : 'orange' };
-    }
-    if (isPrimary) {
-      const map = { 'Exceeding Expectations':4, 'Meeting Expectations':3, 'Approaching Expectations':2, 'Below Expectations':1, 'Needs Improvement':0 };
-      const p = map[grade];
-      if (p !== undefined) return { grade, points: p, color: p >= 3 ? 'green' : p >= 1 ? 'yellow' : 'red' };
-    }
-    return { grade, points: points || '-', color: 'gray' };
-  };
 
-  // ==================== STUDENT REPORT ====================
-  const generateStudentReport = () => {
-    if (!selectedStudent) { alert('Please select a student'); return; }
-    setLoading(true);
-    try {
-      const student = students.find(s => s.id === selectedStudent);
-      if (!student) { alert('Student not found'); return; }
-      let studentResults = results.filter(r => r.studentId === selectedStudent);
-      if (selectedExam) studentResults = studentResults.filter(r => r.examId === selectedExam);
-
-      const enriched = studentResults.map(r => {
-        const exam = exams.find(e => e.id === r.examId);
-        let itemName = 'Unknown', itemCode = '';
-        if (isUniversity || isTVET) {
-          const unitId = r.unitId || exam?.unitId;
-          const unit = units.find(u => u.id === unitId);
-          if (unit) { itemName = unit.name; itemCode = unit.code; }
-        } else {
-          const subjectId = r.subjectId || exam?.subjectId;
-          const subject = subjects.find(s => s.id === subjectId);
-          if (subject) { itemName = subject.name; itemCode = subject.code; }
-        }
-        if (itemName === 'Unknown' && exam?.name) itemName = exam.name;
-        const gradeInfo = getGradeDisplay(r.grade, r.points);
-        return {
-          id: r.id,
-          examName: exam?.name || 'Unknown Exam',
-          examDate: exam?.date,
-          examType: exam?.type,
-          itemName, itemCode,
-          marks: r.marks || 0,
-          grade: gradeInfo.grade,
-          points: gradeInfo.points,
-          gradeColor: gradeInfo.color,
-          isAbsent: r.isAbsent || false,
-          remarks: r.remarks
-        };
-      }).sort((a, b) => new Date(b.examDate) - new Date(a.examDate));
-
-      const totalMarks = enriched.reduce((s, r) => s + r.marks, 0);
-      const marks = enriched.map(r => r.marks);
-      const summary = {
-        totalExams: enriched.length,
-        totalMarks,
-        average: enriched.length ? (totalMarks / enriched.length).toFixed(2) : 0,
-        highest: marks.length ? Math.max(...marks) : 0,
-        lowest: marks.length ? Math.min(...marks) : 0
-      };
-
-      const trend = [...enriched].reverse().map(r => ({
-        name: r.examName.length > 15 ? r.examName.substring(0, 12) + '…' : r.examName,
-        marks: r.marks,
-        date: r.examDate ? new Date(r.examDate).toLocaleDateString() : 'N/A'
-      }));
-
-      const bySubject = {};
-      enriched.forEach(r => {
-        if (!bySubject[r.itemName]) bySubject[r.itemName] = { total: 0, count: 0 };
-        bySubject[r.itemName].total += r.marks;
-        bySubject[r.itemName].count += 1;
-      });
-      const subjectPerf = Object.keys(bySubject).map(name => ({
-        name: name.length > 15 ? name.substring(0, 12) + '…' : name,
-        average: Math.round(bySubject[name].total / bySubject[name].count)
-      }));
-
-      const gradeDist = {};
-      enriched.forEach(r => { gradeDist[r.grade] = (gradeDist[r.grade] || 0) + 1; });
-      const gradeChart = Object.keys(gradeDist).map(g => ({ name: g, value: gradeDist[g] }));
-
-      setReportData({ type: 'student', student, results: enriched, summary, charts: { trend, subjectPerf, gradeChart } });
-    } catch (err) { console.error(err); alert('Failed to generate student report'); }
-    finally { setLoading(false); }
-  };
-
-  // ==================== CLASS REPORT ====================
-  const generateClassReport = () => {
-    if (isUniversity && !selectedCourse) return alert('Select a course');
-    if (isTVET && !selectedProgram) return alert('Select a program');
-    if (isRegularSchool && !selectedClass) return alert('Select a class');
-    setLoading(true);
-    try {
-      let studentList = [], entityName = '', examList = [];
-      if (isUniversity) {
-        studentList = students.filter(s => s.courseId === selectedCourse);
-        if (selectedYear) studentList = studentList.filter(s => s.currentYear === parseInt(selectedYear));
-        entityName = courses.find(c => c.id === selectedCourse)?.name || 'Course';
-        examList = exams.filter(e => e.courseId === selectedCourse);
-      } else if (isTVET) {
-        studentList = students.filter(s => s.programId === selectedProgram);
-        if (selectedModule) studentList = studentList.filter(s => s.currentModule === `Module ${selectedModule}`);
-        if (selectedYear) studentList = studentList.filter(s => s.currentYear === parseInt(selectedYear));
-        entityName = programs.find(p => p.id === selectedProgram)?.name || 'Program';
-        examList = exams.filter(e => e.programId === selectedProgram);
-      } else {
-        studentList = students.filter(s => s.classId === selectedClass);
-        entityName = classes.find(c => c.id === selectedClass)?.name || 'Class';
-        examList = exams.filter(e => e.classId === selectedClass);
+    // Otherwise fall back to fee-level defaults
+    let feeLevelTotal = 0;
+    applicable.forEach(fee => {
+      const amount = parseFloat(fee.amount) || 0;
+      const pct = parseFloat(fee.discountPercent) || 0;
+      if (pct > 0) {
+        feeLevelTotal += amount * (pct / 100);
+      } else if (parseFloat(fee.discountAmount) > 0) {
+        feeLevelTotal += parseFloat(fee.discountAmount);
       }
-      const perf = studentList.map(student => {
-        const rs = results.filter(r => r.studentId === student.id);
-        const total = rs.reduce((sum, r) => sum + (r.marks || 0), 0);
-        const avg = rs.length ? parseFloat((total / rs.length).toFixed(2)) : 0;
-        return { student, examCount: rs.length, totalMarks: total, average: avg };
-      });
-      const withResults = perf.filter(p => p.examCount > 0);
-      const classAverage = withResults.length ? (withResults.reduce((s, p) => s + p.average, 0) / withResults.length).toFixed(2) : '0.00';
-      const topStudents = [...withResults].sort((a, b) => b.average - a.average).slice(0, 10)
-        .map(s => ({ name: `${s.student.firstName} ${s.student.lastName}`.substring(0, 15), average: s.average }));
-      const ranges = { '90-100': 0, '80-89': 0, '70-79': 0, '60-69': 0, '50-59': 0, '<50': 0 };
-      perf.forEach(p => {
-        if (p.average >= 90) ranges['90-100']++;
-        else if (p.average >= 80) ranges['80-89']++;
-        else if (p.average >= 70) ranges['70-79']++;
-        else if (p.average >= 60) ranges['60-69']++;
-        else if (p.average >= 50) ranges['50-59']++;
-        else ranges['<50']++;
-      });
-      const rangeChart = Object.keys(ranges).map(r => ({ name: `${r}%`, count: ranges[r] })).filter(x => x.count > 0);
-      setReportData({
-        type: 'class', entityName, studentPerformance: perf,
-        charts: { topStudents, rangeChart },
-        summary: { totalStudents: studentList.length, studentsWithResults: withResults.length, totalExams: examList.length, classAverage }
-      });
-    } catch (err) { console.error(err); alert('Failed to generate class report'); }
-    finally { setLoading(false); }
+    });
+    return Math.min(feeLevelTotal, grossBilled);
   };
 
-  // ==================== DETAILED ACADEMIC ====================
-  const generateAcademicReport = () => {
-    if (!academicStudent) return alert('Select a student');
-    setLoading(true);
-    try {
-      const student = students.find(s => s.id === academicStudent);
-      if (!student) { alert('Student not found'); return; }
-      const studentResults = results.filter(r => r.studentId === academicStudent);
-      const bySubject = {};
-      studentResults.forEach(r => {
-        const exam = exams.find(e => e.id === r.examId);
-        let itemName = 'Unknown';
-        if (isUniversity || isTVET) {
-          const unitId = r.unitId || exam?.unitId;
-          const unit = units.find(u => u.id === unitId);
-          if (unit) itemName = unit.name;
+  // Per-fee resolver — kept for the table and for the discount modal preview
+  const getResolvedDiscount = (fee, studentId) => {
+    if (!fee || !studentId) return 0;
+    const feeAmount = parseFloat(fee.amount) || 0;
+
+    // Sum ALL active discount records for this student+fee
+    const records = getStudentDiscounts(studentId, fee.id);
+    if (records.length > 0) {
+      let total = 0;
+      records.forEach(d => {
+        const v = parseFloat(d.value) || 0;
+        const t = String(d.type).toUpperCase();
+        if (t === 'PERCENT' || t === 'PERCENTAGE') {
+          total += feeAmount * (v / 100);
         } else {
-          const subjectId = r.subjectId || exam?.subjectId;
-          const subject = subjects.find(s => s.id === subjectId);
-          if (subject) itemName = subject.name;
+          total += v;
         }
-        if (itemName === 'Unknown' && exam?.name) itemName = exam.name;
-        if (!bySubject[itemName]) bySubject[itemName] = { name: itemName, exams: [], total: 0, count: 0 };
-        bySubject[itemName].exams.push({
-          exam: exam?.name || 'Unknown',
-          date: exam?.date,
-          marks: r.marks || 0,
-          grade: r.grade,
-          points: r.points
-        });
-        bySubject[itemName].total += r.marks || 0;
-        bySubject[itemName].count += 1;
       });
-      const subjectRows = Object.values(bySubject).map(s => ({
-        subject: s.name,
-        examCount: s.count,
-        totalMarks: s.total,
-        average: s.count ? (s.total / s.count).toFixed(2) : '0.00',
-        bestExam: s.exams.reduce((best, e) => e.marks > (best?.marks || 0) ? e : best, null)?.exam || '—',
-        worstExam: s.exams.reduce((worst, e) => e.marks < (worst?.marks || Infinity) ? e : worst, null)?.exam || '—',
-        exams: s.exams
-      })).sort((a, b) => parseFloat(b.average) - parseFloat(a.average));
-      const classMates = isRegularSchool
-        ? students.filter(s => s.classId === student.classId)
-        : isUniversity
-          ? students.filter(s => s.courseId === student.courseId)
-          : students.filter(s => s.programId === student.programId);
-      const peerAverages = classMates.map(m => {
-        const rs = results.filter(r => r.studentId === m.id);
-        const total = rs.reduce((sum, r) => sum + (r.marks || 0), 0);
-        return { studentId: m.id, avg: rs.length ? total / rs.length : 0 };
-      }).sort((a, b) => b.avg - a.avg);
-      const myRank = peerAverages.findIndex(p => p.studentId === academicStudent) + 1;
-      const overallAvg = studentResults.length ? (studentResults.reduce((sum, r) => sum + (r.marks || 0), 0) / studentResults.length).toFixed(2) : '0.00';
-      const bestSubject = subjectRows[0]?.subject || '—';
-      const weakestSubject = subjectRows[subjectRows.length - 1]?.subject || '—';
-      const radarData = subjectRows.map(s => ({
-        subject: s.subject.length > 12 ? s.subject.substring(0, 10) + '…' : s.subject,
-        average: parseFloat(s.average)
-      }));
-      const progression = [...studentResults].map(r => {
-        const exam = exams.find(e => e.id === r.examId);
-        return { name: exam?.name?.substring(0, 12) || 'Exam', marks: r.marks || 0, date: exam?.date };
-      }).sort((a, b) => new Date(a.date) - new Date(b.date));
-      setReportData({
-        type: 'academic', student, subjectRows,
-        summary: {
-          overallAvg, totalSubjects: subjectRows.length, totalExams: studentResults.length,
-          rank: myRank, totalPeers: peerAverages.length, bestSubject, weakestSubject
-        },
-        charts: { radarData, progression }
-      });
-    } catch (err) { console.error(err); alert('Failed to generate academic report'); }
-    finally { setLoading(false); }
+      return Math.min(total, feeAmount);
+    }
+
+    // Fee-level default
+    if (parseFloat(fee.discountPercent) > 0) {
+      return feeAmount * (parseFloat(fee.discountPercent) / 100);
+    }
+    if (parseFloat(fee.discountAmount) > 0) {
+      return parseFloat(fee.discountAmount);
+    }
+
+    return 0;
   };
 
-  // ==================== FEE REPORT (WITH DISCOUNTS) ====================
-  const generateFeeReport = async () => {
-    setLoading(true);
+  // Fee-level default only (used in the table's "Default Discount" column)
+  const getFeeLevelDiscount = (fee) => {
+    if (!fee) return 0;
+    const amount = parseFloat(fee.amount) || 0;
+    const pct = parseFloat(fee.discountPercent) || 0;
+    if (pct > 0) return amount * (pct / 100);
+    return parseFloat(fee.discountAmount) || 0;
+  };
+
+  const getPaidForFee = (fee, studentId = null) => {
+    if (!fee || !Array.isArray(payments)) return 0;
+    return payments
+      .filter(p =>
+        String(p.feeId) === String(fee.id) &&
+        (!studentId || String(p.studentId) === String(studentId))
+      )
+      .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+  };
+
+  const getBalanceForFee = (fee, studentId = null) => {
+    const amount = parseFloat(fee?.amount) || 0;
+    const discount = getResolvedDiscount(fee, studentId);
+    const paid = getPaidForFee(fee, studentId);
+    return amount - discount - paid;
+  };
+
+  // ==================== 7. HANDLERS ====================
+  const handleEdit = (fee) => {
+    if (!canEdit) { alert('You do not have permission to edit fees'); return; }
+
+    setForm({
+      name: fee.name || '',
+      amount: fee.amount || '',
+      term: fee.term || '',
+      academicYear: fee.academicYear || new Date().getFullYear().toString(),
+      dueDate: fee.dueDate || '',
+      category: fee.category || 'TUITION',
+      allocationType: fee.allocationType || 'AUTO',
+      appliesTo: fee.appliesTo || ['ALL'],
+      transportRouteId: fee.transportRouteId || null,
+      courseId: fee.courseId || '',
+      programId: fee.programId || '',
+      facultyId: fee.facultyId || '',
+      departmentId: fee.departmentId || '',
+      year: fee.year || (isUniversity ? 1 : null),
+      semester: fee.semester || (isUniversity ? 1 : null),
+      module: fee.module || (isTVET ? 1 : null),
+      classId: fee.classId || '',
+      isOptional: fee.isOptional || false,
+      isRecurring: fee.isRecurring || false,
+      discountAmount: fee.discountAmount || 0,
+      discountPercent: fee.discountPercent || 0
+    });
+
+    setAllocationType(fee.allocationType || 'AUTO');
+    if (isUniversity && fee.facultyId) setSelectedFaculty(fee.facultyId);
+    if (isUniversity && fee.departmentId) setSelectedDepartment(fee.departmentId);
+    if (isUniversity && fee.courseId) setSelectedCourse(fee.courseId);
+    if (isTVET && fee.departmentId) setSelectedDepartment(fee.departmentId);
+    if (isTVET && fee.programId) setSelectedProgram(fee.programId);
+
+    setEditingId(fee.id);
+    setShowForm(true);
+  };
+
+  const handleDeleteClick = (fee) => {
+    if (!canDelete) { alert('You do not have permission to delete fees'); return; }
+    setDeleteConfirm(fee);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm) return;
+    setLoading(true); setApiError('');
     try {
-      const fetchedFees = (await fetchOnce('fees')) || fees;
-      const fetchedDiscounts = (await fetchOnce('discounts')) || discounts;
-
-      const start = feeDateRange.start || firstOfMonthStr();
-      const end = feeDateRange.end || todayStr();
-
-      const filteredPayments = payments.filter(p => {
-        const d = new Date(p.date || p.paymentDate).toISOString().split('T')[0];
-        return d >= start && d <= end;
-      });
-
-      let targetStudents = students;
-      if (isUniversity && feeCourseId) targetStudents = students.filter(s => s.courseId === feeCourseId);
-      if (isTVET && feeProgramId) targetStudents = students.filter(s => s.programId === feeProgramId);
-      if (isRegularSchool && feeClassId) targetStudents = students.filter(s => s.classId === feeClassId);
-
-      const studentIds = new Set(targetStudents.map(s => s.id));
-      const paymentsForStudents = filteredPayments.filter(p => studentIds.has(p.studentId));
-
-      const perStudent = targetStudents.map(s => {
-        const applicableFees = fetchedFees.filter(f => {
-          if (isUniversity) return f.courseId === s.courseId;
-          if (isTVET) return f.programId === s.programId;
-          return f.classId === s.classId;
-        });
-        const grossBilled = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
-
-        // ✅ APPLY DISCOUNTS
-        const studentDiscounts = getStudentDiscounts(s.id, fetchedDiscounts);
-        const discountAmount = computeDiscountKES(studentDiscounts, grossBilled);
-        const billed = Math.max(0, grossBilled - discountAmount);
-
-        const paid = paymentsForStudents
-          .filter(p => p.studentId === s.id)
-          .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-        const balance = Math.max(0, billed - paid);
-
-        return {
-          admissionNumber: s.admissionNumber,
-          name: `${s.firstName || ''} ${s.lastName || ''}`.trim(),
-          entity: getStudentEntityName(s),
-          grossBilled,
-          discountAmount,
-          billed,
-          paid,
-          balance,
-          status: balance <= 0 ? 'Cleared' : 'Outstanding'
-        };
-      }).sort((a, b) => b.balance - a.balance);
-
-      const totalCollected    = paymentsForStudents.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
-      const totalGrossBilled  = perStudent.reduce((s, r) => s + r.grossBilled, 0);
-      const totalDiscounts    = perStudent.reduce((s, r) => s + r.discountAmount, 0);
-      const totalBilled       = perStudent.reduce((s, r) => s + r.billed, 0);
-      const totalOutstanding  = perStudent.reduce((s, r) => s + r.balance, 0);
-
-      const monthly = {};
-      paymentsForStudents.forEach(p => {
-        const m = new Date(p.date || p.paymentDate).toLocaleString('default', { month: 'short', year: 'numeric' });
-        monthly[m] = (monthly[m] || 0) + parseFloat(p.amount || 0);
-      });
-      const monthlyChart = Object.keys(monthly).map(m => ({ month: m, collected: monthly[m] }));
-
-      const byMethod = {};
-      paymentsForStudents.forEach(p => {
-        const m = p.paymentMethod || 'Other';
-        byMethod[m] = (byMethod[m] || 0) + parseFloat(p.amount || 0);
-      });
-      const methodChart = Object.keys(byMethod).map(m => ({ name: m, value: byMethod[m] }));
-
-      setReportData({
-        type: 'fee',
-        summary: {
-          totalCollected,
-          totalBilled,
-          totalGrossBilled,
-          totalDiscounts,
-          totalOutstanding,
-          collectionRate: totalBilled > 0 ? ((totalCollected / totalBilled) * 100).toFixed(2) : '0.00',
-          paymentCount: paymentsForStudents.length,
-          studentCount: targetStudents.length
-        },
-        charts: { monthlyChart, methodChart },
-        rows: perStudent,
-        period: { start, end }
-      });
-    } catch (err) {
-      console.error(err);
-      alert('Failed to generate fee report');
+      const paymentsForFee = payments?.filter(p => String(p.feeId) === String(deleteConfirm.id)) || [];
+      if (paymentsForFee.length > 0) {
+        if (!window.confirm(`This fee has ${paymentsForFee.length} payment(s) associated with it. Continue?`)) {
+          setDeleteConfirm(null); setLoading(false); return;
+        }
+      }
+      await onDelete(deleteConfirm.id);
+      alert('✅ Fee deleted successfully!');
+      setDeleteConfirm(null);
+    } catch (error) {
+      console.error('Error deleting fee:', error);
+      setApiError(error.response?.data?.message || 'Failed to delete fee');
     } finally {
       setLoading(false);
     }
   };
 
-  // ==================== OUTSTANDING (WITH DISCOUNTS) ====================
-  const generateOutstandingReport = async () => {
-    setLoading(true);
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!canManage) { alert('You do not have permission to create fees'); return; }
+    setLoading(true); setApiError(''); setAllocationMessage('');
     try {
-      const fetchedFees = (await fetchOnce('fees')) || fees;
-      const fetchedDiscounts = (await fetchOnce('discounts')) || discounts;
+      if (isUniversity && !form.courseId) { alert('Please select a course'); setLoading(false); return; }
+      if (isTVET && !form.programId) { alert('Please select a program'); setLoading(false); return; }
+      if (isPrimarySecondary && !form.classId) { alert('Please select a class'); setLoading(false); return; }
+      if (!form.name) { alert('Please enter a fee name'); setLoading(false); return; }
+      if (!form.amount || parseFloat(form.amount) <= 0) { alert('Please enter a valid amount'); setLoading(false); return; }
 
-      let target = students;
-      if (isUniversity && outstandingCourseId) target = target.filter(s => s.courseId === outstandingCourseId);
-      if (isTVET && outstandingProgramId) target = target.filter(s => s.programId === outstandingProgramId);
-      if (isRegularSchool && outstandingClassId) target = target.filter(s => s.classId === outstandingClassId);
+      const submitData = { ...form, allocationType };
+      const uuidFields = ['classId', 'courseId', 'programId', 'facultyId', 'departmentId', 'transportRouteId'];
+      uuidFields.forEach(field => { if (submitData[field] === '') submitData[field] = null; });
+      if (submitData.amount === '') submitData.amount = 0;
+      if (submitData.year === '') submitData.year = isUniversity ? 1 : null;
+      if (isTVET && submitData.term) submitData.module = parseInt(submitData.term);
+      submitData.discountAmount = parseFloat(submitData.discountAmount) || 0;
+      submitData.discountPercent = parseFloat(submitData.discountPercent) || 0;
 
-      const rows = target.map(s => {
-        const applicableFees = fetchedFees.filter(f => {
-          if (isUniversity) return f.courseId === s.courseId;
-          if (isTVET) return f.programId === s.programId;
-          return f.classId === s.classId;
-        });
-        const grossBilled = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
-
-        // ✅ APPLY DISCOUNTS
-        const studentDiscounts = getStudentDiscounts(s.id, fetchedDiscounts);
-        const discountAmount = computeDiscountKES(studentDiscounts, grossBilled);
-        const billed = Math.max(0, grossBilled - discountAmount);
-
-        const studentPayments = payments.filter(p => p.studentId === s.id);
-        const paid = studentPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-        const balance = Math.max(0, billed - paid);
-
-        const lastPayment = [...studentPayments].sort(
-          (a, b) => new Date(b.date || b.paymentDate) - new Date(a.date || a.paymentDate)
-        )[0];
-
-        return {
-          studentId: s.id,
-          admissionNumber: s.admissionNumber,
-          name: `${s.firstName || ''} ${s.lastName || ''}`.trim(),
-          entity: getStudentEntityName(s),
-          grossBilled,
-          discountAmount,
-          billed,
-          paid,
-          balance,
-          lastPaymentDate: lastPayment?.date ? new Date(lastPayment.date).toLocaleDateString() : 'Never',
-          daysSinceLastPayment: lastPayment?.date
-            ? Math.floor((new Date() - new Date(lastPayment.date)) / (1000 * 60 * 60 * 24))
-            : 999
-        };
-      })
-      .filter(r => r.balance >= outstandingMinBalance)
-      .sort((a, b) => b.balance - a.balance);
-
-      const buckets = { '0-30 days': 0, '31-60 days': 0, '61-90 days': 0, '90+ days': 0 };
-      rows.forEach(r => {
-        if (r.daysSinceLastPayment <= 30) buckets['0-30 days'] += r.balance;
-        else if (r.daysSinceLastPayment <= 60) buckets['31-60 days'] += r.balance;
-        else if (r.daysSinceLastPayment <= 90) buckets['61-90 days'] += r.balance;
-        else buckets['90+ days'] += r.balance;
-      });
-      const agingChart = Object.keys(buckets).map(b => ({ name: b, amount: buckets[b] }));
-
-      const totalOutstanding = rows.reduce((s, r) => s + r.balance, 0);
-      const totalDiscounts   = rows.reduce((s, r) => s + r.discountAmount, 0);
-      const avgBalance       = rows.length ? totalOutstanding / rows.length : 0;
-      const highest          = rows[0]?.balance || 0;
-
-      setReportData({
-        type: 'outstanding',
-        summary: {
-          totalOutstanding,
-          totalDiscounts,
-          studentsWithBalance: rows.length,
-          averageBalance: avgBalance,
-          highestBalance: highest
-        },
-        charts: { agingChart },
-        rows
-      });
-    } catch (err) { console.error(err); alert('Failed to generate outstanding report'); }
-    finally { setLoading(false); }
-  };
-
-  // ==================== FEE TRANSFERS ====================
-  const generateFeeTransferReport = async () => {
-    setLoading(true);
-    try {
-      const fetchedTransfers = (await fetchOnce('feeTransfers')) || feeTransfers;
-
-      let rows = fetchedTransfers;
-
-      if (transferStatus) rows = rows.filter(t => t.status === transferStatus);
-      if (transferStudentId) rows = rows.filter(t => t.fromStudentId === transferStudentId || t.toStudentId === transferStudentId);
-      if (String(transferSearch ?? '').trim()) {
-        const q = String(transferSearch).toLowerCase();
-        rows = rows.filter(t => {
-          const from = t.fromStudent || {};
-          const to = t.toStudent || {};
-          return (
-            String(from.firstName || '').toLowerCase().includes(q) ||
-            String(from.lastName || '').toLowerCase().includes(q) ||
-            String(from.admissionNumber || '').toLowerCase().includes(q) ||
-            String(to.firstName || '').toLowerCase().includes(q) ||
-            String(to.lastName || '').toLowerCase().includes(q) ||
-            String(to.admissionNumber || '').toLowerCase().includes(q)
-          );
-        });
+      if (editingId) {
+        await handleUpdate('/fees', editingId, submitData, setFees, fees);
+        alert('✅ Fee updated successfully!');
+      } else {
+        await onCreate(e, submitData);
+        const msg = allocationType === 'AUTO'
+          ? '✅ Fee created and AUTO-allocated to all eligible students!'
+          : '✅ Fee created successfully! Use the Fee Allocation module to manually assign to students.';
+        setAllocationMessage(msg);
+        alert(msg);
       }
 
-      let serverStats = null;
-      try {
-        const statsRes = await api.get('/fee-transfers/stats');
-        serverStats = statsRes.data.stats;
-      } catch (_) { /* ignore */ }
+      setShowForm(false);
+      setEditingId(null);
+      setSelectedFaculty(''); setSelectedDepartment('');
+      setSelectedCourse(''); setSelectedProgram('');
+      setAllocationType('AUTO');
+    } catch (error) {
+      console.error('Error saving fee:', error);
+      setApiError(error.response?.data?.message || 'Failed to save fee');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-      const byStatus = {
-        PENDING:   rows.filter(t => t.status === 'PENDING').length,
-        APPROVED:  rows.filter(t => t.status === 'APPROVED').length,
-        REJECTED:  rows.filter(t => t.status === 'REJECTED').length,
-        CANCELLED: rows.filter(t => t.status === 'CANCELLED').length
+  const handleCancel = () => {
+    setShowForm(false); setEditingId(null);
+    setSelectedFaculty(''); setSelectedDepartment('');
+    setSelectedCourse(''); setSelectedProgram('');
+    setAllocationType('AUTO'); setAllocationMessage('');
+    setForm({
+      name: '', amount: '', term: '',
+      academicYear: new Date().getFullYear().toString(),
+      dueDate: '', category: 'TUITION',
+      allocationType: 'AUTO', appliesTo: ['ALL'], transportRouteId: null,
+      courseId: '', programId: '', facultyId: '', departmentId: '',
+      year: isUniversity ? 1 : null,
+      semester: isUniversity ? 1 : null,
+      module: isTVET ? 1 : null,
+      classId: '',
+      isOptional: false, isRecurring: false,
+      discountAmount: 0, discountPercent: 0
+    });
+  };
+
+  const openDiscountModal = (student = null, fee = null) => {
+    if (!canGrantDiscount) { alert('You do not have permission to grant discounts'); return; }
+    setDiscountStudent(student || null);
+    setDiscountFee(fee || null);
+
+    let existing = null;
+    if (student) {
+      if (Array.isArray(discounts)) {
+        existing = discounts.find(d =>
+          isDiscountActive(d) &&
+          String(d.studentId) === String(student.id) &&
+          String(d.feeId || '') === String(fee?.id || '')
+        );
+      }
+    }
+
+    setDiscountForm({
+      type: existing?.type || 'AMOUNT',
+      value: existing?.value || '',
+      reason: existing?.reason || '',
+      academicYear: existing?.academicYear || new Date().getFullYear().toString(),
+      term: existing?.term || ''
+    });
+
+    setShowDiscountModal(true);
+  };
+
+  // Auto-fill existing discount when student/fee changes inside modal
+  useEffect(() => {
+    if (!showDiscountModal) return;
+    if (!discountStudent) return;
+
+    const existing = Array.isArray(discounts)
+      ? discounts.find(d =>
+          isDiscountActive(d) &&
+          String(d.studentId) === String(discountStudent.id) &&
+          String(d.feeId || '') === String(discountFee?.id || '')
+        )
+      : null;
+
+    if (existing) {
+      setDiscountForm({
+        type: existing.type || 'AMOUNT',
+        value: existing.value || '',
+        reason: existing.reason || '',
+        academicYear: existing.academicYear || new Date().getFullYear().toString(),
+        term: existing.term || ''
+      });
+    } else {
+      setDiscountForm({
+        type: 'AMOUNT', value: '', reason: '',
+        academicYear: new Date().getFullYear().toString(), term: ''
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showDiscountModal, discountStudent?.id, discountFee?.id]);
+
+  const handleSaveDiscount = async () => {
+    if (!canGrantDiscount) { alert('You do not have permission to grant discounts'); return; }
+    if (!discountStudent) { alert('Please select a student'); return; }
+    if (!discountForm.value || parseFloat(discountForm.value) <= 0) {
+      alert('Please enter a valid discount value'); return;
+    }
+    setLoading(true); setApiError('');
+    try {
+      const payload = {
+        studentId: discountStudent.id,
+        feeId: discountFee?.id || null,
+        type: discountForm.type,
+        value: parseFloat(discountForm.value),
+        reason: discountForm.reason || '',
+        academicYear: discountForm.academicYear,
+        term: discountForm.term || null,
+        schoolId: currentSchool?.id
       };
 
-      const approvedTotal = rows
-        .filter(t => t.status === 'APPROVED')
-        .reduce((s, t) => s + parseFloat(t.amount || 0), 0);
+      const existing = Array.isArray(discounts)
+        ? discounts.find(d =>
+            isDiscountActive(d) &&
+            String(d.studentId) === String(discountStudent.id) &&
+            String(d.feeId || '') === String(discountFee?.id || '')
+          )
+        : null;
 
-      const statusChart = Object.entries(byStatus).filter(([_, v]) => v > 0).map(([name, value]) => ({ name, value }));
-
-      const monthly = {};
-      rows.filter(t => t.status === 'APPROVED').forEach(t => {
-        const d = new Date(t.approvedAt || t.createdAt);
-        if (isNaN(d.getTime())) return;
-        const key = d.toLocaleString('default', { month: 'short', year: 'numeric' });
-        monthly[key] = (monthly[key] || 0) + parseFloat(t.amount || 0);
-      });
-      const monthlyChart = Object.keys(monthly).map(m => ({ month: m, amount: monthly[m] }));
-
-      const tableRows = rows.map(t => {
-        const from = t.fromStudent || {};
-        const to = t.toStudent || {};
-        return {
-          status: t.status,
-          amount: parseFloat(t.amount || 0),
-          fromStudent: `${from.firstName || ''} ${from.lastName || ''}`.trim() || '—',
-          fromAdmission: from.admissionNumber || '—',
-          toStudent: `${to.firstName || ''} ${to.lastName || ''}`.trim() || '—',
-          toAdmission: to.admissionNumber || '—',
-          reason: t.reason || '—',
-          requestedBy: t.requestedByUser ? `${t.requestedByUser.firstName || ''} ${t.requestedByUser.lastName || ''}`.trim() : '—',
-          requestedAt: t.requestedAt ? new Date(t.requestedAt).toLocaleString() : '—',
-          approvedBy: t.approvedByUser ? `${t.approvedByUser.firstName || ''} ${t.approvedByUser.lastName || ''}`.trim() : '—',
-          approvedAt: t.approvedAt ? new Date(t.approvedAt).toLocaleString() : '—',
-          rejectedBy: t.rejectedByUser ? `${t.rejectedByUser.firstName || ''} ${t.rejectedByUser.lastName || ''}`.trim() : '—',
-          rejectedAt: t.rejectedAt ? new Date(t.rejectedAt).toLocaleString() : '—',
-          rejectReason: t.rejectReason || '—'
-        };
-      });
-
-      setReportData({
-        type: 'feeTransfer',
-        summary: serverStats
-          ? {
-              total: serverStats.pending + serverStats.approved + serverStats.rejected + serverStats.cancelled,
-              pending: serverStats.pending,
-              approved: serverStats.approved,
-              rejected: serverStats.rejected,
-              cancelled: serverStats.cancelled,
-              totalTransferred: serverStats.totalAmount
-            }
-          : {
-              total: rows.length,
-              pending: byStatus.PENDING,
-              approved: byStatus.APPROVED,
-              rejected: byStatus.REJECTED,
-              cancelled: byStatus.CANCELLED,
-              totalTransferred: approvedTotal
-            },
-        charts: { statusChart, monthlyChart },
-        rows: tableRows
-      });
-    } catch (err) { console.error(err); alert('Failed to generate fee transfers report'); }
-    finally { setLoading(false); }
-  };
-
-  // ==================== ADMISSIONS ====================
-  const generateAdmissionReport = () => {
-    setLoading(true);
-    try {
-      let target = students;
-      if (isUniversity && admissionCourseId) target = target.filter(s => s.courseId === admissionCourseId);
-      if (isTVET && admissionProgramId) target = target.filter(s => s.programId === admissionProgramId);
-      if (isRegularSchool && admissionClassId) target = target.filter(s => s.classId === admissionClassId);
-      if (admissionGender) target = target.filter(s => s.gender === admissionGender);
-      if (admissionBoarding) target = target.filter(s => s.boardingStatus === admissionBoarding);
-      const yearFiltered = target.filter(s => {
-        const d = s.admissionDate || s.enrollmentDate || s.createdAt;
-        if (!d) return false;
-        return new Date(d).getFullYear().toString() === admissionYear;
-      });
-      const total = yearFiltered.length;
-      const thisMonth = yearFiltered.filter(s => {
-        const d = new Date(s.admissionDate || s.enrollmentDate || s.createdAt);
-        const now = new Date();
-        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-      }).length;
-      const males = yearFiltered.filter(s => s.gender === 'MALE').length;
-      const females = yearFiltered.filter(s => s.gender === 'FEMALE').length;
-      const other = yearFiltered.filter(s => s.gender && s.gender !== 'MALE' && s.gender !== 'FEMALE').length;
-      const boarding = yearFiltered.filter(s => s.boardingStatus === 'BOARDING').length;
-      const day = yearFiltered.filter(s => s.boardingStatus === 'DAY').length;
-      const monthly = Array.from({ length: 12 }, (_, i) => ({ month: new Date(0, i).toLocaleString('default', { month: 'short' }), count: 0 }));
-      yearFiltered.forEach(s => {
-        const d = new Date(s.admissionDate || s.enrollmentDate || s.createdAt);
-        if (!isNaN(d)) monthly[d.getMonth()].count += 1;
-      });
-      const byEntity = {};
-      yearFiltered.forEach(s => { const name = getStudentEntityName(s); byEntity[name] = (byEntity[name] || 0) + 1; });
-      const entityChart = Object.keys(byEntity).map(n => ({ name: n, count: byEntity[n] }));
-      const genderChart = [
-        { name: 'Male', value: males },
-        { name: 'Female', value: females },
-        { name: 'Other', value: other }
-      ].filter(x => x.value > 0);
-      const rows = yearFiltered.map(s => ({
-        admissionNumber: s.admissionNumber,
-        name: `${s.firstName || ''} ${s.lastName || ''}`.trim(),
-        gender: s.gender || '—',
-        entity: getStudentEntityName(s),
-        boardingStatus: s.boardingStatus || '—',
-        admissionDate: s.admissionDate ? new Date(s.admissionDate).toLocaleDateString() : '—',
-        phone: s.phone || '—'
-      })).sort((a, b) => new Date(b.admissionDate) - new Date(a.admissionDate));
-      setReportData({
-        type: 'admission',
-        summary: { total, thisMonth, males, females, other, boarding, day },
-        charts: { monthly, entityChart, genderChart }, rows
-      });
-    } catch (err) { console.error(err); alert('Failed to generate admission report'); }
-    finally { setLoading(false); }
-  };
-
-  // ==================== FINANCIAL ====================
-  const generateFinancialReport = () => {
-    if (!feeDateRange.start || !feeDateRange.end) { alert('Select date range'); return; }
-    setLoading(true);
-    try {
-      const filteredPayments = payments.filter(p => {
-        const d = new Date(p.date || p.paymentDate).toISOString().split('T')[0];
-        return d >= feeDateRange.start && d <= feeDateRange.end;
-      });
-      const filteredExpenses = expenses.filter(e => {
-        const d = new Date(e.date).toISOString().split('T')[0];
-        return d >= feeDateRange.start && d <= feeDateRange.end;
-      });
-      const totalIncome = filteredPayments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
-      const totalExpenses = filteredExpenses.reduce((s, e) => s + parseFloat(e.amount || 0), 0);
-      const netIncome = totalIncome - totalExpenses;
-      const monthly = {};
-      filteredPayments.forEach(p => {
-        const m = new Date(p.date || p.paymentDate).toLocaleString('default', { month: 'short', year: 'numeric' });
-        if (!monthly[m]) monthly[m] = { month: m, income: 0, expenses: 0, profit: 0 };
-        monthly[m].income += parseFloat(p.amount || 0);
-      });
-      filteredExpenses.forEach(e => {
-        const m = new Date(e.date).toLocaleString('default', { month: 'short', year: 'numeric' });
-        if (!monthly[m]) monthly[m] = { month: m, income: 0, expenses: 0, profit: 0 };
-        monthly[m].expenses += parseFloat(e.amount || 0);
-      });
-      Object.values(monthly).forEach(m => { m.profit = m.income - m.expenses; });
-      const monthlyChart = Object.values(monthly);
-      const incomeByMethod = {};
-      filteredPayments.forEach(p => { const k = p.paymentMethod || 'Other'; incomeByMethod[k] = (incomeByMethod[k] || 0) + parseFloat(p.amount || 0); });
-      const methodChart = Object.keys(incomeByMethod).map(k => ({ name: k, value: incomeByMethod[k] }));
-      const expensesByCategory = {};
-      filteredExpenses.forEach(e => { const k = e.category || 'Other'; expensesByCategory[k] = (expensesByCategory[k] || 0) + parseFloat(e.amount || 0); });
-      const categoryChart = Object.keys(expensesByCategory).map(k => ({ name: k, value: expensesByCategory[k] }));
-      setReportData({
-        type: 'financial',
-        period: { ...feeDateRange },
-        summary: { totalIncome, totalExpenses, netIncome },
-        charts: { monthlyChart, methodChart, categoryChart }
-      });
-    } catch (err) { console.error(err); alert('Failed to generate financial report'); }
-    finally { setLoading(false); }
-  };
-
-  // ==================== ATTENDANCE ====================
-  const generateAttendanceReport = async () => {
-    setLoading(true);
-    try {
-      const fetchedAttendance = (await fetchOnce('attendance')) || attendance;
-
-      const start = attendanceDateRange.start || firstOfMonthStr();
-      const end = attendanceDateRange.end || todayStr();
-      let target = fetchedAttendance.filter(a => a.date >= start && a.date <= end);
-      if (isUniversity && attendanceCourseId) target = target.filter(a => a.courseId === attendanceCourseId);
-      if (isTVET && attendanceProgramId) target = target.filter(a => a.programId === attendanceProgramId);
-      if (isRegularSchool && attendanceClassId) target = target.filter(a => a.classId === attendanceClassId);
-      const present = target.filter(a => a.status === 'PRESENT').length;
-      const absent = target.filter(a => a.status === 'ABSENT').length;
-      const late = target.filter(a => a.status === 'LATE').length;
-      const leave = target.filter(a => a.status === 'PERMISSION' || a.status === 'SICK').length;
-      const total = target.length;
-      const daily = {};
-      target.forEach(a => {
-        if (!daily[a.date]) daily[a.date] = { date: a.date, present: 0, absent: 0, late: 0 };
-        if (a.status === 'PRESENT') daily[a.date].present += 1;
-        else if (a.status === 'ABSENT') daily[a.date].absent += 1;
-        else if (a.status === 'LATE') daily[a.date].late += 1;
-      });
-      const dailyChart = Object.values(daily).sort((a, b) => a.date.localeCompare(b.date)).map(d => ({ ...d, day: new Date(d.date).toLocaleDateString('en', { day: 'numeric', month: 'short' }) }));
-      const byStudent = {};
-      target.forEach(a => {
-        if (!byStudent[a.studentId]) byStudent[a.studentId] = { present: 0, absent: 0, late: 0, leave: 0, total: 0 };
-        const b = byStudent[a.studentId];
-        b.total += 1;
-        if (a.status === 'PRESENT') b.present += 1;
-        else if (a.status === 'ABSENT') b.absent += 1;
-        else if (a.status === 'LATE') b.late += 1;
-        else b.leave += 1;
-      });
-      const rows = Object.keys(byStudent).map(sid => {
-        const s = students.find(x => x.id === sid);
-        const b = byStudent[sid];
-        return {
-          admissionNumber: s?.admissionNumber || '—',
-          name: s ? `${s.firstName} ${s.lastName}` : 'Unknown',
-          entity: s ? getStudentEntityName(s) : '—',
-          present: b.present, absent: b.absent, late: b.late, leave: b.leave, total: b.total,
-          rate: b.total > 0 ? ((b.present / b.total) * 100).toFixed(1) : '0.0'
-        };
-      }).sort((a, b) => parseFloat(b.rate) - parseFloat(a.rate));
-      setReportData({
-        type: 'attendance',
-        summary: {
-          total, present, absent, late, leave,
-          presentRate: total > 0 ? ((present / total) * 100).toFixed(2) : '0.00',
-          absentRate: total > 0 ? ((absent / total) * 100).toFixed(2) : '0.00'
-        },
-        charts: { dailyChart }, rows, period: { start, end }
-      });
-    } catch (err) { console.error(err); alert('Failed to generate attendance report'); }
-    finally { setLoading(false); }
-  };
-
-  // ==================== STAFF ====================
-  const generateStaffReport = async () => {
-    setLoading(true);
-    try {
-      const fetchedStaff = (await fetchOnce('staff')) || staff;
-
-      let target = fetchedStaff;
-      if (staffDepartment) target = target.filter(s => s.department === staffDepartment);
-      if (staffType) target = target.filter(s => s.staffType === staffType);
-      const total = target.length;
-      const teaching = target.filter(s => s.staffType === 'TEACHING').length;
-      const nonTeaching = target.filter(s => s.staffType === 'NON_TEACHING').length;
-      const permanent = target.filter(s => s.employmentType === 'PERMANENT').length;
-      const contract = target.filter(s => s.employmentType === 'CONTRACT').length;
-      const byDept = {};
-      target.forEach(s => { const d = s.department || 'Unassigned'; byDept[d] = (byDept[d] || 0) + 1; });
-      const deptChart = Object.keys(byDept).map(d => ({ name: d, count: byDept[d] }));
-      const byType = {};
-      target.forEach(s => { const t = s.staffType || 'Unspecified'; byType[t] = (byType[t] || 0) + 1; });
-      const typeChart = Object.keys(byType).map(t => ({ name: t, value: byType[t] }));
-      const rows = target.map(s => ({
-        employeeId: s.employeeId || '—',
-        name: s.User ? `${s.User.firstName || ''} ${s.User.lastName || ''}`.trim() : 'Staff',
-        email: s.User?.email || '—',
-        phone: s.User?.phone || '—',
-        department: s.department || '—',
-        jobTitle: s.jobTitle || '—',
-        staffType: s.staffType || '—',
-        employmentType: s.employmentType || '—',
-        employmentDate: s.employmentDate ? new Date(s.employmentDate).toLocaleDateString() : '—'
-      }));
-      setReportData({ type: 'staff', summary: { total, teaching, nonTeaching, permanent, contract }, charts: { deptChart, typeChart }, rows });
-    } catch (err) { console.error(err); alert('Failed to generate staff report'); }
-    finally { setLoading(false); }
-  };
-
-  // ==================== DISCOUNTS ====================
-  const generateDiscountReport = async () => {
-    setLoading(true);
-    try {
-      const fetchedDiscounts = (await fetchOnce('discounts')) || discounts;
-      const fetchedFees = (await fetchOnce('fees')) || fees;
-
-      let target = fetchedDiscounts;
-      if (discountSearch) {
-        const q = discountSearch.toLowerCase();
-        target = target.filter(d => {
-          const s = students.find(x => x.id === d.studentId);
-          return (s && `${s.firstName} ${s.lastName}`.toLowerCase().includes(q)) ||
-                 (d.reason || '').toLowerCase().includes(q);
-        });
+      if (existing && existing.id) {
+        const response = await api.put(`/discounts/${existing.id}`, payload);
+        const updated = response.data?.discount || { ...existing, ...payload };
+        if (setDiscounts) {
+          setDiscounts(discounts.map(d => d.id === existing.id ? updated : d));
+        }
+        alert('✅ Discount updated successfully!');
+      } else {
+        const response = await api.post('/discounts', payload);
+        const newDiscount = response.data?.discount || { id: `temp-${Date.now()}`, ...payload, isActive: true };
+        if (setDiscounts) setDiscounts([...(discounts || []), newDiscount]);
+        alert('✅ Discount applied successfully!');
       }
-      const totalValue = target.reduce((sum, d) => sum + parseFloat(d.value || 0), 0);
-      const count = target.length;
-      const avg = count ? totalValue / count : 0;
-      const byType = {};
-      target.forEach(d => { byType[d.type] = (byType[d.type] || 0) + 1; });
-      const typeChart = Object.keys(byType).map(t => ({ name: t, value: byType[t] }));
-      const rows = target.map(d => {
-        const s = students.find(x => x.id === d.studentId);
-        const f = fetchedFees.find(x => x.id === d.feeId);
-        return {
-          student: s ? `${s.firstName} ${s.lastName}` : '—',
-          admissionNumber: s?.admissionNumber || '—',
-          fee: f?.name || 'All Fees',
-          type: d.type,
-          value: d.value,
-          reason: d.reason || '—',
-          isActive: d.isActive ? 'Active' : 'Inactive'
-        };
+
+      setShowDiscountModal(false);
+      setDiscountStudent(null);
+      setDiscountFee(null);
+      setDiscountForm({
+        type: 'AMOUNT', value: '', reason: '',
+        academicYear: new Date().getFullYear().toString(), term: ''
       });
-      setReportData({ type: 'discount', summary: { count, totalValue, avg }, charts: { typeChart }, rows });
-    } catch (err) { console.error(err); alert('Failed to generate discount report'); }
-    finally { setLoading(false); }
+    } catch (error) {
+      console.error('Error saving discount:', error);
+      alert('❌ Failed to save discount: ' + (error.response?.data?.message || error.message));
+      setApiError(error.response?.data?.message || error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // ==================== ALLOCATION ====================
-  const generateAllocationReport = async () => {
-    setLoading(true);
+  const handleRemoveFeeLevelDiscount = async (fee) => {
+    if (!canGrantDiscount) { alert('You do not have permission to remove discounts'); return; }
+    if (!window.confirm(`Remove the default discount on "${fee.name}"?`)) return;
+    setLoading(true); setApiError('');
     try {
-      const fetchedFees = (await fetchOnce('fees')) || fees;
-      const fetchedAllocations = (await fetchOnce('allocations')) || allocations;
-
-      const feeFiltered = allocationFeeId ? fetchedAllocations.filter(a => a.feeId === allocationFeeId) : fetchedAllocations;
-      const allocatedCount = feeFiltered.length;
-      const totalAllocated = feeFiltered.reduce((s, a) => s + parseFloat(a.amount || 0), 0);
-      const paidAmounts = feeFiltered.map(a => {
-        const p = payments.filter(x => x.studentId === a.studentId && x.feeId === a.feeId);
-        return p.reduce((sum, x) => sum + parseFloat(x.amount || 0), 0);
-      });
-      const totalPaid = paidAmounts.reduce((s, x) => s + x, 0);
-      const totalOutstanding = Math.max(0, totalAllocated - totalPaid);
-      const byFee = {};
-      feeFiltered.forEach(a => {
-        const f = fetchedFees.find(x => x.id === a.feeId);
-        const key = f?.name || 'Unspecified';
-        if (!byFee[key]) byFee[key] = { name: key, allocated: 0, count: 0 };
-        byFee[key].allocated += parseFloat(a.amount || 0);
-        byFee[key].count += 1;
-      });
-      const feeChart = Object.values(byFee);
-      const rows = feeFiltered.map(a => {
-        const s = students.find(x => x.id === a.studentId);
-        const f = fetchedFees.find(x => x.id === a.feeId);
-        const paid = payments.filter(x => x.studentId === a.studentId && x.feeId === a.feeId).reduce((sum, x) => sum + parseFloat(x.amount || 0), 0);
-        const balance = Math.max(0, parseFloat(a.amount || 0) - paid);
-        return {
-          student: s ? `${s.firstName} ${s.lastName}` : '—',
-          admissionNumber: s?.admissionNumber || '—',
-          fee: f?.name || '—',
-          allocated: parseFloat(a.amount || 0),
-          paid, balance,
-          status: balance <= 0 ? 'Cleared' : 'Outstanding'
-        };
-      });
-      setReportData({
-        type: 'allocation',
-        summary: {
-          allocatedCount, totalAllocated, totalPaid, totalOutstanding,
-          collectionRate: totalAllocated > 0 ? ((totalPaid / totalAllocated) * 100).toFixed(2) : '0.00'
-        },
-        charts: { feeChart }, rows
-      });
-    } catch (err) { console.error(err); alert('Failed to generate allocation report'); }
-    finally { setLoading(false); }
+      await handleUpdate('/fees', fee.id, {
+        ...fee,
+        discountAmount: 0,
+        discountPercent: 0
+      }, setFees, fees);
+      alert('✅ Default discount removed');
+    } catch (error) {
+      console.error('Error removing fee-level discount:', error);
+      alert('❌ Failed to remove discount: ' + (error.response?.data?.message || error.message));
+      setApiError(error.response?.data?.message || error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // ==================== INVENTORY ====================
-  const generateInventoryReport = async () => {
-    setLoading(true);
-    try {
-      const fetchedInventory = (await fetchOnce('inventory')) || inventory;
+  // ==================== 8. COMPUTED TOTALS (mirrors ReportsModule) ====================
+  // - Gross Billed = sum of every student's applicable fees
+  // - Discounts    = sum of every student's resolved discount (all records summed)
+  // - Net Billed   = Gross − Discounts (clamped at 0)
+  // - Collected    = sum of all payments
+  // - Outstanding  = sum of per-student (net − paid), clamped at 0 per student
+  const totals = useMemo(() => {
+    let grossBilled = 0;
+    let totalDiscounts = 0;
+    const studentDiscountDetails = [];
 
-      let target = fetchedInventory;
-      if (inventoryCategory) target = target.filter(i => i.category === inventoryCategory);
-      if (inventoryLowStockOnly) target = target.filter(i => (i.quantity || 0) <= (i.reorderLevel || 0));
-      const totalItems = target.length;
-      const totalQuantity = target.reduce((s, i) => s + (i.quantity || 0), 0);
-      const totalValue = target.reduce((s, i) => s + (parseFloat(i.quantity || 0) * parseFloat(i.unitPrice || 0)), 0);
-      const lowStock = target.filter(i => (i.quantity || 0) <= (i.reorderLevel || 0)).length;
-      const outOfStock = target.filter(i => (i.quantity || 0) === 0).length;
-      const byCategory = {};
-      target.forEach(i => {
-        const k = i.category || 'Uncategorized';
-        if (!byCategory[k]) byCategory[k] = { name: k, count: 0, value: 0 };
-        byCategory[k].count += 1;
-        byCategory[k].value += parseFloat(i.quantity || 0) * parseFloat(i.unitPrice || 0);
+    (students || []).forEach(student => {
+      const applicable = getApplicableFeesForStudent(student);
+      const studentGross = applicable.reduce(
+        (s, f) => s + (parseFloat(f.amount) || 0), 0
+      );
+      grossBilled += studentGross;
+
+      // Single discount for this student's whole bill
+      const studentDiscount = getResolvedDiscountForStudent(student);
+      totalDiscounts += studentDiscount;
+
+      studentDiscountDetails.push({
+        name: `${student.firstName || ''} ${student.lastName || ''}`.trim(),
+        admissionNumber: student.admissionNumber,
+        studentId: student.id,
+        programId: student.programId,
+        courseId: student.courseId,
+        classId: student.classId,
+        applicableFeesCount: applicable.length,
+        grossBilled: studentGross,
+        studentDiscount
       });
-      const categoryChart = Object.values(byCategory);
-      const lowStockList = target.filter(i => (i.quantity || 0) <= (i.reorderLevel || 0))
-        .map(i => ({ name: i.name, quantity: i.quantity, reorderLevel: i.reorderLevel }))
-        .sort((a, b) => (a.quantity - a.reorderLevel) - (b.quantity - b.reorderLevel));
-      const rows = target.map(i => ({
-        name: i.name,
-        category: i.category || '—',
-        quantity: i.quantity || 0,
-        unit: i.unit || '—',
-        unitPrice: parseFloat(i.unitPrice || 0),
-        totalValue: parseFloat(i.quantity || 0) * parseFloat(i.unitPrice || 0),
-        reorderLevel: i.reorderLevel || 0,
-        status: (i.quantity || 0) === 0 ? 'Out of Stock'
-              : (i.quantity || 0) <= (i.reorderLevel || 0) ? 'Low Stock'
-              : 'In Stock'
-      })).sort((a, b) => b.totalValue - a.totalValue);
-      setReportData({
-        type: 'inventory',
-        summary: { totalItems, totalQuantity, totalValue, lowStock, outOfStock },
-        charts: { categoryChart, lowStockList }, rows
-      });
-    } catch (err) { console.error(err); alert('Failed to generate inventory report'); }
-    finally { setLoading(false); }
-  };
+    });
 
-  // ==================== TRANSPORT ====================
-  const generateTransportReport = async () => {
-    setLoading(true);
-    try {
-      const fetchedRoutes = (await fetchOnce('transportRoutes')) || transportRoutes;
-      const fetchedVehicles = (await fetchOnce('vehicles')) || vehicles;
+    const netBilled = Math.max(0, grossBilled - totalDiscounts);
 
-      let routes = fetchedRoutes;
-      if (transportSearch) {
-        const q = transportSearch.toLowerCase();
-        routes = routes.filter(r => (r.name || '').toLowerCase().includes(q));
-      }
-      const totalRoutes = routes.length;
-      const totalVehicles = fetchedVehicles.length;
-      const totalStudents = routes.reduce((s, r) => s + (Array.isArray(r.students) ? r.students.length : 0), 0);
-      const monthlyRevenue = routes.reduce((s, r) => {
-        const cnt = Array.isArray(r.students) ? r.students.length : 0;
-        return s + (cnt * parseFloat(r.fee || 0));
-      }, 0);
-      const routeChart = routes.map(r => ({
-        name: (r.name || '').substring(0, 15),
-        students: Array.isArray(r.students) ? r.students.length : 0
-      }));
-      const capacityChart = routes.map(r => {
-        const v = fetchedVehicles.find(x => x.id === r.vehicleId);
-        const cap = v?.capacity || 0;
-        const used = Array.isArray(r.students) ? r.students.length : 0;
-        return {
-          name: (r.name || '').substring(0, 15),
-          capacity: cap, used,
-          utilization: cap > 0 ? Math.round((used / cap) * 100) : 0
-        };
-      });
-      const routeRows = routes.map(r => {
-        const v = fetchedVehicles.find(x => x.id === r.vehicleId);
-        const cnt = Array.isArray(r.students) ? r.students.length : 0;
-        return {
-          route: r.name || '—',
-          vehicle: v?.registration || '—',
-          driver: v?.driver || '—',
-          driverPhone: v?.driverPhone || '—',
-          capacity: v?.capacity || 0,
-          students: cnt,
-          utilization: v?.capacity ? Math.round((cnt / v.capacity) * 100) + '%' : '—',
-          feePerStudent: parseFloat(r.fee || 0),
-          monthlyRevenue: cnt * parseFloat(r.fee || 0)
-        };
-      }).sort((a, b) => b.monthlyRevenue - a.monthlyRevenue);
+    const totalPaid = (payments || []).reduce(
+      (sum, p) => sum + (parseFloat(p.amount) || 0), 0
+    );
 
-      const studentRows = [];
-      routes.forEach(r => {
-        const v = fetchedVehicles.find(x => x.id === r.vehicleId);
-        const sids = Array.isArray(r.students) ? r.students : [];
-        sids.forEach(sid => {
-          const s = students.find(x => x.id === sid);
-          studentRows.push({
-            student: s ? `${s.firstName} ${s.lastName}` : 'Unknown',
-            admissionNumber: s?.admissionNumber || '—',
-            entity: s ? getStudentEntityName(s) : '—',
-            route: r.name || '—',
-            vehicle: v?.registration || '—',
-            driver: v?.driver || '—',
-            driverPhone: v?.driverPhone || '—',
-            fee: parseFloat(r.fee || 0),
-            pickupPoint: Array.isArray(r.pickupPoints) && r.pickupPoints[0] ? r.pickupPoints[0] : '—'
-          });
-        });
-      });
+    // Per-student outstanding — each row clamped at 0, sum not clamped
+    const outstandingPerStudent = (students || []).map(student => {
+      const applicable = getApplicableFeesForStudent(student);
+      const studentGross = applicable.reduce(
+        (s, f) => s + (parseFloat(f.amount) || 0), 0
+      );
+      const studentDisc = getResolvedDiscountForStudent(student);
+      const studentNet = Math.max(0, studentGross - studentDisc);
+      const studentPaid = (payments || [])
+        .filter(p => String(p.studentId) === String(student.id))
+        .reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+      return Math.max(0, studentNet - studentPaid);
+    });
 
-      setReportData({
-        type: 'transport',
-        summary: { totalRoutes, totalVehicles, totalStudents, monthlyRevenue },
-        charts: { routeChart, capacityChart },
-        rows: routeRows,
-        studentRows
-      });
-    } catch (err) { console.error(err); alert('Failed to generate transport report'); }
-    finally { setLoading(false); }
-  };
+    const outstanding = outstandingPerStudent.reduce((a, b) => a + b, 0);
 
-  // ==================== HOSTEL ====================
-  const generateHostelReport = async () => {
-    setLoading(true);
-    try {
-      const fetchedHostels = (await fetchOnce('hostels')) || hostels;
+    const collectionRate = netBilled > 0
+      ? ((totalPaid / netBilled) * 100).toFixed(2)
+      : '0.00';
 
-      let target = fetchedHostels;
-      if (hostelGenderFilter) target = target.filter(h => h.gender === hostelGenderFilter);
-      const totalHostels = target.length;
-      let totalBeds = 0, totalOccupied = 0;
-      target.forEach(h => {
-        (h.rooms || []).forEach(r => {
-          totalBeds += r.beds || 0;
-          totalOccupied += (r.students || []).length;
-        });
-      });
-      const occupancyRate = totalBeds > 0 ? ((totalOccupied / totalBeds) * 100).toFixed(1) : '0.0';
-      const emptyBeds = totalBeds - totalOccupied;
-      const hostelChart = target.map(h => {
-        const beds = (h.rooms || []).reduce((s, r) => s + (r.beds || 0), 0);
-        const occ = (h.rooms || []).reduce((s, r) => s + ((r.students || []).length), 0);
-        return { name: h.name || '—', beds, occupied: occ, empty: beds - occ };
-      });
-      const genderChart = [
-        { name: 'Boys', value: target.filter(h => h.gender === 'BOYS').length },
-        { name: 'Girls', value: target.filter(h => h.gender === 'GIRLS').length },
-        { name: 'Mixed', value: target.filter(h => h.gender === 'MIXED').length }
-      ].filter(x => x.value > 0);
+    return {
+      grossBilled,
+      totalDiscounts,
+      netBilled,
+      totalPaid,
+      outstanding,
+      collectionRate,
+      studentDiscountDetails
+    };
+  }, [fees, discounts, students, payments, isUniversity, isTVET]);
 
-      const hostelRows = target.map(h => {
-        const beds = (h.rooms || []).reduce((s, r) => s + (r.beds || 0), 0);
-        const occ = (h.rooms || []).reduce((s, r) => s + ((r.students || []).length), 0);
-        return {
-          hostel: h.name || '—',
-          gender: h.gender || '—',
-          warden: h.warden || '—',
-          wardenPhone: h.wardenPhone || '—',
-          capacity: h.capacity || 0,
-          beds, occupied: occ, empty: beds - occ,
-          occupancyRate: beds > 0 ? ((occ / beds) * 100).toFixed(1) + '%' : '0%'
-        };
-      }).sort((a, b) => parseFloat(b.occupancyRate) - parseFloat(a.occupancyRate));
+  // Friendly aliases
+  const totalBilled = totals.grossBilled;
+  const netBilled = totals.netBilled;
+  const totalPaid = totals.totalPaid;
+  const outstanding = totals.outstanding;
+  const totalDiscounts = totals.totalDiscounts;
+  const collectionRate = totals.collectionRate;
 
-      const studentRows = [];
-      target.forEach(h => {
-        (h.rooms || []).forEach(room => {
-          const sids = Array.isArray(room.students) ? room.students : [];
-          sids.forEach(sid => {
-            const s = students.find(x => x.id === sid);
-            studentRows.push({
-              student: s ? `${s.firstName} ${s.lastName}` : 'Unknown',
-              admissionNumber: s?.admissionNumber || '—',
-              entity: s ? getStudentEntityName(s) : '—',
-              hostel: h.name || '—',
-              hostelGender: h.gender || '—',
-              room: room.roomNumber || room.name || '—',
-              warden: h.warden || '—',
-              wardenPhone: h.wardenPhone || '—',
-              beds: room.beds || 0,
-              roomOccupied: sids.length
-            });
-          });
-        });
-      });
-
-      setReportData({
-        type: 'hostel',
-        summary: { totalHostels, totalBeds, totalOccupied, emptyBeds, occupancyRate },
-        charts: { hostelChart, genderChart },
-        rows: hostelRows,
-        studentRows
-      });
-    } catch (err) { console.error(err); alert('Failed to generate hostel report'); }
-    finally { setLoading(false); }
-  };
-
-  // ==================== LIBRARY ====================
-  const generateLibraryReport = async () => {
-    setLoading(true);
-    try {
-      const fetchedBooks = (await fetchOnce('books')) || books;
-      const fetchedBorrows = (await fetchOnce('borrows')) || borrows;
-
-      let target = fetchedBooks;
-      if (libraryCategory) target = target.filter(b => b.category === libraryCategory);
-
-      const totalTitles = target.length;
-      const totalCopies = target.reduce((s, b) => s + (b.quantity || 0), 0);
-      const availableCopies = target.reduce((s, b) => s + (b.available || 0), 0);
-      const borrowedCopies = totalCopies - availableCopies;
-
-      const overdueBorrows = fetchedBorrows.filter(b => b.status === 'BORROWED' && b.dueDate && new Date(b.dueDate) < new Date());
-      const totalFines = fetchedBorrows.reduce((s, b) => s + parseFloat(b.fine || 0), 0);
-
-      const byCategory = {};
-      target.forEach(b => {
-        const k = b.category || 'Uncategorized';
-        if (!byCategory[k]) byCategory[k] = { name: k, titles: 0, copies: 0 };
-        byCategory[k].titles += 1;
-        byCategory[k].copies += b.quantity || 0;
-      });
-      const categoryChart = Object.values(byCategory);
-
-      const borrowCountByBook = {};
-      fetchedBorrows.forEach(br => { borrowCountByBook[br.bookId] = (borrowCountByBook[br.bookId] || 0) + 1; });
-      const topBorrowed = Object.keys(borrowCountByBook)
-        .map(bookId => {
-          const b = fetchedBooks.find(x => x.id === bookId);
-          return { name: b?.title?.substring(0, 20) || 'Unknown', count: borrowCountByBook[bookId] };
-        })
-        .sort((a, b) => b.count - a.count).slice(0, 10);
-
-      const bookRows = target.map(b => {
-        const timesBorrowed = fetchedBorrows.filter(br => br.bookId === b.id).length;
-        return {
-          title: b.title || '—',
-          author: b.author || '—',
-          isbn: b.isbn || '—',
-          category: b.category || '—',
-          quantity: b.quantity || 0,
-          available: b.available || 0,
-          borrowed: (b.quantity || 0) - (b.available || 0),
-          timesBorrowed,
-          location: b.location || '—'
-        };
-      }).sort((a, b) => b.timesBorrowed - a.timesBorrowed);
-
-      const borrowRows = fetchedBorrows.map(br => {
-        const student = students.find(s => s.id === br.studentId);
-        const book = fetchedBooks.find(b => b.id === br.bookId);
-        const today = new Date();
-        const due = br.dueDate ? new Date(br.dueDate) : null;
-        const isOverdue = br.status === 'BORROWED' && due && due < today;
-        const daysOverdue = isOverdue ? Math.floor((today - due) / (1000 * 60 * 60 * 24)) : 0;
-        return {
-          student: student ? `${student.firstName} ${student.lastName}` : '—',
-          admissionNumber: student?.admissionNumber || '—',
-          entity: student ? getStudentEntityName(student) : '—',
-          book: book?.title || '—',
-          author: book?.author || '—',
-          borrowDate: br.borrowDate ? new Date(br.borrowDate).toLocaleDateString() : '—',
-          dueDate: br.dueDate ? new Date(br.dueDate).toLocaleDateString() : '—',
-          returnDate: br.returnDate ? new Date(br.returnDate).toLocaleDateString() : '—',
-          status: br.status || '—',
-          daysOverdue,
-          fine: parseFloat(br.fine || 0)
-        };
-      }).sort((a, b) => {
-        if (a.daysOverdue !== b.daysOverdue) return b.daysOverdue - a.daysOverdue;
-        return new Date(b.borrowDate) - new Date(a.borrowDate);
-      });
-
-      setReportData({
-        type: 'library',
-        summary: { totalTitles, totalCopies, availableCopies, borrowedCopies, overdueCount: overdueBorrows.length, totalFines },
-        charts: { categoryChart, topBorrowed },
-        rows: bookRows,
-        borrowRows
-      });
-    } catch (err) { console.error(err); alert('Failed to generate library report'); }
-    finally { setLoading(false); }
-  };
-
-  // ==================== TAB AUTO-GENERATE ====================
+  // ==================== 8a. DEBUG LOG ====================
   useEffect(() => {
-    setReportData(null);
-    if (activeTab === 'fee')         generateFeeReport();
-    if (activeTab === 'outstanding') generateOutstandingReport();
-    if (activeTab === 'feeTransfer') generateFeeTransferReport();
-    if (activeTab === 'admission')   generateAdmissionReport();
-    if (activeTab === 'financial')   generateFinancialReport();
-    if (activeTab === 'attendance')  generateAttendanceReport();
-    if (activeTab === 'staff')       generateStaffReport();
-    if (activeTab === 'discount')    generateDiscountReport();
-    if (activeTab === 'allocation')  generateAllocationReport();
-    if (activeTab === 'inventory')   generateInventoryReport();
-    if (activeTab === 'transport')   generateTransportReport();
-    if (activeTab === 'hostel')      generateHostelReport();
-    if (activeTab === 'library')     generateLibraryReport();
+    console.log('===== FEES SUMMARY DEBUG =====');
+    console.log('Students prop length:', (students || []).length);
+    console.log('Fees length:', (fees || []).length);
+    console.log('Discounts length:', (discounts || []).length);
+    console.log('Raw discounts array:', discounts);
+    console.log('Total Discounts (from totals):', totals.totalDiscounts);
+    console.log('Gross Billed:', totals.grossBilled);
+    console.log('Net Billed:', totals.netBilled);
+    console.log('Per-student discount totals:');
+    totals.studentDiscountDetails.forEach(s => {
+      console.log(
+        `  ${s.name} (${s.admissionNumber}) ` +
+        `[id=${s.studentId}, program=${s.programId}] ` +
+        `→ fees: ${s.applicableFeesCount}, ` +
+        `gross: ${s.grossBilled}, discount: ${s.studentDiscount}`
+      );
+    });
+    console.log('==============================');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
+  }, [fees, discounts, students]);
 
-  // ==================== SMALL UI ====================
-  const StatCard = ({ label, value, sub, color = 'indigo' }) => (
-    <div className={`bg-gradient-to-br from-${color}-500 to-${color}-600 rounded-xl p-5 text-white`}>
-      <p className="text-xs opacity-90 uppercase tracking-wide">{label}</p>
-      <p className="text-2xl font-bold mt-1">{value}</p>
-      {sub && <p className="text-xs opacity-75 mt-1">{sub}</p>}
-    </div>
-  );
+  // ==================== 9. RENDER ====================
+  if (!canView) {
+    return (
+      <div className="bg-white p-8 rounded-xl shadow-sm text-center">
+        <i className="fas fa-lock text-5xl text-gray-400 mb-4"></i>
+        <p className="text-gray-500">You do not have permission to view fees.</p>
+      </div>
+    );
+  }
 
-  const Card = ({ children, className = '' }) => (
-    <div className={`bg-white rounded-xl shadow-sm p-6 ${className}`}>{children}</div>
-  );
-
-  const TableWrap = ({ headers, children }) => (
-    <div className="overflow-x-auto border rounded-lg">
-      <table className="w-full text-sm">
-        <thead className="bg-gray-50">
-          <tr>{headers.map((h, i) => <th key={i} className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">{h}</th>)}</tr>
-        </thead>
-        <tbody className="divide-y">{children}</tbody>
-      </table>
-    </div>
-  );
-
-  const ExportBtn = ({ onClick, disabled }) => (
-    <button onClick={onClick} disabled={disabled} className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-green-700 disabled:opacity-50 no-print">
-      <i className="fas fa-file-csv mr-2"></i>Export CSV
-    </button>
-  );
-
-  const PrintBtn = () => (
-    <button onClick={() => window.print()} className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-indigo-700 no-print">
-      <i className="fas fa-print mr-2"></i>Print
-    </button>
-  );
-
-  const ChartCard = ({ title, children, span }) => (
-    <div className={`bg-white p-4 rounded-xl shadow-sm ${span ? 'lg:col-span-2' : ''}`}>
-      <h4 className="text-base font-semibold mb-3">{title}</h4>
-      <ResponsiveContainer width="100%" height={280}>{children}</ResponsiveContainer>
-    </div>
-  );
-
-  const ModeToggle = ({ value, onChange, options }) => (
-    <div className="inline-flex rounded-lg border bg-white p-0.5 no-print">
-      {options.map(o => (
-        <button
-          key={o.value}
-          onClick={() => onChange(o.value)}
-          className={`px-3 py-1.5 text-sm rounded-md transition-colors ${value === o.value ? 'bg-indigo-600 text-white' : 'text-gray-700 hover:bg-gray-100'}`}
-        >
-          <i className={`fas ${o.icon} mr-1`}></i>{o.label}
-        </button>
-      ))}
-    </div>
-  );
-
-  // ==================== RENDER ====================
   return (
-    <div className="reports-module space-y-6">
-      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50 no-print" />}
+    <div className="space-y-6">
+      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
 
-      {/* Header */}
-      <div className="flex flex-wrap justify-between items-center gap-3 no-print">
-        <h2 className="text-2xl font-bold">
-          {isUniversity ? '🎓 University Reports' : isTVET ? '🔧 TVET Reports' : '📊 School Reports'}
-        </h2>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setShowCharts(v => !v)}
-            className="bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg text-sm hover:bg-gray-300 no-print"
-          >
-            <i className={`fas fa-${showCharts ? 'eye-slash' : 'eye'} mr-2`}></i>{showCharts ? 'Hide' : 'Show'} Charts
-          </button>
-          <PrintBtn />
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="bg-white rounded-xl shadow-sm p-1 flex flex-wrap gap-1 no-print">
-        {ALL_TABS.map(t => (
-          <button
-            key={t.key}
-            onClick={() => setActiveTab(t.key)}
-            className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${activeTab === t.key ? 'bg-indigo-600 text-white' : 'hover:bg-gray-100 text-gray-700'}`}
-          >
-            <i className={`fas ${t.icon} mr-2`}></i>{t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* ==================== TAB: STUDENT ==================== */}
-      {activeTab === 'student' && (
-        <div className="space-y-6">
-          <Card className="no-print">
-            <h3 className="text-lg font-semibold mb-4">Student Performance Report</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              <SearchableSelect label="Select Student" value={selectedStudent} onChange={(e) => { setSelectedStudent(e.target.value); setSelectedExam(''); }} options={studentOptions} placeholder="Search student..." emptyMessage="No students" />
-              {selectedStudent && (
-                <SearchableSelect label="Filter by Exam (optional)" value={selectedExam} onChange={(e) => setSelectedExam(e.target.value)} options={examOptionsForStudent} placeholder="Any exam" emptyMessage="No exams" />
-              )}
-            </div>
-            <button onClick={generateStudentReport} disabled={!selectedStudent || loading} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">Generate Report</button>
-          </Card>
-
-          {reportData?.type === 'student' && (
-            <>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 no-print">
-                <StatCard label="Exams Taken" value={reportData.summary.totalExams} color="blue" />
-                <StatCard label="Average" value={`${reportData.summary.average}%`} color="green" />
-                <StatCard label="Highest" value={`${reportData.summary.highest}%`} color="yellow" />
-                <StatCard label="Lowest" value={`${reportData.summary.lowest}%`} color="orange" />
-                <StatCard label="Total Marks" value={reportData.summary.totalMarks} color="purple" />
-              </div>
-
-              {showCharts && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 no-print">
-                  {reportData.charts.trend.length > 0 && (
-                    <ChartCard title="Performance Trend" span>
-                      <LineChart data={reportData.charts.trend}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" angle={-45} textAnchor="end" height={60} interval={0} />
-                        <YAxis domain={[0, 100]} /><Tooltip /><Legend />
-                        <Line type="monotone" dataKey="marks" stroke="#4f46e5" strokeWidth={2} name="Marks" />
-                      </LineChart>
-                    </ChartCard>
-                  )}
-                  {reportData.charts.subjectPerf.length > 0 && (
-                    <ChartCard title={`${academicColumnLabel} Performance`}>
-                      <BarChart data={reportData.charts.subjectPerf}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" angle={-45} textAnchor="end" height={60} interval={0} />
-                        <YAxis domain={[0, 100]} /><Tooltip />
-                        <Bar dataKey="average" fill="#4f46e5" radius={[4,4,0,0]} />
-                      </BarChart>
-                    </ChartCard>
-                  )}
-                  {reportData.charts.gradeChart.length > 0 && (
-                    <ChartCard title="Grade Distribution">
-                      <PieChart>
-                        <Pie data={reportData.charts.gradeChart} cx="50%" cy="50%" label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} dataKey="value">
-                          {reportData.charts.gradeChart.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                        </Pie>
-                        <Tooltip />
-                      </PieChart>
-                    </ChartCard>
-                  )}
-                </div>
-              )}
-
-              {reportData.results.length > 0 && (
-                <div className="print-area" data-print-title={`Student Report — ${reportData.student.firstName} ${reportData.student.lastName} (${reportData.student.admissionNumber})`}>
-                  <Card>
-                    <div className="flex justify-between items-center mb-3">
-                      <h3 className="font-semibold">Detailed Results ({reportData.results.length})</h3>
-                      <ExportBtn onClick={() => exportCSV(reportData.results, 'student_report.csv')} />
-                    </div>
-                    <TableWrap headers={['Date','Exam', academicColumnLabel,'Marks','Grade','Points']}>
-                      {reportData.results.map((r, i) => (
-                        <tr key={i} className="hover:bg-gray-50">
-                          <td className="px-3 py-2">{r.examDate ? new Date(r.examDate).toLocaleDateString() : '—'}</td>
-                          <td className="px-3 py-2 font-medium">{r.examName}</td>
-                          <td className="px-3 py-2">{r.itemName}{r.itemCode && <span className="text-xs text-gray-500 ml-1">({r.itemCode})</span>}</td>
-                          <td className="px-3 py-2 font-bold">{r.marks}</td>
-                          <td className="px-3 py-2"><span className="px-2 py-0.5 rounded-full text-xs bg-gray-100">{r.grade}</span></td>
-                          <td className="px-3 py-2">{r.points}</td>
-                        </tr>
-                      ))}
-                    </TableWrap>
-                  </Card>
-                </div>
-              )}
-            </>
-          )}
+      {apiError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+          <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
         </div>
       )}
 
-      {/* ==================== TAB: CLASS ==================== */}
-      {activeTab === 'class' && (
-        <div className="space-y-6">
-          <Card className="no-print">
-            <h3 className="text-lg font-semibold mb-4">
-              {isUniversity ? 'Course Performance' : isTVET ? 'Program Performance' : 'Class Performance'}
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {allocationMessage && (
+        <div className={`p-4 rounded-lg ${allocationType === 'AUTO' ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-blue-50 border border-blue-200 text-blue-700'}`}>
+          <i className={`fas ${allocationType === 'AUTO' ? 'fa-check-circle' : 'fa-info-circle'} mr-2`}></i>
+          {allocationMessage}
+        </div>
+      )}
+
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold">{getFeeTitle()}</h2>
+        <div className="flex space-x-2">
+          {canGrantDiscount && (
+            <button
+              onClick={() => openDiscountModal(null, null)}
+              className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 flex items-center"
+            >
+              <i className="fas fa-percent mr-2"></i>Grant Discount
+            </button>
+          )}
+          {canManage && (
+            <button
+              onClick={() => { handleCancel(); setShowForm(true); }}
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center"
+            >
+              <i className="fas fa-plus mr-2"></i>
+              {editingId ? 'Cancel' : 'Create Fee'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ==================== CREATE/EDIT FEE FORM ==================== */}
+      {showForm && canManage && (
+        <div className="bg-white p-6 rounded-xl shadow-sm border-2 border-indigo-100">
+          <h3 className="text-lg font-semibold mb-4">
+            {editingId ? '✏️ Edit Fee' : '➕ Create New Fee'}
+          </h3>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <InputField
+                label="Fee Name *"
+                value={form.name || ''}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder={isUniversity ? "e.g., Semester 1 Tuition" : (isTVET ? "e.g., Module 1 Workshop Fee" : "e.g., Term 1 Tuition")}
+                required disabled={loading}
+              />
+
               {isUniversity && (<>
-                <SearchableSelect label="Course" value={selectedCourse} onChange={(e) => { setSelectedCourse(e.target.value); setSelectedYear(''); }} options={courseOptions} placeholder="Select course..." emptyMessage="No courses" />
-                <SearchableSelect label="Year (optional)" value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} options={yearOptions} placeholder="All years" />
+                <SearchableSelect label="Faculty" value={form.facultyId || ''}
+                  onChange={(e) => { setForm({ ...form, facultyId: e.target.value, departmentId: '', courseId: '' }); setSelectedFaculty(e.target.value); setSelectedDepartment(''); setSelectedCourse(''); }}
+                  options={facultyOptions} required disabled={loading} placeholder="Search faculty..." />
+                <SearchableSelect label="Department" value={form.departmentId || ''}
+                  onChange={(e) => { setForm({ ...form, departmentId: e.target.value, courseId: '' }); setSelectedDepartment(e.target.value); setSelectedCourse(''); }}
+                  options={departmentOptions} required disabled={loading || !selectedFaculty} placeholder="Search department..." />
+                <SearchableSelect label="Course *" value={form.courseId || ''}
+                  onChange={(e) => { setForm({ ...form, courseId: e.target.value }); setSelectedCourse(e.target.value); }}
+                  options={courseOptions} required disabled={loading || !selectedDepartment} placeholder="Search course..." />
+                <SearchableSelect label="Year of Study *" value={form.year || ''}
+                  onChange={(e) => setForm({ ...form, year: parseInt(e.target.value) || '' })}
+                  options={yearOptions} required disabled={loading} placeholder="Select year..." />
+                <SearchableSelect label="Semester *" value={form.term || ''}
+                  onChange={(e) => setForm({ ...form, term: e.target.value })}
+                  options={termOptions} required disabled={loading} placeholder="Select semester..." />
               </>)}
+
               {isTVET && (<>
-                <SearchableSelect label="Program" value={selectedProgram} onChange={(e) => { setSelectedProgram(e.target.value); setSelectedModule(''); setSelectedYear(''); }} options={programOptions} placeholder="Select program..." emptyMessage="No programs" />
-                <SearchableSelect label="Module (optional)" value={selectedModule} onChange={(e) => setSelectedModule(e.target.value)} options={moduleOptions} placeholder="All modules" />
-                <SearchableSelect label="Year (optional)" value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} options={yearOptions} placeholder="All years" />
+                <SearchableSelect label="Department" value={form.departmentId || ''}
+                  onChange={(e) => { setForm({ ...form, departmentId: e.target.value, programId: '' }); setSelectedDepartment(e.target.value); setSelectedProgram(''); }}
+                  options={departmentOptions} required disabled={loading} placeholder="Search department..." />
+                <SearchableSelect label="Program *" value={form.programId || ''}
+                  onChange={(e) => { setForm({ ...form, programId: e.target.value }); setSelectedProgram(e.target.value); }}
+                  options={programOptions} required disabled={loading || !selectedDepartment} placeholder="Search program..." />
+                <SearchableSelect label="Module Level *" value={form.term || ''}
+                  onChange={(e) => setForm({ ...form, term: e.target.value })}
+                  options={termOptions} required disabled={loading || !form.programId} placeholder="Select module..." />
+                <SearchableSelect label="Level" value={form.level || ''}
+                  onChange={(e) => setForm({ ...form, level: e.target.value })}
+                  options={levelOptions} disabled={loading} placeholder="Select level..." />
               </>)}
-              {isRegularSchool && (
-                <SearchableSelect label="Class" value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)} options={classOptions} placeholder="Select class..." emptyMessage="No classes" />
-              )}
-            </div>
-            <button onClick={generateClassReport} className="mt-4 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
-          </Card>
 
-          {reportData?.type === 'class' && (
-            <>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 no-print">
-                <StatCard label="Total Students" value={reportData.summary.totalStudents} color="blue" />
-                <StatCard label="With Results" value={reportData.summary.studentsWithResults} color="green" />
-                <StatCard label="Average" value={`${reportData.summary.classAverage}%`} color="purple" />
-                <StatCard label="Exams" value={reportData.summary.totalExams} color="yellow" />
-              </div>
+              {isPrimarySecondary && (<>
+                <SearchableSelect label="Class *" value={form.classId || ''}
+                  onChange={(e) => setForm({ ...form, classId: e.target.value })}
+                  options={classOptions} required disabled={loading} placeholder="Search class..." />
+                <SearchableSelect label="Term *" value={form.term || ''}
+                  onChange={(e) => setForm({ ...form, term: e.target.value })}
+                  options={termOptions} required disabled={loading} placeholder="Select term..." />
+              </>)}
 
-              {showCharts && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 no-print">
-                  {reportData.charts.topStudents.length > 0 && (
-                    <ChartCard title="Top 10 Students">
-                      <BarChart data={reportData.charts.topStudents} layout="vertical">
-                        <CartesianGrid strokeDasharray="3 3" /><XAxis type="number" domain={[0, 100]} />
-                        <YAxis type="category" dataKey="name" width={120} />
-                        <Tooltip /><Bar dataKey="average" fill="#4f46e5" radius={[0,4,4,0]} />
-                      </BarChart>
-                    </ChartCard>
-                  )}
-                  {reportData.charts.rangeChart.length > 0 && (
-                    <ChartCard title="Performance Distribution">
-                      <PieChart>
-                        <Pie data={reportData.charts.rangeChart} cx="50%" cy="50%" label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} dataKey="count">
-                          {reportData.charts.rangeChart.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                        </Pie>
-                        <Tooltip />
-                      </PieChart>
-                    </ChartCard>
-                  )}
-                </div>
-              )}
+              <InputField label="Amount (KES) *" type="number"
+                value={form.amount === '' ? '' : form.amount}
+                onChange={(e) => setForm({ ...form, amount: e.target.value === '' ? '' : parseFloat(e.target.value) })}
+                required disabled={loading} min="0" step="0.01" />
 
-              <div className="print-area" data-print-title={`${reportData.entityName} — Student Performance`}>
-                <Card>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold">Student Performance ({reportData.studentPerformance.length})</h3>
-                    <ExportBtn onClick={() => exportCSV(reportData.studentPerformance.map(p => ({
-                      admissionNumber: p.student?.admissionNumber,
-                      name: `${p.student?.firstName || ''} ${p.student?.lastName || ''}`.trim(),
-                      exams: p.examCount, total: p.totalMarks, average: p.average
-                    })), 'class_report.csv')} />
-                  </div>
-                  <TableWrap headers={['Admission','Student','Exams','Total Marks','Average']}>
-                    {[...reportData.studentPerformance].sort((a,b)=>b.average-a.average).map((p, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 font-mono text-xs">{p.student?.admissionNumber || '—'}</td>
-                        <td className="px-3 py-2">{p.student?.firstName} {p.student?.lastName}</td>
-                        <td className="px-3 py-2">{p.examCount}</td>
-                        <td className="px-3 py-2">{p.totalMarks}</td>
-                        <td className="px-3 py-2 font-bold">{p.average.toFixed(2)}%</td>
-                      </tr>
-                    ))}
-                  </TableWrap>
-                </Card>
-              </div>
-            </>
-          )}
-        </div>
-      )}
+              <InputField label="Academic Year"
+                value={form.academicYear || new Date().getFullYear().toString()}
+                onChange={(e) => setForm({ ...form, academicYear: e.target.value })}
+                placeholder="2026" required disabled={loading} />
 
-      {/* ==================== TAB: DETAILED ACADEMIC ==================== */}
-      {activeTab === 'academic' && (
-        <div className="space-y-6">
-          <Card className="no-print">
-            <h3 className="text-lg font-semibold mb-4">Detailed Academic Report</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              <SearchableSelect label="Select Student" value={academicStudent} onChange={(e) => setAcademicStudent(e.target.value)} options={studentOptions} placeholder="Search student..." emptyMessage="No students" />
-            </div>
-            <button onClick={generateAcademicReport} disabled={!academicStudent || loading} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">Generate Report</button>
-          </Card>
+              <InputField label="Due Date" type="date"
+                value={form.dueDate || ''}
+                onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
+                required disabled={loading} />
 
-          {reportData?.type === 'academic' && (
-            <>
-              <div className="grid grid-cols-2 md:grid-cols-6 gap-4 no-print">
-                <StatCard label="Overall Avg" value={`${reportData.summary.overallAvg}%`} color="blue" />
-                <StatCard label="Subjects" value={reportData.summary.totalSubjects} color="green" />
-                <StatCard label="Exams" value={reportData.summary.totalExams} color="yellow" />
-                <StatCard label="Class Rank" value={`${reportData.summary.rank} / ${reportData.summary.totalPeers}`} color="purple" />
-                <StatCard label="Best Subject" value={reportData.summary.bestSubject?.substring(0, 12) || '—'} color="green" />
-                <StatCard label="Weakest" value={reportData.summary.weakestSubject?.substring(0, 12) || '—'} color="red" />
-              </div>
+              <SearchableSelect label="Category" value={form.category || ''}
+                onChange={(e) => setForm({ ...form, category: e.target.value })}
+                options={categoryOptions} disabled={loading} placeholder="Select category..." />
 
-              {showCharts && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 no-print">
-                  {reportData.charts.radarData.length > 0 && (
-                    <ChartCard title={`${academicColumnLabel} Performance Radar`}>
-                      <RadarChart data={reportData.charts.radarData}>
-                        <PolarGrid /><PolarAngleAxis dataKey="subject" />
-                        <PolarRadiusAxis domain={[0, 100]} />
-                        <Radar dataKey="average" stroke="#4f46e5" fill="#4f46e5" fillOpacity={0.4} />
-                        <Tooltip />
-                      </RadarChart>
-                    </ChartCard>
-                  )}
-                  {reportData.charts.progression.length > 0 && (
-                    <ChartCard title="Per-Exam Progression">
-                      <LineChart data={reportData.charts.progression}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" angle={-30} textAnchor="end" height={60} interval={0} />
-                        <YAxis domain={[0, 100]} /><Tooltip />
-                        <Line type="monotone" dataKey="marks" stroke="#10b981" strokeWidth={2} />
-                      </LineChart>
-                    </ChartCard>
-                  )}
-                </div>
-              )}
+              <SearchableSelect label="Transport Route" value={form.transportRouteId || ''}
+                onChange={(e) => setForm({ ...form, transportRouteId: e.target.value || null })}
+                options={routeOptions} disabled={loading} placeholder="Search route..." />
 
-              <div className="print-area" data-print-title={`Detailed Academic — ${reportData.student.firstName} ${reportData.student.lastName}`}>
-                <Card>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold">{academicColumnLabel} Breakdown ({reportData.subjectRows.length})</h3>
-                    <ExportBtn onClick={() => exportCSV(reportData.subjectRows.map(s => ({
-                      subject: s.subject, exams: s.examCount, total: s.totalMarks, average: s.average,
-                      bestExam: s.bestExam, worstExam: s.worstExam
-                    })), 'academic_detailed.csv')} />
-                  </div>
-                  <TableWrap headers={[academicColumnLabel,'Exams','Total Marks','Average','Best Exam','Weakest Exam']}>
-                    {reportData.subjectRows.map((s, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 font-medium">{s.subject}</td>
-                        <td className="px-3 py-2">{s.examCount}</td>
-                        <td className="px-3 py-2">{s.totalMarks}</td>
-                        <td className="px-3 py-2 font-bold">{s.average}%</td>
-                        <td className="px-3 py-2 text-xs">{s.bestExam}</td>
-                        <td className="px-3 py-2 text-xs">{s.worstExam}</td>
-                      </tr>
-                    ))}
-                  </TableWrap>
-                </Card>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ==================== TAB: FEE (WITH DISCOUNTS) ==================== */}
-      {activeTab === 'fee' && (
-        <div className="space-y-6">
-          <Card className="no-print">
-            <h3 className="text-lg font-semibold mb-4">Fee Collection Report</h3>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-              <div><label className="block text-sm font-medium mb-1">Start</label><input type="date" value={feeDateRange.start} onChange={(e) => setFeeDateRange({ ...feeDateRange, start: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
-              <div><label className="block text-sm font-medium mb-1">End</label><input type="date" value={feeDateRange.end} onChange={(e) => setFeeDateRange({ ...feeDateRange, end: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
-              {isRegularSchool && <SearchableSelect label="Class" value={feeClassId} onChange={(e) => setFeeClassId(e.target.value)} options={classOptions} placeholder="All classes" />}
-              {isUniversity && <SearchableSelect label="Course" value={feeCourseId} onChange={(e) => setFeeCourseId(e.target.value)} options={courseOptions} placeholder="All courses" />}
-              {isTVET && <SearchableSelect label="Program" value={feeProgramId} onChange={(e) => setFeeProgramId(e.target.value)} options={programOptions} placeholder="All programs" />}
-            </div>
-            <button onClick={generateFeeReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
-          </Card>
-
-          {reportData?.type === 'fee' && (
-            <>
-              <div className="grid grid-cols-2 md:grid-cols-6 gap-4 no-print">
-                <StatCard label="Gross Billed" value={formatCurrency(reportData.summary.totalGrossBilled)} color="gray" />
-                <StatCard label="Discounts" value={formatCurrency(reportData.summary.totalDiscounts)} color="orange" />
-                <StatCard label="Net Billed" value={formatCurrency(reportData.summary.totalBilled)} color="blue" />
-                <StatCard label="Collected" value={formatCurrency(reportData.summary.totalCollected)} color="green" />
-                <StatCard label="Outstanding" value={formatCurrency(reportData.summary.totalOutstanding)} color="red" />
-                <StatCard label="Collection Rate" value={`${reportData.summary.collectionRate}%`} color="purple" />
-              </div>
-
-              {showCharts && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 no-print">
-                  {reportData.charts.monthlyChart.length > 0 && (
-                    <ChartCard title="Monthly Collection" span>
-                      <AreaChart data={reportData.charts.monthlyChart}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="month" /><YAxis /><Tooltip formatter={formatCurrency} />
-                        <Area type="monotone" dataKey="collected" stroke="#10b981" fill="#10b981" fillOpacity={0.4} />
-                      </AreaChart>
-                    </ChartCard>
-                  )}
-                  {reportData.charts.methodChart.length > 0 && (
-                    <ChartCard title="By Payment Method">
-                      <PieChart>
-                        <Pie data={reportData.charts.methodChart} cx="50%" cy="50%" label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} dataKey="value">
-                          {reportData.charts.methodChart.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                        </Pie>
-                        <Tooltip formatter={formatCurrency} />
-                      </PieChart>
-                    </ChartCard>
-                  )}
-                </div>
-              )}
-
-              <div className="print-area" data-print-title={`Fee Collection Report — ${reportData.period?.start || ''} to ${reportData.period?.end || ''}`}>
-                <Card>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold">Per-Student Fee Status ({reportData.rows.length})</h3>
-                    <ExportBtn onClick={() => exportCSV(reportData.rows.map(r => ({
-                      admissionNumber: r.admissionNumber,
-                      name: r.name,
-                      entity: r.entity,
-                      grossBilled: r.grossBilled,
-                      discount: r.discountAmount,
-                      netBilled: r.billed,
-                      paid: r.paid,
-                      balance: r.balance,
-                      status: r.status
-                    })), 'fee_report.csv')} />
-                  </div>
-                  <TableWrap headers={['Admission','Student', entityColumnLabel,'Gross Billed','Discount','Net Billed','Paid','Balance','Status']}>
-                    {reportData.rows.map((r, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
-                        <td className="px-3 py-2">{r.name}</td>
-                        <td className="px-3 py-2 text-xs">{r.entity}</td>
-                        <td className="px-3 py-2 text-gray-500 line-through">{formatCurrency(r.grossBilled)}</td>
-                        <td className="px-3 py-2 text-orange-600 font-medium">-{formatCurrency(r.discountAmount)}</td>
-                        <td className="px-3 py-2 font-medium">{formatCurrency(r.billed)}</td>
-                        <td className="px-3 py-2 text-green-700">{formatCurrency(r.paid)}</td>
-                        <td className="px-3 py-2 text-red-700 font-medium">{formatCurrency(r.balance)}</td>
-                        <td className="px-3 py-2">
-                          <span className={`px-2 py-0.5 rounded-full text-xs ${r.status === 'Cleared' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{r.status}</span>
-                        </td>
-                      </tr>
-                    ))}
-                  </TableWrap>
-                </Card>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ==================== TAB: OUTSTANDING (WITH DISCOUNTS) ==================== */}
-      {activeTab === 'outstanding' && (
-        <div className="space-y-6">
-          <Card className="no-print">
-            <h3 className="text-lg font-semibold mb-4">Outstanding Balances</h3>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">Min Balance (KES)</label>
-                <input type="number" min="0" value={outstandingMinBalance} onChange={(e) => setOutstandingMinBalance(parseFloat(e.target.value) || 0)} className="w-full px-3 py-2 border rounded-lg" />
-              </div>
-              {isRegularSchool && <SearchableSelect label="Class" value={outstandingClassId} onChange={(e) => setOutstandingClassId(e.target.value)} options={classOptions} placeholder="All classes" />}
-              {isUniversity && <SearchableSelect label="Course" value={outstandingCourseId} onChange={(e) => setOutstandingCourseId(e.target.value)} options={courseOptions} placeholder="All courses" />}
-              {isTVET && <SearchableSelect label="Program" value={outstandingProgramId} onChange={(e) => setOutstandingProgramId(e.target.value)} options={programOptions} placeholder="All programs" />}
-            </div>
-            <button onClick={generateOutstandingReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
-          </Card>
-
-          {reportData?.type === 'outstanding' && (
-            <>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 no-print">
-                <StatCard label="Total Outstanding" value={formatCurrency(reportData.summary.totalOutstanding)} color="red" />
-                <StatCard label="Total Discounts" value={formatCurrency(reportData.summary.totalDiscounts)} color="orange" />
-                <StatCard label="Students" value={reportData.summary.studentsWithBalance} color="blue" />
-                <StatCard label="Average Balance" value={formatCurrency(reportData.summary.averageBalance)} color="yellow" />
-                <StatCard label="Highest Balance" value={formatCurrency(reportData.summary.highestBalance)} color="purple" />
-              </div>
-
-              {showCharts && reportData.charts.agingChart.length > 0 && (
-                <div className="no-print">
-                  <ChartCard title="Aging Buckets">
-                    <BarChart data={reportData.charts.agingChart}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" /><YAxis /><Tooltip formatter={formatCurrency} />
-                      <Bar dataKey="amount" fill="#ef4444" />
-                    </BarChart>
-                  </ChartCard>
-                </div>
-              )}
-
-              <div className="print-area" data-print-title="Outstanding Balances">
-                <Card>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold">Students with Balances ({reportData.rows.length})</h3>
-                    <ExportBtn onClick={() => exportCSV(reportData.rows.map(r => ({
-                      admissionNumber: r.admissionNumber,
-                      name: r.name,
-                      entity: r.entity,
-                      grossBilled: r.grossBilled,
-                      discount: r.discountAmount,
-                      netBilled: r.billed,
-                      paid: r.paid,
-                      balance: r.balance,
-                      lastPayment: r.lastPaymentDate
-                    })), 'outstanding.csv')} />
-                  </div>
-                  <TableWrap headers={['Admission','Student', entityColumnLabel,'Gross Billed','Discount','Net Billed','Paid','Balance','Last Payment']}>
-                    {reportData.rows.map((r, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
-                        <td className="px-3 py-2">{r.name}</td>
-                        <td className="px-3 py-2 text-xs">{r.entity}</td>
-                        <td className="px-3 py-2 text-gray-500 line-through">{formatCurrency(r.grossBilled)}</td>
-                        <td className="px-3 py-2 text-orange-600 font-medium">-{formatCurrency(r.discountAmount)}</td>
-                        <td className="px-3 py-2 font-medium">{formatCurrency(r.billed)}</td>
-                        <td className="px-3 py-2 text-green-700">{formatCurrency(r.paid)}</td>
-                        <td className="px-3 py-2 text-red-700 font-bold">{formatCurrency(r.balance)}</td>
-                        <td className="px-3 py-2 text-xs">{r.lastPaymentDate}</td>
-                      </tr>
-                    ))}
-                  </TableWrap>
-                </Card>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ==================== TAB: FEE TRANSFERS ==================== */}
-      {activeTab === 'feeTransfer' && (
-        <div className="space-y-6">
-          <Card className="no-print">
-            <h3 className="text-lg font-semibold mb-4">Fee Transfers Report</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <SearchableSelect
-                label="Status"
-                value={transferStatus}
-                onChange={(e) => setTransferStatus(e.target.value)}
-                options={[
-                  { value: 'PENDING',   label: 'Pending' },
-                  { value: 'APPROVED',  label: 'Approved' },
-                  { value: 'REJECTED',  label: 'Rejected' },
-                  { value: 'CANCELLED', label: 'Cancelled' }
-                ]}
-                placeholder="All statuses"
+              <InputField
+                label="Default Discount Amount (KES)"
+                type="number"
+                value={form.discountAmount === '' ? '' : (form.discountAmount || 0)}
+                onChange={(e) => setForm({ ...form, discountAmount: e.target.value === '' ? '' : parseFloat(e.target.value) })}
+                placeholder="e.g., 3000 (applies to all students)"
+                disabled={loading} min="0" step="0.01"
               />
-              <SearchableSelect
-                label="Student"
-                value={transferStudentId}
-                onChange={(e) => setTransferStudentId(e.target.value)}
-                options={studentOptionsForTransfers}
-                placeholder="All students"
+              <InputField
+                label="Default Discount (%)"
+                type="number"
+                value={form.discountPercent === '' ? '' : (form.discountPercent || 0)}
+                onChange={(e) => setForm({ ...form, discountPercent: e.target.value === '' ? '' : parseFloat(e.target.value) })}
+                placeholder="e.g., 10 (takes precedence over amount)"
+                disabled={loading} min="0" max="100" step="0.01"
               />
+            </div>
+
+            {/* ===== ALLOCATION TYPE SELECTOR ===== */}
+            <div className="border-t pt-4 mt-2">
+              <label className="block text-sm font-medium text-gray-700 mb-3">Allocation Type</label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div
+                  className={`border rounded-lg p-4 cursor-pointer transition-all ${
+                    allocationType === 'AUTO' ? 'border-green-500 bg-green-50 ring-2 ring-green-500' : 'border-gray-200 hover:border-green-300'
+                  }`}
+                  onClick={() => setAllocationType('AUTO')}>
+                  <div className="flex items-start">
+                    <input type="radio" value="AUTO" checked={allocationType === 'AUTO'}
+                      onChange={(e) => setAllocationType(e.target.value)} className="mt-1 mr-3" />
+                    <div>
+                      <div className="font-medium text-green-700">🔄 Auto Allocation</div>
+                      <p className="text-sm text-gray-600 mt-1">
+                        Fee is automatically assigned to <strong>ALL</strong> eligible students
+                      </p>
+                      <div className="mt-2 text-xs text-green-600 bg-green-100 px-2 py-1 rounded inline-block">
+                        No manual action needed
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div
+                  className={`border rounded-lg p-4 cursor-pointer transition-all ${
+                    allocationType === 'MANUAL' ? 'border-yellow-500 bg-yellow-50 ring-2 ring-yellow-500' : 'border-gray-200 hover:border-yellow-300'
+                  }`}
+                  onClick={() => setAllocationType('MANUAL')}>
+                  <div className="flex items-start">
+                    <input type="radio" value="MANUAL" checked={allocationType === 'MANUAL'}
+                      onChange={(e) => setAllocationType(e.target.value)} className="mt-1 mr-3" />
+                    <div>
+                      <div className="font-medium text-yellow-700">✋ Manual Allocation</div>
+                      <p className="text-sm text-gray-600 mt-1">
+                        Fee is <strong>NOT</strong> automatically assigned
+                      </p>
+                      <div className="mt-2 text-xs text-yellow-600 bg-yellow-100 px-2 py-1 rounded inline-block">
+                        Requires manual assignment
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3 p-3 bg-gray-50 rounded-lg">
+                <p className="text-xs text-gray-500">
+                  <i className="fas fa-info-circle mr-1"></i>
+                  {allocationType === 'AUTO'
+                    ? "🔹 Auto: Fee will appear on ALL students' fee statements immediately after creation."
+                    : '🔸 Manual: Fee will NOT appear until manually allocated.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-4">
+              <label className="flex items-center space-x-2">
+                <input type="checkbox" checked={form.isOptional || false}
+                  onChange={(e) => setForm({ ...form, isOptional: e.target.checked })}
+                  className="rounded" disabled={loading} />
+                <span>This fee is optional</span>
+              </label>
+              <label className="flex items-center space-x-2">
+                <input type="checkbox" checked={form.isRecurring || false}
+                  onChange={(e) => setForm({ ...form, isRecurring: e.target.checked })}
+                  className="rounded" disabled={loading} />
+                <span>{isTVET ? 'Applies to all modules' : 'Recurring (charged every term/semester)'}</span>
+              </label>
+            </div>
+
+            <div className="flex space-x-2 pt-4 border-t">
+              <button type="submit"
+                className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                disabled={loading}>
+                {loading ? 'Saving...' : (editingId ? 'Update Fee' : 'Create Fee')}
+              </button>
+              <button type="button" onClick={handleCancel}
+                className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
+                disabled={loading}>Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ==================== DISCOUNT MODAL ==================== */}
+      {showDiscountModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">
+                <i className="fas fa-percent text-purple-600 mr-2"></i>
+                Grant Discount
+              </h3>
+              <button onClick={() => setShowDiscountModal(false)} className="text-gray-400 hover:text-gray-600">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <SearchableSelect
+                label="Student *"
+                value={discountStudent?.id || ''}
+                onChange={(e) => {
+                  const s = (students || []).find(x => String(x.id) === String(e.target.value));
+                  setDiscountStudent(s || null);
+                }}
+                options={studentOptions}
+                placeholder="Search student..."
+              />
+
               <div>
-                <label className="block text-sm font-medium mb-1">Search by name or admission no.</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Applies To
+                </label>
+                <select
+                  value={discountFee?.id || ''}
+                  onChange={(e) => {
+                    const f = fees.find(x => String(x.id) === String(e.target.value));
+                    setDiscountFee(f || null);
+                  }}
+                  className="w-full px-3 py-2 border rounded-lg"
+                >
+                  <option value="">All fees for this student</option>
+                  {fees.map(f => (
+                    <option key={f.id} value={f.id}>
+                      {f.name} — {formatCurrency(f.amount)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Discount Type *
+                  </label>
+                  <select
+                    value={discountForm.type}
+                    onChange={(e) => setDiscountForm({ ...discountForm, type: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="AMOUNT">Fixed Amount (KES)</option>
+                    <option value="PERCENT">Percentage (%)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    {discountForm.type === 'PERCENT' ? 'Percentage (%) *' : 'Amount (KES) *'}
+                  </label>
+                  <input
+                    type="number"
+                    value={discountForm.value}
+                    onChange={(e) => setDiscountForm({ ...discountForm, value: e.target.value })}
+                    placeholder={discountForm.type === 'PERCENT' ? 'e.g., 10' : 'e.g., 3000'}
+                    className="w-full px-3 py-2 border rounded-lg"
+                    min="0"
+                    step="0.01"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Reason / Notes
+                </label>
                 <input
-                  value={transferSearch}
-                  onChange={(e) => setTransferSearch(e.target.value)}
-                  placeholder="Type to filter..."
+                  type="text"
+                  value={discountForm.reason}
+                  onChange={(e) => setDiscountForm({ ...discountForm, reason: e.target.value })}
+                  placeholder="e.g., Bursary, Staff child, Sibling discount"
                   className="w-full px-3 py-2 border rounded-lg"
                 />
               </div>
+
+              {discountStudent && (
+                <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-sm">
+                  <p className="font-medium text-purple-800 mb-1">Preview:</p>
+                  {discountFee ? (
+                    <ul className="text-xs text-purple-700 space-y-0.5">
+                      <li>Fee: <strong>{discountFee.name}</strong> — {formatCurrency(discountFee.amount)}</li>
+                      <li>
+                        Discount:{' '}
+                        <strong>
+                          {discountForm.type === 'PERCENT'
+                            ? `${discountForm.value || 0}% (${formatCurrency(
+                                (parseFloat(discountFee.amount) || 0) * ((parseFloat(discountForm.value) || 0) / 100)
+                              )})`
+                            : formatCurrency(parseFloat(discountForm.value) || 0)}
+                        </strong>
+                      </li>
+                      <li>
+                        Amount to pay:{' '}
+                        <strong className="text-green-700">
+                          {formatCurrency(
+                            (parseFloat(discountFee.amount) || 0) -
+                            (discountForm.type === 'PERCENT'
+                              ? (parseFloat(discountFee.amount) || 0) * ((parseFloat(discountForm.value) || 0) / 100)
+                              : (parseFloat(discountForm.value) || 0))
+                          )}
+                        </strong>
+                      </li>
+                    </ul>
+                  ) : (
+                    <p className="text-xs text-purple-700">
+                      Discount will apply across the student's fee statement.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
-            <div className="flex gap-2">
-              <button
-                onClick={generateFeeTransferReport}
-                className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
-              >
-                Generate Report
+
+            <div className="flex space-x-2 mt-6 pt-4 border-t">
+              <button onClick={handleSaveDiscount} disabled={loading}
+                className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 disabled:opacity-50">
+                {loading ? 'Saving...' : 'Apply Discount'}
+              </button>
+              <button onClick={() => setShowDiscountModal(false)}
+                className="flex-1 bg-gray-500 text-white py-2 rounded-lg hover:bg-gray-600">
+                Cancel
               </button>
             </div>
-          </Card>
+          </div>
+        </div>
+      )}
 
-          {reportData?.type === 'feeTransfer' && (
-            <>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 no-print">
-                <StatCard label="Total Transfers" value={reportData.summary.total}       color="blue" />
-                <StatCard label="Pending"          value={reportData.summary.pending}     color="yellow" />
-                <StatCard label="Approved"         value={reportData.summary.approved}    color="green" />
-                <StatCard label="Rejected"         value={reportData.summary.rejected}    color="red" />
-                <StatCard
-                  label="Total Transferred"
-                  value={formatCurrency(reportData.summary.totalTransferred)}
-                  color="purple"
-                />
+      {/* ==================== DELETE CONFIRMATION ==================== */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <i className="fas fa-exclamation-triangle text-red-600 text-2xl"></i>
               </div>
+              <h3 className="text-xl font-bold text-gray-800">Delete Fee?</h3>
+              <p className="text-gray-600 mt-2">
+                Are you sure you want to delete <span className="font-semibold">{deleteConfirm.name}</span>?
+              </p>
+              <p className="text-sm text-red-600 mt-2">This action cannot be undone.</p>
+            </div>
+            <div className="flex space-x-2">
+              <button onClick={confirmDelete} disabled={loading}
+                className="flex-1 bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 disabled:opacity-50">
+                {loading ? 'Deleting...' : 'Yes, Delete'}
+              </button>
+              <button onClick={() => setDeleteConfirm(null)}
+                className="flex-1 bg-gray-500 text-white py-2 rounded-lg hover:bg-gray-600">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
-              {showCharts && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 no-print">
-                  {reportData.charts.statusChart.length > 0 && (
-                    <ChartCard title="By Status">
-                      <PieChart>
-                        <Pie
-                          data={reportData.charts.statusChart}
-                          cx="50%"
-                          cy="50%"
-                          label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                          outerRadius={100}
-                          dataKey="value"
-                        >
-                          {reportData.charts.statusChart.map((_, i) => (
-                            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                      </PieChart>
-                    </ChartCard>
-                  )}
+      {/* ==================== SUMMARY CARDS (6 cards, no minus sign) ==================== */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="bg-white p-4 rounded-xl shadow-sm">
+          <p className="text-sm text-gray-500">Fee Definitions</p>
+          <p className="text-2xl font-bold">{fees.length}</p>
+        </div>
 
-                  {reportData.charts.monthlyChart.length > 0 && (
-                    <ChartCard title="Approved Transfers by Month">
-                      <BarChart data={reportData.charts.monthlyChart}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="month" />
-                        <YAxis />
-                        <Tooltip formatter={formatCurrency} />
-                        <Bar dataKey="amount" fill="#4f46e5" />
-                      </BarChart>
-                    </ChartCard>
-                  )}
-                </div>
-              )}
+        <div className="bg-white p-4 rounded-xl shadow-sm">
+          <p className="text-sm text-gray-500">Gross Billed</p>
+          <p className="text-2xl font-bold text-green-600">
+            {formatCurrency(totalBilled)}
+          </p>
+          <p className="text-xs text-gray-400 mt-1">Sum across all students</p>
+        </div>
 
-              <div className="print-area" data-print-title="Fee Transfers Report">
-                <Card>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold">
-                      Transfers ({reportData.rows.length})
-                    </h3>
-                    <ExportBtn
-                      onClick={() => exportCSV(reportData.rows, 'fee_transfers.csv')}
-                    />
-                  </div>
-                  <TableWrap
-                    headers={[
-                      'Status', 'Amount',
-                      'From Student', 'From Adm.',
-                      'To Student', 'To Adm.',
-                      'Reason',
-                      'Requested By', 'Requested At',
-                      'Approved By', 'Approved At',
-                      'Rejected By', 'Rejected At', 'Reject Reason'
-                    ]}
-                  >
-                    {reportData.rows.map((r, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-3 py-2">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-xs ${
-                              r.status === 'APPROVED'
-                                ? 'bg-green-100 text-green-800'
-                                : r.status === 'PENDING'
-                                ? 'bg-yellow-100 text-yellow-800'
-                                : r.status === 'REJECTED'
-                                ? 'bg-red-100 text-red-800'
-                                : 'bg-gray-100 text-gray-700'
-                            }`}
-                          >
-                            {r.status}
-                          </span>
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-purple-200">
+          <p className="text-sm text-gray-500">Discounts</p>
+          <p className="text-2xl font-bold text-purple-600">
+            {formatCurrency(totalDiscounts)}
+          </p>
+          {totalDiscounts > 0 && (
+            <p className="text-xs text-gray-500 mt-1">
+              Net Billed: {formatCurrency(netBilled)}
+            </p>
+          )}
+        </div>
+
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-200">
+          <p className="text-sm text-gray-500">Net Billed</p>
+          <p className="text-2xl font-bold text-indigo-600">
+            {formatCurrency(netBilled)}
+          </p>
+          <p className="text-xs text-gray-400 mt-1">Gross − Discounts</p>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl shadow-sm">
+          <p className="text-sm text-gray-500">Collected</p>
+          <p className="text-2xl font-bold text-blue-600">
+            {formatCurrency(totalPaid)}
+          </p>
+          <p className="text-xs text-gray-400 mt-1">
+            Rate: {collectionRate}%
+          </p>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl shadow-sm">
+          <p className="text-sm text-gray-500">Outstanding</p>
+          <p className="text-2xl font-bold text-red-600">
+            {formatCurrency(outstanding)}
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            Net Billed − Collected
+          </p>
+        </div>
+      </div>
+
+      {/* ==================== FEES TABLE ==================== */}
+      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                {isUniversity && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Course</th>}
+                {isTVET && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Program</th>}
+                {isTVET && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Module</th>}
+                {isPrimarySecondary && <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Class</th>}
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  {isTVET ? 'Module' : (isUniversity ? 'Semester' : 'Term')}
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase"
+                    title="Default discount for all students. Per-student discounts are visible in Fee Collection.">
+                  Default Discount
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Year</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due Date</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Allocation</th>
+                {(canEdit || canDelete || canGrantDiscount) && (
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                )}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {fees.length === 0 ? (
+                <tr>
+                  <td colSpan={isUniversity ? 13 : (isTVET ? 14 : 13)} className="px-6 py-8 text-center text-gray-500">
+                    <i className="fas fa-file-invoice text-4xl text-gray-300 mb-2"></i>
+                    <p>No fees created yet.</p>
+                    {canManage && (
+                      <button onClick={() => setShowForm(true)}
+                        className="mt-2 text-indigo-600 hover:text-indigo-800">
+                        Click here to create your first fee
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ) : (
+                fees.map(fee => {
+                  const feeLevelDiscount = getFeeLevelDiscount(fee);
+                  const hasPerStudentDiscounts = Array.isArray(discounts)
+                    ? discounts.some(d =>
+                        isDiscountActive(d) &&
+                        d.feeId !== null && d.feeId !== undefined &&
+                        String(d.feeId) === String(fee.id)
+                      )
+                    : false;
+
+                  return (
+                    <tr key={fee.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap font-medium">{fee.name}</td>
+                      {isUniversity && <td className="px-6 py-4 whitespace-nowrap">{getCourseName(fee.courseId)}</td>}
+                      {isTVET && <td className="px-6 py-4 whitespace-nowrap">{getProgramName(fee.programId)}</td>}
+                      {isTVET && <td className="px-6 py-4 whitespace-nowrap">{fee.module ? `Module ${fee.module}` : 'N/A'}</td>}
+                      {isPrimarySecondary && <td className="px-6 py-4 whitespace-nowrap">{getClassName(fee.classId)}</td>}
+                      <td className="px-6 py-4 whitespace-nowrap">{getModuleDisplay(fee)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap font-medium text-green-600">
+                        {formatCurrency(fee.amount)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex flex-col gap-1">
+                          {feeLevelDiscount > 0 ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-medium">
+                              {formatCurrency(feeLevelDiscount)}
+                              {canGrantDiscount && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveFeeLevelDiscount(fee)}
+                                  className="text-red-600 hover:text-red-800 ml-1"
+                                  title="Remove default discount"
+                                >
+                                  ×
+                                </button>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400 text-xs">—</span>
+                          )}
+                          {hasPerStudentDiscounts && (
+                            <span className="text-[10px] text-purple-600" title="Some students have per-student discounts on this fee">
+                              <i className="fas fa-user-tag mr-1"></i>has per-student discounts
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">{fee.academicYear}</td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {fee.dueDate ? new Date(fee.dueDate).toLocaleDateString() : 'N/A'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
+                          {fee.category || 'TUITION'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-2 py-1 rounded-full text-xs ${
+                          fee.allocationType === 'AUTO' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          {fee.allocationType}
+                        </span>
+                      </td>
+                      {(canEdit || canDelete || canGrantDiscount) && (
+                        <td className="px-6 py-4 whitespace-nowrap text-right space-x-2">
+                          {canGrantDiscount && (
+                            <button
+                              onClick={() => openDiscountModal(null, fee)}
+                              className="text-purple-600 hover:text-purple-900 p-2 hover:bg-purple-50 rounded-lg transition-colors"
+                              title="Grant per-student discount on this fee">
+                              <i className="fas fa-percent"></i>
+                            </button>
+                          )}
+                          {canEdit && (
+                            <button onClick={() => handleEdit(fee)}
+                              className="text-indigo-600 hover:text-indigo-900 p-2 hover:bg-indigo-50 rounded-lg transition-colors"
+                              title="Edit Fee">
+                              <i className="fas fa-edit"></i>
+                            </button>
+                          )}
+                          {canDelete && (
+                            <button onClick={() => handleDeleteClick(fee)}
+                              className="text-red-600 hover:text-red-900 p-2 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Delete Fee">
+                              <i className="fas fa-trash"></i>
+                            </button>
+                          )}
                         </td>
-                        <td className="px-3 py-2 font-bold">{formatCurrency(r.amount)}</td>
-                        <td className="px-3 py-2">{r.fromStudent}</td>
-                        <td className="px-3 py-2 font-mono text-xs">{r.fromAdmission}</td>
-                        <td className="px-3 py-2">{r.toStudent}</td>
-                        <td className="px-3 py-2 font-mono text-xs">{r.toAdmission}</td>
-                        <td className="px-3 py-2 text-xs">{r.reason}</td>
-                        <td className="px-3 py-2 text-xs">{r.requestedBy}</td>
-                        <td className="px-3 py-2 text-xs">{r.requestedAt}</td>
-                        <td className="px-3 py-2 text-xs">{r.approvedBy}</td>
-                        <td className="px-3 py-2 text-xs">{r.approvedAt}</td>
-                        <td className="px-3 py-2 text-xs">{r.rejectedBy}</td>
-                        <td className="px-3 py-2 text-xs">{r.rejectedAt}</td>
-                        <td className="px-3 py-2 text-xs">{r.rejectReason}</td>
-                      </tr>
-                    ))}
-                  </TableWrap>
-                </Card>
-              </div>
-            </>
-          )}
+                      )}
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
-      )}
+      </div>
 
-      {/* ==================== TAB: ADMISSION ==================== */}
-      {activeTab === 'admission' && (
-        <div className="space-y-6">
-          <Card className="no-print">
-            <h3 className="text-lg font-semibold mb-4">Admission Report</h3>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-              <div><label className="block text-sm font-medium mb-1">Year</label><input type="number" min="2000" max="2100" value={admissionYear} onChange={(e) => setAdmissionYear(e.target.value)} className="w-full px-3 py-2 border rounded-lg" /></div>
-              {isRegularSchool && <SearchableSelect label="Class" value={admissionClassId} onChange={(e) => setAdmissionClassId(e.target.value)} options={classOptions} placeholder="All classes" />}
-              {isUniversity && <SearchableSelect label="Course" value={admissionCourseId} onChange={(e) => setAdmissionCourseId(e.target.value)} options={courseOptions} placeholder="All courses" />}
-              {isTVET && <SearchableSelect label="Program" value={admissionProgramId} onChange={(e) => setAdmissionProgramId(e.target.value)} options={programOptions} placeholder="All programs" />}
-              <SearchableSelect label="Gender" value={admissionGender} onChange={(e) => setAdmissionGender(e.target.value)} options={[{value:'MALE',label:'Male'},{value:'FEMALE',label:'Female'},{value:'OTHER',label:'Other'}]} placeholder="Any" />
-              <SearchableSelect label="Boarding" value={admissionBoarding} onChange={(e) => setAdmissionBoarding(e.target.value)} options={[{value:'BOARDING',label:'Boarding'},{value:'DAY',label:'Day'},{value:'WEEKLY',label:'Weekly'}]} placeholder="Any" />
-            </div>
-            <button onClick={generateAdmissionReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
-          </Card>
-
-          {reportData?.type === 'admission' && (
-            <>
-              <div className="grid grid-cols-2 md:grid-cols-6 gap-4 no-print">
-                <StatCard label="Total" value={reportData.summary.total} color="blue" />
-                <StatCard label="This Month" value={reportData.summary.thisMonth} color="green" />
-                <StatCard label="Male" value={reportData.summary.males} color="indigo" />
-                <StatCard label="Female" value={reportData.summary.females} color="pink" />
-                <StatCard label="Boarding" value={reportData.summary.boarding} color="purple" />
-                <StatCard label="Day" value={reportData.summary.day} color="yellow" />
-              </div>
-
-              {showCharts && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 no-print">
-                  {reportData.charts.monthly.length > 0 && (
-                    <ChartCard title="Monthly Admissions" span>
-                      <BarChart data={reportData.charts.monthly}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="month" /><YAxis /><Tooltip />
-                        <Bar dataKey="count" fill="#4f46e5" />
-                      </BarChart>
-                    </ChartCard>
-                  )}
-                  {reportData.charts.entityChart.length > 0 && (
-                    <ChartCard title={`By ${entityColumnLabel}`}>
-                      <BarChart data={reportData.charts.entityChart} layout="vertical">
-                        <CartesianGrid strokeDasharray="3 3" /><XAxis type="number" />
-                        <YAxis type="category" dataKey="name" width={130} />
-                        <Tooltip /><Bar dataKey="count" fill="#10b981" />
-                      </BarChart>
-                    </ChartCard>
-                  )}
-                  {reportData.charts.genderChart.length > 0 && (
-                    <ChartCard title="Gender Distribution">
-                      <PieChart>
-                        <Pie data={reportData.charts.genderChart} cx="50%" cy="50%" label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} dataKey="value">
-                          {reportData.charts.genderChart.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                        </Pie>
-                        <Tooltip />
-                      </PieChart>
-                    </ChartCard>
-                  )}
-                </div>
-              )}
-
-              <div className="print-area" data-print-title={`Admissions Report — ${admissionYear}`}>
-                <Card>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold">Admitted Students ({reportData.rows.length})</h3>
-                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'admissions.csv')} />
-                  </div>
-                  <TableWrap headers={['Admission','Name','Gender', entityColumnLabel,'Boarding','Admission Date','Phone']}>
-                    {reportData.rows.map((r, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
-                        <td className="px-3 py-2">{r.name}</td>
-                        <td className="px-3 py-2">{r.gender}</td>
-                        <td className="px-3 py-2 text-xs">{r.entity}</td>
-                        <td className="px-3 py-2">{r.boardingStatus}</td>
-                        <td className="px-3 py-2">{r.admissionDate}</td>
-                        <td className="px-3 py-2 text-xs">{r.phone}</td>
-                      </tr>
-                    ))}
-                  </TableWrap>
-                </Card>
-              </div>
-            </>
-          )}
+      {/* ==================== ALLOCATION INFO ==================== */}
+      <div className="bg-gray-50 rounded-xl p-4 text-sm text-gray-500 border border-gray-200">
+        <div className="flex items-start">
+          <i className="fas fa-info-circle text-indigo-500 mt-0.5 mr-2"></i>
+          <div>
+            <p className="font-medium text-gray-700">About Fee Allocation & Discounts:</p>
+            <ul className="list-disc list-inside mt-1 space-y-1 text-xs">
+              <li><span className="font-medium text-green-600">Auto Allocation:</span> Fee is automatically assigned to all eligible students when created.</li>
+              <li><span className="font-medium text-yellow-600">Manual Allocation:</span> Fee is not assigned automatically. Use the Fee Allocation module to assign.</li>
+              <li><span className="font-medium text-purple-600">Default Discount:</span> Set on the fee itself — applies to every student who gets that fee. Shown in the <em>Default Discount</em> column.</li>
+              <li><span className="font-medium text-purple-600">Per-Student Discount:</span> Click the <i className="fas fa-percent"></i> button on any fee row to grant a discount to a specific student (bursary, scholarship, sibling, staff child).</li>
+              <li><span className="font-medium text-gray-700">Balance formula:</span> Outstanding = Net Billed − Collected. Gross Billed is the sum of all fee amounts across all eligible students.</li>
+            </ul>
+          </div>
         </div>
-      )}
-
-      {/* ==================== TAB: FINANCIAL ==================== */}
-      {activeTab === 'financial' && (
-        <div className="space-y-6">
-          <Card className="no-print">
-            <h3 className="text-lg font-semibold mb-4">Financial Summary</h3>
-            <div className="grid grid-cols-2 gap-4 mb-4 max-w-lg">
-              <div><label className="block text-sm font-medium mb-1">Start</label><input type="date" value={feeDateRange.start} onChange={(e) => setFeeDateRange({ ...feeDateRange, start: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
-              <div><label className="block text-sm font-medium mb-1">End</label><input type="date" value={feeDateRange.end} onChange={(e) => setFeeDateRange({ ...feeDateRange, end: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
-            </div>
-            <button onClick={generateFinancialReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
-          </Card>
-
-          {reportData?.type === 'financial' && (
-            <>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 no-print">
-                <StatCard label="Income" value={formatCurrency(reportData.summary.totalIncome)} color="green" />
-                <StatCard label="Expenses" value={formatCurrency(reportData.summary.totalExpenses)} color="red" />
-                <StatCard label="Net" value={formatCurrency(reportData.summary.netIncome)} color={reportData.summary.netIncome >= 0 ? 'blue' : 'orange'} />
-              </div>
-
-              {showCharts && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 no-print">
-                  {reportData.charts.monthlyChart.length > 0 && (
-                    <ChartCard title="Monthly Trend" span>
-                      <ComposedChart data={reportData.charts.monthlyChart}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="month" /><YAxis /><Tooltip formatter={formatCurrency} /><Legend />
-                        <Bar dataKey="income" fill="#10b981" name="Income" />
-                        <Bar dataKey="expenses" fill="#ef4444" name="Expenses" />
-                        <Line type="monotone" dataKey="profit" stroke="#4f46e5" name="Profit" strokeWidth={2} />
-                      </ComposedChart>
-                    </ChartCard>
-                  )}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ==================== TAB: ATTENDANCE ==================== */}
-      {activeTab === 'attendance' && (
-        <div className="space-y-6">
-          <Card className="no-print">
-            <h3 className="text-lg font-semibold mb-4">Attendance Report</h3>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-              <div><label className="block text-sm font-medium mb-1">Start</label><input type="date" value={attendanceDateRange.start} onChange={(e) => setAttendanceDateRange({ ...attendanceDateRange, start: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
-              <div><label className="block text-sm font-medium mb-1">End</label><input type="date" value={attendanceDateRange.end} onChange={(e) => setAttendanceDateRange({ ...attendanceDateRange, end: e.target.value })} className="w-full px-3 py-2 border rounded-lg" /></div>
-              {isRegularSchool && <SearchableSelect label="Class" value={attendanceClassId} onChange={(e) => setAttendanceClassId(e.target.value)} options={classOptions} placeholder="All classes" />}
-              {isUniversity && <SearchableSelect label="Course" value={attendanceCourseId} onChange={(e) => setAttendanceCourseId(e.target.value)} options={courseOptions} placeholder="All courses" />}
-              {isTVET && <SearchableSelect label="Program" value={attendanceProgramId} onChange={(e) => setAttendanceProgramId(e.target.value)} options={programOptions} placeholder="All programs" />}
-            </div>
-            <button onClick={generateAttendanceReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
-          </Card>
-
-          {reportData?.type === 'attendance' && (
-            <>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 no-print">
-                <StatCard label="Total Records" value={reportData.summary.total} color="blue" />
-                <StatCard label="Present" value={reportData.summary.present} sub={`${reportData.summary.presentRate}%`} color="green" />
-                <StatCard label="Absent" value={reportData.summary.absent} sub={`${reportData.summary.absentRate}%`} color="red" />
-                <StatCard label="Late" value={reportData.summary.late} color="yellow" />
-                <StatCard label="Leave/Sick" value={reportData.summary.leave} color="purple" />
-              </div>
-
-              {showCharts && reportData.charts.dailyChart.length > 0 && (
-                <div className="no-print">
-                  <ChartCard title="Daily Attendance Trend" span>
-                    <LineChart data={reportData.charts.dailyChart}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="day" angle={-30} textAnchor="end" height={60} interval={0} />
-                      <YAxis /><Tooltip /><Legend />
-                      <Line type="monotone" dataKey="present" stroke="#10b981" name="Present" />
-                      <Line type="monotone" dataKey="absent" stroke="#ef4444" name="Absent" />
-                      <Line type="monotone" dataKey="late" stroke="#f59e0b" name="Late" />
-                    </LineChart>
-                  </ChartCard>
-                </div>
-              )}
-
-              <div className="print-area" data-print-title="Attendance Report">
-                <Card>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold">Per-Student Attendance ({reportData.rows.length})</h3>
-                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'attendance_report.csv')} />
-                  </div>
-                  <TableWrap headers={['Admission','Student', entityColumnLabel,'Present','Absent','Late','Leave','Total','Rate']}>
-                    {reportData.rows.map((r, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
-                        <td className="px-3 py-2">{r.name}</td>
-                        <td className="px-3 py-2 text-xs">{r.entity}</td>
-                        <td className="px-3 py-2 text-green-700">{r.present}</td>
-                        <td className="px-3 py-2 text-red-700">{r.absent}</td>
-                        <td className="px-3 py-2 text-yellow-700">{r.late}</td>
-                        <td className="px-3 py-2 text-blue-700">{r.leave}</td>
-                        <td className="px-3 py-2">{r.total}</td>
-                        <td className="px-3 py-2 font-bold">{r.rate}%</td>
-                      </tr>
-                    ))}
-                  </TableWrap>
-                </Card>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ==================== TAB: STAFF ==================== */}
-      {activeTab === 'staff' && (
-        <div className="space-y-6">
-          <Card className="no-print">
-            <h3 className="text-lg font-semibold mb-4">Staff Report</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <SearchableSelect label="Department" value={staffDepartment} onChange={(e) => setStaffDepartment(e.target.value)} options={[...new Set((staff || []).map(s => s.department).filter(Boolean))].map(d => ({ value: d, label: d }))} placeholder="All departments" />
-              <SearchableSelect label="Staff Type" value={staffType} onChange={(e) => setStaffType(e.target.value)} options={['TEACHING','NON_TEACHING','ACADEMIC','ADMINISTRATIVE','TECHNICAL','RESEARCH'].map(t => ({ value: t, label: t.replace('_',' ') }))} placeholder="All types" />
-            </div>
-            <button onClick={generateStaffReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
-          </Card>
-
-          {reportData?.type === 'staff' && (
-            <>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 no-print">
-                <StatCard label="Total Staff" value={reportData.summary.total} color="blue" />
-                <StatCard label="Teaching" value={reportData.summary.teaching} color="green" />
-                <StatCard label="Non-Teaching" value={reportData.summary.nonTeaching} color="yellow" />
-                <StatCard label="Permanent" value={reportData.summary.permanent} color="purple" />
-                <StatCard label="Contract" value={reportData.summary.contract} color="orange" />
-              </div>
-
-              {showCharts && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 no-print">
-                  {reportData.charts.deptChart.length > 0 && (
-                    <ChartCard title="By Department">
-                      <BarChart data={reportData.charts.deptChart} layout="vertical">
-                        <CartesianGrid strokeDasharray="3 3" /><XAxis type="number" />
-                        <YAxis type="category" dataKey="name" width={130} />
-                        <Tooltip /><Bar dataKey="count" fill="#4f46e5" />
-                      </BarChart>
-                    </ChartCard>
-                  )}
-                  {reportData.charts.typeChart.length > 0 && (
-                    <ChartCard title="By Staff Type">
-                      <PieChart>
-                        <Pie data={reportData.charts.typeChart} cx="50%" cy="50%" label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} dataKey="value">
-                          {reportData.charts.typeChart.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                        </Pie>
-                        <Tooltip />
-                      </PieChart>
-                    </ChartCard>
-                  )}
-                </div>
-              )}
-
-              <div className="print-area" data-print-title="Staff Report">
-                <Card>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold">Staff List ({reportData.rows.length})</h3>
-                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'staff_report.csv')} />
-                  </div>
-                  <TableWrap headers={['Employee ID','Name','Email','Phone','Department','Job Title','Staff Type','Employment','Joined']}>
-                    {reportData.rows.map((r, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 font-mono text-xs">{r.employeeId}</td>
-                        <td className="px-3 py-2">{r.name}</td>
-                        <td className="px-3 py-2 text-xs">{r.email}</td>
-                        <td className="px-3 py-2 text-xs">{r.phone}</td>
-                        <td className="px-3 py-2">{r.department}</td>
-                        <td className="px-3 py-2">{r.jobTitle}</td>
-                        <td className="px-3 py-2 text-xs">{r.staffType}</td>
-                        <td className="px-3 py-2 text-xs">{r.employmentType}</td>
-                        <td className="px-3 py-2 text-xs">{r.employmentDate}</td>
-                      </tr>
-                    ))}
-                  </TableWrap>
-                </Card>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ==================== TAB: DISCOUNTS ==================== */}
-      {activeTab === 'discount' && (
-        <div className="space-y-6">
-          <Card className="no-print">
-            <h3 className="text-lg font-semibold mb-4">Discounts Report</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">Search student or reason</label>
-                <input value={discountSearch} onChange={(e) => setDiscountSearch(e.target.value)} placeholder="Type to filter..." className="w-full px-3 py-2 border rounded-lg" />
-              </div>
-            </div>
-            <button onClick={generateDiscountReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
-          </Card>
-
-          {reportData?.type === 'discount' && (
-            <>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 no-print">
-                <StatCard label="Total Discounts" value={reportData.summary.count} color="blue" />
-                <StatCard label="Total Value" value={formatCurrency(reportData.summary.totalValue)} color="green" />
-                <StatCard label="Average" value={formatCurrency(reportData.summary.avg)} color="purple" />
-              </div>
-
-              {showCharts && reportData.charts.typeChart.length > 0 && (
-                <div className="no-print">
-                  <ChartCard title="By Type (Amount vs Percent)">
-                    <PieChart>
-                      <Pie data={reportData.charts.typeChart} cx="50%" cy="50%" label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`} outerRadius={100} dataKey="value">
-                        {reportData.charts.typeChart.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                      </Pie>
-                      <Tooltip />
-                    </PieChart>
-                  </ChartCard>
-                </div>
-              )}
-
-              <div className="print-area" data-print-title="Discounts Report">
-                <Card>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold">Discount Records ({reportData.rows.length})</h3>
-                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'discounts.csv')} />
-                  </div>
-                  <TableWrap headers={['Student','Admission','Fee','Type','Value','Reason','Status']}>
-                    {reportData.rows.map((r, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-3 py-2">{r.student}</td>
-                        <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
-                        <td className="px-3 py-2 text-xs">{r.fee}</td>
-                        <td className="px-3 py-2">{r.type}</td>
-                        <td className="px-3 py-2 font-bold">{r.value}</td>
-                        <td className="px-3 py-2 text-xs">{r.reason}</td>
-                        <td className="px-3 py-2">
-                          <span className={`px-2 py-0.5 rounded-full text-xs ${r.isActive === 'Active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700'}`}>{r.isActive}</span>
-                        </td>
-                      </tr>
-                    ))}
-                  </TableWrap>
-                </Card>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ==================== TAB: ALLOCATION ==================== */}
-      {activeTab === 'allocation' && (
-        <div className="space-y-6">
-          <Card className="no-print">
-            <h3 className="text-lg font-semibold mb-4">Fee Allocation Report</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <SearchableSelect label="Fee" value={allocationFeeId} onChange={(e) => setAllocationFeeId(e.target.value)} options={fees.map(f => ({ value: f.id, label: f.name, subLabel: formatCurrency(f.amount) }))} placeholder="All fees" />
-            </div>
-            <button onClick={generateAllocationReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
-          </Card>
-
-          {reportData?.type === 'allocation' && (
-            <>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 no-print">
-                <StatCard label="Allocations" value={reportData.summary.allocatedCount} color="blue" />
-                <StatCard label="Allocated" value={formatCurrency(reportData.summary.totalAllocated)} color="purple" />
-                <StatCard label="Paid" value={formatCurrency(reportData.summary.totalPaid)} color="green" />
-                <StatCard label="Outstanding" value={formatCurrency(reportData.summary.totalOutstanding)} color="red" />
-                <StatCard label="Collection Rate" value={`${reportData.summary.collectionRate}%`} color="yellow" />
-              </div>
-
-              <div className="print-area" data-print-title="Fee Allocation Report">
-                <Card>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold">Allocation Records ({reportData.rows.length})</h3>
-                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'fee_allocations.csv')} />
-                  </div>
-                  <TableWrap headers={['Student','Admission','Fee','Allocated','Paid','Balance','Status']}>
-                    {reportData.rows.map((r, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-3 py-2">{r.student}</td>
-                        <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
-                        <td className="px-3 py-2 text-xs">{r.fee}</td>
-                        <td className="px-3 py-2">{formatCurrency(r.allocated)}</td>
-                        <td className="px-3 py-2 text-green-700">{formatCurrency(r.paid)}</td>
-                        <td className="px-3 py-2 text-red-700 font-medium">{formatCurrency(r.balance)}</td>
-                        <td className="px-3 py-2">
-                          <span className={`px-2 py-0.5 rounded-full text-xs ${r.status === 'Cleared' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{r.status}</span>
-                        </td>
-                      </tr>
-                    ))}
-                  </TableWrap>
-                </Card>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ==================== TAB: INVENTORY ==================== */}
-      {activeTab === 'inventory' && (
-        <div className="space-y-6">
-          <Card className="no-print">
-            <h3 className="text-lg font-semibold mb-4">Inventory Report</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <SearchableSelect label="Category" value={inventoryCategory} onChange={(e) => setInventoryCategory(e.target.value)} options={[...new Set(inventory.map(i => i.category).filter(Boolean))].map(c => ({ value: c, label: c }))} placeholder="All categories" />
-              <div className="flex items-end">
-                <label className="flex items-center gap-2 cursor-pointer text-sm">
-                  <input type="checkbox" checked={inventoryLowStockOnly} onChange={(e) => setInventoryLowStockOnly(e.target.checked)} />
-                  Show low-stock items only
-                </label>
-              </div>
-            </div>
-            <button onClick={generateInventoryReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
-          </Card>
-
-          {reportData?.type === 'inventory' && (
-            <>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 no-print">
-                <StatCard label="Total Items" value={reportData.summary.totalItems} color="blue" />
-                <StatCard label="Total Quantity" value={reportData.summary.totalQuantity} color="purple" />
-                <StatCard label="Total Value" value={formatCurrency(reportData.summary.totalValue)} color="green" />
-                <StatCard label="Low Stock" value={reportData.summary.lowStock} color="yellow" />
-                <StatCard label="Out of Stock" value={reportData.summary.outOfStock} color="red" />
-              </div>
-
-              <div className="print-area" data-print-title="Inventory Report">
-                <Card>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-semibold">Inventory Items ({reportData.rows.length})</h3>
-                    <ExportBtn onClick={() => exportCSV(reportData.rows, 'inventory.csv')} />
-                  </div>
-                  <TableWrap headers={['Item','Category','Quantity','Unit','Unit Price','Total Value','Reorder Level','Status']}>
-                    {reportData.rows.map((r, i) => (
-                      <tr key={i} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 font-medium">{r.name}</td>
-                        <td className="px-3 py-2">{r.category}</td>
-                        <td className="px-3 py-2">{r.quantity}</td>
-                        <td className="px-3 py-2">{r.unit}</td>
-                        <td className="px-3 py-2">{formatCurrency(r.unitPrice)}</td>
-                        <td className="px-3 py-2 font-bold">{formatCurrency(r.totalValue)}</td>
-                        <td className="px-3 py-2">{r.reorderLevel}</td>
-                        <td className="px-3 py-2">
-                          <span className={`px-2 py-0.5 rounded-full text-xs ${
-                            r.status === 'In Stock' ? 'bg-green-100 text-green-800' :
-                            r.status === 'Low Stock' ? 'bg-yellow-100 text-yellow-800' :
-                            'bg-red-100 text-red-800'
-                          }`}>{r.status}</span>
-                        </td>
-                      </tr>
-                    ))}
-                  </TableWrap>
-                </Card>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ==================== TAB: TRANSPORT ==================== */}
-      {activeTab === 'transport' && (
-        <div className="space-y-6">
-          <Card className="no-print">
-            <div className="flex justify-between items-start flex-wrap gap-3 mb-4">
-              <h3 className="text-lg font-semibold">Transport Report</h3>
-              <ModeToggle
-                value={transportView}
-                onChange={setTransportView}
-                options={[
-                  { value: 'routes', label: 'Routes', icon: 'fa-bus' },
-                  { value: 'students', label: 'Students', icon: 'fa-user-graduate' }
-                ]}
-              />
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">Search route</label>
-                <input value={transportSearch} onChange={(e) => setTransportSearch(e.target.value)} placeholder="Type to filter..." className="w-full px-3 py-2 border rounded-lg" />
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={generateTransportReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
-            </div>
-          </Card>
-
-          {reportData?.type === 'transport' && (
-            <>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 no-print">
-                <StatCard label="Total Routes" value={reportData.summary.totalRoutes} color="blue" />
-                <StatCard label="Vehicles" value={reportData.summary.totalVehicles} color="purple" />
-                <StatCard label="Students" value={reportData.summary.totalStudents} color="green" />
-                <StatCard label="Monthly Revenue" value={formatCurrency(reportData.summary.monthlyRevenue)} color="yellow" />
-              </div>
-
-              {showCharts && transportView === 'routes' && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 no-print">
-                  {reportData.charts.routeChart.length > 0 && (
-                    <ChartCard title="Students per Route">
-                      <BarChart data={reportData.charts.routeChart}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" angle={-30} textAnchor="end" height={60} interval={0} />
-                        <YAxis /><Tooltip />
-                        <Bar dataKey="students" fill="#4f46e5" />
-                      </BarChart>
-                    </ChartCard>
-                  )}
-                  {reportData.charts.capacityChart.length > 0 && (
-                    <ChartCard title="Vehicle Utilization">
-                      <BarChart data={reportData.charts.capacityChart}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" angle={-30} textAnchor="end" height={60} interval={0} />
-                        <YAxis /><Tooltip /><Legend />
-                        <Bar dataKey="capacity" fill="#94a3b8" name="Capacity" />
-                        <Bar dataKey="used" fill="#4f46e5" name="Used" />
-                      </BarChart>
-                    </ChartCard>
-                  )}
-                </div>
-              )}
-
-              {transportView === 'routes' && (
-                <div className="print-area" data-print-title="Transport Routes Report">
-                  <Card>
-                    <div className="flex justify-between items-center mb-3">
-                      <h3 className="font-semibold">Transport Routes ({reportData.rows.length})</h3>
-                      <ExportBtn onClick={() => exportCSV(reportData.rows, 'transport_routes.csv')} />
-                    </div>
-                    <TableWrap headers={['Route','Vehicle','Driver','Phone','Capacity','Students','Utilization','Fee/Student','Monthly Revenue']}>
-                      {reportData.rows.map((r, i) => (
-                        <tr key={i} className="hover:bg-gray-50">
-                          <td className="px-3 py-2 font-medium">{r.route}</td>
-                          <td className="px-3 py-2 font-mono text-xs">{r.vehicle}</td>
-                          <td className="px-3 py-2">{r.driver}</td>
-                          <td className="px-3 py-2 text-xs">{r.driverPhone}</td>
-                          <td className="px-3 py-2">{r.capacity}</td>
-                          <td className="px-3 py-2">{r.students}</td>
-                          <td className="px-3 py-2">{r.utilization}</td>
-                          <td className="px-3 py-2">{formatCurrency(r.feePerStudent)}</td>
-                          <td className="px-3 py-2 font-bold text-green-700">{formatCurrency(r.monthlyRevenue)}</td>
-                        </tr>
-                      ))}
-                    </TableWrap>
-                  </Card>
-                </div>
-              )}
-
-              {transportView === 'students' && (
-                <div className="print-area" data-print-title="Students on Transport">
-                  <Card>
-                    <div className="flex justify-between items-center mb-3">
-                      <h3 className="font-semibold">Students on Transport ({reportData.studentRows.length})</h3>
-                      <ExportBtn onClick={() => exportCSV(reportData.studentRows, 'transport_students.csv')} />
-                    </div>
-                    <TableWrap headers={['Student','Admission', entityColumnLabel,'Route','Vehicle','Driver','Phone','Fee','Pickup']}>
-                      {reportData.studentRows.map((r, i) => (
-                        <tr key={i} className="hover:bg-gray-50">
-                          <td className="px-3 py-2 font-medium">{r.student}</td>
-                          <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
-                          <td className="px-3 py-2 text-xs">{r.entity}</td>
-                          <td className="px-3 py-2">{r.route}</td>
-                          <td className="px-3 py-2 font-mono text-xs">{r.vehicle}</td>
-                          <td className="px-3 py-2">{r.driver}</td>
-                          <td className="px-3 py-2 text-xs">{r.driverPhone}</td>
-                          <td className="px-3 py-2">{formatCurrency(r.fee)}</td>
-                          <td className="px-3 py-2 text-xs">{r.pickupPoint}</td>
-                        </tr>
-                      ))}
-                    </TableWrap>
-                  </Card>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ==================== TAB: HOSTEL ==================== */}
-      {activeTab === 'hostel' && (
-        <div className="space-y-6">
-          <Card className="no-print">
-            <div className="flex justify-between items-start flex-wrap gap-3 mb-4">
-              <h3 className="text-lg font-semibold">Hostel Report</h3>
-              <ModeToggle
-                value={hostelView}
-                onChange={setHostelView}
-                options={[
-                  { value: 'hostels', label: 'Hostels', icon: 'fa-hotel' },
-                  { value: 'students', label: 'Students', icon: 'fa-user-graduate' }
-                ]}
-              />
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <SearchableSelect label="Gender" value={hostelGenderFilter} onChange={(e) => setHostelGenderFilter(e.target.value)} options={[{value:'BOYS',label:'Boys'},{value:'GIRLS',label:'Girls'},{value:'MIXED',label:'Mixed'}]} placeholder="All hostels" />
-            </div>
-            <div className="flex gap-2">
-              <button onClick={generateHostelReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
-            </div>
-          </Card>
-
-          {reportData?.type === 'hostel' && (
-            <>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 no-print">
-                <StatCard label="Hostels" value={reportData.summary.totalHostels} color="blue" />
-                <StatCard label="Total Beds" value={reportData.summary.totalBeds} color="purple" />
-                <StatCard label="Occupied" value={reportData.summary.totalOccupied} color="green" />
-                <StatCard label="Empty" value={reportData.summary.emptyBeds} color="yellow" />
-                <StatCard label="Occupancy Rate" value={`${reportData.summary.occupancyRate}%`} color="indigo" />
-              </div>
-
-              {showCharts && hostelView === 'hostels' && reportData.charts.hostelChart.length > 0 && (
-                <div className="no-print">
-                  <ChartCard title="Beds vs Occupied by Hostel" span>
-                    <BarChart data={reportData.charts.hostelChart}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" /><YAxis /><Tooltip /><Legend />
-                      <Bar dataKey="beds" fill="#94a3b8" name="Total Beds" />
-                      <Bar dataKey="occupied" fill="#4f46e5" name="Occupied" />
-                      <Bar dataKey="empty" fill="#10b981" name="Empty" />
-                    </BarChart>
-                  </ChartCard>
-                </div>
-              )}
-
-              {hostelView === 'hostels' && (
-                <div className="print-area" data-print-title="Hostel Report">
-                  <Card>
-                    <div className="flex justify-between items-center mb-3">
-                      <h3 className="font-semibold">Hostels ({reportData.rows.length})</h3>
-                      <ExportBtn onClick={() => exportCSV(reportData.rows, 'hostels.csv')} />
-                    </div>
-                    <TableWrap headers={['Hostel','Gender','Warden','Phone','Capacity','Beds','Occupied','Empty','Occupancy']}>
-                      {reportData.rows.map((r, i) => (
-                        <tr key={i} className="hover:bg-gray-50">
-                          <td className="px-3 py-2 font-medium">{r.hostel}</td>
-                          <td className="px-3 py-2">{r.gender}</td>
-                          <td className="px-3 py-2">{r.warden}</td>
-                          <td className="px-3 py-2 text-xs">{r.wardenPhone}</td>
-                          <td className="px-3 py-2">{r.capacity}</td>
-                          <td className="px-3 py-2">{r.beds}</td>
-                          <td className="px-3 py-2 text-green-700">{r.occupied}</td>
-                          <td className="px-3 py-2 text-yellow-700">{r.empty}</td>
-                          <td className="px-3 py-2 font-bold">{r.occupancyRate}</td>
-                        </tr>
-                      ))}
-                    </TableWrap>
-                  </Card>
-                </div>
-              )}
-
-              {hostelView === 'students' && (
-                <div className="print-area" data-print-title="Students in Hostels">
-                  <Card>
-                    <div className="flex justify-between items-center mb-3">
-                      <h3 className="font-semibold">Students in Hostels ({reportData.studentRows.length})</h3>
-                      <ExportBtn onClick={() => exportCSV(reportData.studentRows, 'hostel_students.csv')} />
-                    </div>
-                    <TableWrap headers={['Student','Admission', entityColumnLabel,'Hostel','Gender','Room','Warden','Phone']}>
-                      {reportData.studentRows.map((r, i) => (
-                        <tr key={i} className="hover:bg-gray-50">
-                          <td className="px-3 py-2 font-medium">{r.student}</td>
-                          <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
-                          <td className="px-3 py-2 text-xs">{r.entity}</td>
-                          <td className="px-3 py-2">{r.hostel}</td>
-                          <td className="px-3 py-2">{r.hostelGender}</td>
-                          <td className="px-3 py-2 font-medium">{r.room}</td>
-                          <td className="px-3 py-2">{r.warden}</td>
-                          <td className="px-3 py-2 text-xs">{r.wardenPhone}</td>
-                        </tr>
-                      ))}
-                    </TableWrap>
-                  </Card>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ==================== TAB: LIBRARY ==================== */}
-      {activeTab === 'library' && (
-        <div className="space-y-6">
-          <Card className="no-print">
-            <div className="flex justify-between items-start flex-wrap gap-3 mb-4">
-              <h3 className="text-lg font-semibold">Library Report</h3>
-              <ModeToggle
-                value={libraryView}
-                onChange={setLibraryView}
-                options={[
-                  { value: 'books', label: 'Books', icon: 'fa-book' },
-                  { value: 'borrows', label: 'Borrowers', icon: 'fa-user-graduate' }
-                ]}
-              />
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <SearchableSelect label="Category" value={libraryCategory} onChange={(e) => setLibraryCategory(e.target.value)} options={[...new Set(books.map(b => b.category).filter(Boolean))].map(c => ({ value: c, label: c }))} placeholder="All categories" />
-            </div>
-            <div className="flex gap-2">
-              <button onClick={generateLibraryReport} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">Generate Report</button>
-            </div>
-          </Card>
-
-          {reportData?.type === 'library' && (
-            <>
-              <div className="grid grid-cols-2 md:grid-cols-6 gap-4 no-print">
-                <StatCard label="Total Titles" value={reportData.summary.totalTitles} color="blue" />
-                <StatCard label="Total Copies" value={reportData.summary.totalCopies} color="purple" />
-                <StatCard label="Available" value={reportData.summary.availableCopies} color="green" />
-                <StatCard label="Borrowed" value={reportData.summary.borrowedCopies} color="yellow" />
-                <StatCard label="Overdue" value={reportData.summary.overdueCount} color="red" />
-                <StatCard label="Fines" value={formatCurrency(reportData.summary.totalFines)} color="indigo" />
-              </div>
-
-              {libraryView === 'books' && (
-                <div className="print-area" data-print-title="Library Books Report">
-                  <Card>
-                    <div className="flex justify-between items-center mb-3">
-                      <h3 className="font-semibold">Books ({reportData.rows.length})</h3>
-                      <ExportBtn onClick={() => exportCSV(reportData.rows, 'library_books.csv')} />
-                    </div>
-                    <TableWrap headers={['Title','Author','ISBN','Category','Quantity','Available','Borrowed','Times Borrowed','Location']}>
-                      {reportData.rows.map((r, i) => (
-                        <tr key={i} className="hover:bg-gray-50">
-                          <td className="px-3 py-2 font-medium">{r.title}</td>
-                          <td className="px-3 py-2">{r.author}</td>
-                          <td className="px-3 py-2 font-mono text-xs">{r.isbn}</td>
-                          <td className="px-3 py-2">{r.category}</td>
-                          <td className="px-3 py-2">{r.quantity}</td>
-                          <td className="px-3 py-2 text-green-700">{r.available}</td>
-                          <td className="px-3 py-2 text-red-700">{r.borrowed}</td>
-                          <td className="px-3 py-2 font-bold">{r.timesBorrowed}</td>
-                          <td className="px-3 py-2 text-xs">{r.location}</td>
-                        </tr>
-                      ))}
-                    </TableWrap>
-                  </Card>
-                </div>
-              )}
-
-              {libraryView === 'borrows' && (
-                <div className="print-area" data-print-title="Library Borrowers Report">
-                  <Card>
-                    <div className="flex justify-between items-center mb-3">
-                      <h3 className="font-semibold">Borrowers ({reportData.borrowRows.length})</h3>
-                      <ExportBtn onClick={() => exportCSV(reportData.borrowRows, 'library_borrowers.csv')} />
-                    </div>
-                    <TableWrap headers={['Student','Admission', entityColumnLabel,'Book','Author','Borrowed','Due','Returned','Status','Days Overdue','Fine']}>
-                      {reportData.borrowRows.map((r, i) => (
-                        <tr key={i} className={`hover:bg-gray-50 ${r.daysOverdue > 0 ? 'bg-red-50' : ''}`}>
-                          <td className="px-3 py-2 font-medium">{r.student}</td>
-                          <td className="px-3 py-2 font-mono text-xs">{r.admissionNumber}</td>
-                          <td className="px-3 py-2 text-xs">{r.entity}</td>
-                          <td className="px-3 py-2">{r.book}</td>
-                          <td className="px-3 py-2 text-xs">{r.author}</td>
-                          <td className="px-3 py-2 text-xs">{r.borrowDate}</td>
-                          <td className="px-3 py-2 text-xs">{r.dueDate}</td>
-                          <td className="px-3 py-2 text-xs">{r.returnDate}</td>
-                          <td className="px-3 py-2">
-                            <span className={`px-2 py-0.5 rounded-full text-xs ${
-                              r.status === 'RETURNED' ? 'bg-green-100 text-green-800' :
-                              r.status === 'BORROWED' && r.daysOverdue > 0 ? 'bg-red-100 text-red-800' :
-                              r.status === 'BORROWED' ? 'bg-blue-100 text-blue-800' :
-                              'bg-gray-100 text-gray-700'
-                            }`}>{r.status}</span>
-                          </td>
-                          <td className="px-3 py-2 text-xs">{r.daysOverdue > 0 ? `${r.daysOverdue} days` : '—'}</td>
-                          <td className="px-3 py-2 font-bold text-red-700">{r.fine > 0 ? formatCurrency(r.fine) : '—'}</td>
-                        </tr>
-                      ))}
-                    </TableWrap>
-                  </Card>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
+      </div>
     </div>
   );
 };
-
 
 // ==================== EXAM CARD PRINT MODAL ====================
 const ExamCardPrintModal = ({ student, units, currentSchool, onClose }) => {
