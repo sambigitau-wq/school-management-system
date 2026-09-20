@@ -69890,6 +69890,7 @@ const fetchUser = async () => {
         fetchData('/exams', setExams, 'exams'),
         fetchData('/fees', setFees, 'fees'),
         fetchData('/staff', setStaff, 'staff'),
+          fetchData('/discounts', setDiscounts, 'discounts'),   
         fetchData('/books', setBooks, 'books'),
         fetchData('/vehicles', setVehicles, 'vehicles'),
         fetchData('/hostels', setHostels, 'hostels'),
