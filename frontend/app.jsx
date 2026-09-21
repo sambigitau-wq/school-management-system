@@ -52386,7 +52386,6 @@ const FeeCollectionModule = ({
   }, [feeStructure]);
 
   // ==================== DISCOUNT RESOLVER ====================
-  // Prefer API-fetched studentDiscounts (state), fall back to prop.
   const resolveDiscount = (fee, studentId) => {
     if (!fee || !studentId) return { amount: 0, source: null, kind: null };
 
@@ -52394,12 +52393,10 @@ const FeeCollectionModule = ({
       ? studentDiscounts
       : (discounts || []);
 
-    // 1. Per-fee discount
     const perFee = list.find(d =>
       d.studentId === studentId && d.feeId === fee.id && d.isActive !== false
     );
 
-    // 2. Student-wide discount
     const studentWide = !perFee
       ? list.find(d =>
           d.studentId === studentId &&
@@ -52417,7 +52414,6 @@ const FeeCollectionModule = ({
       return { amount, source: active, kind: perFee ? 'per-fee' : 'student-wide' };
     }
 
-    // 3. Fee-level default
     const feeAmount = parseFloat(fee.amount) || 0;
     if (parseFloat(fee.discountPercent) > 0) {
       return {
@@ -52451,7 +52447,6 @@ const FeeCollectionModule = ({
       if (!student) { setApiError('Student not found'); return; }
       setStudentDetails(student);
 
-      // Build fee filter
       let feeParams = {};
       if (isTVET && student.programId) feeParams.programId = student.programId;
       else if (isUniversity && student.courseId) feeParams.courseId = student.courseId;
@@ -52461,7 +52456,6 @@ const FeeCollectionModule = ({
       const studentFees = feesRes.data.fees || [];
       setFeeStructure(studentFees);
 
-      // Payments
       const payRes = await api.get('/payments', { params: { studentId: student.id } });
       const studentPayments = payRes.data.payments || [];
       const totalPaidAmount = studentPayments.reduce(
@@ -52469,7 +52463,6 @@ const FeeCollectionModule = ({
       );
       setTotalPaid(totalPaidAmount);
 
-      // ✅ Discounts — prefer API, fall back to prop
       let list = [];
       try {
         const dRes = await api.get('/discounts', { params: { studentId: student.id } });
@@ -52480,7 +52473,6 @@ const FeeCollectionModule = ({
       }
       setStudentDiscounts(list);
 
-      // Compute totals
       const grossFees = studentFees.reduce((s, f) => s + (parseFloat(f.amount) || 0), 0);
 
       let totalDiscountAmount = 0;
@@ -52518,7 +52510,7 @@ const FeeCollectionModule = ({
     }
   };
 
-  // ==================== SUBMIT PAYMENT ====================
+  // ==================== SUBMIT PAYMENT (uses api axios instance, not localhost) ====================
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!selectedStudent) { setApiError('Please select a student'); return; }
@@ -52544,16 +52536,9 @@ const FeeCollectionModule = ({
         admissionNumber: student?.admissionNumber || null
       };
 
-      const token = localStorage.getItem('token');
-      const res = await fetch('http://localhost:5000/api/payments', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(paymentData)
-      });
-      const data = await res.json();
+      // ✅ Uses shared `api` instance (respects base URL from config)
+      const res = await api.post('/payments', paymentData);
+      const data = res.data;
 
       if (data.success) {
         const receipt = {
@@ -52579,7 +52564,7 @@ const FeeCollectionModule = ({
       }
     } catch (err) {
       console.error('Error processing payment:', err);
-      setApiError(err.message || 'Failed to process payment');
+      setApiError(err.response?.data?.message || err.message || 'Failed to process payment');
     } finally {
       setLoading(false);
     }
@@ -53005,6 +52990,8 @@ const FeeCollectionModule = ({
     </div>
   );
 };
+
+
 
 
 const StudentArrivalModule = ({ 
