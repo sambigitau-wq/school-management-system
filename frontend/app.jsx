@@ -5253,9 +5253,9 @@ const StudentModule = ({
   // ==================================================================
   //  PERMISSIONS
   // ==================================================================
-  const canEdit = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER'].includes(user?.role);
-  const canDelete = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
-  const canAdd = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'CLASS_TEACHER'].includes(user?.role);
+  const canEdit = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER'].includes(user?.role);
+  const canDelete = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
+  const canAdd = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'CLASS_TEACHER'].includes(user?.role);
 
   const isStudent = user?.role === 'STUDENT';
   const isParent = user?.role === 'PARENT';
@@ -5272,6 +5272,33 @@ const StudentModule = ({
   const enableParentPortal =
     currentSchool?.enableParentPortal === true ||
     currentSchool?.settings?.enableParentPortal === true;
+
+  // ==================================================================
+  //  SENIOR SECONDARY — Form vs Grade detection
+  //  "Form 1".."Form 4"      → traditional grading (A, B+, B, ...)
+  //  "Grade 10".."Grade 12"  → CBC grading (EE, ME, AE, BE, NI)
+  // ==================================================================
+  const isCBCSeniorLevel = (levelName) => {
+    if (!levelName) return false;
+    const s = String(levelName).trim().toLowerCase();
+    return /^grade\s*1[0-2]$/.test(s);
+  };
+  const isFormLevel = (levelName) => {
+    if (!levelName) return false;
+    const s = String(levelName).trim().toLowerCase();
+    return /^form\s*[1-4]$/.test(s);
+  };
+  const resolveGradingFlavor = (category, levelHint) => {
+    if (category === 'COLLEGE_TVET') return 'TVET';
+    if (category === 'UNIVERSITY') return 'UNI';
+    if (category === 'ECDE_PRIMARY_JSS') return 'CBC';
+    if (category === 'SENIOR_SECONDARY') {
+      if (levelHint && isCBCSeniorLevel(levelHint)) return 'CBC';
+      if (levelHint && isFormLevel(levelHint)) return '844';
+      return '844';
+    }
+    return 'CBC';
+  };
 
   // ==================================================================
   //  STATE
@@ -5305,6 +5332,10 @@ const StudentModule = ({
 
   const [autoAdm, setAutoAdm] = useState(true);
   const [admPreview, setAdmPreview] = useState('');
+
+  // ✅ Password visibility toggles
+  const [showStudentPassword, setShowStudentPassword] = useState(false);
+  const [showParentPassword, setShowParentPassword] = useState(false);
 
   const [localForm, setLocalForm] = useState(() => emptyForm());
   const formState = form ?? localForm;
@@ -5345,7 +5376,14 @@ const StudentModule = ({
       boardingStatus: 'DAY',
       transportRouteId: '',
       medicalInfo: { bloodGroup: '', allergies: '', disabilities: '' },
-      studentLogin: { email: '', password: '', createAccount: false },
+
+      // ✅ STUDENT LOGIN — RESTORED
+      studentLogin: {
+        createAccount: false,
+        email: '',
+        password: ''
+      },
+
       parent: {
         firstName: '', middleName: '', lastName: '',
         email: '', phone: '',
@@ -5456,33 +5494,37 @@ const StudentModule = ({
   const moduleLevelOptions = ['Module 1', 'Module 2', 'Module 3', 'Module 4'];
 
   // ==================================================================
-  //  GRADE HELPERS
+  //  GRADE HELPERS — Empty marks never fabricate a grade
   // ==================================================================
-  const getGrade = (marks) => {
-    if (marks === null || marks === undefined || marks === '') return { grade: '-', points: 0 };
+  const getGrade = (marks, levelHint = null) => {
+    if (marks === null || marks === undefined || marks === '') return { grade: '', points: 0 };
     const n = Number(marks);
-    if (!Number.isFinite(n)) return { grade: '-', points: 0 };
-    if (isUniversity) {
-      if (n >= 70) return { grade: 'A', points: 5 };
-      if (n >= 60) return { grade: 'B', points: 4 };
-      if (n >= 50) return { grade: 'C', points: 3 };
-      if (n >= 40) return { grade: 'D', points: 2 };
-      return { grade: 'E', points: 1 };
+    if (!Number.isFinite(n)) return { grade: '', points: 0 };
+
+    const flavor = resolveGradingFlavor(schoolCategory, levelHint);
+
+    if (flavor === 'UNI') {
+      if (n >= 70) return { grade: 'A', points: 5.0 };
+      if (n >= 60) return { grade: 'B', points: 4.0 };
+      if (n >= 50) return { grade: 'C', points: 3.0 };
+      if (n >= 40) return { grade: 'D', points: 2.0 };
+      return { grade: 'E', points: 1.0 };
     }
-    if (isTVET) {
+    if (flavor === 'TVET') {
       if (n >= 80) return { grade: 'DISTINCTION', points: 5 };
       if (n >= 65) return { grade: 'CREDIT', points: 4 };
       if (n >= 50) return { grade: 'MERIT', points: 3 };
       if (n >= 40) return { grade: 'PASS', points: 2 };
       return { grade: 'FAIL', points: 1 };
     }
-    if (isPrimary) {
+    if (flavor === 'CBC') {
       if (n >= 80) return { grade: 'Exceeding Expectations', points: 4 };
       if (n >= 65) return { grade: 'Meeting Expectations', points: 3 };
       if (n >= 50) return { grade: 'Approaching Expectations', points: 2 };
       if (n >= 30) return { grade: 'Below Expectations', points: 1 };
       return { grade: 'Needs Improvement', points: 0 };
     }
+    // 844 (Form 1–4)
     if (n >= 80) return { grade: 'A', points: 12 };
     if (n >= 75) return { grade: 'A-', points: 11 };
     if (n >= 70) return { grade: 'B+', points: 10 };
@@ -5498,12 +5540,29 @@ const StudentModule = ({
   };
 
   const getGradeColor = (grade) => {
-    if (!grade) return 'bg-gray-100 text-gray-800';
-    if (['A', 'A-', 'Exceeding Expectations', 'DISTINCTION'].includes(grade)) return 'bg-green-100 text-green-800';
-    if (['B+', 'B', 'B-', 'Meeting Expectations', 'CREDIT'].includes(grade)) return 'bg-blue-100 text-blue-800';
-    if (['C+', 'C', 'C-', 'Approaching Expectations', 'MERIT'].includes(grade)) return 'bg-yellow-100 text-yellow-800';
-    if (['D+', 'D', 'D-', 'Below Expectations', 'PASS'].includes(grade)) return 'bg-orange-100 text-orange-800';
-    if (['E', 'Needs Improvement', 'FAIL'].includes(grade)) return 'bg-red-100 text-red-800';
+    if (!grade || grade === '') return 'bg-gray-100 text-gray-500';
+
+    // TVET
+    if (grade === 'DISTINCTION') return 'bg-green-100 text-green-800';
+    if (grade === 'CREDIT') return 'bg-blue-100 text-blue-800';
+    if (grade === 'MERIT') return 'bg-yellow-100 text-yellow-800';
+    if (grade === 'PASS') return 'bg-orange-100 text-orange-800';
+    if (grade === 'FAIL') return 'bg-red-100 text-red-800';
+
+    // CBC
+    if (grade === 'Exceeding Expectations') return 'bg-green-100 text-green-800';
+    if (grade === 'Meeting Expectations') return 'bg-blue-100 text-blue-800';
+    if (grade === 'Approaching Expectations') return 'bg-yellow-100 text-yellow-800';
+    if (grade === 'Below Expectations') return 'bg-orange-100 text-orange-800';
+    if (grade === 'Needs Improvement') return 'bg-red-100 text-red-800';
+
+    // Letters
+    if (['A', 'A-'].includes(grade)) return 'bg-green-100 text-green-800';
+    if (['B+', 'B', 'B-'].includes(grade)) return 'bg-blue-100 text-blue-800';
+    if (['C+', 'C', 'C-'].includes(grade)) return 'bg-yellow-100 text-yellow-800';
+    if (['D+', 'D', 'D-'].includes(grade)) return 'bg-orange-100 text-orange-800';
+    if (grade === 'E') return 'bg-red-100 text-red-800';
+
     return 'bg-gray-100 text-gray-800';
   };
 
@@ -5519,6 +5578,21 @@ const StudentModule = ({
     uuidFields.forEach(f => { if (prepared[f] === '') prepared[f] = null; });
     numericFields.forEach(f => { prepared[f] = toNumberOrNull(prepared[f]); });
 
+    // ✅ Student login block
+    if (prepared.studentLogin && typeof prepared.studentLogin === 'object') {
+      const sl = { ...prepared.studentLogin };
+      if (!sl.createAccount) {
+        prepared.studentLogin = { createAccount: false, email: '', password: '' };
+      } else {
+        prepared.studentLogin = {
+          createAccount: true,
+          email: (sl.email || '').trim(),
+          password: sl.password || ''
+        };
+      }
+    }
+
+    // Parent block
     if (prepared.parent && typeof prepared.parent === 'object') {
       const parent = { ...prepared.parent };
       parent.monthlyIncome = toNumberOrNull(parent.monthlyIncome);
@@ -5597,6 +5671,8 @@ const StudentModule = ({
     setFormState(emptyForm());
     setAutoAdm(true);
     setSubmitError('');
+    setShowStudentPassword(false);
+    setShowParentPassword(false);
     setShowForm(true);
     setTimeout(() => document.getElementById('student-form')?.scrollIntoView({ behavior: 'smooth' }), 100);
   };
@@ -5607,6 +5683,8 @@ const StudentModule = ({
     setEditingId(student.id);
     setAutoAdm(false);
     setSubmitError('');
+    setShowStudentPassword(false);
+    setShowParentPassword(false);
     setFormState({
       admissionNumber: student.admissionNumber || '',
       firstName: student.firstName || '',
@@ -5632,7 +5710,7 @@ const StudentModule = ({
       boardingStatus: student.boardingStatus || 'DAY',
       transportRouteId: student.transportRouteId || '',
       medicalInfo: student.medicalInfo || { bloodGroup: '', allergies: '', disabilities: '' },
-      studentLogin: { email: '', password: '', createAccount: false },
+      studentLogin: { createAccount: false, email: '', password: '' },
       parent: {
         firstName: '', middleName: '', lastName: '',
         email: '', phone: '',
@@ -5653,6 +5731,8 @@ const StudentModule = ({
     setEditingId(null);
     setAutoAdm(true);
     setSubmitError('');
+    setShowStudentPassword(false);
+    setShowParentPassword(false);
     setFormState(emptyForm());
   };
 
@@ -5673,6 +5753,19 @@ const StudentModule = ({
     if (isUniversity && !f.courseId) { setSubmitError('Please select a course.'); return; }
     if (isTVET && !f.programId) { setSubmitError('Please select a program.'); return; }
     if (!isUniversity && !isTVET && !f.classId) { setSubmitError('Please select a class.'); return; }
+
+    // ✅ Validate student login block if enabled
+    if (f.studentLogin?.createAccount) {
+      if (!f.studentLogin.email?.trim()) {
+        setSubmitError('Student login email is required.'); return;
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.studentLogin.email.trim())) {
+        setSubmitError('Student login email is not valid.'); return;
+      }
+      if (!f.studentLogin.password || f.studentLogin.password.length < 6) {
+        setSubmitError('Student login password must be at least 6 characters.'); return;
+      }
+    }
 
     const p = f.parent || {};
     if (!p.useExisting) {
@@ -5808,6 +5901,7 @@ const StudentModule = ({
     });
     setCreateNewParent(true);
     setSelectedExistingParent(null);
+    setShowParentPassword(false);
     setShowAddParentModal(true);
   };
 
@@ -6289,6 +6383,89 @@ const StudentModule = ({
               </div>
             </div>
 
+            {/* ✅ STUDENT LOGIN — RESTORED */}
+            {!editingId && (
+              <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
+                <h4 className="font-medium text-blue-700 mb-3 flex items-center gap-2">
+                  <i className="fas fa-user-shield" />
+                  Student Portal Access
+                </h4>
+
+                <label className="flex items-start cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-1 mr-2"
+                    checked={!!formState.studentLogin?.createAccount}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setFormState({
+                        ...formState,
+                        studentLogin: {
+                          createAccount: checked,
+                          email: checked ? (formState.studentLogin?.email || formState.email || '') : '',
+                          password: checked ? (formState.studentLogin?.password || '') : ''
+                        }
+                      });
+                      if (!checked) setShowStudentPassword(false);
+                    }}
+                  />
+                  <span className="text-sm">
+                    <span className="font-medium">Create student login account</span>
+                    <span className="block text-xs text-gray-500 mt-0.5">
+                      Optional. If enabled, the student can log in to view their own results, attendance, and fees.
+                    </span>
+                  </span>
+                </label>
+
+                {formState.studentLogin?.createAccount && (
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <TextInput
+                      label="Student Login Email *"
+                      type="email"
+                      value={formState.studentLogin?.email || ''}
+                      onChange={(e) => setFormState({
+                        ...formState,
+                        studentLogin: { ...formState.studentLogin, email: e.target.value }
+                      })}
+                      placeholder="student@example.com"
+                      required
+                    />
+
+                    {/* ✅ Password with eye toggle */}
+                    <div className="relative">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Student Login Password <span className="text-red-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={showStudentPassword ? 'text' : 'password'}
+                          value={formState.studentLogin?.password || ''}
+                          onChange={(e) => setFormState({
+                            ...formState,
+                            studentLogin: { ...formState.studentLogin, password: e.target.value }
+                          })}
+                          placeholder="Minimum 6 characters"
+                          className="w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
+                          required
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowStudentPassword(v => !v)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                          title={showStudentPassword ? 'Hide password' : 'Show password'}
+                        >
+                          <i className={`fas fa-${showStudentPassword ? 'eye-slash' : 'eye'}`} />
+                        </button>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        At least 6 characters. The student will use this with the email above to log in.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Guardian */}
             {!editingId && (
               <div className="bg-gray-50 p-4 rounded-lg border border-indigo-100">
@@ -6354,14 +6531,18 @@ const StudentModule = ({
                     <label className="flex items-start cursor-pointer">
                       <input type="checkbox" className="mt-1 mr-2"
                         checked={!!formState.parent?.grantPortalAccess}
-                        onChange={(e) => setFormState({
-                          ...formState,
-                          parent: {
-                            ...formState.parent,
-                            grantPortalAccess: e.target.checked,
-                            password: e.target.checked ? (formState.parent?.password || '') : ''
-                          }
-                        })} />
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setFormState({
+                            ...formState,
+                            parent: {
+                              ...formState.parent,
+                              grantPortalAccess: checked,
+                              password: checked ? (formState.parent?.password || '') : ''
+                            }
+                          });
+                          if (!checked) setShowParentPassword(false);
+                        }} />
                       <span className="text-sm">
                         <span className="font-medium">Grant portal access</span>
                         <span className="block text-xs text-gray-500 mt-0.5">
@@ -6371,13 +6552,30 @@ const StudentModule = ({
                     </label>
 
                     {formState.parent?.grantPortalAccess && (
-                      <TextInput
-                        label="Portal Password *"
-                        type="password"
-                        value={formState.parent?.password || ''}
-                        onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, password: e.target.value } })}
-                        required
-                      />
+                      /* ✅ Parent password with eye toggle */
+                      <div className="relative max-w-md">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Portal Password <span className="text-red-500">*</span>
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showParentPassword ? 'text' : 'password'}
+                            value={formState.parent?.password || ''}
+                            onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, password: e.target.value } })}
+                            placeholder="Minimum 6 characters"
+                            className="w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
+                            required
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowParentPassword(v => !v)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                            title={showParentPassword ? 'Hide password' : 'Show password'}
+                          >
+                            <i className={`fas fa-${showParentPassword ? 'eye-slash' : 'eye'}`} />
+                          </button>
+                        </div>
+                      </div>
                     )}
                   </div>
                 )}
@@ -6617,14 +6815,17 @@ const StudentModule = ({
                       const item = isUniversity || isTVET
                         ? (units.find(u => u.id === r.unitId)?.name || '—')
                         : (subjects.find(s => s.id === r.subjectId)?.name || '—');
-                      const g = getGrade(r.marks);
+                      const levelHint = classes.find(c => c.id === studentDetails.classId)?.name || null;
+                      const g = getGrade(r.marks, levelHint);
                       return (
                         <tr key={r.id}>
                           <td className="px-4 py-2">{exam?.name || '—'}</td>
                           <td className="px-4 py-2">{item}</td>
                           <td className="px-4 py-2 font-bold">{r.marks ?? '—'}</td>
                           <td className="px-4 py-2">
-                            <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(r.grade || g.grade)}`}>{r.grade || g.grade}</span>
+                            <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(r.grade || g.grade)}`}>
+                              {r.marks === '' || r.marks === null ? '—' : (r.grade || g.grade)}
+                            </span>
                           </td>
                         </tr>
                       );
@@ -6813,7 +7014,11 @@ const StudentModule = ({
                 <label className="flex items-start cursor-pointer">
                   <input type="checkbox" className="mt-1 mr-2"
                          checked={parentForm.grantPortalAccess}
-                         onChange={(e) => setParentForm({ ...parentForm, grantPortalAccess: e.target.checked, password: e.target.checked ? parentForm.password : '' })} />
+                         onChange={(e) => {
+                           const checked = e.target.checked;
+                           setParentForm({ ...parentForm, grantPortalAccess: checked, password: checked ? parentForm.password : '' });
+                           if (!checked) setShowParentPassword(false);
+                         }} />
                   <span className="text-sm">
                     <span className="font-medium">Grant portal access</span>
                     <span className="block text-xs text-gray-500 mt-0.5">Requires email and password.</span>
@@ -6821,8 +7026,29 @@ const StudentModule = ({
                 </label>
 
                 {parentForm.grantPortalAccess && (
-                  <TextInput label="Portal Password *" type="password" value={parentForm.password}
-                             onChange={(e) => setParentForm({ ...parentForm, password: e.target.value })} required />
+                  /* ✅ Password with eye toggle */
+                  <div className="relative max-w-md">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Portal Password <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showParentPassword ? 'text' : 'password'}
+                        value={parentForm.password}
+                        onChange={(e) => setParentForm({ ...parentForm, password: e.target.value })}
+                        placeholder="Minimum 6 characters"
+                        className="w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowParentPassword(v => !v)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                      >
+                        <i className={`fas fa-${showParentPassword ? 'eye-slash' : 'eye'}`} />
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             )}
@@ -10994,10 +11220,8 @@ const ResultsModule = ({
   admissionNumber: propAdmissionNumber 
 }) => {
   console.log('🎯 ResultsModule initialized');
-  console.log('📚 Programs received:', programs?.length);
   console.log('🏫 School category:', currentSchool?.category);
   console.log('👤 User role:', user?.role);
-  console.log('📝 propAdmissionNumber:', propAdmissionNumber);
 
   // ==================== SCHOOL TYPE DETECTION ====================
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
@@ -11006,6 +11230,37 @@ const ResultsModule = ({
   const isSecondary = schoolCategory === 'SENIOR_SECONDARY';
   const isPrimary = schoolCategory === 'ECDE_PRIMARY_JSS';
   const isRegularSchool = !isUniversity && !isTVET;
+
+  // ============================================================
+  //  SENIOR SECONDARY — determine Form vs Grade per class
+  //  "Form 1".."Form 4"      → KENYA_844 grading (A, B+, ...)
+  //  "Grade 10".."Grade 12"  → CBC grading (EE, ME, AE, BE, NI)
+  // ============================================================
+  const isCBCSeniorLevel = (levelName) => {
+    if (!levelName) return false;
+    const s = String(levelName).trim().toLowerCase();
+    return /^grade\s*1[0-2]$/.test(s);
+  };
+  const isFormLevel = (levelName) => {
+    if (!levelName) return false;
+    const s = String(levelName).trim().toLowerCase();
+    return /^form\s*[1-4]$/.test(s);
+  };
+
+  // Given a school category + optional level hint, return which
+  // grading flavor applies. Values: 'CBC' | '844' | 'TVET' | 'UNI' | 'CBC'
+  const resolveGradingFlavor = (category, levelHint) => {
+    if (category === 'COLLEGE_TVET') return 'TVET';
+    if (category === 'UNIVERSITY')    return 'UNI';
+    if (category === 'ECDE_PRIMARY_JSS') return 'CBC';
+    if (category === 'SENIOR_SECONDARY') {
+      if (levelHint && isCBCSeniorLevel(levelHint)) return 'CBC';
+      if (levelHint && isFormLevel(levelHint))     return '844';
+      // Default for Senior Secondary: traditional Form grading
+      return '844';
+    }
+    return 'CBC';
+  };
 
   // ==================== ROLE PERMISSIONS ====================
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
@@ -11035,16 +11290,10 @@ const ResultsModule = ({
   const canPrintAllResults = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || 
                              isSeniorTeacher || isClassTeacher || isDean || isHOD;
 
-  // ==================== FIXED SEARCHABLE SELECT COMPONENT ====================
+  // ==================== SEARCHABLE SELECT ====================
   const SearchableSelect = ({ 
-    label, 
-    value, 
-    onChange, 
-    options = [], 
-    placeholder = "Search...", 
-    disabled,
-    required,
-    className,
+    label, value, onChange, options = [], placeholder = "Search...", 
+    disabled, required, className,
     noOptionsMessage = "No results found",
     emptyMessage = "No options available"
   }) => {
@@ -11054,21 +11303,15 @@ const ResultsModule = ({
     const dropdownRef = useRef(null);
     
     const filteredOptions = useMemo(() => {
-      if (!options || options.length === 0) {
-        return [];
-      }
-      if (!search.trim()) {
-        return options;
-      }
+      if (!options || options.length === 0) return [];
+      if (!search.trim()) return options;
       const searchLower = search.toLowerCase();
       return options.filter(opt => {
         if (!opt) return false;
         const label = opt.label?.toLowerCase() || '';
         const subLabel = opt.subLabel?.toLowerCase() || '';
         const valueStr = opt.value?.toString().toLowerCase() || '';
-        return label.includes(searchLower) || 
-               subLabel.includes(searchLower) || 
-               valueStr.includes(searchLower);
+        return label.includes(searchLower) || subLabel.includes(searchLower) || valueStr.includes(searchLower);
       });
     }, [options, search]);
     
@@ -11090,9 +11333,7 @@ const ResultsModule = ({
     }, []);
 
     useEffect(() => {
-      if (!isOpen) {
-        setSearch('');
-      }
+      if (!isOpen) setSearch('');
     }, [isOpen]);
     
     const handleSelect = (selectedValue) => {
@@ -11107,19 +11348,14 @@ const ResultsModule = ({
       setSearch(newValue);
       setIsOpen(true);
       setIsFocused(true);
-      
-      if (newValue === '') {
-        onChange({ target: { value: '' } });
-      }
+      if (newValue === '') onChange({ target: { value: '' } });
     };
     
     const handleFocus = () => {
       if (disabled) return;
       setIsFocused(true);
       setIsOpen(true);
-      if (selectedOption) {
-        setSearch(selectedOption.label);
-      }
+      if (selectedOption) setSearch(selectedOption.label);
     };
     
     const handleBlur = () => {
@@ -11127,9 +11363,7 @@ const ResultsModule = ({
         if (!dropdownRef.current?.contains(document.activeElement)) {
           setIsOpen(false);
           setIsFocused(false);
-          if (!selectedOption) {
-            setSearch('');
-          }
+          if (!selectedOption) setSearch('');
         }
       }, 200);
     };
@@ -11142,12 +11376,7 @@ const ResultsModule = ({
       setIsFocused(false);
     };
     
-    let displayValue = '';
-    if (isFocused) {
-      displayValue = search;
-    } else if (selectedOption) {
-      displayValue = selectedOption.label;
-    }
+    let displayValue = isFocused ? search : (selectedOption ? selectedOption.label : '');
     
     return (
       <div className="relative" ref={dropdownRef}>
@@ -11194,9 +11423,7 @@ const ResultsModule = ({
         {isOpen && !disabled && (
           <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
             {options && options.length === 0 ? (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {emptyMessage}
-              </div>
+              <div className="px-3 py-4 text-center text-gray-500 text-sm">{emptyMessage}</div>
             ) : filteredOptions.length > 0 ? (
               filteredOptions.map((opt) => (
                 <div
@@ -11205,16 +11432,10 @@ const ResultsModule = ({
                     opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
                   } ${opt.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                   onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    if (!opt.disabled) {
-                      handleSelect(opt.value);
-                    }
-                  }}
+                  onClick={() => { if (!opt.disabled) handleSelect(opt.value); }}
                 >
                   <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && (
-                    <div className="text-xs text-gray-500">{opt.subLabel}</div>
-                  )}
+                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
                 </div>
               ))
             ) : (
@@ -11255,19 +11476,16 @@ const ResultsModule = ({
   const [selectAllForMessage, setSelectAllForMessage] = useState(false);
   
   const [showPrintModal, setShowPrintModal] = useState(false);
-  const [printFormat, setPrintFormat] = useState('summary');
   const [selectedStudentForReport, setSelectedStudentForReport] = useState(null);
   const [studentReportData, setStudentReportData] = useState(null);
   const [allResultsPrintData, setAllResultsPrintData] = useState(null);
   const [showAllResultsPrintModal, setShowAllResultsPrintModal] = useState(false);
   
-  // Student/Parent states
   const [myResults, setMyResults] = useState([]);
   const [myStudentRecord, setMyStudentRecord] = useState(null);
   const [loadingMyData, setLoadingMyData] = useState(false);
   const [showAdmissionModal, setShowAdmissionModal] = useState(false);
   const [admissionNumber, setAdmissionNumber] = useState(propAdmissionNumber || '');
-  const [admissionMessage, setAdmissionMessage] = useState('');
   const [showStudentPrintModal, setShowStudentPrintModal] = useState(false);
   const [apiError, setApiError] = useState('');
   const [myResultsSummary, setMyResultsSummary] = useState(null);
@@ -11276,382 +11494,352 @@ const ResultsModule = ({
   const [selectedChild, setSelectedChild] = useState(null);
   const [childResults, setChildResults] = useState([]);
   const [loadingChildren, setLoadingChildren] = useState(false);
-  const [studentIdMapping, setStudentIdMapping] = useState({});
 
-  // ==================== FIX: Prevent Infinite Loop ====================
   const hasLoadedStudentData = React.useRef(false);
   const hasLoadedChildrenData = React.useRef(false);
 
   // ==================== HELPER: RESOLVE STUDENT ID ====================
   const resolveStudentId = (id) => {
     if (!id) return null;
-    
-    if (students.some(s => s.id === id)) {
-      return id;
-    }
-    
-    const studentByUserId = students.find(s => s.userId === id);
-    if (studentByUserId) {
-      return studentByUserId.id;
-    }
-    
-    const studentByAdmission = students.find(s => s.admissionNumber === id);
-    if (studentByAdmission) {
-      return studentByAdmission.id;
-    }
-    
-    const studentByEmail = students.find(s => s.email === id);
-    if (studentByEmail) {
-      return studentByEmail.id;
-    }
-    
+    if (students.some(s => s.id === id)) return id;
+    const byUser = students.find(s => s.userId === id);
+    if (byUser) return byUser.id;
+    const byAdm = students.find(s => s.admissionNumber === id);
+    if (byAdm) return byAdm.id;
     return null;
   };
 
-  // ==================== HELPER: BUILD STUDENT ID MAP ====================
-  const buildStudentIdMap = (studentIds) => {
-    const map = {};
-    for (const id of studentIds) {
-      const resolved = resolveStudentId(id);
-      if (resolved) {
-        map[id] = resolved;
-      }
+  // ============================================================
+  //  ✅ GRADE FUNCTIONS
+  //  Empty marks → blank grade (NEVER "Not Yet Competent" / "FAIL")
+  //  Uses `levelHint` (class name) to pick the correct scale.
+  // ============================================================
+  const calculateGrade = (marks, maxMarks = 100, examCategory = null, levelHint = null) => {
+    // ✅ Distinguish empty from 0
+    if (marks === '' || marks === null || marks === undefined) {
+      return { grade: '', points: 0, remark: '' };
     }
-    return map;
-  };
 
-  // ==================== GRADE FUNCTIONS ====================
-  const calculateGrade = (marks, maxMarks = 100, examCategory = null) => {
-    if (!marks && marks !== 0) return { grade: '-', points: 0, remark: '' };
-    const percentage = (marks / maxMarks) * 100;
-    const category = examCategory || schoolCategory;
-    
-    if (category === 'COLLEGE_TVET') {
-      if (percentage >= 80) return { grade: 'DISTINCTION', points: 5, remark: 'Excellent' };
-      if (percentage >= 65) return { grade: 'CREDIT', points: 4, remark: 'Very Good' };
-      if (percentage >= 50) return { grade: 'MERIT', points: 3, remark: 'Good' };
-      if (percentage >= 40) return { grade: 'PASS', points: 2, remark: 'Satisfactory' };
-      return { grade: 'FAIL', points: 1, remark: 'Needs Improvement' };
+    const numericMarks = parseFloat(marks);
+    if (isNaN(numericMarks)) {
+      return { grade: '', points: 0, remark: '' };
     }
-    
-    if (category === 'UNIVERSITY') {
+
+    const percentage = maxMarks > 0 ? (numericMarks / maxMarks) * 100 : 0;
+    const category = examCategory || schoolCategory;
+    const flavor = resolveGradingFlavor(category, levelHint);
+
+    // ===== TVET — Traditional =====
+    if (flavor === 'TVET') {
+      if (percentage >= 80) return { grade: 'DISTINCTION', points: 5, remark: 'Excellent' };
+      if (percentage >= 65) return { grade: 'CREDIT',      points: 4, remark: 'Very Good' };
+      if (percentage >= 50) return { grade: 'MERIT',       points: 3, remark: 'Good' };
+      if (percentage >= 40) return { grade: 'PASS',        points: 2, remark: 'Satisfactory' };
+      return                     { grade: 'FAIL',          points: 1, remark: 'Needs Improvement' };
+    }
+
+    // ===== University — A / B / C / D / E only =====
+    if (flavor === 'UNI') {
       if (percentage >= 70) return { grade: 'A', points: 5.0, remark: 'Excellent' };
       if (percentage >= 60) return { grade: 'B', points: 4.0, remark: 'Very Good' };
       if (percentage >= 50) return { grade: 'C', points: 3.0, remark: 'Good' };
       if (percentage >= 40) return { grade: 'D', points: 2.0, remark: 'Fair' };
-      return { grade: 'E', points: 1.0, remark: 'Poor' };
+      return                     { grade: 'E', points: 1.0, remark: 'Poor' };
     }
-    
-    if (category === 'ECDE_PRIMARY_JSS') {
-      if (percentage >= 80) return { grade: 'Exceeding Expectations', points: 4, remark: 'Exceeding Expectations' };
-      if (percentage >= 65) return { grade: 'Meeting Expectations', points: 3, remark: 'Meeting Expectations' };
+
+    // ===== CBC — Primary, JSS, and Grade 10–12 =====
+    if (flavor === 'CBC') {
+      if (percentage >= 80) return { grade: 'Exceeding Expectations',   points: 4, remark: 'Exceeding Expectations' };
+      if (percentage >= 65) return { grade: 'Meeting Expectations',     points: 3, remark: 'Meeting Expectations' };
       if (percentage >= 50) return { grade: 'Approaching Expectations', points: 2, remark: 'Approaching Expectations' };
-      if (percentage >= 30) return { grade: 'Below Expectations', points: 1, remark: 'Below Expectations' };
-      return { grade: 'Needs Improvement', points: 0, remark: 'Needs Improvement' };
+      if (percentage >= 30) return { grade: 'Below Expectations',       points: 1, remark: 'Below Expectations' };
+      return                     { grade: 'Needs Improvement',         points: 0, remark: 'Needs Improvement' };
     }
-    
-    if (percentage >= 80) return { grade: 'A', points: 12, remark: 'Excellent' };
+
+    // ===== 8-4-4 / Form 1–4 (Traditional Senior Secondary) =====
+    if (percentage >= 80) return { grade: 'A',  points: 12, remark: 'Excellent' };
     if (percentage >= 75) return { grade: 'A-', points: 11, remark: 'Very Good' };
     if (percentage >= 70) return { grade: 'B+', points: 10, remark: 'Good' };
-    if (percentage >= 65) return { grade: 'B', points: 9, remark: 'Above Average' };
-    if (percentage >= 60) return { grade: 'B-', points: 8, remark: 'Average' };
-    if (percentage >= 55) return { grade: 'C+', points: 7, remark: 'Below Average' };
-    if (percentage >= 50) return { grade: 'C', points: 6, remark: 'Fair' };
-    if (percentage >= 45) return { grade: 'C-', points: 5, remark: 'Below Expectations' };
-    if (percentage >= 40) return { grade: 'D+', points: 4, remark: 'Needs Improvement' };
-    if (percentage >= 35) return { grade: 'D', points: 3, remark: 'Poor' };
-    if (percentage >= 30) return { grade: 'D-', points: 2, remark: 'Very Poor' };
-    return { grade: 'E', points: 1, remark: 'Needs Intervention' };
+    if (percentage >= 65) return { grade: 'B',  points: 9,  remark: 'Above Average' };
+    if (percentage >= 60) return { grade: 'B-', points: 8,  remark: 'Average' };
+    if (percentage >= 55) return { grade: 'C+', points: 7,  remark: 'Below Average' };
+    if (percentage >= 50) return { grade: 'C',  points: 6,  remark: 'Fair' };
+    if (percentage >= 45) return { grade: 'C-', points: 5,  remark: 'Below Expectations' };
+    if (percentage >= 40) return { grade: 'D+', points: 4,  remark: 'Needs Improvement' };
+    if (percentage >= 35) return { grade: 'D',  points: 3,  remark: 'Poor' };
+    if (percentage >= 30) return { grade: 'D-', points: 2,  remark: 'Very Poor' };
+    return                     { grade: 'E',  points: 1,  remark: 'Needs Intervention' };
   };
 
   const getGradeColor = (grade) => {
-    if (!grade) return 'bg-gray-100 text-gray-800';
-    
-    if (grade === 'DISTINCTION' || grade === 'A' || grade === 'Exceeding Expectations') 
-      return 'bg-green-100 text-green-800';
-    if (grade === 'CREDIT' || grade === 'B' || grade === 'Meeting Expectations') 
-      return 'bg-blue-100 text-blue-800';
-    if (grade === 'MERIT' || grade === 'C' || grade === 'Approaching Expectations') 
-      return 'bg-yellow-100 text-yellow-800';
-    if (grade === 'PASS' || grade === 'D' || grade === 'Below Expectations') 
-      return 'bg-orange-100 text-orange-800';
-    if (grade === 'FAIL' || grade === 'E' || grade === 'Needs Improvement') 
-      return 'bg-red-100 text-red-800';
-    
+    if (!grade || grade === '') return 'bg-gray-100 text-gray-500';
+
+    // TVET Traditional
+    if (grade === 'DISTINCTION') return 'bg-green-100 text-green-800';
+    if (grade === 'CREDIT')      return 'bg-blue-100 text-blue-800';
+    if (grade === 'MERIT')       return 'bg-yellow-100 text-yellow-800';
+    if (grade === 'PASS')        return 'bg-orange-100 text-orange-800';
+    if (grade === 'FAIL')        return 'bg-red-100 text-red-800';
+
+    // CBC
+    if (grade === 'Exceeding Expectations')   return 'bg-green-100 text-green-800';
+    if (grade === 'Meeting Expectations')     return 'bg-blue-100 text-blue-800';
+    if (grade === 'Approaching Expectations') return 'bg-yellow-100 text-yellow-800';
+    if (grade === 'Below Expectations')       return 'bg-orange-100 text-orange-800';
+    if (grade === 'Needs Improvement')        return 'bg-red-100 text-red-800';
+
+    // Letter grades (Form 1–4 / University)
+    if (['A', 'A-'].includes(grade)) return 'bg-green-100 text-green-800';
+    if (['B+', 'B', 'B-'].includes(grade)) return 'bg-blue-100 text-blue-800';
+    if (['C+', 'C', 'C-'].includes(grade)) return 'bg-yellow-100 text-yellow-800';
+    if (['D+', 'D', 'D-'].includes(grade)) return 'bg-orange-100 text-orange-800';
+    if (grade === 'E') return 'bg-red-100 text-red-800';
+
     return 'bg-gray-100 text-gray-800';
   };
 
-  const displayGrade = (grade) => {
-    if (!grade) return '-';
-    
-    if (isTVET) {
-      if (grade === 'Exceeding Expectations') return 'DISTINCTION';
-      if (grade === 'Meeting Expectations') return 'CREDIT';
-      if (grade === 'Approaching Expectations') return 'MERIT';
-      if (grade === 'Below Expectations') return 'PASS';
-      if (grade === 'Needs Improvement') return 'FAIL';
-      return grade;
-    }
-    
-    if (isUniversity) {
-      if (grade === 'Exceeding Expectations') return 'A';
-      if (grade === 'Meeting Expectations') return 'B';
-      if (grade === 'Approaching Expectations') return 'C';
-      if (grade === 'Below Expectations') return 'D';
-      if (grade === 'Needs Improvement') return 'E';
-      return grade;
-    }
-    
+  // ✅ FIXED: Never fabricate a grade for empty marks
+  const displayGrade = (grade, marks) => {
+    if (marks === '' || marks === null || marks === undefined) return '—';
+    if (!grade || grade === '') return '—';
     return grade;
   };
 
-  const calculateMeanGrade = (results) => {
-    if (!results || results.length === 0) return 'N/A';
-    
-    const avgPoints = results.reduce((sum, r) => sum + (r.points || 0), 0) / results.length;
-    
-    if (isTVET) {
+  const calculateMeanGrade = (results, levelHint = null) => {
+    const valid = (results || []).filter(r =>
+      r.marks !== '' && r.marks !== null && r.marks !== undefined && !isNaN(parseFloat(r.marks))
+    );
+    if (valid.length === 0) return 'N/A';
+
+    const avgPoints = valid.reduce((sum, r) => sum + (r.points || 0), 0) / valid.length;
+    const flavor = resolveGradingFlavor(schoolCategory, levelHint);
+
+    if (flavor === 'TVET') {
       if (avgPoints >= 4.5) return 'DISTINCTION';
       if (avgPoints >= 3.5) return 'CREDIT';
       if (avgPoints >= 2.5) return 'MERIT';
       if (avgPoints >= 1.5) return 'PASS';
       return 'FAIL';
     }
-    
-    if (isUniversity) {
+    if (flavor === 'UNI') {
       if (avgPoints >= 4.5) return 'A';
       if (avgPoints >= 3.5) return 'B';
       if (avgPoints >= 2.5) return 'C';
       if (avgPoints >= 1.5) return 'D';
       return 'E';
     }
-    
-    if (isSecondary) {
-      if (avgPoints >= 11.5) return 'A';
-      if (avgPoints >= 10.5) return 'A-';
-      if (avgPoints >= 9.5) return 'B+';
-      if (avgPoints >= 8.5) return 'B';
-      if (avgPoints >= 7.5) return 'B-';
-      if (avgPoints >= 6.5) return 'C+';
-      if (avgPoints >= 5.5) return 'C';
-      if (avgPoints >= 4.5) return 'C-';
-      if (avgPoints >= 3.5) return 'D+';
-      if (avgPoints >= 2.5) return 'D';
-      if (avgPoints >= 1.5) return 'D-';
-      return 'E';
+    if (flavor === 'CBC') {
+      if (avgPoints >= 3.5) return 'Exceeding Expectations';
+      if (avgPoints >= 2.5) return 'Meeting Expectations';
+      if (avgPoints >= 1.5) return 'Approaching Expectations';
+      if (avgPoints >= 0.5) return 'Below Expectations';
+      return 'Needs Improvement';
     }
-    
-    if (avgPoints >= 3.5) return 'Exceeding Expectations';
-    if (avgPoints >= 2.5) return 'Meeting Expectations';
-    if (avgPoints >= 1.5) return 'Approaching Expectations';
-    if (avgPoints >= 0.5) return 'Below Expectations';
-    return 'Needs Improvement';
+    // 844
+    if (avgPoints >= 11.5) return 'A';
+    if (avgPoints >= 10.5) return 'A-';
+    if (avgPoints >= 9.5)  return 'B+';
+    if (avgPoints >= 8.5)  return 'B';
+    if (avgPoints >= 7.5)  return 'B-';
+    if (avgPoints >= 6.5)  return 'C+';
+    if (avgPoints >= 5.5)  return 'C';
+    if (avgPoints >= 4.5)  return 'C-';
+    if (avgPoints >= 3.5)  return 'D+';
+    if (avgPoints >= 2.5)  return 'D';
+    if (avgPoints >= 1.5)  return 'D-';
+    return 'E';
   };
 
-  // ==================== HELPER FUNCTIONS ====================
+  // ==================== HELPER: GET ITEM NAME ====================
   const getItemName = (result, exam) => {
     if (isTVET || isUniversity) {
       if (result.unitId) {
-        const unit = units?.find(u => u.id === result.unitId);
-        if (unit?.name) return unit.name;
+        const u = units?.find(x => x.id === result.unitId);
+        if (u?.name) return u.name;
       }
       if (exam?.unitId) {
-        const unit = units?.find(u => u.id === exam.unitId);
-        if (unit?.name) return unit.name;
+        const u = units?.find(x => x.id === exam.unitId);
+        if (u?.name) return u.name;
       }
     } else {
       if (result.subjectId) {
-        const subject = subjects?.find(s => s.id === result.subjectId);
-        if (subject?.name) return subject.name;
+        const s = subjects?.find(x => x.id === result.subjectId);
+        if (s?.name) return s.name;
       }
       if (exam?.subjectId) {
-        const subject = subjects?.find(s => s.id === exam.subjectId);
-        if (subject?.name) return subject.name;
+        const s = subjects?.find(x => x.id === exam.subjectId);
+        if (s?.name) return s.name;
       }
     }
     return exam?.name || 'Unknown';
   };
 
-  // ==================== LOAD RESULTS WITH ADMISSION NUMBER ====================
+  // ==================== HELPER: GET LEVEL HINT FOR AN EXAM ====================
+  // The class name tells us whether to use CBC or 844 grading.
+  const getLevelHint = (exam, student, explicitClass = null) => {
+    // 1. Explicit class passed in (from admin view)
+    if (explicitClass) {
+      const cls = classes?.find(c => c.id === explicitClass);
+      if (cls?.name) return cls.name;
+    }
+    // 2. Student's class
+    if (student?.classId) {
+      const cls = classes?.find(c => c.id === student.classId);
+      if (cls?.name) return cls.name;
+    }
+    // 3. Exam's class
+    if (exam?.classId) {
+      const cls = classes?.find(c => c.id === exam.classId);
+      if (cls?.name) return cls.name;
+    }
+    // 4. Exam's attached class object
+    if (exam?.class?.name) return exam.class.name;
+    if (exam?.Class?.name) return exam.Class.name;
+    return null;
+  };
+
+  // ==================== LOAD RESULTS FOR STUDENT ====================
   const loadResultsWithAdmission = async (admNumber) => {
-    if (!admNumber) return;
+    if (!admNumber) return { enhancedResults: [], studentInfo: null };
     setLoadingMyData(true);
     setApiError('');
     try {
-      console.log('🔍 Loading results for admission:', admNumber);
-     const resultsRes = await api.get(`/results/by-admission/${encodeURIComponent(admNumber)}`);
-      const studentResults = resultsRes.data.results || [];
-      const studentInfo = resultsRes.data.student;
-      
+      const res = await api.get(`/results/by-admission/${encodeURIComponent(admNumber)}`);
+      const studentResults = res.data.results || [];
+      const studentInfo = res.data.student;
+
       const enhancedResults = studentResults.map(result => {
         const exam = exams?.find(e => e.id === result.examId);
-        const gradeInfo = calculateGrade(result.marks, exam?.maxMarks || 100, exam?.schoolCategory);
-        
+        const hasMarks = result.marks !== null && result.marks !== undefined && result.marks !== '';
+
+        // ✅ Resolve which grading scale applies for this specific result
+        const levelHint = getLevelHint(exam, studentInfo);
+
+        // ✅ ALWAYS recalculate from marks — never trust the stored grade
+        const gradeInfo = hasMarks
+          ? calculateGrade(
+              result.marks,
+              exam?.maxMarks || result.maxMarks || 100,
+              exam?.schoolCategory || schoolCategory,
+              levelHint
+            )
+          : { grade: '', points: 0 };
+
         return {
           ...result,
           grade: gradeInfo.grade,
           points: gradeInfo.points,
           displayGrade: gradeInfo.grade,
-          displayPoints: gradeInfo.points,
-          itemName: getItemName(result, exam)
+          itemName: getItemName(result, exam),
+          examName: result.examName || result.exam?.name || exam?.name || 'Unknown',
+          examDate: result.examDate || result.exam?.date || exam?.date,
+          levelHint
         };
       });
-      
+
       return { enhancedResults, studentInfo };
     } catch (error) {
       console.error('Error loading results:', error);
-      if (error.response?.status === 404) {
-        setApiError('No results found for this student');
-      } else {
-        setApiError('Failed to load results');
-      }
+      setApiError(error.response?.status === 404
+        ? 'No results found for this student'
+        : 'Failed to load results');
       return { enhancedResults: [], studentInfo: null };
     } finally {
       setLoadingMyData(false);
     }
   };
 
-  // ==================== FIXED STUDENT VIEW SETUP ====================
+  // ==================== SUMMARY / UNIT STATS BUILDERS ====================
+  const buildSummary = (enhancedResults) => {
+    const valid = enhancedResults.filter(r =>
+      r.marks !== '' && r.marks !== null && r.marks !== undefined && !isNaN(parseFloat(r.marks))
+    );
+    const totalPoints = valid.reduce((sum, r) => sum + (r.points || 0), 0);
+    const totalMarks  = valid.reduce((sum, r) => sum + (parseFloat(r.marks) || 0), 0);
+    const average = valid.length > 0 ? (totalMarks / valid.length).toFixed(2) : 0;
+
+    // Use the levelHint from the first result if available
+    const levelHint = enhancedResults[0]?.levelHint || null;
+
+    return {
+      total: valid.length,
+      totalRecords: enhancedResults.length,
+      average,
+      totalPoints,
+      meanGrade: calculateMeanGrade(enhancedResults, levelHint)
+    };
+  };
+
+  const buildUnitStats = (enhancedResults) => {
+    const stats = {};
+    enhancedResults.forEach(r => {
+      const key = r.itemName || 'Unknown';
+      if (!stats[key]) {
+        stats[key] = { name: key, marks: r.marks, grade: r.grade, points: r.points };
+      }
+    });
+    return stats;
+  };
+
+  // ==================== STUDENT VIEW SETUP ====================
   React.useEffect(() => {
     if (!isStudent) return;
     if (hasLoadedStudentData.current) return;
-    
-    const loadStudentData = async () => {
-      const storedAdmission = localStorage.getItem('studentAdmissionNumber');
-      const storedStudent = localStorage.getItem('studentData');
-      
-      if (storedAdmission && storedAdmission !== 'null') {
-        setAdmissionNumber(storedAdmission);
-        const { enhancedResults, studentInfo } = await loadResultsWithAdmission(storedAdmission);
-        
+
+    const run = async () => {
+      const stored = localStorage.getItem('studentAdmissionNumber');
+      if (stored && stored !== 'null') {
+        setAdmissionNumber(stored);
+        const { enhancedResults, studentInfo } = await loadResultsWithAdmission(stored);
         if (enhancedResults.length > 0 || studentInfo) {
           setMyResults(enhancedResults);
           setMyStudentRecord(studentInfo);
-          
-          const totalPoints = enhancedResults.reduce((sum, r) => sum + (r.points || 0), 0);
-          const totalMarks = enhancedResults.reduce((sum, r) => sum + (r.marks || 0), 0);
-          const average = enhancedResults.length > 0 ? (totalMarks / enhancedResults.length).toFixed(2) : 0;
-          
-          setMyResultsSummary({
-            total: enhancedResults.length,
-            average: average,
-            totalPoints: totalPoints,
-            meanGrade: calculateMeanGrade(enhancedResults)
-          });
-          
-          const unitStats = {};
-          enhancedResults.forEach(result => {
-            const unitName = result.itemName || (isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject');
-            if (!unitStats[unitName]) {
-              unitStats[unitName] = { 
-                name: unitName, 
-                marks: result.marks, 
-                grade: result.grade, 
-                points: result.points 
-              };
-            }
-          });
-          setMyUnitStats(unitStats);
+          setMyResultsSummary(buildSummary(enhancedResults));
+          setMyUnitStats(buildUnitStats(enhancedResults));
           setShowAdmissionModal(false);
           hasLoadedStudentData.current = true;
           return;
         }
       }
-      
+
       if (propAdmissionNumber && propAdmissionNumber !== 'null') {
         setAdmissionNumber(propAdmissionNumber);
         const { enhancedResults, studentInfo } = await loadResultsWithAdmission(propAdmissionNumber);
-        
         if (enhancedResults.length > 0 || studentInfo) {
           setMyResults(enhancedResults);
           setMyStudentRecord(studentInfo);
-          
-          const totalPoints = enhancedResults.reduce((sum, r) => sum + (r.points || 0), 0);
-          const totalMarks = enhancedResults.reduce((sum, r) => sum + (r.marks || 0), 0);
-          const average = enhancedResults.length > 0 ? (totalMarks / enhancedResults.length).toFixed(2) : 0;
-          
-          setMyResultsSummary({
-            total: enhancedResults.length,
-            average: average,
-            totalPoints: totalPoints,
-            meanGrade: calculateMeanGrade(enhancedResults)
-          });
-          
-          const unitStats = {};
-          enhancedResults.forEach(result => {
-            const unitName = result.itemName || (isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject');
-            if (!unitStats[unitName]) {
-              unitStats[unitName] = { 
-                name: unitName, 
-                marks: result.marks, 
-                grade: result.grade, 
-                points: result.points 
-              };
-            }
-          });
-          setMyUnitStats(unitStats);
+          setMyResultsSummary(buildSummary(enhancedResults));
+          setMyUnitStats(buildUnitStats(enhancedResults));
           setShowAdmissionModal(false);
           hasLoadedStudentData.current = true;
           return;
         }
       }
-      
+
       if (user?.id) {
         try {
-          const studentRes = await api.get(`/students/by-user/${user.id}`);
-          if (studentRes.data.student) {
-            const student = studentRes.data.student;
-            localStorage.setItem('studentAdmissionNumber', student.admissionNumber);
-            localStorage.setItem('studentData', JSON.stringify(student));
-            setAdmissionNumber(student.admissionNumber);
-            
-            const { enhancedResults, studentInfo } = await loadResultsWithAdmission(student.admissionNumber);
+          const r = await api.get(`/students/by-user/${user.id}`);
+          if (r.data.student) {
+            const s = r.data.student;
+            localStorage.setItem('studentAdmissionNumber', s.admissionNumber);
+            setAdmissionNumber(s.admissionNumber);
+            const { enhancedResults, studentInfo } = await loadResultsWithAdmission(s.admissionNumber);
             setMyResults(enhancedResults);
             setMyStudentRecord(studentInfo);
-            
-            const totalPoints = enhancedResults.reduce((sum, r) => sum + (r.points || 0), 0);
-            const totalMarks = enhancedResults.reduce((sum, r) => sum + (r.marks || 0), 0);
-            const average = enhancedResults.length > 0 ? (totalMarks / enhancedResults.length).toFixed(2) : 0;
-            
-            setMyResultsSummary({
-              total: enhancedResults.length,
-              average: average,
-              totalPoints: totalPoints,
-              meanGrade: calculateMeanGrade(enhancedResults)
-            });
-            
-            const unitStats = {};
-            enhancedResults.forEach(result => {
-              const unitName = result.itemName || (isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject');
-              if (!unitStats[unitName]) {
-                unitStats[unitName] = { 
-                  name: unitName, 
-                  marks: result.marks, 
-                  grade: result.grade, 
-                  points: result.points 
-                };
-              }
-            });
-            setMyUnitStats(unitStats);
+            setMyResultsSummary(buildSummary(enhancedResults));
+            setMyUnitStats(buildUnitStats(enhancedResults));
             setShowAdmissionModal(false);
             hasLoadedStudentData.current = true;
             return;
           }
-        } catch (err) {
-          console.log('No student found for user');
-        }
+        } catch (_) {}
       }
-      
+
       setShowAdmissionModal(true);
     };
-    
-    loadStudentData();
-    
-    return () => {
-      if (!isStudent) {
-        hasLoadedStudentData.current = false;
-      }
-    };
+
+    run();
+    return () => { if (!isStudent) hasLoadedStudentData.current = false; };
   }, [isStudent]);
 
   React.useEffect(() => {
@@ -11661,18 +11849,13 @@ const ResultsModule = ({
     }
   }, [propAdmissionNumber, isStudent]);
 
-  // ==================== FIXED PARENT VIEW SETUP ====================
+  // ==================== PARENT VIEW SETUP ====================
   React.useEffect(() => {
     if (isParent && !hasLoadedChildrenData.current) {
       loadMyChildren();
       hasLoadedChildrenData.current = true;
     }
-    
-    return () => {
-      if (!isParent) {
-        hasLoadedChildrenData.current = false;
-      }
-    };
+    return () => { if (!isParent) hasLoadedChildrenData.current = false; };
   }, [isParent]);
 
   const loadMyChildren = async () => {
@@ -11680,35 +11863,18 @@ const ResultsModule = ({
     setApiError('');
     try {
       const res = await api.get('/parents/me/children');
-      let childrenList = res.data.children || [];
-      
-      if (childrenList.length === 0 && user?.id) {
-        const parentsRes = await api.get(`/parents?userId=${user.id}`);
-        const parentRecords = parentsRes.data.parents || [];
-        
-        if (parentRecords.length > 0) {
-          const childrenPromises = parentRecords.map(async (record) => {
-            const studentRes = await api.get(`/students/${record.studentId}`);
-            return studentRes.data.student;
-          });
-          childrenList = await Promise.all(childrenPromises);
-        }
-      }
-      
-      const enhancedChildren = childrenList.map(child => ({
-        ...child,
-        programName: child.program?.name || programs?.find(p => p.id === child.programId)?.name || 'No Program',
-        moduleInfo: child.currentModule || (isTVET ? 'Module 1' : '')
+      const list = (res.data.children || []).map(c => ({
+        ...c,
+        programName: c.program?.name || programs?.find(p => p.id === c.programId)?.name || 'No Program',
+        moduleInfo: c.currentModule || (isTVET ? 'Module 1' : '')
       }));
-      
-      setMyChildren(enhancedChildren);
-      
-      if (enhancedChildren.length > 0) {
-        setSelectedChild(enhancedChildren[0]);
-        await loadChildResults(enhancedChildren[0].admissionNumber);
+      setMyChildren(list);
+      if (list.length > 0) {
+        setSelectedChild(list[0]);
+        await loadChildResults(list[0].admissionNumber);
       }
-    } catch (error) {
-      console.error('Error loading children:', error);
+    } catch (err) {
+      console.error('Error loading children:', err);
       setApiError('Failed to load your children');
     } finally {
       setLoadingChildren(false);
@@ -11717,169 +11883,72 @@ const ResultsModule = ({
 
   const loadChildResults = async (childAdmission) => {
     setLoadingMyData(true);
-    setApiError('');
     try {
       const { enhancedResults, studentInfo } = await loadResultsWithAdmission(childAdmission);
-      
       setChildResults(enhancedResults);
       setMyStudentRecord(studentInfo);
-      
-      const totalPoints = enhancedResults.reduce((sum, r) => sum + (r.points || 0), 0);
-      const totalMarks = enhancedResults.reduce((sum, r) => sum + (r.marks || 0), 0);
-      const average = enhancedResults.length > 0 ? (totalMarks / enhancedResults.length).toFixed(2) : 0;
-      
-      setMyResultsSummary({
-        total: enhancedResults.length,
-        average: average,
-        totalPoints: totalPoints,
-        meanGrade: calculateMeanGrade(enhancedResults)
-      });
-      
-      const unitStats = {};
-      enhancedResults.forEach(result => {
-        const unitName = result.itemName || (isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject');
-        if (!unitStats[unitName]) {
-          unitStats[unitName] = { 
-            name: unitName, 
-            marks: result.marks, 
-            grade: result.grade, 
-            points: result.points 
-          };
-        }
-      });
-      setMyUnitStats(unitStats);
-      
-    } catch (error) {
-      console.error('Error loading child results:', error);
-      if (error.response?.status === 404) {
-        setApiError('No results found for this student');
-      } else {
-        setApiError('Failed to load results');
-      }
+      setMyResultsSummary(buildSummary(enhancedResults));
+      setMyUnitStats(buildUnitStats(enhancedResults));
+    } catch (err) {
+      console.error('Error loading child results:', err);
     } finally {
       setLoadingMyData(false);
     }
   };
 
-  // ==================== STUDENT ADMISSION HANDLER ====================
+  // ==================== STUDENT ADMISSION SUBMIT ====================
   const handleAdmissionSubmit = async () => {
-    if (!admissionNumber) {
-      setApiError('Please enter your admission number');
-      return;
-    }
-    
+    if (!admissionNumber) { setApiError('Please enter your admission number'); return; }
     setLoadingMyData(true);
     setApiError('');
     try {
       const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(admissionNumber)}`);
-      
-      if (studentRes.data.student) {
-        const student = studentRes.data.student;
-        
-        localStorage.setItem('studentAdmissionNumber', admissionNumber);
-        localStorage.setItem('studentData', JSON.stringify(student));
-        
-        if (user?.id && !student.userId) {
-          try {
-            await api.patch(`/students/${student.id}`, { userId: user.id });
-          } catch (err) {
-            console.error('Error linking student:', err);
-          }
-        }
-        
-        const { enhancedResults, studentInfo } = await loadResultsWithAdmission(admissionNumber);
-        
-        setMyResults(enhancedResults);
-        setMyStudentRecord(studentInfo);
-        
-        const totalPoints = enhancedResults.reduce((sum, r) => sum + (r.points || 0), 0);
-        const totalMarks = enhancedResults.reduce((sum, r) => sum + (r.marks || 0), 0);
-        const average = enhancedResults.length > 0 ? (totalMarks / enhancedResults.length).toFixed(2) : 0;
-        
-        setMyResultsSummary({
-          total: enhancedResults.length,
-          average: average,
-          totalPoints: totalPoints,
-          meanGrade: calculateMeanGrade(enhancedResults)
-        });
-        
-        const unitStats = {};
-        enhancedResults.forEach(result => {
-          const unitName = result.itemName || (isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject');
-          if (!unitStats[unitName]) {
-            unitStats[unitName] = { 
-              name: unitName, 
-              marks: result.marks, 
-              grade: result.grade, 
-              points: result.points 
-            };
-          }
-        });
-        setMyUnitStats(unitStats);
-        
-        setShowAdmissionModal(false);
-        hasLoadedStudentData.current = true;
-      } else {
+      if (!studentRes.data.student) {
         setApiError('Student not found. Please check your admission number.');
+        return;
       }
-    } catch (error) {
-      console.error('Error checking admission:', error);
+      const student = studentRes.data.student;
+      localStorage.setItem('studentAdmissionNumber', admissionNumber);
+
+      if (user?.id && !student.userId) {
+        try { await api.patch(`/students/${student.id}`, { userId: user.id }); } catch (_) {}
+      }
+
+      const { enhancedResults, studentInfo } = await loadResultsWithAdmission(admissionNumber);
+      setMyResults(enhancedResults);
+      setMyStudentRecord(studentInfo || student);
+      setMyResultsSummary(buildSummary(enhancedResults));
+      setMyUnitStats(buildUnitStats(enhancedResults));
+      setShowAdmissionModal(false);
+      hasLoadedStudentData.current = true;
+    } catch (err) {
       setApiError('Student not found. Please check your admission number.');
     } finally {
       setLoadingMyData(false);
     }
   };
 
-  // ==================== GET OPTIONS (Admin View) ====================
-  const getProgramOptions = () => {
-    if (!programs || programs.length === 0) return [];
-    return programs.map(p => ({ value: p.id, label: p.name, subLabel: p.code || '' }));
-  };
+  // ==================== OPTIONS ====================
+  const getProgramOptions = () => (programs || []).map(p => ({ value: p.id, label: p.name, subLabel: p.code || '' }));
+  const getCourseOptions  = () => (courses  || []).map(c => ({ value: c.id, label: c.name, subLabel: c.code || '' }));
+  const getClassOptions   = () => (classes  || []).map(c => ({ value: c.id, label: c.name, subLabel: `Capacity: ${c.capacity || 'N/A'}` }));
+  const getSubjectOptions = () => (filteredSubjects || []).map(s => ({ value: s.id, label: s.name, subLabel: `Code: ${s.code || ''}` }));
+  const getUnitOptions    = () => (filteredUnits || []).map(u => ({
+    value: u.id, label: u.name,
+    subLabel: isUniversity ? `Semester: ${u.semester || 'N/A'}` : `Module: ${u.module || 'N/A'}`
+  }));
+  const getExamOptions    = () => (filteredExams || []).map(e => ({
+    value: e.id, label: e.name,
+    subLabel: `Date: ${new Date(e.date).toLocaleDateString()}`
+  }));
 
-  const getCourseOptions = () => {
-    if (!courses || courses.length === 0) return [];
-    return courses.map(c => ({ value: c.id, label: c.name, subLabel: c.code || '' }));
-  };
-
-  const getClassOptions = () => {
-    if (!classes || classes.length === 0) return [];
-    return classes.map(c => ({ value: c.id, label: c.name, subLabel: `Capacity: ${c.capacity || 'N/A'}` }));
-  };
-
-  const getSubjectOptions = () => {
-    if (!filteredSubjects || filteredSubjects.length === 0) return [];
-    return filteredSubjects.map(s => ({ value: s.id, label: s.name, subLabel: `Code: ${s.code || ''}` }));
-  };
-
-  const getUnitOptions = () => {
-    if (!filteredUnits || filteredUnits.length === 0) return [];
-    return filteredUnits.map(u => ({ 
-      value: u.id, 
-      label: u.name, 
-      subLabel: isUniversity ? `Semester: ${u.semester || 'N/A'}` : `Module: ${u.module || 'N/A'}`
-    }));
-  };
-
-  const getExamOptions = () => {
-    if (!filteredExams || filteredExams.length === 0) return [];
-    return filteredExams.map(e => ({ 
-      value: e.id, 
-      label: e.name, 
-      subLabel: `Date: ${new Date(e.date).toLocaleDateString()}`
-    }));
-  };
-
-  // ==================== FILTERS (Admin View) ====================
+  // ==================== FILTERS ====================
   React.useEffect(() => {
     if (isUniversity && selectedCourse && units) {
       setFilteredUnits(units.filter(u => u.courseId === selectedCourse));
     } else if (isTVET && selectedProgram && units) {
       const programUnits = units.filter(u => u.programId === selectedProgram);
-      if (selectedModule) {
-        setFilteredUnits(programUnits.filter(u => u.module === parseInt(selectedModule)));
-      } else {
-        setFilteredUnits(programUnits);
-      }
+      setFilteredUnits(selectedModule ? programUnits.filter(u => u.module === parseInt(selectedModule)) : programUnits);
     } else {
       setFilteredUnits([]);
     }
@@ -11895,28 +11964,24 @@ const ResultsModule = ({
 
   const filteredExams = React.useMemo(() => {
     let filtered = exams || [];
-    
     if (isUniversity) {
       if (selectedCourse) filtered = filtered.filter(e => e.courseId === selectedCourse);
       if (selectedYear) filtered = filtered.filter(e => e.year === parseInt(selectedYear));
       if (selectedSemester) filtered = filtered.filter(e => e.semester === parseInt(selectedSemester));
       if (selectedUnit) filtered = filtered.filter(e => e.unitId === selectedUnit);
-    } 
-    else if (isTVET) {
+    } else if (isTVET) {
       if (selectedProgram) filtered = filtered.filter(e => e.programId === selectedProgram);
       if (selectedYear) filtered = filtered.filter(e => e.year === parseInt(selectedYear));
       if (selectedModule) filtered = filtered.filter(e => e.module === parseInt(selectedModule));
       if (selectedUnit) filtered = filtered.filter(e => e.unitId === selectedUnit);
-    } 
-    else {
+    } else {
       if (selectedClass) filtered = filtered.filter(e => e.classId === selectedClass);
       if (selectedSubject) filtered = filtered.filter(e => e.subjectId === selectedSubject);
     }
-    
     return filtered;
   }, [exams, selectedCourse, selectedProgram, selectedYear, selectedSemester, selectedModule, selectedUnit, selectedClass, selectedSubject, isUniversity, isTVET]);
 
-  // ==================== FIXED: LOAD EXAM RESULTS (Admin) ====================
+  // ==================== LOAD EXAM RESULTS (ADMIN) ====================
   const loadExamResults = async () => {
     if (!selectedExam) { alert('Please select an exam'); return; }
     if (!canViewAllResults) { alert('You do not have permission to view results'); return; }
@@ -11925,39 +11990,29 @@ const ResultsModule = ({
     try {
       const exam = exams.find(e => e.id === selectedExam);
       if (!exam) { alert('Exam not found'); return; }
-      
+
+      // Determine which grading scale applies for this exam
+      const examLevelHint = getLevelHint(exam, null, exam.classId || selectedClass);
+      const examFlavor = resolveGradingFlavor(schoolCategory, examLevelHint);
+
+      // ---- Gather students ----
       let studentList = [];
-      
       const selectedStudentIds = exam.selectedStudents || [];
-      console.log('🔍 Exam selectedStudents:', selectedStudentIds);
-      
+
       if (selectedStudentIds.length > 0) {
         const resolvedIds = [];
-        const notFoundIds = [];
-        
         for (const id of selectedStudentIds) {
           const resolved = resolveStudentId(id);
-          if (resolved) {
-            resolvedIds.push(resolved);
-          } else {
-            notFoundIds.push(id);
-          }
+          if (resolved) resolvedIds.push(resolved);
         }
-        
-        console.log(`✅ Resolved ${resolvedIds.length} IDs, ${notFoundIds.length} not found`);
-        
         if (resolvedIds.length > 0) {
-          const studentsRes = await api.get('/students', { 
-            params: { ids: resolvedIds.join(',') } 
-          });
+          const studentsRes = await api.get('/students', { params: { ids: resolvedIds.join(',') } });
           studentList = studentsRes.data.students || [];
-          console.log(`📋 Found ${studentList.length} students from resolved IDs`);
         }
       }
-      
+
       if (studentList.length === 0) {
         let params = {};
-        
         if (isUniversity && exam.courseId) {
           params.courseId = exam.courseId;
           if (exam.year) params.year = exam.year;
@@ -11968,55 +12023,60 @@ const ResultsModule = ({
         } else if (exam.classId) {
           params.classId = exam.classId;
         }
-        
         if (Object.keys(params).length > 0) {
           const res = await api.get('/students', { params });
           studentList = res.data.students || [];
-          console.log(`📋 Found ${studentList.length} students from class/course/program`);
         }
       }
-      
+
       studentList = studentList.filter(s => s.schoolId === currentSchool?.id);
-      console.log(`📋 Final student list: ${studentList.length} students`);
-      
+
       if (studentList.length === 0) {
         alert('No students found for this exam. Please ensure students are assigned to this exam.');
         setLoading(false);
         return;
       }
-      
+
+      // ---- Fetch existing results ----
       let existingResults = [];
       try {
         const res = await api.get(`/results/exam/${selectedExam}`);
         existingResults = res.data.results || [];
-      } catch (err) { console.log('No existing results'); }
-      
+      } catch (_) { /* no existing */ }
+
       const itemName = getItemName({}, exam);
-      
+
       const parentsByStudent = {};
       parents?.forEach(p => {
         if (!parentsByStudent[p.studentId]) parentsByStudent[p.studentId] = [];
         parentsByStudent[p.studentId].push(p);
       });
-      
+
       const entries = studentList.map(student => {
         const existing = existingResults.find(r => r.studentId === student.id);
-        const marks = existing?.marks || '';
-        const gradeInfo = marks ? calculateGrade(marks, exam.maxMarks, exam.schoolCategory) : { grade: '-', points: 0 };
+        const hasMarks = existing?.marks !== undefined && existing?.marks !== null && existing?.marks !== '';
+        const marks = hasMarks ? existing.marks : '';
+
+        // ✅ ALWAYS recalculate grade from marks — never use existing.grade
+        const gradeInfo = hasMarks
+          ? calculateGrade(marks, exam.maxMarks || 100, exam.schoolCategory || schoolCategory, examLevelHint)
+          : { grade: '', points: 0 };
+
         return {
           studentId: student.id,
           studentName: `${student.firstName} ${student.lastName}`,
           admissionNumber: student.admissionNumber,
           unitName: itemName,
           marks: marks,
-          grade: existing?.grade || gradeInfo.grade,
-          points: existing?.points || gradeInfo.points,
+          grade: gradeInfo.grade,
+          points: gradeInfo.points,
           isAbsent: existing?.isAbsent || false,
           resultId: existing?.id,
           parents: parentsByStudent[student.id] || []
         };
       });
-      
+
+      console.log(`📋 Loaded ${entries.length} entries — grading flavor: ${examFlavor} (level hint: ${examLevelHint})`);
       setResultEntries(entries);
     } catch (error) {
       console.error('Error:', error);
@@ -12026,16 +12086,11 @@ const ResultsModule = ({
     }
   };
 
-  // ==================== ✅ FIXED: SAVE RESULTS ====================
-  // Bug fixed: the previous version called `GET /results/exam/{examId}` inside the
-  // per-student for-loop, producing N redundant HTTP reads and making the save
-  // appear to hang on the "Saving..." state. We now fetch existing results ONCE
-  // before the loop and use a studentId → result map to decide PUT vs POST.
+  // ==================== SAVE RESULTS ====================
   const saveAllResults = async () => {
     if (!canAddResults) { alert('You do not have permission to save results'); return; }
-    
+
     const entriesToSave = resultEntries.filter(e => e.marks !== '' || e.isAbsent);
-    
     if (entriesToSave.length === 0) {
       alert('No marks entered. Please enter marks or mark students as absent.');
       return;
@@ -12048,46 +12103,34 @@ const ResultsModule = ({
 
     try {
       const exam = exams.find(e => e.id === selectedExam);
-      if (!exam) {
-        alert('Exam not found. Please refresh.');
-        return;
-      }
+      if (!exam) { alert('Exam not found. Please refresh.'); return; }
 
-      // ✅ STEP 1: Fetch existing results ONCE (not per student)
+      const examLevelHint = getLevelHint(exam, null, exam.classId || selectedClass);
+
+      // Fetch existing results once
       let existingByStudentId = {};
       try {
-        console.log('🔎 Fetching existing results for exam:', selectedExam);
         const existingRes = await api.get(`/results/exam/${selectedExam}`);
         const existingList = existingRes.data?.results || [];
-        existingList.forEach(r => {
-          existingByStudentId[r.studentId] = r;
-        });
-        console.log(`📋 Found ${existingList.length} existing results`);
-      } catch (err) {
-        console.warn('⚠️ Could not fetch existing results, will create new:', err?.message);
-      }
+        existingList.forEach(r => { existingByStudentId[r.studentId] = r; });
+      } catch (_) { /* will create new */ }
 
-      // ✅ STEP 2: Save each student — one write, no redundant reads
       for (const entry of entriesToSave) {
         const marks = entry.isAbsent ? 0 : parseFloat(entry.marks) || 0;
 
         const student = students.find(s => s.id === entry.studentId);
         if (!student) {
-          errors++;
-          errorDetails.push(`${entry.studentName}: Student not found in system`);
-          continue;
+          errors++; errorDetails.push(`${entry.studentName}: Student not found in system`); continue;
         }
-
         if (student.schoolId && student.schoolId !== currentSchool?.id) {
-          errors++;
-          errorDetails.push(`${entry.studentName}: Student does not belong to this school`);
-          continue;
+          errors++; errorDetails.push(`${entry.studentName}: Student does not belong to this school`); continue;
         }
 
         const { grade, points } = calculateGrade(
           marks,
-          exam?.maxMarks || 100,
-          exam?.schoolCategory
+          exam.maxMarks || 100,
+          exam.schoolCategory || schoolCategory,
+          examLevelHint
         );
 
         const data = {
@@ -12106,51 +12149,36 @@ const ResultsModule = ({
           data.subjectId = exam.subjectId;
         }
 
-        const existing = entry.resultId
-          ? { id: entry.resultId }
-          : existingByStudentId[student.id];
+        const existing = entry.resultId ? { id: entry.resultId } : existingByStudentId[student.id];
 
         try {
           if (existing?.id) {
-            console.log(`📝 Updating ${entry.studentName} (result ${existing.id})`);
             await api.put(`/results/${existing.id}`, data);
           } else {
-            console.log(`📝 Creating result for ${entry.studentName}`);
             await api.post('/results', data);
           }
           saved++;
         } catch (err) {
-          console.error(`❌ Failed to save ${entry.studentName}:`, err);
           errors++;
-          const errorMsg =
-            err.response?.data?.message ||
-            err.response?.data?.error ||
-            err.message ||
-            'Unknown error';
+          const errorMsg = err.response?.data?.message || err.response?.data?.error || err.message || 'Unknown error';
           errorDetails.push(`${entry.studentName}: ${errorMsg}`);
         }
       }
 
-      // Report
       if (saved > 0 && errors === 0) {
         alert(`✅ ${saved} result(s) saved successfully!`);
       } else if (saved > 0 && errors > 0) {
-        alert(
-          `⚠️ ${saved} saved, ${errors} failed:\n\n${errorDetails.slice(0, 10).join('\n')}` +
-          (errorDetails.length > 10 ? `\n... and ${errorDetails.length - 10} more` : '')
-        );
+        alert(`⚠️ ${saved} saved, ${errors} failed:\n\n${errorDetails.slice(0, 10).join('\n')}` +
+              (errorDetails.length > 10 ? `\n... and ${errorDetails.length - 10} more` : ''));
       } else {
         alert(`❌ All saves failed:\n\n${errorDetails.slice(0, 10).join('\n')}`);
       }
 
-      if (saved > 0) {
-        await loadExamResults();
-      }
+      if (saved > 0) await loadExamResults();
     } catch (error) {
       console.error('❌ Fatal error in saveAllResults:', error);
       alert('Failed to save: ' + (error.response?.data?.message || error.message));
     } finally {
-      // ✅ ALWAYS runs — this is what resets the "Saving..." state
       setLoading(false);
     }
   };
@@ -12163,7 +12191,7 @@ const ResultsModule = ({
     try {
       const exam = exams.find(e => e.id === selectedExam);
       await api.put(`/exams/${selectedExam}`, { ...exam, isPublished: true, resultsPublished: true, publishedAt: new Date().toISOString() });
-      setExams(prevExams => prevExams.map(e => e.id === selectedExam ? { ...e, isPublished: true, resultsPublished: true, publishedAt: new Date().toISOString() } : e));
+      setExams(prev => prev.map(e => e.id === selectedExam ? { ...e, isPublished: true, resultsPublished: true, publishedAt: new Date().toISOString() } : e));
       alert('✅ Results published successfully!');
       await loadExamResults();
     } catch (error) {
@@ -12180,16 +12208,21 @@ const ResultsModule = ({
     try {
       const resultsRes = await api.get(`/results?studentId=${student.studentId}`);
       const studentResults = resultsRes.data.results || [];
-      const enrichedResults = await Promise.all(studentResults.map(async (result) => {
-        const exam = exams?.find(e => e.id === result.examId);
-        const gradeInfo = calculateGrade(result.marks, exam?.maxMarks || 100, exam?.schoolCategory);
-        const itemName = getItemName(result, exam);
+      const exam = exams?.find(e => e.id === selectedExam);
+      const levelHint = getLevelHint(exam, null, exam?.classId || selectedClass);
+
+      const enrichedResults = studentResults.map(result => {
+        const examObj = exams?.find(e => e.id === result.examId);
+        const hasMarks = result.marks !== null && result.marks !== undefined && result.marks !== '';
+        const gradeInfo = hasMarks
+          ? calculateGrade(result.marks, examObj?.maxMarks || 100, examObj?.schoolCategory || schoolCategory, levelHint)
+          : { grade: '', points: 0 };
         return {
           id: result.id,
           examId: result.examId,
-          examName: exam?.name || 'Unknown Exam',
-          examDate: exam?.date,
-          itemName: itemName,
+          examName: examObj?.name || 'Unknown Exam',
+          examDate: examObj?.date,
+          itemName: getItemName(result, examObj),
           marks: result.marks || 0,
           grade: gradeInfo.grade,
           displayGrade: gradeInfo.grade,
@@ -12200,14 +12233,22 @@ const ResultsModule = ({
           admissionNumber: student.admissionNumber,
           studentId: student.studentId
         };
-      }));
+      });
+
       const totalMarks = enrichedResults.reduce((sum, r) => sum + (r.marks || 0), 0);
       const average = enrichedResults.length > 0 ? (totalMarks / enrichedResults.length).toFixed(2) : 0;
       const totalPoints = enrichedResults.reduce((sum, r) => sum + (r.points || 0), 0);
+
       setStudentReportData({
         student: { name: student.studentName, admissionNumber: student.admissionNumber, studentId: student.studentId },
         results: enrichedResults,
-        summary: { totalExams: enrichedResults.length, totalMarks, average, totalPoints, meanGrade: calculateMeanGrade(enrichedResults) }
+        summary: {
+          totalExams: enrichedResults.length,
+          totalMarks,
+          average,
+          totalPoints,
+          meanGrade: calculateMeanGrade(enrichedResults, levelHint)
+        }
       });
       setSelectedStudentForReport(student);
       setShowPrintModal(true);
@@ -12226,29 +12267,27 @@ const ResultsModule = ({
     try {
       const exam = exams.find(e => e.id === selectedExam);
       if (!exam) { alert('Exam not found'); return; }
-      
+
+      const levelHint = getLevelHint(exam, null, exam.classId || selectedClass);
+
       const resultsRes = await api.get(`/results/exam/${selectedExam}`);
       const examResults = resultsRes.data.results || [];
-      
+
       let studentList = [];
-      
       const selectedStudentIds = exam.selectedStudents || [];
-      
+
       if (selectedStudentIds.length > 0) {
         const resolvedIds = [];
         for (const id of selectedStudentIds) {
           const resolved = resolveStudentId(id);
           if (resolved) resolvedIds.push(resolved);
         }
-        
         if (resolvedIds.length > 0) {
-          const studentsRes = await api.get('/students', { 
-            params: { ids: resolvedIds.join(',') } 
-          });
+          const studentsRes = await api.get('/students', { params: { ids: resolvedIds.join(',') } });
           studentList = studentsRes.data.students || [];
         }
       }
-      
+
       if (studentList.length === 0) {
         let params = {};
         if (isUniversity && exam.courseId) {
@@ -12261,41 +12300,49 @@ const ResultsModule = ({
         } else if (exam.classId) {
           params.classId = exam.classId;
         }
-        
         if (Object.keys(params).length > 0) {
           const res = await api.get('/students', { params });
           studentList = res.data.students || [];
         }
       }
-      
+
       studentList = studentList.filter(s => s.schoolId === currentSchool?.id);
-      
       const itemName = getItemName({}, exam);
-      
+
       const enrichedResults = studentList.map(student => {
         const result = examResults.find(r => r.studentId === student.id);
-        const gradeInfo = result?.marks ? calculateGrade(result.marks, exam.maxMarks, exam.schoolCategory) : { grade: '-', points: 0 };
+        const hasMarks = result?.marks !== undefined && result?.marks !== null && result?.marks !== '';
+        const gradeInfo = hasMarks
+          ? calculateGrade(result.marks, exam.maxMarks || 100, exam.schoolCategory || schoolCategory, levelHint)
+          : { grade: '', points: 0 };
         return {
           studentId: student.id,
           studentName: `${student.firstName} ${student.lastName}`,
           admissionNumber: student.admissionNumber,
           unitName: itemName,
-          marks: result?.marks || 0,
-          grade: result?.grade || gradeInfo.grade,
-          displayGrade: result?.grade || gradeInfo.grade,
-          points: result?.points || gradeInfo.points,
+          marks: hasMarks ? result.marks : '',
+          grade: gradeInfo.grade,
+          displayGrade: gradeInfo.grade,
+          points: gradeInfo.points,
           isAbsent: result?.isAbsent || false,
           remarks: result?.remarks || ''
         };
-      }).filter(r => r.marks > 0 || r.isAbsent);
-      
-      const totalMarks = enrichedResults.reduce((sum, r) => sum + (r.marks || 0), 0);
+      }).filter(r => r.marks !== '' || r.isAbsent);
+
+      const totalMarks = enrichedResults.reduce((sum, r) => sum + (parseFloat(r.marks) || 0), 0);
       const average = enrichedResults.length > 0 ? (totalMarks / enrichedResults.length).toFixed(2) : 0;
       const totalPoints = enrichedResults.reduce((sum, r) => sum + (r.points || 0), 0);
+
       setAllResultsPrintData({
         exam: { name: exam.name, date: exam.date, itemName: itemName, maxMarks: exam.maxMarks },
         results: enrichedResults,
-        summary: { totalStudents: enrichedResults.length, totalMarks, average, totalPoints, meanGrade: calculateMeanGrade(enrichedResults) }
+        summary: {
+          totalStudents: enrichedResults.length,
+          totalMarks,
+          average,
+          totalPoints,
+          meanGrade: calculateMeanGrade(enrichedResults, levelHint)
+        }
       });
       setShowAllResultsPrintModal(true);
     } catch (error) {
@@ -12306,7 +12353,7 @@ const ResultsModule = ({
     }
   };
 
-  // ==================== HANDLE CHANGES ====================
+  // ==================== HANDLE INPUT CHANGES ====================
   const handleMarkChange = (studentId, value) => {
     setResultEntries(prev => prev.map(e => e.studentId === studentId ? { ...e, marks: value } : e));
   };
@@ -12325,7 +12372,7 @@ const ResultsModule = ({
     setSelectAllForMessage(false);
   };
 
-  const filteredResultEntries = resultEntries.filter(entry => 
+  const filteredResultEntries = resultEntries.filter(entry =>
     entry.studentName?.toLowerCase().includes(studentSearch.toLowerCase()) ||
     entry.admissionNumber?.toLowerCase().includes(studentSearch.toLowerCase())
   ).filter(entry => !filterGrade || entry.grade === filterGrade);
@@ -12345,15 +12392,18 @@ const ResultsModule = ({
       for (const studentId of selectedStudentsForMessage) {
         const student = resultEntries.find(e => e.studentId === studentId);
         if (!student) continue;
+
         let studentParents = [];
         try {
           const parentsRes = await api.get(`/parents?studentId=${studentId}`);
           studentParents = parentsRes.data.parents || [];
-        } catch (err) { console.error('Error fetching parents:', err); }
+        } catch (_) {}
+
         if (studentParents.length === 0) {
           logs.push({ student: student.studentName, error: 'No parents found' });
           continue;
         }
+
         const itemName = getItemName({}, exam);
         const message = (messageTemplate || `Dear Parent,\n\nYour child {student_name} (Adm: {admission}) has received the following results for {exam_name}:\n\nSubject: {subject}\nMarks: {marks}\nGrade: {grade}\nPoints: {points}\n\nThank you,\n{school_name}\n{date}`)
           .replace(/{student_name}/g, student.studentName)
@@ -12361,10 +12411,11 @@ const ResultsModule = ({
           .replace(/{exam_name}/g, exam.name)
           .replace(/{subject}/g, itemName)
           .replace(/{marks}/g, student.marks)
-          .replace(/{grade}/g, displayGrade(student.grade))
+          .replace(/{grade}/g, displayGrade(student.grade, student.marks))
           .replace(/{points}/g, student.points)
           .replace(/{school_name}/g, currentSchool?.name || 'School')
           .replace(/{date}/g, new Date().toLocaleDateString());
+
         for (const parent of studentParents) {
           try {
             if (messageType === 'SMS' || messageType === 'BOTH') {
@@ -12407,7 +12458,9 @@ const ResultsModule = ({
     }
   };
 
-  // ==================== FIXED STUDENT VIEW ====================
+  // ============================================================
+  //  STUDENT VIEW RENDER
+  // ============================================================
   if (isStudent) {
     return (
       <div className="space-y-6">
@@ -12420,12 +12473,6 @@ const ResultsModule = ({
                   <i className="fas fa-times"></i>
                 </button>
               </div>
-              {admissionMessage && (
-                <div className="bg-blue-50 p-3 rounded-lg text-blue-600 text-sm mb-4">
-                  <i className="fas fa-info-circle mr-2"></i>
-                  Please enter your admission number to view your results.
-                </div>
-              )}
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Admission Number</label>
@@ -12437,7 +12484,7 @@ const ResultsModule = ({
                       setAdmissionNumber(e.target.value.toUpperCase());
                       hasLoadedStudentData.current = false;
                     }}
-                    placeholder="e.g., BCM-05 or 7689"
+                    placeholder="e.g., ADM/2026/0001"
                     autoFocus
                   />
                 </div>
@@ -12458,16 +12505,15 @@ const ResultsModule = ({
             </div>
           </div>
         )}
-        
+
         {loadingMyData && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
-        
+
         <div className="flex justify-between items-center">
           <h2 className="text-2xl font-bold">My Results</h2>
           {myStudentRecord && (
             <button
               onClick={() => {
                 localStorage.removeItem('studentAdmissionNumber');
-                localStorage.removeItem('studentData');
                 setAdmissionNumber('');
                 setMyStudentRecord(null);
                 setMyResults([]);
@@ -12483,10 +12529,13 @@ const ResultsModule = ({
 
         {myStudentRecord ? (
           <div className="space-y-6">
+            {/* Profile banner */}
             <div className={`rounded-xl p-6 text-white ${isTVET ? 'bg-gradient-to-r from-purple-600 to-pink-600' : 'bg-gradient-to-r from-indigo-500 to-purple-600'}`}>
               <div className="flex items-center space-x-4">
                 <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center">
-                  <span className="text-2xl font-bold text-indigo-600">{myStudentRecord.firstName?.[0]}{myStudentRecord.lastName?.[0]}</span>
+                  <span className="text-2xl font-bold text-indigo-600">
+                    {myStudentRecord.firstName?.[0]}{myStudentRecord.lastName?.[0]}
+                  </span>
                 </div>
                 <div>
                   <h3 className="text-2xl font-bold">{myStudentRecord.firstName} {myStudentRecord.lastName}</h3>
@@ -12515,6 +12564,7 @@ const ResultsModule = ({
               </div>
             </div>
 
+            {/* Summary cards */}
             {myResultsSummary && (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="bg-blue-50 p-4 rounded-lg text-center">
@@ -12536,6 +12586,7 @@ const ResultsModule = ({
               </div>
             )}
 
+            {/* Unit performance summary */}
             {Object.keys(myUnitStats).length > 0 && (
               <div className="bg-white rounded-xl shadow-sm overflow-hidden">
                 <div className="px-6 py-4 bg-gray-50 border-b">
@@ -12557,10 +12608,10 @@ const ResultsModule = ({
                       {Object.values(myUnitStats).map((unit, idx) => (
                         <tr key={idx} className="hover:bg-gray-50">
                           <td className="px-4 py-3 font-medium">{unit.name}</td>
-                          <td className="px-4 py-3">{unit.marks}</td>
+                          <td className="px-4 py-3">{unit.marks === '' || unit.marks === null ? '—' : unit.marks}</td>
                           <td className="px-4 py-3">
                             <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(unit.grade)}`}>
-                              {displayGrade(unit.grade)}
+                              {displayGrade(unit.grade, unit.marks)}
                             </span>
                           </td>
                           <td className="px-4 py-3">{unit.points}</td>
@@ -12572,6 +12623,7 @@ const ResultsModule = ({
               </div>
             )}
 
+            {/* Detailed results */}
             {myResults.length > 0 ? (
               <div className="bg-white rounded-xl shadow-sm overflow-hidden">
                 <div className="px-6 py-4 bg-gray-50 border-b">
@@ -12588,7 +12640,6 @@ const ResultsModule = ({
                         <th className="px-4 py-3 text-left">Grade</th>
                         <th className="px-4 py-3 text-left">Points</th>
                         <th className="px-4 py-3 text-left">Remarks</th>
-                        <th className="px-4 py-3 text-left">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -12597,40 +12648,14 @@ const ResultsModule = ({
                           <td className="px-4 py-3 font-medium">{result.examName || 'Unknown'}</td>
                           <td className="px-4 py-3">{result.examDate ? new Date(result.examDate).toLocaleDateString() : 'N/A'}</td>
                           <td className="px-4 py-3">{result.itemName}</td>
-                          <td className="px-4 py-3 font-bold">{result.marks}</td>
+                          <td className="px-4 py-3 font-bold">{result.marks === '' || result.marks === null ? '—' : result.marks}</td>
                           <td className="px-4 py-3">
                             <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(result.grade)}`}>
-                              {displayGrade(result.grade)}
+                              {displayGrade(result.grade, result.marks)}
                             </span>
                           </td>
                           <td className="px-4 py-3">{result.points}</td>
                           <td className="px-4 py-3 text-sm text-gray-500">{result.remarks || '—'}</td>
-                          <td className="px-4 py-3">
-                            <button
-                              onClick={() => {
-                                setStudentReportData({
-                                  student: {
-                                    name: `${myStudentRecord.firstName} ${myStudentRecord.lastName}`,
-                                    admissionNumber: myStudentRecord.admissionNumber,
-                                    studentId: myStudentRecord.id
-                                  },
-                                  results: [result],
-                                  summary: {
-                                    totalExams: 1,
-                                    totalMarks: result.marks,
-                                    average: result.marks,
-                                    totalPoints: result.points,
-                                    meanGrade: result.grade
-                                  }
-                                });
-                                setShowStudentPrintModal(true);
-                              }}
-                              className="text-indigo-600 hover:text-indigo-900 p-1 hover:bg-indigo-50 rounded"
-                              title="Print Result"
-                            >
-                              <i className="fas fa-print"></i>
-                            </button>
-                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -12645,6 +12670,7 @@ const ResultsModule = ({
               </div>
             )}
 
+            {/* Print all */}
             {myResults.length > 0 && (
               <div className="flex justify-end">
                 <button
@@ -12677,13 +12703,10 @@ const ResultsModule = ({
           </div>
         )}
 
-        {showStudentPrintModal && studentReportData && (
+        {showStudentPrintModal && studentReportData && typeof StudentResultsPrintModal !== 'undefined' && (
           <StudentResultsPrintModal
             reportData={studentReportData}
-            onClose={() => {
-              setShowStudentPrintModal(false);
-              setStudentReportData(null);
-            }}
+            onClose={() => { setShowStudentPrintModal(false); setStudentReportData(null); }}
             currentSchool={currentSchool}
           />
         )}
@@ -12691,20 +12714,21 @@ const ResultsModule = ({
     );
   }
 
-  // ==================== PARENT VIEW ====================
+  // ============================================================
+  //  PARENT VIEW RENDER
+  // ============================================================
   if (isParent) {
     return (
       <div className="space-y-6">
         {loadingChildren && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
         {apiError && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-            <i className="fas fa-exclamation-circle mr-2"></i>
-            {apiError}
+            <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
           </div>
         )}
-        
+
         <h2 className="text-2xl font-bold">My Children's Results</h2>
-        
+
         {loadingChildren ? (
           <div className="bg-white p-12 rounded-xl shadow-sm text-center">
             <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-4"></div>
@@ -12714,9 +12738,6 @@ const ResultsModule = ({
           <div className="bg-white p-12 rounded-xl shadow-sm text-center">
             <i className="fas fa-child text-6xl text-gray-300 mb-4"></i>
             <p className="text-gray-500 text-lg">No children linked to your account.</p>
-            <p className="text-sm text-gray-400 mt-2">
-              If you believe this is an error, please contact the school administration.
-            </p>
           </div>
         ) : (
           <div className="space-y-6">
@@ -12735,8 +12756,6 @@ const ResultsModule = ({
                 {myChildren.map(child => (
                   <option key={child.id} value={child.id}>
                     {child.firstName} {child.lastName} ({child.admissionNumber})
-                    {child.programName && child.programName !== 'No Program' && ` - ${child.programName}`}
-                    {child.moduleInfo && ` • ${child.moduleInfo}`}
                   </option>
                 ))}
               </select>
@@ -12754,24 +12773,6 @@ const ResultsModule = ({
                     <div>
                       <h3 className="text-2xl font-bold">{myStudentRecord.firstName} {myStudentRecord.lastName}</h3>
                       <p className="text-purple-100">Admission: {myStudentRecord.admissionNumber}</p>
-                      <p className="text-purple-200 text-sm mt-1">
-                        {isTVET ? (
-                          <>
-                            {myStudentRecord.program?.name || programs?.find(p => p.id === myStudentRecord.programId)?.name || 'No Program'}
-                            {myStudentRecord.currentModule && ` • ${myStudentRecord.currentModule}`}
-                            {myStudentRecord.currentYear && ` • Year ${myStudentRecord.currentYear}`}
-                          </>
-                        ) : isUniversity ? (
-                          <>
-                            {myStudentRecord.course?.name || courses?.find(c => c.id === myStudentRecord.courseId)?.name || 'No Course'}
-                            {myStudentRecord.currentYear && ` • Year ${myStudentRecord.currentYear}`}
-                          </>
-                        ) : (
-                          <>
-                            {myStudentRecord.class?.name || classes?.find(c => c.id === myStudentRecord.classId)?.name || 'No Class'}
-                          </>
-                        )}
-                      </p>
                     </div>
                   </div>
                 </div>
@@ -12779,7 +12780,7 @@ const ResultsModule = ({
                 {myResultsSummary && (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div className="bg-blue-50 p-4 rounded-lg text-center">
-                      <p className="text-sm text-blue-600">Total {isTVET ? 'Modules' : isUniversity ? 'Units' : 'Exams'}</p>
+                      <p className="text-sm text-blue-600">Total Exams</p>
                       <p className="text-2xl font-bold text-blue-700">{myResultsSummary.total}</p>
                     </div>
                     <div className="bg-green-50 p-4 rounded-lg text-center">
@@ -12812,8 +12813,6 @@ const ResultsModule = ({
                             <th className="px-4 py-3 text-left">Marks</th>
                             <th className="px-4 py-3 text-left">Grade</th>
                             <th className="px-4 py-3 text-left">Points</th>
-                            <th className="px-4 py-3 text-left">Remarks</th>
-                            <th className="px-4 py-3 text-left">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y">
@@ -12822,40 +12821,13 @@ const ResultsModule = ({
                               <td className="px-4 py-3 font-medium">{result.examName || 'Unknown'}</td>
                               <td className="px-4 py-3">{result.examDate ? new Date(result.examDate).toLocaleDateString() : 'N/A'}</td>
                               <td className="px-4 py-3">{result.itemName}</td>
-                              <td className="px-4 py-3 font-bold">{result.marks}</td>
+                              <td className="px-4 py-3 font-bold">{result.marks === '' || result.marks === null ? '—' : result.marks}</td>
                               <td className="px-4 py-3">
                                 <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(result.grade)}`}>
-                                  {displayGrade(result.grade)}
+                                  {displayGrade(result.grade, result.marks)}
                                 </span>
                               </td>
                               <td className="px-4 py-3">{result.points}</td>
-                              <td className="px-4 py-3 text-sm text-gray-500">{result.remarks || '—'}</td>
-                              <td className="px-4 py-3">
-                                <button
-                                  onClick={() => {
-                                    setStudentReportData({
-                                      student: {
-                                        name: `${myStudentRecord.firstName} ${myStudentRecord.lastName}`,
-                                        admissionNumber: myStudentRecord.admissionNumber,
-                                        studentId: myStudentRecord.id
-                                      },
-                                      results: [result],
-                                      summary: {
-                                        totalExams: 1,
-                                        totalMarks: result.marks,
-                                        average: result.marks,
-                                        totalPoints: result.points,
-                                        meanGrade: result.grade
-                                      }
-                                    });
-                                    setShowStudentPrintModal(true);
-                                  }}
-                                  className="text-indigo-600 hover:text-indigo-900 p-1 hover:bg-indigo-50 rounded"
-                                  title="Print Result"
-                                >
-                                  <i className="fas fa-print"></i>
-                                </button>
-                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -12868,40 +12840,15 @@ const ResultsModule = ({
                     <p className="text-gray-500 text-lg">No results found for this student.</p>
                   </div>
                 )}
-
-                {childResults.length > 0 && (
-                  <div className="flex justify-end">
-                    <button
-                      onClick={() => {
-                        setStudentReportData({
-                          student: {
-                            name: `${myStudentRecord.firstName} ${myStudentRecord.lastName}`,
-                            admissionNumber: myStudentRecord.admissionNumber,
-                            studentId: myStudentRecord.id
-                          },
-                          results: childResults,
-                          summary: myResultsSummary
-                        });
-                        setShowStudentPrintModal(true);
-                      }}
-                      className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 flex items-center"
-                    >
-                      <i className="fas fa-print mr-2"></i>Print All Results
-                    </button>
-                  </div>
-                )}
               </div>
             )}
           </div>
         )}
 
-        {showStudentPrintModal && studentReportData && (
+        {showStudentPrintModal && studentReportData && typeof StudentResultsPrintModal !== 'undefined' && (
           <StudentResultsPrintModal
             reportData={studentReportData}
-            onClose={() => {
-              setShowStudentPrintModal(false);
-              setStudentReportData(null);
-            }}
+            onClose={() => { setShowStudentPrintModal(false); setStudentReportData(null); }}
             currentSchool={currentSchool}
           />
         )}
@@ -12909,16 +12856,22 @@ const ResultsModule = ({
     );
   }
 
-  // ==================== TEACHER/ADMIN VIEW ====================
+  // ============================================================
+  //  ADMIN / TEACHER VIEW RENDER
+  // ============================================================
   return (
     <div className="space-y-6">
       {(loading || publishing || sendingMessages) && <div className="h-1 bg-indigo-600 animate-pulse fixed top-0 left-0 w-full z-50" />}
-      {apiError && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg"><i className="fas fa-exclamation-circle mr-2"></i>{apiError}</div>}
-      
+      {apiError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+          <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
+        </div>
+      )}
+
       <h2 className="text-2xl font-bold">
         {isUniversity ? '📚 Course Results' : isTVET ? '🔧 Program Results' : isSecondary ? '📖 Secondary Results' : isPrimary ? '🎯 Primary Results' : '📊 Results Management'}
       </h2>
-      
+
       {canViewAllResults && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">🔍 Filter Results</h3>
@@ -12931,7 +12884,6 @@ const ResultsModule = ({
                   onChange={(e) => { setSelectedCourse(e.target.value); setSelectedUnit(''); setSelectedSemester(''); }} 
                   options={getCourseOptions()} 
                   placeholder="Search course..."
-                  emptyMessage="No courses available"
                 />
                 <SearchableSelect 
                   label="Year" 
@@ -12944,7 +12896,6 @@ const ResultsModule = ({
                     { value: '4', label: 'Year 4' }
                   ]} 
                   placeholder="All Years"
-                  emptyMessage="No years available"
                 />
                 <SearchableSelect 
                   label="Semester" 
@@ -12955,11 +12906,10 @@ const ResultsModule = ({
                     { value: '2', label: 'Semester 2' }
                   ]} 
                   placeholder="All Semesters"
-                  emptyMessage="No semesters available"
                 />
               </>
             )}
-            
+
             {isTVET && (
               <>
                 <SearchableSelect 
@@ -12968,7 +12918,6 @@ const ResultsModule = ({
                   onChange={(e) => { setSelectedProgram(e.target.value); setSelectedUnit(''); setSelectedModule(''); }} 
                   options={getProgramOptions()} 
                   placeholder="Search program..."
-                  emptyMessage="No programs available"
                 />
                 <SearchableSelect 
                   label="Year" 
@@ -12980,7 +12929,6 @@ const ResultsModule = ({
                     { value: '3', label: 'Year 3' }
                   ]} 
                   placeholder="All Years"
-                  emptyMessage="No years available"
                 />
                 <SearchableSelect 
                   label="Module" 
@@ -12993,11 +12941,10 @@ const ResultsModule = ({
                     { value: '4', label: 'Module 4' }
                   ]} 
                   placeholder="All Modules"
-                  emptyMessage="No modules available"
                 />
               </>
             )}
-            
+
             {isRegularSchool && (
               <>
                 <SearchableSelect 
@@ -13006,7 +12953,6 @@ const ResultsModule = ({
                   onChange={(e) => { setSelectedClass(e.target.value); setSelectedSubject(''); }} 
                   options={getClassOptions()} 
                   placeholder="Search class..."
-                  emptyMessage="No classes available"
                 />
                 <SearchableSelect 
                   label="Subject" 
@@ -13014,12 +12960,11 @@ const ResultsModule = ({
                   onChange={(e) => setSelectedSubject(e.target.value)} 
                   options={getSubjectOptions()} 
                   placeholder="Search subject..."
-                  emptyMessage="No subjects available"
                   disabled={!selectedClass} 
                 />
               </>
             )}
-            
+
             {(isUniversity || isTVET) && (
               <SearchableSelect 
                 label={isTVET ? "Module" : "Unit"} 
@@ -13027,19 +12972,17 @@ const ResultsModule = ({
                 onChange={(e) => setSelectedUnit(e.target.value)} 
                 options={getUnitOptions()} 
                 placeholder={`Search ${isTVET ? 'module' : 'unit'}...`}
-                emptyMessage={`No ${isTVET ? 'modules' : 'units'} available`}
               />
             )}
-            
+
             <SearchableSelect 
               label="Exam" 
               value={selectedExam} 
               onChange={(e) => setSelectedExam(e.target.value)} 
               options={getExamOptions()} 
               placeholder="Search exam..."
-              emptyMessage="No exams available"
             />
-            
+
             <div className="flex items-end">
               <button onClick={loadExamResults} disabled={!selectedExam || loading} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 w-full">
                 {loading ? 'Loading...' : 'Load Results'}
@@ -13053,25 +12996,48 @@ const ResultsModule = ({
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="p-4 bg-gray-50 border-b flex flex-wrap gap-3 justify-between items-center">
             <div className="flex items-center space-x-2">
-              {canSendMessages && <label className="flex items-center space-x-2 mr-4"><input type="checkbox" checked={selectAllForMessage} onChange={(e) => handleSelectAllForMessage(e.target.checked)} className="rounded" /><span className="text-sm">Select All</span></label>}
+              {canSendMessages && (
+                <label className="flex items-center space-x-2 mr-4">
+                  <input type="checkbox" checked={selectAllForMessage} onChange={(e) => handleSelectAllForMessage(e.target.checked)} className="rounded" />
+                  <span className="text-sm">Select All</span>
+                </label>
+              )}
               <span className="text-sm text-gray-600">Selected: {selectedStudentsForMessage.length} students</span>
             </div>
             <div className="flex space-x-2">
-              <input type="text" placeholder="Search students..." className="px-3 py-2 border rounded-lg w-64" value={studentSearch} onChange={(e) => setStudentSearch(e.target.value)} />
-              {uniqueGrades.length > 0 && <select value={filterGrade} onChange={(e) => setFilterGrade(e.target.value)} className="px-3 py-2 border rounded-lg"><option value="">All Grades</option>{uniqueGrades.map(g => <option key={g} value={g}>{g}</option>)}</select>}
-              {canPrintAllResults && <button onClick={loadAllResultsForPrint} disabled={loading || !selectedExam} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center disabled:opacity-50" title="Print All Results"><i className="fas fa-print mr-2"></i>Print All Results</button>}
+              <input
+                type="text"
+                placeholder="Search students..."
+                className="px-3 py-2 border rounded-lg w-64"
+                value={studentSearch}
+                onChange={(e) => setStudentSearch(e.target.value)}
+              />
+              {uniqueGrades.length > 0 && (
+                <select value={filterGrade} onChange={(e) => setFilterGrade(e.target.value)} className="px-3 py-2 border rounded-lg">
+                  <option value="">All Grades</option>
+                  {uniqueGrades.map(g => <option key={g} value={g}>{g}</option>)}
+                </select>
+              )}
+              {canPrintAllResults && (
+                <button
+                  onClick={loadAllResultsForPrint}
+                  disabled={loading || !selectedExam}
+                  className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center disabled:opacity-50"
+                >
+                  <i className="fas fa-print mr-2"></i>Print All Results
+                </button>
+              )}
             </div>
           </div>
-          
+
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr>
-                  {canSendMessages && <th className="px-4 py-3 text-left w-10"><span className="sr-only">Select</span></th>}
+                  {canSendMessages && <th className="px-4 py-3 text-left w-10"></th>}
                   <th className="px-4 py-3 text-left">Admission</th>
                   <th className="px-4 py-3 text-left">Student</th>
-                  {(isUniversity || isTVET) && <th className="px-4 py-3 text-left">{isTVET ? 'Module' : 'Unit'}</th>}
-                  {isRegularSchool && <th className="px-4 py-3 text-left">Subject</th>}
+                  <th className="px-4 py-3 text-left">{isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject'}</th>
                   <th className="px-4 py-3 text-left">Marks</th>
                   <th className="px-4 py-3 text-left">Grade</th>
                   <th className="px-4 py-3 text-left">Points</th>
@@ -13086,35 +13052,52 @@ const ResultsModule = ({
                 ) : (
                   filteredResultEntries.map(entry => (
                     <tr key={entry.studentId} className="hover:bg-gray-50">
-                      {canSendMessages && <td className="px-4 py-3"><input type="checkbox" checked={selectedStudentsForMessage.includes(entry.studentId)} onChange={(e) => handleSelectForMessage(entry.studentId, e.target.checked)} className="rounded" /></td>}
+                      {canSendMessages && (
+                        <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedStudentsForMessage.includes(entry.studentId)}
+                            onChange={(e) => handleSelectForMessage(entry.studentId, e.target.checked)}
+                            className="rounded"
+                          />
+                        </td>
+                      )}
                       <td className="px-4 py-3 font-mono">{entry.admissionNumber}</td>
                       <td className="px-4 py-3">{entry.studentName}</td>
                       <td className="px-4 py-3">{entry.unitName}</td>
                       <td className="px-4 py-3">
-                        <input 
-                          type="number" 
-                          value={entry.marks} 
-                          onChange={(e) => handleMarkChange(entry.studentId, e.target.value)} 
-                          onBlur={(e) => { 
-                            if (e.target.value) { 
-                              const exam = exams.find(e => e.id === selectedExam); 
-                              const newGradeInfo = calculateGrade(e.target.value, exam?.maxMarks, exam?.schoolCategory); 
-                              setResultEntries(prev => prev.map(e => e.studentId === entry.studentId ? { ...e, grade: newGradeInfo.grade, points: newGradeInfo.points } : e)); 
-                            } 
-                          }} 
-                          className={`w-20 px-2 py-1 border rounded ${!canAddResults ? 'bg-gray-100' : ''}`} 
-                          disabled={entry.isAbsent || !canAddResults} 
+                        <input
+                          type="number"
+                          value={entry.marks}
+                          onChange={(e) => handleMarkChange(entry.studentId, e.target.value)}
+                          onBlur={(e) => {
+                            if (e.target.value !== '') {
+                              const exam = exams.find(x => x.id === selectedExam);
+                              const levelHint = getLevelHint(exam, null, exam?.classId || selectedClass);
+                              const newGradeInfo = calculateGrade(e.target.value, exam?.maxMarks || 100, exam?.schoolCategory || schoolCategory, levelHint);
+                              setResultEntries(prev => prev.map(x =>
+                                x.studentId === entry.studentId ? { ...x, grade: newGradeInfo.grade, points: newGradeInfo.points } : x
+                              ));
+                            }
+                          }}
+                          className={`w-20 px-2 py-1 border rounded ${!canAddResults ? 'bg-gray-100' : ''}`}
+                          disabled={entry.isAbsent || !canAddResults}
                         />
                       </td>
                       <td className="px-4 py-3">
                         <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(entry.grade)}`}>
-                          {displayGrade(entry.grade)}
+                          {displayGrade(entry.grade, entry.marks)}
                         </span>
                       </td>
-                      <td className="px-4 py-3">{entry.points?.toFixed(1) || '0.0'}</td>
+                      <td className="px-4 py-3">{(entry.points || 0).toFixed(1)}</td>
                       {canAddResults && (
                         <td className="px-4 py-3">
-                          <input type="checkbox" checked={entry.isAbsent} onChange={(e) => handleAbsentChange(entry.studentId, e.target.checked)} className="rounded" />
+                          <input
+                            type="checkbox"
+                            checked={entry.isAbsent}
+                            onChange={(e) => handleAbsentChange(entry.studentId, e.target.checked)}
+                            className="rounded"
+                          />
                         </td>
                       )}
                       <td className="px-4 py-3">
@@ -13133,11 +13116,19 @@ const ResultsModule = ({
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex space-x-2">
-                          <button onClick={(e) => { e.stopPropagation(); loadStudentReport(entry); }} className="text-indigo-600 hover:text-indigo-900 p-2 hover:bg-indigo-50 rounded-lg transition-colors" title="View Student Report">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); loadStudentReport(entry); }}
+                            className="text-indigo-600 hover:text-indigo-900 p-2 hover:bg-indigo-50 rounded-lg transition-colors"
+                            title="View Student Report"
+                          >
                             <i className="fas fa-file-alt"></i>
                           </button>
                           {canSendMessages && (
-                            <button onClick={(e) => { e.stopPropagation(); handleSelectForMessage(entry.studentId, !selectedStudentsForMessage.includes(entry.studentId)); }} className={`p-2 rounded-lg transition-colors ${selectedStudentsForMessage.includes(entry.studentId) ? 'bg-indigo-100 text-indigo-600' : 'text-gray-400 hover:text-indigo-600 hover:bg-indigo-50'}`} title="Select for messaging">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleSelectForMessage(entry.studentId, !selectedStudentsForMessage.includes(entry.studentId)); }}
+                              className={`p-2 rounded-lg transition-colors ${selectedStudentsForMessage.includes(entry.studentId) ? 'bg-indigo-100 text-indigo-600' : 'text-gray-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
+                              title="Select for messaging"
+                            >
                               <i className="fas fa-envelope"></i>
                             </button>
                           )}
@@ -13149,18 +13140,34 @@ const ResultsModule = ({
               </tbody>
             </table>
           </div>
-          
+
           {(canAddResults || canPublishResults || canSendMessages) && (
             <div className="p-4 bg-gray-50 border-t flex flex-wrap gap-2">
-              {canAddResults && <button onClick={saveAllResults} disabled={loading} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center"><i className="fas fa-save mr-2"></i>Save All</button>}
-              {canPublishResults && <button onClick={publishResults} disabled={publishing} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center"><i className="fas fa-globe mr-2"></i>Publish</button>}
-              {canSendMessages && <button onClick={() => setShowMessageModal(true)} disabled={selectedStudentsForMessage.length === 0} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 flex items-center disabled:opacity-50"><i className="fas fa-paper-plane mr-2"></i>Send to Parents ({selectedStudentsForMessage.length})</button>}
+              {canAddResults && (
+                <button onClick={saveAllResults} disabled={loading} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center">
+                  <i className="fas fa-save mr-2"></i>Save All
+                </button>
+              )}
+              {canPublishResults && (
+                <button onClick={publishResults} disabled={publishing} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center">
+                  <i className="fas fa-globe mr-2"></i>Publish
+                </button>
+              )}
+              {canSendMessages && (
+                <button
+                  onClick={() => setShowMessageModal(true)}
+                  disabled={selectedStudentsForMessage.length === 0}
+                  className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 flex items-center disabled:opacity-50"
+                >
+                  <i className="fas fa-paper-plane mr-2"></i>Send to Parents ({selectedStudentsForMessage.length})
+                </button>
+              )}
             </div>
           )}
         </div>
       )}
 
-      {showPrintModal && studentReportData && (
+      {showPrintModal && studentReportData && typeof StudentResultsPrintModal !== 'undefined' && (
         <StudentResultsPrintModal
           reportData={studentReportData}
           onClose={() => { setShowPrintModal(false); setStudentReportData(null); }}
@@ -13168,7 +13175,7 @@ const ResultsModule = ({
         />
       )}
 
-      {showAllResultsPrintModal && allResultsPrintData && (
+      {showAllResultsPrintModal && allResultsPrintData && typeof AllResultsPrintModal !== 'undefined' && (
         <AllResultsPrintModal
           printData={allResultsPrintData}
           onClose={() => { setShowAllResultsPrintModal(false); setAllResultsPrintData(null); }}
@@ -13183,28 +13190,24 @@ const ResultsModule = ({
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
             <h3 className="text-xl font-bold mb-4">Send Results to Parents</h3>
-            
+
             <div className="mb-4 p-3 bg-indigo-50 rounded-lg">
               <p className="text-sm text-indigo-700">
                 <i className="fas fa-info-circle mr-2"></i>
                 Sending to {selectedStudentsForMessage.length} student(s)
               </p>
             </div>
-            
+
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Message Type</label>
-                <select
-                  value={messageType}
-                  onChange={(e) => setMessageType(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg"
-                >
+                <select value={messageType} onChange={(e) => setMessageType(e.target.value)} className="w-full px-3 py-2 border rounded-lg">
                   <option value="SMS">SMS Only</option>
                   <option value="EMAIL">Email Only</option>
                   <option value="BOTH">Both SMS and Email</option>
                 </select>
               </div>
-              
+
               <div>
                 <label className="block text-sm font-medium mb-1">Message Template</label>
                 <textarea
@@ -13225,7 +13228,7 @@ const ResultsModule = ({
                   <code className="bg-gray-100 px-1">{'{date}'}</code>
                 </div>
               </div>
-              
+
               {messageLog.length > 0 && (
                 <div className="bg-green-50 p-3 rounded-lg max-h-40 overflow-auto">
                   <p className="text-sm font-medium text-green-700 mb-2">Message Log:</p>
@@ -13240,7 +13243,7 @@ const ResultsModule = ({
                   ))}
                 </div>
               )}
-              
+
               <div className="flex space-x-2 pt-4">
                 <button
                   onClick={handleSendToParents}
@@ -13254,10 +13257,7 @@ const ResultsModule = ({
                   )}
                 </button>
                 <button
-                  onClick={() => {
-                    setShowMessageModal(false);
-                    setMessageLog([]);
-                  }}
+                  onClick={() => { setShowMessageModal(false); setMessageLog([]); }}
                   className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
                 >
                   Cancel
