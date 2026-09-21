@@ -177,28 +177,56 @@ const sequelize = new Sequelize(
     }
   }
 );
-
-
 // ==================== GRADING SYSTEMS ====================
 
+// Helper — does a class/level name look like Kenyan CBC Senior School?
+const isCBCSeniorLevel = (levelName) => {
+  if (!levelName) return false;
+  const s = String(levelName).trim().toLowerCase();
+  // Matches "Grade 10", "Grade 11", "Grade 12", "grade10", etc.
+  return /^grade\s*1[0-2]$/.test(s);
+};
+
+// Helper — does a class/level name look like Form 1–4?
+const isFormLevel = (levelName) => {
+  if (!levelName) return false;
+  const s = String(levelName).trim().toLowerCase();
+  return /^form\s*[1-4]$/.test(s);
+};
+
 const GRADING_SYSTEMS = {
-  // Kenya CBC (Competency Based Curriculum) - Primary & JSS
+  // ============================================================
+  //  Kenya CBC — Primary, JSS, AND Grade 10–12 (new Senior School)
+  //  Uses EE / ME / AE / BE / NI
+  // ============================================================
   CBC: {
-    name: 'Kenya CBC',
+    name: 'Kenya CBC (Competency Based Curriculum)',
     code: 'CBC',
-    applicableTo: ['ECDE_PRIMARY_JSS'],
-    levels: ['PP1', 'PP2', 'Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5', 'Grade 6', 'Grade 7', 'Grade 8', 'Grade 9'],
+    applicableTo: ['ECDE_PRIMARY_JSS', 'SENIOR_SECONDARY'],
+    levels: [
+      'PP1', 'PP2',
+      'Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5', 'Grade 6',
+      'Grade 7', 'Grade 8', 'Grade 9',
+      'Grade 10', 'Grade 11', 'Grade 12'
+    ],
     grading: {
-      'EE': { min: 80, max: 100, grade: 'Exceeding Expectations', code: 'EE', points: 4, color: 'green' },
-      'ME': { min: 65, max: 79, grade: 'Meeting Expectations', code: 'ME', points: 3, color: 'blue' },
-      'AE': { min: 50, max: 64, grade: 'Approaching Expectations', code: 'AE', points: 2, color: 'yellow' },
-      'BE': { min: 30, max: 49, grade: 'Below Expectations', code: 'BE', points: 1, color: 'orange' },
-      'NI': { min: 0, max: 29, grade: 'Needs Improvement', code: 'NI', points: 0, color: 'red' }
+      'EE': { min: 80, max: 100, grade: 'Exceeding Expectations',    code: 'EE', points: 4, color: 'green'  },
+      'ME': { min: 65, max: 79,  grade: 'Meeting Expectations',      code: 'ME', points: 3, color: 'blue'   },
+      'AE': { min: 50, max: 64,  grade: 'Approaching Expectations',  code: 'AE', points: 2, color: 'yellow' },
+      'BE': { min: 30, max: 49,  grade: 'Below Expectations',        code: 'BE', points: 1, color: 'orange' },
+      'NI': { min: 0,  max: 29,  grade: 'Needs Improvement',         code: 'NI', points: 0, color: 'red'    }
     },
-    hasPoints: false,
+    hasPoints: true,
     hasGrades: true,
     hasComments: true,
     requiresDescriptions: true,
+    calculateMeanGrade: (avgPoints) => {
+      if (avgPoints >= 3.5) return 'Exceeding Expectations';
+      if (avgPoints >= 2.5) return 'Meeting Expectations';
+      if (avgPoints >= 1.5) return 'Approaching Expectations';
+      if (avgPoints >= 0.5) return 'Below Expectations';
+      return 'Needs Improvement';
+    },
     getGrade: (marks) => {
       for (const [code, range] of Object.entries(GRADING_SYSTEMS.CBC.grading)) {
         if (marks >= range.min && marks <= range.max) {
@@ -209,40 +237,44 @@ const GRADING_SYSTEMS = {
     }
   },
 
-  // Kenya 8-4-4 System (Secondary)
+  // ============================================================
+  //  Kenya Senior Secondary — FORM 1 to FORM 4
+  //  Traditional grading: A, A-, B+, B, B-, C+, C, C-, D+, D, D-, E
+  // ============================================================
   KENYA_844: {
-    name: 'Kenya 8-4-4',
+    name: 'Kenya Senior Secondary (Form 1–4)',
     code: '844',
     applicableTo: ['SENIOR_SECONDARY'],
     levels: ['Form 1', 'Form 2', 'Form 3', 'Form 4'],
     grading: {
-      'A': { min: 80, max: 100, grade: 'A', points: 12, color: 'green' },
-      'A-': { min: 75, max: 79, grade: 'A-', points: 11, color: 'green' },
-      'B+': { min: 70, max: 74, grade: 'B+', points: 10, color: 'blue' },
-      'B': { min: 65, max: 69, grade: 'B', points: 9, color: 'blue' },
-      'B-': { min: 60, max: 64, grade: 'B-', points: 8, color: 'blue' },
-      'C+': { min: 55, max: 59, grade: 'C+', points: 7, color: 'yellow' },
-      'C': { min: 50, max: 54, grade: 'C', points: 6, color: 'yellow' },
-      'C-': { min: 45, max: 49, grade: 'C-', points: 5, color: 'yellow' },
-      'D+': { min: 40, max: 44, grade: 'D+', points: 4, color: 'orange' },
-      'D': { min: 35, max: 39, grade: 'D', points: 3, color: 'orange' },
-      'D-': { min: 30, max: 34, grade: 'D-', points: 2, color: 'orange' },
-      'E': { min: 0, max: 29, grade: 'E', points: 1, color: 'red' }
+      'A':  { min: 80, max: 100, grade: 'A',  points: 12, color: 'green'  },
+      'A-': { min: 75, max: 79,  grade: 'A-', points: 11, color: 'green'  },
+      'B+': { min: 70, max: 74,  grade: 'B+', points: 10, color: 'blue'   },
+      'B':  { min: 65, max: 69,  grade: 'B',  points: 9,  color: 'blue'   },
+      'B-': { min: 60, max: 64,  grade: 'B-', points: 8,  color: 'blue'   },
+      'C+': { min: 55, max: 59,  grade: 'C+', points: 7,  color: 'yellow' },
+      'C':  { min: 50, max: 54,  grade: 'C',  points: 6,  color: 'yellow' },
+      'C-': { min: 45, max: 49,  grade: 'C-', points: 5,  color: 'yellow' },
+      'D+': { min: 40, max: 44,  grade: 'D+', points: 4,  color: 'orange' },
+      'D':  { min: 35, max: 39,  grade: 'D',  points: 3,  color: 'orange' },
+      'D-': { min: 30, max: 34,  grade: 'D-', points: 2,  color: 'orange' },
+      'E':  { min: 0,  max: 29,  grade: 'E',  points: 1,  color: 'red'    }
     },
     hasPoints: true,
     hasGrades: true,
-    calculateMeanGrade: (points) => {
-      if (points >= 80) return 'A';
-      if (points >= 75) return 'A-';
-      if (points >= 70) return 'B+';
-      if (points >= 65) return 'B';
-      if (points >= 60) return 'B-';
-      if (points >= 55) return 'C+';
-      if (points >= 50) return 'C';
-      if (points >= 45) return 'C-';
-      if (points >= 40) return 'D+';
-      if (points >= 35) return 'D';
-      if (points >= 30) return 'D-';
+    calculateMeanGrade: (avgPoints) => {
+      // avgPoints here means the mean POINTS value (not percentage)
+      if (avgPoints >= 11.5) return 'A';
+      if (avgPoints >= 10.5) return 'A-';
+      if (avgPoints >= 9.5)  return 'B+';
+      if (avgPoints >= 8.5)  return 'B';
+      if (avgPoints >= 7.5)  return 'B-';
+      if (avgPoints >= 6.5)  return 'C+';
+      if (avgPoints >= 5.5)  return 'C';
+      if (avgPoints >= 4.5)  return 'C-';
+      if (avgPoints >= 3.5)  return 'D+';
+      if (avgPoints >= 2.5)  return 'D';
+      if (avgPoints >= 1.5)  return 'D-';
       return 'E';
     },
     getGrade: (marks) => {
@@ -255,20 +287,96 @@ const GRADING_SYSTEMS = {
     }
   },
 
-  // International Baccalaureate (IB)
+  // ============================================================
+  //  TVET — Traditional (DISTINCTION / CREDIT / MERIT / PASS / FAIL)
+  // ============================================================
+  TVET: {
+    name: 'TVET (Technical & Vocational Education)',
+    code: 'TVET',
+    applicableTo: ['COLLEGE_TVET'],
+    levels: ['Certificate', 'Diploma', 'Higher Diploma'],
+    grading: {
+      'DISTINCTION': { min: 80, max: 100, grade: 'DISTINCTION', code: 'D',  points: 5, color: 'green'  },
+      'CREDIT':      { min: 65, max: 79,  grade: 'CREDIT',      code: 'CR', points: 4, color: 'blue'   },
+      'MERIT':       { min: 50, max: 64,  grade: 'MERIT',       code: 'M',  points: 3, color: 'yellow' },
+      'PASS':        { min: 40, max: 49,  grade: 'PASS',        code: 'P',  points: 2, color: 'orange' },
+      'FAIL':        { min: 0,  max: 39,  grade: 'FAIL',        code: 'F',  points: 1, color: 'red'    }
+    },
+    hasPoints: true,
+    hasGrades: true,
+    calculateMeanGrade: (avgPoints) => {
+      if (avgPoints >= 4.5) return 'DISTINCTION';
+      if (avgPoints >= 3.5) return 'CREDIT';
+      if (avgPoints >= 2.5) return 'MERIT';
+      if (avgPoints >= 1.5) return 'PASS';
+      return 'FAIL';
+    },
+    getGrade: (marks) => {
+      for (const [code, range] of Object.entries(GRADING_SYSTEMS.TVET.grading)) {
+        if (marks >= range.min && marks <= range.max) {
+          return { grade: range.grade, code: range.code, points: range.points, color: range.color };
+        }
+      }
+      return { grade: 'FAIL', code: 'F', points: 1, color: 'red' };
+    }
+  },
+
+  // ============================================================
+  //  University — Simple A / B / C / D / E (no plus or minus)
+  // ============================================================
+  UNIVERSITY: {
+    name: 'University (A–E)',
+    code: 'UNI',
+    applicableTo: ['UNIVERSITY'],
+    levels: ['Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Year 6'],
+    grading: {
+      'A': { min: 70, max: 100, grade: 'A', points: 5.0, gpa: 4.0, color: 'green'  },
+      'B': { min: 60, max: 69,  grade: 'B', points: 4.0, gpa: 3.0, color: 'blue'   },
+      'C': { min: 50, max: 59,  grade: 'C', points: 3.0, gpa: 2.0, color: 'yellow' },
+      'D': { min: 40, max: 49,  grade: 'D', points: 2.0, gpa: 1.0, color: 'orange' },
+      'E': { min: 0,  max: 39,  grade: 'E', points: 1.0, gpa: 0.0, color: 'red'    }
+    },
+    hasPoints: true,
+    hasGrades: true,
+    isGPABased: true,
+    calculateGPA: (results) => {
+      if (!results || results.length === 0) return 0;
+      const totalPoints = results.reduce((sum, r) => sum + (r.points || 0), 0);
+      return (totalPoints / results.length).toFixed(2);
+    },
+    calculateMeanGrade: (avgPoints) => {
+      if (avgPoints >= 4.5) return 'A';
+      if (avgPoints >= 3.5) return 'B';
+      if (avgPoints >= 2.5) return 'C';
+      if (avgPoints >= 1.5) return 'D';
+      return 'E';
+    },
+    getGrade: (marks) => {
+      for (const [code, range] of Object.entries(GRADING_SYSTEMS.UNIVERSITY.grading)) {
+        if (marks >= range.min && marks <= range.max) {
+          return { grade: range.grade, code: range.code, points: range.points, gpa: range.gpa, color: range.color };
+        }
+      }
+      return { grade: 'E', code: 'E', points: 1.0, gpa: 0.0, color: 'red' };
+    }
+  },
+
+  // ============================================================
+  //  International Baccalaureate (IB)
+  // ============================================================
   IB: {
     name: 'International Baccalaureate',
     code: 'IB',
     applicableTo: ['INTERNATIONAL'],
     levels: ['IB Diploma', 'IB Certificate'],
     grading: {
-      '7': { min: 85, max: 100, grade: '7', points: 7, description: 'Excellent', color: 'green' },
-      '6': { min: 75, max: 84, grade: '6', points: 6, description: 'Very Good', color: 'blue' },
-      '5': { min: 65, max: 74, grade: '5', points: 5, description: 'Good', color: 'blue' },
-      '4': { min: 55, max: 64, grade: '4', points: 4, description: 'Satisfactory', color: 'yellow' },
-      '3': { min: 45, max: 54, grade: '3', points: 3, description: 'Mediocre', color: 'orange' },
-      '2': { min: 35, max: 44, grade: '2', points: 2, description: 'Poor', color: 'orange' },
-      '1': { min: 0, max: 34, grade: '1', points: 1, description: 'Very Poor', color: 'red' }
+      '7': { min: 85, max: 100, grade: '7', points: 7, description: 'Excellent',    color: 'green'  },
+      '6': { min: 75, max: 84,  grade: '6', points: 6, description: 'Very Good',    color: 'blue'   },
+      '5': { min: 65, max: 74,  grade: '5', points: 5, description: 'Good',         color: 'blue'   },
+      '4': { min: 55, max: 64,  grade: '4', points: 4, description: 'Satisfactory', color: 'yellow' },
+      '3': { min: 45, max: 54,  grade: '3', points: 3, description: 'Mediocre',     color: 'orange' },
+      '2': { min: 35, max: 44,  grade: '2', points: 2, description: 'Poor',         color: 'orange' },
+      '1': { min: 0,  max: 34,  grade: '1', points: 1, description: 'Very Poor',    color: 'red'    }
     },
     hasPoints: true,
     hasGrades: true,
@@ -282,22 +390,24 @@ const GRADING_SYSTEMS = {
     }
   },
 
-  // Cambridge IGCSE
+  // ============================================================
+  //  Cambridge IGCSE
+  // ============================================================
   CAMBRIDGE_IGCSE: {
     name: 'Cambridge IGCSE',
     code: 'IGCSE',
     applicableTo: ['INTERNATIONAL'],
     levels: ['IGCSE'],
     grading: {
-      'A*': { min: 90, max: 100, grade: 'A*', points: 8, color: 'green' },
-      'A': { min: 80, max: 89, grade: 'A', points: 7, color: 'green' },
-      'B': { min: 70, max: 79, grade: 'B', points: 6, color: 'blue' },
-      'C': { min: 60, max: 69, grade: 'C', points: 5, color: 'blue' },
-      'D': { min: 50, max: 59, grade: 'D', points: 4, color: 'yellow' },
-      'E': { min: 40, max: 49, grade: 'E', points: 3, color: 'orange' },
-      'F': { min: 30, max: 39, grade: 'F', points: 2, color: 'orange' },
-      'G': { min: 20, max: 29, grade: 'G', points: 1, color: 'red' },
-      'U': { min: 0, max: 19, grade: 'U', points: 0, color: 'red' }
+      'A*': { min: 90, max: 100, grade: 'A*', points: 8, color: 'green'  },
+      'A':  { min: 80, max: 89,  grade: 'A',  points: 7, color: 'green'  },
+      'B':  { min: 70, max: 79,  grade: 'B',  points: 6, color: 'blue'   },
+      'C':  { min: 60, max: 69,  grade: 'C',  points: 5, color: 'blue'   },
+      'D':  { min: 50, max: 59,  grade: 'D',  points: 4, color: 'yellow' },
+      'E':  { min: 40, max: 49,  grade: 'E',  points: 3, color: 'orange' },
+      'F':  { min: 30, max: 39,  grade: 'F',  points: 2, color: 'orange' },
+      'G':  { min: 20, max: 29,  grade: 'G',  points: 1, color: 'red'    },
+      'U':  { min: 0,  max: 19,  grade: 'U',  points: 0, color: 'red'    }
     },
     hasPoints: true,
     hasGrades: true,
@@ -311,82 +421,28 @@ const GRADING_SYSTEMS = {
     }
   },
 
-  // TVET - Competency Based (Modules)
-  TVET: {
-    name: 'TVET Competency Based',
-    code: 'TVET',
-    applicableTo: ['COLLEGE_TVET'],
-    levels: ['Certificate', 'Diploma', 'Higher Diploma'],
-    grading: {
-      'C': { min: 80, max: 100, grade: 'Competent', code: 'C', points: 4, color: 'green' },
-      'NYC': { min: 0, max: 79, grade: 'Not Yet Competent', code: 'NYC', points: 0, color: 'red' }
-    },
-    hasPoints: false,
-    hasGrades: true,
-    isCompetencyBased: true,
-    getGrade: (marks) => {
-      if (marks >= 80) return { grade: 'Competent', code: 'C', points: 4, color: 'green' };
-      return { grade: 'Not Yet Competent', code: 'NYC', points: 0, color: 'red' };
-    }
-  },
-
-  // University - GPA Based
-  UNIVERSITY: {
-    name: 'University GPA System',
-    code: 'UNI',
-    applicableTo: ['UNIVERSITY'],
-    levels: ['Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Year 6'],
-    grading: {
-      'A': { min: 70, max: 100, grade: 'A', points: 5.0, gpa: 4.0, color: 'green' },
-      'B+': { min: 65, max: 69, grade: 'B+', points: 4.5, gpa: 3.5, color: 'blue' },
-      'B': { min: 60, max: 64, grade: 'B', points: 4.0, gpa: 3.0, color: 'blue' },
-      'B-': { min: 55, max: 59, grade: 'B-', points: 3.5, gpa: 2.7, color: 'blue' },
-      'C+': { min: 50, max: 54, grade: 'C+', points: 3.0, gpa: 2.3, color: 'yellow' },
-      'C': { min: 45, max: 49, grade: 'C', points: 2.5, gpa: 2.0, color: 'yellow' },
-      'C-': { min: 40, max: 44, grade: 'C-', points: 2.0, gpa: 1.7, color: 'yellow' },
-      'D+': { min: 35, max: 39, grade: 'D+', points: 1.5, gpa: 1.3, color: 'orange' },
-      'D': { min: 30, max: 34, grade: 'D', points: 1.0, gpa: 1.0, color: 'orange' },
-      'E': { min: 0, max: 29, grade: 'E', points: 0.0, gpa: 0.0, color: 'red' }
-    },
-    hasPoints: true,
-    hasGrades: true,
-    isGPABased: true,
-    calculateGPA: (results) => {
-      if (!results || results.length === 0) return 0;
-      const totalPoints = results.reduce((sum, r) => sum + (r.points || 0), 0);
-      const totalCredits = results.reduce((sum, r) => sum + (r.credits || 3), 0);
-      return totalCredits > 0 ? (totalPoints / results.length).toFixed(2) : 0;
-    },
-    getGrade: (marks) => {
-      for (const [code, range] of Object.entries(GRADING_SYSTEMS.UNIVERSITY.grading)) {
-        if (marks >= range.min && marks <= range.max) {
-          return { grade: range.grade, code: range.code, points: range.points, gpa: range.gpa, color: range.color };
-        }
-      }
-      return { grade: 'E', code: 'E', points: 0.0, gpa: 0.0, color: 'red' };
-    }
-  },
-
-  // American System (A-F with + and -)
+  // ============================================================
+  //  American System (A–F with + and -)
+  // ============================================================
   AMERICAN: {
     name: 'American',
     code: 'USA',
     applicableTo: ['INTERNATIONAL'],
     levels: ['Grade 9', 'Grade 10', 'Grade 11', 'Grade 12'],
     grading: {
-      'A+': { min: 97, max: 100, grade: 'A+', points: 4.0, gpa: 4.0, color: 'green' },
-      'A': { min: 93, max: 96, grade: 'A', points: 4.0, gpa: 4.0, color: 'green' },
-      'A-': { min: 90, max: 92, grade: 'A-', points: 3.7, gpa: 3.7, color: 'green' },
-      'B+': { min: 87, max: 89, grade: 'B+', points: 3.3, gpa: 3.3, color: 'blue' },
-      'B': { min: 83, max: 86, grade: 'B', points: 3.0, gpa: 3.0, color: 'blue' },
-      'B-': { min: 80, max: 82, grade: 'B-', points: 2.7, gpa: 2.7, color: 'blue' },
-      'C+': { min: 77, max: 79, grade: 'C+', points: 2.3, gpa: 2.3, color: 'yellow' },
-      'C': { min: 73, max: 76, grade: 'C', points: 2.0, gpa: 2.0, color: 'yellow' },
-      'C-': { min: 70, max: 72, grade: 'C-', points: 1.7, gpa: 1.7, color: 'yellow' },
-      'D+': { min: 67, max: 69, grade: 'D+', points: 1.3, gpa: 1.3, color: 'orange' },
-      'D': { min: 63, max: 66, grade: 'D', points: 1.0, gpa: 1.0, color: 'orange' },
-      'D-': { min: 60, max: 62, grade: 'D-', points: 0.7, gpa: 0.7, color: 'orange' },
-      'F': { min: 0, max: 59, grade: 'F', points: 0.0, gpa: 0.0, color: 'red' }
+      'A+': { min: 97, max: 100, grade: 'A+', points: 4.0, gpa: 4.0, color: 'green'  },
+      'A':  { min: 93, max: 96,  grade: 'A',  points: 4.0, gpa: 4.0, color: 'green'  },
+      'A-': { min: 90, max: 92,  grade: 'A-', points: 3.7, gpa: 3.7, color: 'green'  },
+      'B+': { min: 87, max: 89,  grade: 'B+', points: 3.3, gpa: 3.3, color: 'blue'   },
+      'B':  { min: 83, max: 86,  grade: 'B',  points: 3.0, gpa: 3.0, color: 'blue'   },
+      'B-': { min: 80, max: 82,  grade: 'B-', points: 2.7, gpa: 2.7, color: 'blue'   },
+      'C+': { min: 77, max: 79,  grade: 'C+', points: 2.3, gpa: 2.3, color: 'yellow' },
+      'C':  { min: 73, max: 76,  grade: 'C',  points: 2.0, gpa: 2.0, color: 'yellow' },
+      'C-': { min: 70, max: 72,  grade: 'C-', points: 1.7, gpa: 1.7, color: 'yellow' },
+      'D+': { min: 67, max: 69,  grade: 'D+', points: 1.3, gpa: 1.3, color: 'orange' },
+      'D':  { min: 63, max: 66,  grade: 'D',  points: 1.0, gpa: 1.0, color: 'orange' },
+      'D-': { min: 60, max: 62,  grade: 'D-', points: 0.7, gpa: 0.7, color: 'orange' },
+      'F':  { min: 0,  max: 59,  grade: 'F',  points: 0.0, gpa: 0.0, color: 'red'    }
     },
     hasPoints: true,
     hasGrades: true,
@@ -401,7 +457,6 @@ const GRADING_SYSTEMS = {
     }
   }
 };
-
 // ==================== PERMISSION DEFINITIONS (Master List) ====================
 const MASTER_PERMISSIONS = [
   // ==================== EXISTING PERMISSIONS ====================
@@ -5051,21 +5106,45 @@ const generateReceiptNo = async () => {
     return `RCP-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
   }
 };
-const getGradingSystem = (schoolCategory) => {
-  switch(schoolCategory) {
+// ==================== GRADING SYSTEM RESOLVER ====================
+// For SENIOR_SECONDARY, we need a hint about the actual class/level:
+//   - "Form 1".."Form 4"        → KENYA_844 (A, A-, B+, B, B-, ...)
+//   - "Grade 10".."Grade 12"    → CBC       (EE, ME, AE, BE, NI)
+//
+// The `levelHint` parameter is optional. Pass it whenever you have
+// the class name available (e.g. from exam.class.name or student.class.name).
+// ============================================================
+const getGradingSystem = (schoolCategory, levelHint = null) => {
+  switch (schoolCategory) {
     case 'ECDE_PRIMARY_JSS':
       return GRADING_SYSTEMS.CBC;
-    case 'SENIOR_SECONDARY':
+
+    case 'SENIOR_SECONDARY': {
+      // If we can inspect the level, do it:
+      if (levelHint && isCBCSeniorLevel(levelHint)) {
+        return GRADING_SYSTEMS.CBC;        // Grade 10–12
+      }
+      if (levelHint && isFormLevel(levelHint)) {
+        return GRADING_SYSTEMS.KENYA_844;  // Form 1–4
+      }
+      // No hint → default to the traditional Form-based grading,
+      // because most SENIOR_SECONDARY schools still run Form 1–4.
       return GRADING_SYSTEMS.KENYA_844;
+    }
+
     case 'COLLEGE_TVET':
       return GRADING_SYSTEMS.TVET;
+
     case 'UNIVERSITY':
       return GRADING_SYSTEMS.UNIVERSITY;
+
+    case 'INTERNATIONAL':
+      return GRADING_SYSTEMS.IB;
+
     default:
       return GRADING_SYSTEMS.CBC;
   }
 };
-
 const calculateGradeFromMarks = (marks, schoolCategory, maxMarks = 100) => {
   const percentage = (marks / maxMarks) * 100;
   const gradingSystem = getGradingSystem(schoolCategory);
