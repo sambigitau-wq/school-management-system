@@ -9176,7 +9176,6 @@ const CourseUnitsModule = ({
   );
 };
 
-
 const ExamModule = ({ 
   exams, setExams, 
   classes, subjects, students, 
@@ -9343,8 +9342,6 @@ const ExamModule = ({
   const [selectedModule, setSelectedModule] = useState('');
   const [selectedUnit, setSelectedUnit] = useState('');
   const [selectedSubject, setSelectedSubject] = useState('');
-
-  // ⬅️ NEW: filter by exam name
   const [selectedExamName, setSelectedExamName] = useState('');
   
   const [examNameOption, setExamNameOption] = useState('select');
@@ -9480,21 +9477,18 @@ const ExamModule = ({
     const endpoints = [];
     if (schoolId) {
       endpoints.push(`/staff?schoolId=${schoolId}`);
-      endpoints.push(`/staff?school_id=${schoolId}`);
       endpoints.push(`/schools/${schoolId}/staff`);
     }
     endpoints.push('/staff');
-    endpoints.push('/staffs');
 
     let rawStaff = [];
     let lastError = null;
-    let usedEndpoint = null;
 
     for (const url of endpoints) {
       try {
         const res = await api.get(url);
         const arr = extractStaffArray(res.data);
-        if (arr.length > 0) { rawStaff = arr; usedEndpoint = url; break; }
+        if (arr.length > 0) { rawStaff = arr; break; }
       } catch (err) {
         lastError = err;
       }
@@ -9577,7 +9571,6 @@ const ExamModule = ({
     return classes.map(c => ({ value: c.id, label: c.name, subLabel: `Capacity: ${c.capacity || 'N/A'}` }));
   }, [classes]);
 
-  // ⬅️ NEW: exam name filter options derived from existing exams
   const examNameFilterOptions = useMemo(() => {
     if (!exams || exams.length === 0) return [];
     const names = [...new Set(exams.map(e => e.name).filter(Boolean))].sort();
@@ -9716,11 +9709,18 @@ const ExamModule = ({
   };
 
   // ============================================================
-  // GRADE CALCULATION
+  // ✅ GRADE CALCULATION — Empty marks → blank grade (never fabricate)
   // ============================================================
   const calculateGrade = (marks, maxMarks = 100, examCategory = null) => {
-    if (!marks && marks !== 0) return { grade: '-', points: 0, remark: '' };
-    const percentage = (marks / maxMarks) * 100;
+    // ✅ Distinguish empty from 0
+    if (marks === '' || marks === null || marks === undefined) {
+      return { grade: '', points: 0, remark: '' };
+    }
+    const numericMarks = parseFloat(marks);
+    if (isNaN(numericMarks)) {
+      return { grade: '', points: 0, remark: '' };
+    }
+    const percentage = maxMarks > 0 ? (numericMarks / maxMarks) * 100 : 0;
     const category = examCategory || schoolCategory;
     
     if (category === 'UNIVERSITY') {
@@ -9744,6 +9744,7 @@ const ExamModule = ({
       if (percentage >= 30) return { grade: 'Below Expectations', points: 1, remark: 'Below Expectations' };
       return { grade: 'Needs Improvement', points: 0, remark: 'Needs Improvement' };
     }
+    // SENIOR_SECONDARY (Form 1–4) — traditional grading
     if (percentage >= 80) return { grade: 'A', points: 12, remark: 'Excellent' };
     if (percentage >= 75) return { grade: 'A-', points: 11, remark: 'Very Good' };
     if (percentage >= 70) return { grade: 'B+', points: 10, remark: 'Good' };
@@ -9759,7 +9760,7 @@ const ExamModule = ({
   };
 
   const getGradeColor = (grade) => {
-    if (!grade) return 'bg-gray-100 text-gray-800';
+    if (!grade || grade === '') return 'bg-gray-100 text-gray-500';
     if (['A', 'A-', 'Exceeding Expectations', 'DISTINCTION'].includes(grade)) return 'bg-green-100 text-green-800';
     if (['B+', 'B', 'B-', 'Meeting Expectations', 'CREDIT'].includes(grade)) return 'bg-blue-100 text-blue-800';
     if (['C+', 'C', 'C-', 'Approaching Expectations', 'MERIT'].includes(grade)) return 'bg-yellow-100 text-yellow-800';
@@ -9769,16 +9770,13 @@ const ExamModule = ({
   };
 
   // ============================================================
-  // FILTERED EXAMS — now also filters by selectedExamName
+  // FILTERED EXAMS
   // ============================================================
   const filteredExams = useMemo(() => {
     let filtered = exams || [];
-
-    // ⬅️ NEW: apply exam-name filter first
     if (selectedExamName) {
       filtered = filtered.filter(e => e.name === selectedExamName);
     }
-
     if (isUniversity) {
       if (selectedCourse) filtered = filtered.filter(e => e.courseId === selectedCourse);
       if (selectedYear) filtered = filtered.filter(e => e.year === parseInt(selectedYear));
@@ -9972,70 +9970,176 @@ const ExamModule = ({
   };
 
   // ============================================================
-  // LOAD STUDENTS FOR BULK RESULTS
+  // ✅ LOAD STUDENTS FOR BULK RESULTS — FIXED
+  // ============================================================
+  // Fixed issues:
+  //  1. Use `params` object instead of string interpolation so URL
+  //     is encoded correctly.
+  //  2. Filter students by school (in case backend returns other
+  //     schools' students).
+  //  3. Prefer exam.selectedStudents if present (that's who the teacher
+  //     picked when creating the exam).
+  //  4. Detect if exam has no assigned class/course/program and tell
+  //     the user clearly.
+  //  5. Guard against duplicate/empty student lists.
+  //  6. Show a clear error instead of silently leaving the modal closed.
   // ============================================================
   const loadStudentsForBulkResults = async (examId) => {
-    if (!examId) return;
-    if (!canAddResults) { alert('You do not have permission to add results'); return; }
-    
+    if (!examId) {
+      alert('No exam selected.');
+      return;
+    }
+    if (!canAddResults) {
+      alert('You do not have permission to add results.');
+      return;
+    }
+
     setLoading(true);
+    setApiError('');
     setSelectedExamForResults(examId);
-    
+
     try {
       const exam = exams.find(e => e.id === examId);
-      if (!exam) { alert('Exam not found'); setLoading(false); return; }
-      
+      if (!exam) {
+        alert('Exam not found. Please refresh the page and try again.');
+        setLoading(false);
+        return;
+      }
+
+      // ---- Determine which student set to load ----
       let studentList = [];
-      if (isUniversity) {
-        if (!exam.courseId) { alert('This exam has no course assigned'); setLoading(false); return; }
-        const res = await api.get(`/students?courseId=${exam.courseId}`);
-        studentList = res.data.students || [];
-        if (exam.year) studentList = studentList.filter(s => s.currentYear === exam.year);
-      } else if (isTVET) {
-        if (!exam.programId) { alert('This exam has no program assigned'); setLoading(false); return; }
-        const res = await api.get(`/students?programId=${exam.programId}`);
-        studentList = res.data.students || [];
-        if (exam.module) studentList = studentList.filter(s => s.currentModule === `Module ${exam.module}`);
-      } else {
-        if (!exam.classId) { alert('This exam has no class assigned'); setLoading(false); return; }
-        const res = await api.get(`/students?classId=${exam.classId}`);
+
+      // Strategy 1: If exam has explicitly selected students, use those.
+      const selectedStudentIds = Array.isArray(exam.selectedStudents) ? exam.selectedStudents : [];
+      if (selectedStudentIds.length > 0) {
+        try {
+          const res = await api.get('/students', {
+            params: { ids: selectedStudentIds.join(',') }
+          });
+          studentList = res.data.students || [];
+        } catch (err) {
+          console.warn('Could not load selected students, falling back to scope:', err.message);
+        }
+      }
+
+      // Strategy 2: Load by exam scope (class / course / program)
+      if (studentList.length === 0) {
+        const params = {};
+
+        if (isUniversity) {
+          if (!exam.courseId) {
+            alert('This exam has no course assigned. Please edit the exam first.');
+            setLoading(false);
+            return;
+          }
+          params.courseId = exam.courseId;
+          if (exam.year) params.year = exam.year;
+        } else if (isTVET) {
+          if (!exam.programId) {
+            alert('This exam has no program assigned. Please edit the exam first.');
+            setLoading(false);
+            return;
+          }
+          params.programId = exam.programId;
+          if (exam.module) params.module = exam.module;
+          if (exam.year) params.year = exam.year;
+        } else {
+          if (!exam.classId) {
+            alert('This exam has no class assigned. Please edit the exam first.');
+            setLoading(false);
+            return;
+          }
+          params.classId = exam.classId;
+        }
+
+        // ✅ Use `params` object (not string interpolation) so URL is encoded correctly
+        const res = await api.get('/students', { params });
         studentList = res.data.students || [];
       }
-      
-      if (studentList.length === 0) { alert('No students found for this exam'); setLoading(false); return; }
-      
+
+      // ---- Always filter to this school (defensive) ----
+      if (currentSchool?.id) {
+        studentList = studentList.filter(s => 
+          !s.schoolId || s.schoolId === currentSchool.id
+        );
+      }
+
+      // ---- Additional in-memory filters (some backends ignore query params) ----
+      if (isUniversity && exam.courseId) {
+        studentList = studentList.filter(s => !s.courseId || s.courseId === exam.courseId);
+        if (exam.year) {
+          studentList = studentList.filter(s => !s.currentYear || s.currentYear === exam.year);
+        }
+      } else if (isTVET && exam.programId) {
+        studentList = studentList.filter(s => !s.programId || s.programId === exam.programId);
+        if (exam.module) {
+          const moduleLabel = `Module ${exam.module}`;
+          studentList = studentList.filter(s => !s.currentModule || s.currentModule === moduleLabel);
+        }
+      } else if (exam.classId) {
+        studentList = studentList.filter(s => !s.classId || s.classId === exam.classId);
+      }
+
+      // ---- Final sanity check ----
+      if (studentList.length === 0) {
+        alert('No students found for this exam. Please make sure students are assigned to the class/course/program.');
+        setLoading(false);
+        setSelectedExamForResults(null);
+        return;
+      }
+
+      // ---- Fetch existing results for this exam ----
       let existingResults = [];
       try {
         const res = await api.get(`/results/exam/${examId}`);
         existingResults = res.data.results || [];
-      } catch (err) { }
-      
+      } catch (err) {
+        console.warn('No existing results for this exam yet:', err.message);
+      }
+
+      // ---- Resolve item name (unit or subject) ----
       let itemName = '';
-      if (isUniversity || isTVET) itemName = units?.find(u => u.id === exam.unitId)?.name || 'Unknown Unit';
-      else itemName = subjects?.find(s => s.id === exam.subjectId)?.name || 'Unknown Subject';
-      
+      if (isUniversity || isTVET) {
+        itemName = units?.find(u => u.id === exam.unitId)?.name || 'Unknown Unit';
+      } else {
+        itemName = subjects?.find(s => s.id === exam.subjectId)?.name || 'Unknown Subject';
+      }
+
+      // ---- Build bulk result rows ----
       const bulkData = studentList.map(student => {
         const existing = existingResults.find(r => r.studentId === student.id);
-        let gradeInfo = { grade: '-', points: 0 };
-        if (existing?.marks) gradeInfo = calculateGrade(existing.marks, exam.maxMarks, exam.schoolCategory);
+        const hasMarks = existing?.marks !== undefined && existing?.marks !== null && existing?.marks !== '';
+        const gradeInfo = hasMarks
+          ? calculateGrade(existing.marks, exam.maxMarks, exam.schoolCategory)
+          : { grade: '', points: 0 };
+
         return {
           studentId: student.id,
-          studentName: `${student.firstName} ${student.lastName}`,
-          admissionNumber: student.admissionNumber,
-          unitId: exam.unitId, subjectId: exam.subjectId, unitName: itemName,
-          marks: existing?.marks || '', grade: existing?.grade || gradeInfo.grade,
-          points: existing?.points || gradeInfo.points,
-          isAbsent: existing?.isAbsent || false, resultId: existing?.id,
+          studentName: `${student.firstName || ''} ${student.lastName || ''}`.trim() || 'Unknown',
+          admissionNumber: student.admissionNumber || '—',
+          unitId: exam.unitId,
+          subjectId: exam.subjectId,
+          unitName: itemName,
+          marks: hasMarks ? existing.marks : '',
+          grade: gradeInfo.grade,
+          points: gradeInfo.points,
+          isAbsent: existing?.isAbsent || false,
+          resultId: existing?.id,
           schoolCategory: exam.schoolCategory
         };
       });
-      
+
+      console.log(`📊 Bulk Results: loaded ${bulkData.length} students for exam "${exam.name}"`);
       setBulkResults(bulkData);
       setShowBulkResultForm(true);
     } catch (error) {
-      console.error('Error loading students:', error);
-      alert('Failed to load students: ' + (error.response?.data?.message || error.message));
-    } finally { setLoading(false); }
+      console.error('❌ Error loading students for bulk results:', error);
+      const msg = error.response?.data?.message || error.message || 'Unknown error';
+      alert('Failed to load students: ' + msg);
+      setApiError(msg);
+    } finally {
+      setLoading(false);
+    }
   };
 
   // ============================================================
@@ -10048,10 +10152,12 @@ const ExamModule = ({
     setBulkResults(prev => prev.map(e => e.studentId === studentId ? { ...e, isAbsent: checked, marks: checked ? 0 : e.marks } : e));
   };
   const handleGradeBlur = (studentId, marks) => {
-    if (marks) {
+    if (marks !== '' && marks !== null && marks !== undefined) {
       const exam = exams.find(e => e.id === selectedExamForResults);
       const { grade, points } = calculateGrade(marks, exam?.maxMarks, exam?.schoolCategory);
       setBulkResults(prev => prev.map(e => e.studentId === studentId ? { ...e, grade, points } : e));
+    } else {
+      setBulkResults(prev => prev.map(e => e.studentId === studentId ? { ...e, grade: '', points: 0 } : e));
     }
   };
 
@@ -10068,6 +10174,13 @@ const ExamModule = ({
       const exam = exams.find(e => e.id === selectedExamForResults);
       if (!exam) { alert('Exam not found. Please refresh and try again.'); setLoading(false); return; }
       
+      // ✅ Fetch existing results ONCE before the loop
+      let existingByStudentId = {};
+      try {
+        const existingRes = await api.get(`/results/exam/${selectedExamForResults}`);
+        (existingRes.data?.results || []).forEach(r => { existingByStudentId[r.studentId] = r; });
+      } catch (_) {}
+
       for (const entry of bulkResults) {
         if (entry.marks === '' && !entry.isAbsent) continue;
         const marks = entry.isAbsent ? 0 : parseFloat(entry.marks) || 0;
@@ -10085,7 +10198,8 @@ const ExamModule = ({
           remarks: entry.isAbsent ? 'Absent' : ''
         };
         try {
-          if (entry.resultId) await api.put(`/results/${entry.resultId}`, resultData);
+          const existing = entry.resultId ? { id: entry.resultId } : existingByStudentId[entry.studentId];
+          if (existing?.id) await api.put(`/results/${existing.id}`, resultData);
           else await api.post('/results', resultData);
           savedCount++;
         } catch (err) {
@@ -10162,15 +10276,8 @@ const ExamModule = ({
       .replace(/'/g, '&#39;');
   };
 
-  // ============================================================
-  // HEADLINE for the printed schedule
-  //  - If an exam name filter is active → "<Name> Examinations"
-  //  - Otherwise → "Examination Schedule"
-  // ============================================================
   const getPrintHeadline = () => {
-    if (selectedExamName) {
-      return `${selectedExamName} Examinations`;
-    }
+    if (selectedExamName) return `${selectedExamName} Examinations`;
     return 'Examination Schedule';
   };
 
@@ -10566,11 +10673,10 @@ const ExamModule = ({
         </div>
       </div>
 
-      {/* Filters Section — now with Exam Name dropdown */}
+      {/* Filters Section */}
       <div className="bg-white p-6 rounded-xl shadow-sm">
         <h3 className="text-lg font-semibold mb-4">🔍 Filter Exams</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* ⬅️ NEW: Exam Name filter */}
           <SearchableSelect
             label="Exam Name / Term"
             value={selectedExamName}
@@ -10659,7 +10765,7 @@ const ExamModule = ({
         </div>
       </div>
 
-      {/* Exam Form Modal — unchanged */}
+      {/* Exam Form Modal */}
       {showExamForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-white p-6 rounded-xl shadow-sm max-w-4xl w-full max-h-[90vh] overflow-auto">
@@ -10882,7 +10988,7 @@ const ExamModule = ({
         </div>
       )}
 
-      {/* Single Result Modal — unchanged */}
+      {/* Single Result Modal */}
       {showResultForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-xl shadow-sm max-w-md w-full">
@@ -10941,7 +11047,7 @@ const ExamModule = ({
         </div>
       )}
 
-      {/* Bulk Results Modal — unchanged */}
+      {/* Bulk Results Modal */}
       {showBulkResultForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
           <div className="bg-white p-6 rounded-xl shadow-sm max-w-6xl w-full max-h-[90vh] overflow-auto">
@@ -11015,10 +11121,10 @@ const ExamModule = ({
                         </td>
                         <td className="px-4 py-2">
                           <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(entry.grade)}`}>
-                            {entry.grade}
+                            {entry.grade || '—'}
                           </span>
                         </td>
-                        <td className="px-4 py-2">{entry.points.toFixed(1)}</td>
+                        <td className="px-4 py-2">{(entry.points || 0).toFixed(1)}</td>
                         <td className="px-4 py-2">
                           <input type="checkbox" checked={entry.isAbsent}
                             onChange={(e) => handleAbsentChange(entry.studentId, e.target.checked)}
@@ -11043,7 +11149,7 @@ const ExamModule = ({
         </div>
       )}
 
-      {/* Exams Table — unchanged */}
+      {/* Exams Table */}
       <div className="bg-white rounded-xl shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
