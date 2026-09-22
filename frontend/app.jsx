@@ -10774,183 +10774,257 @@ const ExamModule = ({
     maxMarks: Number(paper.maxMarks) || 100
   });
 
-  // ============================================================
-  // SUBMIT SESSION
-  // ============================================================
-  const handleSessionSubmit = async (e) => {
-    e.preventDefault();
+// ============================================================
+// SUBMIT SESSION — SAFE DIFF STRATEGY
+//
+//   1. Update session metadata (or create the session)
+//   2. CREATE new papers first (so failures abort before deletion)
+//   3. UPDATE existing papers in place
+//   4. DELETE removed papers LAST (only after 2 & 3 succeed)
+//
+//   Never deletes anything until all creates/updates succeed.
+//   If anything fails, existing papers stay untouched.
+// ============================================================
+const handleSessionSubmit = async (e) => {
+  e.preventDefault();
 
-    if (!canCreateSessions) {
-      setSaveError('You do not have permission to create/edit exam sessions');
-      return;
-    }
+  if (!canCreateSessions) {
+    setSaveError('You do not have permission to create/edit exam sessions');
+    return;
+  }
 
-    // ---------- Validate ----------
-    const validationErrors = validateSessionForm();
-    if (validationErrors.length > 0) {
-      setSaveError(validationErrors.join(' • '));
-      return;
-    }
+  // ---------- Validate ----------
+  const validationErrors = validateSessionForm();
+  if (validationErrors.length > 0) {
+    setSaveError(validationErrors.join(' • '));
+    return;
+  }
 
-    setLoading(true);
-    setSaveError('');
-    setApiError('');
+  setLoading(true);
+  setSaveError('');
+  setApiError('');
 
-    const payload = {
-      name: sessionForm.name.trim(),
-      type: sessionForm.type,
-      term: sessionForm.term || null,
-      academicYear: sessionForm.academicYear || null,
-      startDate: sessionForm.startDate || null,
-      endDate: sessionForm.endDate || null,
-      maxMarks: Number(sessionForm.maxMarks) || 100,
-      notes: sessionForm.notes || null,
-      classId: sessionForm.classId || null,
-      courseId: sessionForm.courseId || null,
-      programId: sessionForm.programId || null,
-      year: sessionForm.year ? parseInt(sessionForm.year, 10) : null,
-      semester: sessionForm.semester ? parseInt(sessionForm.semester, 10) : null,
-      module: sessionForm.module ? parseInt(sessionForm.module, 10) : null
-    };
+  const payload = {
+    name: sessionForm.name.trim(),
+    type: sessionForm.type,
+    term: sessionForm.term || null,
+    academicYear: sessionForm.academicYear || null,
+    startDate: sessionForm.startDate || null,
+    endDate: sessionForm.endDate || null,
+    maxMarks: Number(sessionForm.maxMarks) || 100,
+    notes: sessionForm.notes || null,
+    classId: sessionForm.classId || null,
+    courseId: sessionForm.courseId || null,
+    programId: sessionForm.programId || null,
+    year: sessionForm.year ? parseInt(sessionForm.year, 10) : null,
+    semester: sessionForm.semester ? parseInt(sessionForm.semester, 10) : null,
+    module: sessionForm.module ? parseInt(sessionForm.module, 10) : null
+  };
 
-    try {
-      // ==========================================================
-      // EDIT MODE
-      // ==========================================================
-      if (editingSession) {
-        console.log('✏️ EDIT MODE — session:', editingSession.id);
+  try {
+    // ==========================================================
+    // CREATE MODE
+    // ==========================================================
+    if (!editingSession) {
+      console.log('➕ CREATE MODE');
 
-        // ---- Step 1: Update session metadata ----
-        setSavingPhase('session');
-        try {
-          await api.patch(`/exam-sessions/${editingSession.id}`, payload);
-          console.log('✅ Session metadata updated');
-        } catch (err) {
-          console.error('❌ Step 1 (update session) failed:', err);
-          throw new Error(
-            `Failed to update session: ${err.response?.data?.message || err.message}`
-          );
-        }
+      const createPayload = {
+        ...payload,
+        papers: sessionPapers.map(p => ({
+          subjectId: p.subjectId || null,
+          unitId: p.unitId || null,
+          date: p.date,
+          startTime: p.startTime || null,
+          endTime: p.endTime || null,
+          examHall: p.examHall || null,
+          invigilatorId: p.invigilatorId || null,
+          invigilator: p.invigilatorId ? getStaffName(p.invigilatorId) : null,
+          maxMarks: Number(p.maxMarks) || Number(sessionForm.maxMarks) || 100
+        }))
+      };
 
-        // ---- Step 2: Delete ALL existing papers ----
-        const existingPapers =
-          editingSession.papers ||
-          editingSession.exams ||
-          editingSession.ExamPapers ||
-          [];
-
-        setSavingPhase('deleting');
-        const deleteErrors = [];
-        console.log(`🗑️ Deleting ${existingPapers.length} existing papers...`);
-
-        for (const paper of existingPapers) {
-          if (!paper?.id) continue;
-          try {
-            await api.delete(`/exams/${paper.id}`);
-            console.log(`  ✓ Deleted paper ${paper.id}`);
-          } catch (err) {
-            // 404 = already gone, that's fine
-            if (err.response?.status === 404) {
-              console.log(`  ℹ️ Paper ${paper.id} already deleted`);
-            } else {
-              console.warn(`  ⚠️ Could not delete paper ${paper.id}:`, err.message);
-              deleteErrors.push(paper.id);
-            }
-          }
-        }
-
-        if (deleteErrors.length > 0) {
-          console.warn(`⚠️ ${deleteErrors.length} papers failed to delete — continuing`);
-        }
-
-        // ---- Step 3: Recreate all papers ----
-        setSavingPhase('creating');
-        console.log(`➕ Creating ${sessionPapers.length} papers...`);
-        const createErrors = [];
-
-        for (const paper of sessionPapers) {
-          const paperData = buildPaperData(paper, payload, editingSession.id);
-          try {
-            await api.post('/exams', paperData);
-            console.log(`  ✓ Created paper for subjectId=${paper.subjectId || 'N/A'}, unitId=${paper.unitId || 'N/A'}`);
-          } catch (err) {
-            console.error(`  ❌ Failed to create paper:`, err);
-            const label = paper.subjectId
-              ? subjects.find(s => s.id === paper.subjectId)?.name
-              : units.find(u => u.id === paper.unitId)?.name;
-            createErrors.push(
-              `${label || 'Unknown'}: ${err.response?.data?.message || err.message}`
-            );
-          }
-        }
-
-        if (createErrors.length > 0) {
-          throw new Error(
-            `${createErrors.length} of ${sessionPapers.length} papers failed to save:\n` +
-            createErrors.join('\n')
-          );
-        }
-
-        console.log('✅ All papers recreated successfully');
-
-      // ==========================================================
-      // CREATE MODE
-      // ==========================================================
-      } else {
-        console.log('➕ CREATE MODE');
-        setSavingPhase('session');
-
-        const createPayload = {
-          ...payload,
-          papers: sessionPapers.map(p => ({
-            subjectId: p.subjectId || null,
-            unitId: p.unitId || null,
-            date: p.date,
-            startTime: p.startTime || null,
-            endTime: p.endTime || null,
-            examHall: p.examHall || null,
-            invigilatorId: p.invigilatorId || null,
-            invigilator: p.invigilatorId ? getStaffName(p.invigilatorId) : null,
-            maxMarks: Number(p.maxMarks) || Number(sessionForm.maxMarks) || 100
-          }))
-        };
-
-        try {
-          await api.post('/exam-sessions', createPayload);
-          console.log('✅ Session created');
-        } catch (err) {
-          console.error('❌ Create session failed:', err);
-          throw new Error(
-            `Failed to create session: ${err.response?.data?.message || err.message}`
-          );
-        }
-      }
-
-      // ==========================================================
-      // SUCCESS — reset and reload
-      // ==========================================================
-      alert(editingSession ? '✅ Exam session updated' : '✅ Exam session created');
+      await api.post('/exam-sessions', createPayload);
+      alert('✅ Exam session created');
       setShowSessionForm(false);
       setEditingSession(null);
       setSessionPapers([]);
-      setSavingPhase('');
       await loadSessions();
-
-      // Refresh legacy exams list
       try {
         const r = await api.get('/exams');
         if (r.data?.exams) setExams(r.data.exams);
       } catch (_) {}
-
-    } catch (err) {
-      console.error('❌ Save session failed:', err);
-      setSaveError(err.message || 'Failed to save session');
-    } finally {
-      setLoading(false);
-      setSavingPhase('');
+      return;
     }
-  };
 
+    // ==========================================================
+    // EDIT MODE — SAFE DIFF
+    // ==========================================================
+    console.log('✏️ EDIT MODE — session:', editingSession.id);
+
+    // ---------- Split current form papers into: update / create ----------
+    const existingPapers =
+      editingSession.papers ||
+      editingSession.exams ||
+      editingSession.ExamPapers ||
+      [];
+
+    const existingById = new Map(
+      existingPapers.filter(p => p?.id).map(p => [p.id, p])
+    );
+    const existingIds = new Set(existingById.keys());
+
+    // Papers that already exist (have id AND match a known session paper)
+    const papersToUpdate = sessionPapers.filter(
+      p => p.id && existingIds.has(p.id)
+    );
+
+    // Papers that are new (no id, OR id no longer matches anything)
+    const papersToCreate = sessionPapers.filter(
+      p => !p.id || !existingIds.has(p.id)
+    );
+
+    // Papers that existed but were removed by the user
+    const submittedIds = new Set(
+      sessionPapers.filter(p => p.id).map(p => p.id)
+    );
+    const papersToDelete = existingPapers.filter(
+      p => p.id && !submittedIds.has(p.id)
+    );
+
+    console.log(`📊 Paper diff:
+      - existing in DB: ${existingPapers.length}
+      - to update: ${papersToUpdate.length}
+      - to create: ${papersToCreate.length}
+      - to delete: ${papersToDelete.length}`);
+
+    // ---------- Step 1: Update session metadata ----------
+    setSavingPhase('session');
+    try {
+      await api.patch(`/exam-sessions/${editingSession.id}`, payload);
+      console.log('✅ Session metadata updated');
+    } catch (err) {
+      console.error('❌ Failed to update session:', err);
+      throw new Error(
+        `Failed to update session: ${err.response?.data?.message || err.message}`
+      );
+    }
+
+    // ---------- Step 2: CREATE new papers FIRST ----------
+    // Doing creates before deletes means a create failure aborts the whole
+    // operation WITHOUT losing existing papers.
+    setSavingPhase('creating');
+    const createdPapers = [];
+
+    for (const paper of papersToCreate) {
+      const paperData = buildPaperData(paper, payload, editingSession.id);
+
+      // 🔍 Debug log — remove once creates work
+      if (createdPapers.length === 0) {
+        console.log('📤 First create payload:', JSON.stringify(paperData, null, 2));
+      }
+
+      try {
+        const res = await api.post('/exams', paperData);
+        const created = res.data?.exam || res.data?.paper || res.data;
+        if (created?.id) {
+          createdPapers.push(created);
+          // Give this form paper its new id so it won't be recreated
+          paper.id = created.id;
+        }
+        console.log(`  ✓ Created paper ${created?.id || '(no id returned)'}`);
+      } catch (err) {
+        console.error('❌ Create paper failed:', err);
+        const label = paper.subjectId
+          ? subjects.find(s => s.id === paper.subjectId)?.name
+          : units.find(u => u.id === paper.unitId)?.name;
+        throw new Error(
+          `Failed to create paper "${label || 'Unknown'}": ` +
+          (err.response?.data?.message || err.message) +
+          '\n\n⚠️ Existing papers were NOT modified.'
+        );
+      }
+    }
+
+    // ---------- Step 3: UPDATE existing papers ----------
+    setSavingPhase('updating');
+
+    for (const paper of papersToUpdate) {
+      const paperData = buildPaperData(paper, payload, editingSession.id);
+
+      try {
+        await api.put(`/exams/${paper.id}`, paperData);
+        console.log(`  ✓ Updated paper ${paper.id}`);
+      } catch (err) {
+        // 404 = paper was deleted elsewhere; treat as create-later
+        if (err.response?.status === 404) {
+          console.warn(`  ⚠️ Paper ${paper.id} not found — recreating`);
+          try {
+            const res = await api.post('/exams', paperData);
+            const created = res.data?.exam || res.data?.paper || res.data;
+            if (created?.id) paper.id = created.id;
+          } catch (createErr) {
+            const label = paper.subjectId
+              ? subjects.find(s => s.id === paper.subjectId)?.name
+              : units.find(u => u.id === paper.unitId)?.name;
+            throw new Error(
+              `Failed to recreate paper "${label || 'Unknown'}": ` +
+              (createErr.response?.data?.message || createErr.message)
+            );
+          }
+        } else {
+          console.error('❌ Update paper failed:', err);
+          const label = paper.subjectId
+            ? subjects.find(s => s.id === paper.subjectId)?.name
+            : units.find(u => u.id === paper.unitId)?.name;
+          throw new Error(
+            `Failed to update paper "${label || 'Unknown'}": ` +
+            (err.response?.data?.message || err.message) +
+            '\n\n⚠️ No papers were deleted.'
+          );
+        }
+      }
+    }
+
+    // ---------- Step 4: DELETE removed papers LAST ----------
+    // Only reached if every create and update succeeded.
+    setSavingPhase('deleting');
+
+    for (const paper of papersToDelete) {
+      try {
+        await api.delete(`/exams/${paper.id}`);
+        console.log(`  ✓ Deleted paper ${paper.id}`);
+      } catch (err) {
+        // 404 = already gone; ignore
+        if (err.response?.status !== 404) {
+          console.warn(`  ⚠️ Could not delete paper ${paper.id}:`, err.message);
+        }
+      }
+    }
+
+    // ==========================================================
+    // SUCCESS
+    // ==========================================================
+    console.log('✅ All changes saved successfully');
+    alert('✅ Exam session updated');
+    setShowSessionForm(false);
+    setEditingSession(null);
+    setSessionPapers([]);
+    setSavingPhase('');
+    await loadSessions();
+
+    try {
+      const r = await api.get('/exams');
+      if (r.data?.exams) setExams(r.data.exams);
+    } catch (_) {}
+
+  } catch (err) {
+    console.error('❌ Save session failed:', err);
+    setSaveError(err.message || 'Failed to save session');
+  } finally {
+    setLoading(false);
+    setSavingPhase('');
+  }
+};
   // ============================================================
   // DELETE SESSION
   // ============================================================
