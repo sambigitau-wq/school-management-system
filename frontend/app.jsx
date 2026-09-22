@@ -2003,34 +2003,41 @@ const StudentAdmissionModal = ({ onAdmissionSubmit, onClose, message }) => {
   const [admissionNumber, setAdmissionNumber] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-// FIX THIS SECTION in StudentAdmissionModal:
 const handleSubmit = async (e) => {
   e.preventDefault();
   setLoading(true);
   setError('');
+
   try {
- const res = await api.get(`/students/by-admission/${encodeURIComponent(admissionNumber)}`);
+    const res = await api.get(
+      `/students/by-admission/${encodeURIComponent(admissionNumber)}`
+    );
     const student = res.data.student;
     if (!student) throw new Error('Student not found');
 
-    // FIX: The user data is in res.data.user, not res.data.user
+    // ✅ Link the student record to the logged-in user (if not already linked)
     const token = localStorage.getItem('token');
     if (token) {
-      const userRes = await api.get('/auth/me');
-      if (userRes.data.user && !student.userId) {
-        await api.patch(`/students/${student.id}`, { userId: userRes.data.user.id });
+      try {
+        const userRes = await api.get('/auth/me');
+        const authUser = userRes.data.user;
+        if (authUser && !student.userId) {
+          await api.patch(`/students/${student.id}`, { userId: authUser.id });
+          student.userId = authUser.id; // keep local copy in sync
+        }
+      } catch (linkErr) {
+        // Non-fatal — the student can still proceed
+        console.warn('Could not link student to user:', linkErr);
       }
     }
 
-    // Store admission number and student data
+    // ✅ Cache admission number + full student payload for other modules
     localStorage.setItem('studentAdmissionNumber', admissionNumber);
     localStorage.setItem('studentData', JSON.stringify(student));
-    
-    // CRITICAL: The onAdmissionSubmit callback needs to be called with the student
-    if (onAdmissionSubmit) {
-      onAdmissionSubmit(student);
-    }
-    onClose(); // Close modal after successful submission
+
+    // ✅ Hand off to the parent component
+    if (onAdmissionSubmit) onAdmissionSubmit(student);
+    onClose();
   } catch (error) {
     setError(error.response?.data?.message || 'Student not found');
   } finally {
@@ -5156,17 +5163,20 @@ const StudentSelect = ({ label, value, onChange, options = [] }) => (
 );
 
 // ============================================================
-//  STUDENT MODULE — v6
+//  STUDENT MODULE — v7 (consolidated)
 //  Features:
-//   · Persistent photo (fallback-safe)
-//   · Multi-guardian
+//   · Persistent photo (base64 preferred, URL fallback)
+//   · Multi-guardian with portal access
 //   · Religion field
-//   · Knec-style grouped academic report
-//   · KNEC aptitude analysis
-//   · Term-wise invoice with installments + B/F
-//   · Print-ready invoice with school name + logo
+//   · KNEC-style grouped academic report + aptitude analysis
+//   · Fee-tagged term invoice (real feeId → real term)
+//   · "General Payments" bucket for un-tagged cash (always last)
+//   · Balance B/F carried correctly across terms
+//   · Centered real school name + logo on invoice
+//   · Clean footer (no synthetic "computer-generated" line)
+//   · Print-only invoice (rest of UI hidden)
 //   · Smart labels per school category
-//   · Adaptive grading
+//   · Adaptive grading (CBC / 8-4-4 / TVET / University)
 // ============================================================
 const StudentModule = ({
   students = [],
@@ -5220,12 +5230,15 @@ const StudentModule = ({
   const formatDate = (value) => {
     const iso = toDateInput(value);
     if (!iso) return '—';
-    return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    return new Date(iso).toLocaleDateString('en-GB', {
+      day: '2-digit', month: 'short', year: 'numeric'
+    });
   };
 
   const formatCurrency = (amount) =>
-    new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 })
-      .format(amount || 0);
+    new Intl.NumberFormat('en-KE', {
+      style: 'currency', currency: 'KES', minimumFractionDigits: 0
+    }).format(amount || 0);
 
   const buildAdmissionNumber = (year, seq, prefix = ADM_PREFIX) => {
     const y = Number.parseInt(year, 10);
@@ -5259,17 +5272,14 @@ const StudentModule = ({
     return Number.isFinite(n) ? n : null;
   };
 
-  // ✅ Persistent photo URL helper
-  // If the student has a base64 photo → use it directly (never breaks).
-  // Else if they have a URL → use it.
-  // Else if they have an id → use the backend photo endpoint (which will 404 → initials).
+  // ✅ Persistent photo resolver — base64 → URL → endpoint → initials
   const resolvePhotoUrl = (student) => {
     if (!student) return null;
     const p = student.passportPhoto;
     if (!p) return student.id ? `/api/students/${student.id}/photo` : null;
-    if (typeof p === 'string' && p.startsWith('data:image/')) return p;   // base64
-    if (typeof p === 'string' && p.startsWith('http')) return p;          // full url
-    if (typeof p === 'string' && p.startsWith('/')) return p;             // relative
+    if (typeof p === 'string' && p.startsWith('data:image/')) return p;
+    if (typeof p === 'string' && p.startsWith('http')) return p;
+    if (typeof p === 'string' && p.startsWith('/')) return p;
     return student.id ? `/api/students/${student.id}/photo` : null;
   };
 
@@ -5294,6 +5304,18 @@ const StudentModule = ({
   const SUBJECT_LABEL = isUniversity ? 'Unit' : isTVET ? 'Module' : 'Subject';
   const GROUP_LABEL = isUniversity ? 'Course' : isTVET ? 'Program' : 'Class';
   const TERM_LABEL = isUniversity ? 'Semester' : isTVET ? 'Module' : 'Term';
+
+  // ✅ REAL SCHOOL NAME — never invent one
+  const schoolName =
+    currentSchool?.name?.trim() ||
+    currentSchool?.schoolName?.trim() ||
+    '';
+
+  const schoolLogo = currentSchool?.contact?.logo || '';
+  const schoolAddress = currentSchool?.contact?.address || '';
+  const schoolPhone = currentSchool?.contact?.phone || '';
+  const schoolEmail = currentSchool?.contact?.email || '';
+  const schoolMotto = currentSchool?.motto || '';
 
   const enableParentPortal =
     currentSchool?.enableParentPortal === true ||
@@ -5445,7 +5467,9 @@ const StudentModule = ({
         params: { schoolId: currentSchool.id, year: CURRENT_YEAR }
       });
       const next = res.data?.admissionNumber;
-      const safe = typeof next === 'string' && /\/\d{4}$/.test(next) ? next : nextAdmissionNumber(students, CURRENT_YEAR);
+      const safe = typeof next === 'string' && /\/\d{4}$/.test(next)
+        ? next
+        : nextAdmissionNumber(students, CURRENT_YEAR);
       setAdmPreview(safe);
       if (autoAdm) setFormState(prev => ({ ...prev, admissionNumber: safe }));
     } catch (err) {
@@ -5546,6 +5570,7 @@ const StudentModule = ({
       if (n >= 30) return { grade: 'BE', points: 1 };
       return { grade: 'NI', points: 0 };
     }
+    // 8-4-4
     if (n >= 80) return { grade: 'A', points: 12 };
     if (n >= 75) return { grade: 'A-', points: 11 };
     if (n >= 70) return { grade: 'B+', points: 10 };
@@ -5586,7 +5611,10 @@ const StudentModule = ({
   const handlePhotoSelect = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { setSubmitError('Photo must be less than 5 MB'); return; }
+    if (file.size > 5 * 1024 * 1024) {
+      setSubmitError('Photo must be less than 5 MB');
+      return;
+    }
     if (!/^image\/(jpeg|jpg|png|gif|webp)$/i.test(file.type)) {
       setSubmitError('Only JPG, PNG, GIF, or WEBP images are allowed');
       return;
@@ -5606,29 +5634,15 @@ const StudentModule = ({
       const res = await api.post('/students/upload-photo', fd, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
-
-      // ✅ Prefer base64 — survives server restarts
       const base64 = res.data?.base64;
       const url = res.data?.photoUrl;
-
-      if (base64) {
-        console.log('✅ Photo stored as base64 (persistent)');
-        return base64;
-      }
-      if (url) {
-        console.log('✅ Photo stored as URL:', url);
-        return url;
-      }
-      // Final fallback — save the local preview (base64) we already have
-      if (photoPreview) {
-        console.log('⚠️ Falling back to local base64');
-        return photoPreview;
-      }
+      if (base64) return base64;
+      if (url) return url;
+      if (photoPreview) return photoPreview;
       return null;
     } catch (err) {
       console.error('❌ Photo upload failed:', err);
       setSubmitError('Photo upload failed: ' + (err.response?.data?.message || err.message));
-      // Still return local preview so photo isn't lost
       return photoPreview || null;
     } finally {
       setUploadingPhoto(false);
@@ -5961,12 +5975,19 @@ const StudentModule = ({
   };
 
   // ==================================================================
-  //  INVOICE — term-wise, installments, B/F
+  //  ✅ INVOICE BUILDER — Fee-tagging (NOT date guessing)
+  //
+  //  Rules:
+  //   1. Payment HAS feeId → that fee's real term (from the fee itself).
+  //   2. Payment has NO feeId → "General Payments" bucket.
+  //   3. Terms sorted by number (Term 1 → Term 2 → Term 3).
+  //   4. "General Payments" ALWAYS last.
+  //   5. B/F carried across term groups.
   // ==================================================================
   const buildInvoiceData = (student) => {
     if (!student) return null;
 
-    const studentPayments = (payments || []).filter(p => String(p.studentId) === String(student.id));
+    const studentPaymentsList = (payments || []).filter(p => String(p.studentId) === String(student.id));
 
     const applicableFees = (fees || []).filter(f => {
       if (isUniversity) return String(f.courseId) === String(student.courseId);
@@ -5975,7 +5996,7 @@ const StudentModule = ({
     });
 
     const referencedFeeIds = new Set(
-      studentPayments.map(p => p.feeId).filter(Boolean).map(String)
+      studentPaymentsList.map(p => p.feeId).filter(Boolean).map(String)
     );
 
     const feeById = new Map();
@@ -5986,20 +6007,38 @@ const StudentModule = ({
     });
 
     const getTermKey = (fee) => {
-      if (!fee) return 'Unspecified Term';
-      if (isUniversity) return fee.semester ? `Semester ${fee.semester}` : (fee.term || 'Unspecified Semester');
-      if (isTVET) return fee.module ? `Module ${fee.module}` : (fee.term || 'Unspecified Module');
-      return fee.term || 'Unspecified Term';
+      if (!fee) return 'General Payments';
+      if (isUniversity) {
+        if (fee.semester) return `Semester ${fee.semester}`;
+        if (fee.term && /semester/i.test(String(fee.term))) return fee.term;
+        return 'General Payments';
+      }
+      if (isTVET) {
+        if (fee.module) return `Module ${fee.module}`;
+        if (fee.term && /module/i.test(String(fee.term))) return fee.term;
+        return 'General Payments';
+      }
+      if (fee.term && /term\s*\d/i.test(String(fee.term))) return fee.term;
+      return 'General Payments';
     };
 
     const termGroups = new Map();
     const ensureTermGroup = (term) => {
       if (!termGroups.has(term)) {
-        termGroups.set(term, { term, fees: [], cashOnly: [], totalBilled: 0, totalDiscount: 0, totalPaid: 0 });
+        termGroups.set(term, {
+          term,
+          isGeneral: /general/i.test(term),
+          fees: [],
+          cashOnly: [],
+          totalBilled: 0,
+          totalDiscount: 0,
+          totalPaid: 0
+        });
       }
       return termGroups.get(term);
     };
 
+    // ---- 1. Fee-tagged records ----
     const seenFeeIds = new Set();
     for (const fee of [...applicableFees, ...referencedFeeIds]) {
       const feeObj = typeof fee === 'string' ? feeById.get(fee) : fee;
@@ -6033,7 +6072,7 @@ const StudentModule = ({
         else if (amt > 0) discount = amt;
       }
 
-      const feePayments = studentPayments.filter(p => String(p.feeId) === String(feeObj.id));
+      const feePayments = studentPaymentsList.filter(p => String(p.feeId) === String(feeObj.id));
       const paid = feePayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
 
       group.fees.push({
@@ -6061,17 +6100,13 @@ const StudentModule = ({
       group.totalPaid += paid;
     }
 
-    // Payments with no identifiable fee
-    for (const p of studentPayments) {
+    // ---- 2. Payments WITHOUT a valid feeId → "General Payments" ----
+    const generalGroup = ensureTermGroup('General Payments');
+    for (const p of studentPaymentsList) {
       if (p.feeId && seenFeeIds.has(String(p.feeId))) continue;
-      const d = new Date(p.date || p.paymentDate || p.createdAt);
-      const month = d.getMonth() + 1;
-      let term = 'General';
-      if (!isUniversity && !isTVET) term = month <= 4 ? 'Term 1' : month <= 8 ? 'Term 2' : 'Term 3';
-      else if (isUniversity) term = month <= 6 ? 'Semester 1' : 'Semester 2';
-      else term = 'Module Payment';
-      const group = ensureTermGroup(term);
-      group.cashOnly.push({
+      if (p.feeId && feeById.has(String(p.feeId))) continue;
+
+      generalGroup.cashOnly.push({
         id: p.id,
         date: p.date || p.paymentDate || p.createdAt,
         amount: parseFloat(p.amount) || 0,
@@ -6079,16 +6114,23 @@ const StudentModule = ({
         receiptNo: p.receiptNo,
         reference: p.transactionId || p.mpesaCode || p.bankReference || p.reference || ''
       });
-      group.totalPaid += parseFloat(p.amount) || 0;
+      generalGroup.totalPaid += parseFloat(p.amount) || 0;
     }
 
+    // ---- 3. Sort terms — numbered terms first, "General Payments" last ----
     const termSort = (a, b) => {
-      const na = parseInt(String(a.term).replace(/\D/g, '')) || 0;
-      const nb = parseInt(String(b.term).replace(/\D/g, '')) || 0;
+      const aGen = /general/i.test(String(a.term));
+      const bGen = /general/i.test(String(b.term));
+      if (aGen && !bGen) return 1;
+      if (!aGen && bGen) return -1;
+      if (aGen && bGen) return 0;
+      const na = parseInt(String(a.term).replace(/\D/g, ''), 10) || 0;
+      const nb = parseInt(String(b.term).replace(/\D/g, ''), 10) || 0;
       return na - nb;
     };
     const sortedTerms = Array.from(termGroups.values()).sort(termSort);
 
+    // ---- 4. Build term statements with B/F ----
     let broughtForward = 0;
     const termStatements = sortedTerms.map(g => {
       const netBilled = Math.max(0, g.totalBilled - g.totalDiscount);
@@ -6096,8 +6138,10 @@ const StudentModule = ({
       const paidThisTerm = g.totalPaid;
       const balance = billedThisTerm - paidThisTerm;
       const carriedForward = balance > 0 ? balance : 0;
+
       const row = {
         term: g.term,
+        isGeneral: g.isGeneral,
         fees: g.fees,
         cashOnly: g.cashOnly,
         grossBilled: g.totalBilled,
@@ -6127,15 +6171,29 @@ const StudentModule = ({
         firstName: student.firstName,
         lastName: student.lastName,
         admissionNumber: student.admissionNumber,
-        className: classes.find(c => c.id === student.classId)?.name || student.className || student.Class?.name || '—',
-        programName: programs.find(p => p.id === student.programId)?.name || student.programName || '—',
-        courseName: courses.find(c => c.id === student.courseId)?.name || student.courseName || '—',
+        className:
+          classes.find(c => c.id === student.classId)?.name ||
+          student.className ||
+          student.Class?.name ||
+          '',
+        programName:
+          programs.find(p => p.id === student.programId)?.name ||
+          student.programName ||
+          '',
+        courseName:
+          courses.find(c => c.id === student.courseId)?.name ||
+          student.courseName ||
+          ''
       },
       school: {
-        name: currentSchool?.name,
-        motto: currentSchool?.motto,
-        contact: currentSchool?.contact,
-        logo: currentSchool?.contact?.logo
+        name: schoolName,
+        motto: schoolMotto,
+        contact: {
+          logo: schoolLogo,
+          address: schoolAddress,
+          phone: schoolPhone,
+          email: schoolEmail
+        }
       },
       termStatements,
       totals,
@@ -6289,7 +6347,7 @@ const StudentModule = ({
   };
 
   // ==================================================================
-  //  GROUPED ACADEMIC REPORT (mirrors Results module)
+  //  GROUPED ACADEMIC REPORT
   // ==================================================================
   const examLabelMap = {
     OPENER: 'Opener', MIDTERM: 'Mid-Term', ENDTERM: 'End of Term',
@@ -6334,7 +6392,9 @@ const StudentModule = ({
         : (subjects.find(s => s.id === r.subjectId)?.name || r.Subject?.name || '—');
 
       const marks = parseFloat(r.marks) || 0;
-      const levelHint = studentDetails?.classId ? classes.find(c => c.id === studentDetails.classId)?.name : null;
+      const levelHint = studentDetails?.classId
+        ? classes.find(c => c.id === studentDetails.classId)?.name
+        : null;
       const calc = getGrade(marks, levelHint);
 
       group.subjects.push({
@@ -6380,7 +6440,6 @@ const StudentModule = ({
     };
     const byStream = {};
     studentResults.forEach(r => {
-      const exam = exams.find(e => e.id === r.examId);
       const name = isUniversity || isTVET
         ? units.find(u => u.id === r.unitId)?.name
         : subjects.find(s => s.id === r.subjectId)?.name;
@@ -6461,7 +6520,63 @@ const StudentModule = ({
   };
 
   // ==================================================================
-  //  RENDER — student role view
+  //  PRINT-ONLY STYLE (injected once per mount)
+  //  Only .invoice-print-area will print. Everything else hidden.
+  // ==================================================================
+  useEffect(() => {
+    const id = '__student_module_print_style__';
+    if (document.getElementById(id)) return;
+    const style = document.createElement('style');
+    style.id = id;
+    style.innerHTML = `
+      @media print {
+        body * { visibility: hidden !important; }
+        .invoice-print-area,
+        .invoice-print-area * { visibility: visible !important; }
+        .invoice-print-area {
+          position: absolute !important;
+          left: 0; top: 0;
+          width: 100% !important;
+          background: #fff !important;
+          padding: 12mm !important;
+          box-shadow: none !important;
+          border: none !important;
+          border-radius: 0 !important;
+        }
+        .no-print,
+        .no-print *,
+        nav, aside, header, footer,
+        button, input, select, textarea { display: none !important; }
+        table { border-collapse: collapse !important; width: 100% !important; }
+        thead { display: table-header-group !important; }
+        tr { page-break-inside: avoid !important; }
+        th, td {
+          border: 1px solid #cbd5e1 !important;
+          padding: 6px 8px !important;
+          font-size: 11px !important;
+          color: #111 !important;
+          background: #fff !important;
+        }
+        th { background: #f1f5f9 !important; font-weight: 700 !important; }
+        @page { size: A4 portrait; margin: 10mm; }
+      }
+    `;
+    document.head.appendChild(style);
+    return () => {
+      const el = document.getElementById(id);
+      if (el) el.remove();
+    };
+  }, []);
+
+  const handlePrintInvoice = () => {
+    const el = document.getElementById('invoice-print-area');
+    if (!el) { window.print(); return; }
+    el.classList.add('invoice-print-area');
+    setTimeout(() => { window.print(); }, 80);
+  };
+
+  // ==================================================================
+  //  STUDENT VIEW
   // ==================================================================
   if (isStudent) {
     return (
@@ -6539,27 +6654,27 @@ const StudentModule = ({
   }
 
   // ==================================================================
-  //  RENDER — admin / teacher view
+  //  ADMIN / TEACHER VIEW
   // ==================================================================
   return (
     <div className="space-y-6">
-      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50" />}
+      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50 no-print" />}
 
       {successMessage && (
-        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center justify-between">
+        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center justify-between no-print">
           <span><i className="fas fa-check-circle mr-2" />{successMessage}</span>
           <button onClick={() => setSuccessMessage('')} className="text-green-500 hover:text-green-700"><i className="fas fa-times" /></button>
         </div>
       )}
       {errorMessage && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between no-print">
           <span><i className="fas fa-exclamation-circle mr-2" />{errorMessage}</span>
           <button onClick={() => setErrorMessage('')} className="text-red-500 hover:text-red-700"><i className="fas fa-times" /></button>
         </div>
       )}
 
       {/* Header */}
-      <div className="flex flex-wrap justify-between items-center gap-3">
+      <div className="flex flex-wrap justify-between items-center gap-3 no-print">
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Student Management</h2>
           <p className="text-sm text-gray-500 mt-1">
@@ -6587,7 +6702,7 @@ const StudentModule = ({
 
       {/* Filters */}
       {showFilters && (
-        <div className="bg-white p-4 rounded-xl shadow-sm border">
+        <div className="bg-white p-4 rounded-xl shadow-sm border no-print">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <TextInput label="Search" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Name, admission no, email…" />
             {!isUniversity && !isTVET && (
@@ -6617,7 +6732,7 @@ const StudentModule = ({
 
       {/* FORM */}
       {showForm && (canAdd || canEdit) && (
-        <div id="student-form" className="bg-white p-6 rounded-xl shadow-sm border-2 border-indigo-100">
+        <div id="student-form" className="bg-white p-6 rounded-xl shadow-sm border-2 border-indigo-100 no-print">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold flex items-center gap-2">
               <i className={`fas fa-${editingId ? 'edit' : 'user-plus'} text-indigo-600`} />
@@ -6715,7 +6830,6 @@ const StudentModule = ({
                 <TextInput label="Date of Birth *" type="date" value={formState.dateOfBirth} onChange={(e) => setFormState({ ...formState, dateOfBirth: e.target.value })} required max={toDateInput(new Date())} />
                 <SelectField label="Gender *" value={formState.gender} onChange={(e) => setFormState({ ...formState, gender: e.target.value })} options={genderOptions} />
                 <TextInput label="Nationality" value={formState.nationality} onChange={(e) => setFormState({ ...formState, nationality: e.target.value })} />
-                {/* ✅ Religion */}
                 <SelectField label="Religion" value={formState.religion || ''} onChange={(e) => setFormState({ ...formState, religion: e.target.value })} options={religionOptions} />
               </div>
             </div>
@@ -6981,7 +7095,7 @@ const StudentModule = ({
 
       {/* LIST */}
       {viewMode === 'grid' ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 no-print">
           {filteredStudents.length === 0 ? (
             <div className="col-span-full text-center py-12 text-gray-500">
               <i className="fas fa-users text-5xl text-gray-300 mb-3 block" />
@@ -7019,7 +7133,7 @@ const StudentModule = ({
           ))}
         </div>
       ) : (
-        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden no-print">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50">
@@ -7068,9 +7182,9 @@ const StudentModule = ({
         </div>
       )}
 
-      {/* DETAILS MODAL — full version below */}
+      {/* DETAILS MODAL */}
       {showDetailsModal && selectedStudent && studentDetails && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto p-4">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto p-4 no-print">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl max-h-[92vh] overflow-auto">
             <div className="sticky top-0 bg-white z-10 border-b">
               <div className="flex justify-between items-center px-6 py-4">
@@ -7226,7 +7340,7 @@ const StudentModule = ({
                 </div>
               )}
 
-              {/* ACADEMIC — Knec grouped report */}
+              {/* ACADEMIC — grouped report */}
               {activeDetailTab === 'academic' && (
                 <div className="space-y-6">
                   {groupedResults.length === 0 ? (
@@ -7606,14 +7720,14 @@ const StudentModule = ({
       {/* INVOICE MODAL */}
       {showInvoiceModal && selectedStudent && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto p-4 print:bg-white print:p-0">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-auto print:max-h-none print:shadow-none">
-            <div className="sticky top-0 bg-white z-10 border-b px-6 py-4 flex justify-between items-center print:hidden">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-auto print:max-h-none print:shadow-none print:rounded-none">
+            <div className="sticky top-0 bg-white z-10 border-b px-6 py-4 flex justify-between items-center no-print">
               <h2 className="text-2xl font-bold text-gray-800">
                 <i className="fas fa-file-invoice-dollar text-purple-600 mr-2" />
                 Fee Invoice
               </h2>
               <div className="flex gap-2">
-                <button onClick={() => window.print()} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
+                <button onClick={handlePrintInvoice} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
                   <i className="fas fa-print mr-2" />Print
                 </button>
                 <button onClick={() => setShowInvoiceModal(false)} className="text-gray-500 hover:text-gray-700 p-2">
@@ -7629,28 +7743,26 @@ const StudentModule = ({
               </div>
             ) : invoiceData ? (
               <div className="p-6 space-y-6" id="invoice-print-area">
-                {/* HEADER */}
-                <div className="border-b-2 border-indigo-200 pb-4 flex items-center gap-4">
-                  {invoiceData.school?.logo ? (
-                    <img src={invoiceData.school.logo} alt="School Logo" className="w-20 h-20 rounded-lg object-cover border" />
-                  ) : (
-                    <div className="w-20 h-20 bg-indigo-100 rounded-lg flex items-center justify-center text-indigo-600 text-3xl font-bold">
-                      {invoiceData.school?.name?.charAt(0) || 'S'}
-                    </div>
-                  )}
-                  <div className="flex-1">
-                    <h1 className="text-3xl font-bold text-indigo-800">{invoiceData.school?.name || 'School'}</h1>
-                    {invoiceData.school?.motto && <p className="text-sm italic text-gray-600 mt-1">"{invoiceData.school.motto}"</p>}
+                {/* HEADER — centered school name */}
+                <div className="border-b-2 border-indigo-200 pb-4">
+                  <div className="flex flex-col items-center text-center">
+                    {invoiceData.school?.contact?.logo ? (
+                      <img src={invoiceData.school.contact.logo} alt="School Logo" className="w-20 h-20 rounded-lg object-cover border mb-2" />
+                    ) : null}
+                    <h1 className="text-3xl font-bold text-indigo-800">
+                      {invoiceData.school?.name || ''}
+                    </h1>
+                    {invoiceData.school?.motto && (
+                      <p className="text-sm italic text-gray-600 mt-1">"{invoiceData.school.motto}"</p>
+                    )}
                     <p className="text-xs text-gray-500 mt-2">
-                      {invoiceData.school?.contact?.address && <span>{invoiceData.school.contact.address} • </span>}
-                      {invoiceData.school?.contact?.phone && <span>{invoiceData.school.contact.phone} • </span>}
+                      {invoiceData.school?.contact?.address && <span>{invoiceData.school.contact.address}</span>}
+                      {invoiceData.school?.contact?.address && invoiceData.school?.contact?.phone && <span> • </span>}
+                      {invoiceData.school?.contact?.phone && <span>{invoiceData.school.contact.phone}</span>}
+                      {(invoiceData.school?.contact?.address || invoiceData.school?.contact?.phone) && invoiceData.school?.contact?.email && <span> • </span>}
                       {invoiceData.school?.contact?.email && <span>{invoiceData.school.contact.email}</span>}
                     </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs uppercase tracking-wide text-gray-500">Invoice</p>
-                    <p className="text-sm font-semibold text-gray-700">{new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
-                    <p className="text-xs text-gray-500 mt-1">Fee Statement</p>
+                    <p className="text-xs uppercase tracking-widest text-gray-400 mt-2">Student Fee Statement</p>
                   </div>
                 </div>
 
@@ -7664,6 +7776,7 @@ const StudentModule = ({
                   <div className="text-right">
                     <p className="text-xs uppercase tracking-wide text-gray-500">{GROUP_LABEL}</p>
                     <p className="font-medium">{invoiceData.student.courseName || invoiceData.student.programName || invoiceData.student.className || '—'}</p>
+                    <p className="text-xs text-gray-500 mt-1">Issued: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
                   </div>
                 </div>
 
@@ -7821,9 +7934,9 @@ const StudentModule = ({
                   </div>
                 )}
 
+                {/* Clean footer — no "computer-generated" AI-sounding line */}
                 <div className="text-center text-xs text-gray-400 pt-4 border-t">
-                  <p>Generated on {new Date().toLocaleString()}</p>
-                  <p className="mt-1">This is a computer-generated statement. For enquiries, contact the school bursar.</p>
+                  <p>Generated on {new Date().toLocaleString('en-GB')}</p>
                 </div>
               </div>
             ) : (
@@ -7837,7 +7950,7 @@ const StudentModule = ({
 
       {/* ADD PARENT MODAL */}
       {showAddParentModal && selectedStudentForParent && canEdit && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 no-print">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold">Add Guardian for {selectedStudentForParent.firstName}</h3>
@@ -7912,7 +8025,7 @@ const StudentModule = ({
 
       {/* DELETE CONFIRM */}
       {showDeleteConfirm && selectedStudent && canDelete && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 no-print">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
             <div className="text-center mb-6">
               <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -12155,223 +12268,189 @@ const ExamModule = ({
 };
 
 
-// ==================== COMPLETE RESULTS MODULE ====================
-const ResultsModule = ({ 
+// ============================================================================
+//  RESULTS MODULE — v3
+//  · Termly filter  · Class matrix view  · KNEC at bottom
+//  · Print-scoped  · Permission-aware  · Modern UI
+// ============================================================================
+const ResultsModule = ({
   exams, setExams, results, students, subjects, classes, courses, programs,
   currentSchool, parents, units, user,
-  admissionNumber: propAdmissionNumber 
+  admissionNumber: propAdmissionNumber
 }) => {
 
-  // ==================== SCHOOL TYPE DETECTION ====================
+  // ==================== SCHOOL TYPE ====================
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
-  const isUniversity = schoolCategory === 'UNIVERSITY';
-  const isTVET = schoolCategory === 'COLLEGE_TVET';
-  const isSecondary = schoolCategory === 'SENIOR_SECONDARY';
-  const isPrimary = schoolCategory === 'ECDE_PRIMARY_JSS';
+  const isUniversity   = schoolCategory === 'UNIVERSITY';
+  const isTVET         = schoolCategory === 'COLLEGE_TVET';
+  const isSecondary    = schoolCategory === 'SENIOR_SECONDARY';
+  const isPrimary      = schoolCategory === 'ECDE_PRIMARY_JSS';
   const isRegularSchool = !isUniversity && !isTVET;
 
-  const isCBCSeniorLevel = (levelName) => {
-    if (!levelName) return false;
-    const s = String(levelName).trim().toLowerCase();
-    return /^grade\s*1[0-2]$/.test(s);
-  };
-  const isFormLevel = (levelName) => {
-    if (!levelName) return false;
-    const s = String(levelName).trim().toLowerCase();
-    return /^form\s*[1-4]$/.test(s);
-  };
+  const isCBCSeniorLevel = (level) => !!level && /^grade\s*1[0-2]$/i.test(String(level).trim());
+  const isFormLevel      = (level) => !!level && /^form\s*[1-4]$/i.test(String(level).trim());
 
   const resolveGradingFlavor = (category, levelHint) => {
-    if (category === 'COLLEGE_TVET') return 'TVET';
-    if (category === 'UNIVERSITY')    return 'UNI';
+    if (category === 'COLLEGE_TVET')    return 'TVET';
+    if (category === 'UNIVERSITY')      return 'UNI';
     if (category === 'ECDE_PRIMARY_JSS') return 'CBC';
     if (category === 'SENIOR_SECONDARY') {
       if (levelHint && isCBCSeniorLevel(levelHint)) return 'CBC';
-      if (levelHint && isFormLevel(levelHint))     return '844';
+      if (levelHint && isFormLevel(levelHint))      return '844';
       return '844';
     }
     return 'CBC';
   };
 
-  // ==================== ROLE PERMISSIONS ====================
-  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
-  const isSchoolAdmin = user?.role === 'SCHOOL_ADMIN';
-  const isPrincipal = user?.role === 'PRINCIPAL';
-  const isDeputyPrincipal = user?.role === 'DEPUTY_PRINCIPAL';
-  const isSeniorTeacher = user?.role === 'SENIOR_TEACHER';
-  const isClassTeacher = user?.role === 'CLASS_TEACHER';
+  // ==================== ROLE ====================
+  const isSuperAdmin     = user?.role === 'SUPER_ADMIN';
+  const isSchoolAdmin    = user?.role === 'SCHOOL_ADMIN';
+  const isPrincipal      = user?.role === 'PRINCIPAL';
+  const isDeputyPrincipal= user?.role === 'DEPUTY_PRINCIPAL';
+  const isSeniorTeacher  = user?.role === 'SENIOR_TEACHER';
+  const isClassTeacher   = user?.role === 'CLASS_TEACHER';
   const isSubjectTeacher = user?.role === 'SUBJECT_TEACHER';
-  const isLecturer = ['LECTURER', 'SENIOR_LECTURER', 'PROFESSOR'].includes(user?.role);
-  const isInstructor = ['INSTRUCTOR', 'TRAINER'].includes(user?.role);
-  const isDean = user?.role === 'DEAN';
-  const isHOD = user?.role === 'HOD';
-  const isStudent = user?.role === 'STUDENT';
-  const isParent = user?.role === 'PARENT';
-  
-  const canAddResults = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || 
-                        isSeniorTeacher || isClassTeacher || isSubjectTeacher || 
-                        isLecturer || isInstructor || isDean || isHOD;
-  
-  const canPublishResults = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || isDean;
-  const canSendMessages = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || 
-                         isSeniorTeacher || isClassTeacher || isDean || isHOD;
-  const canViewAllResults = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || 
-                           isSeniorTeacher || isClassTeacher || isSubjectTeacher || 
-                           isLecturer || isInstructor || isDean || isHOD;
-  const canPrintAllResults = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || 
-                             isSeniorTeacher || isClassTeacher || isDean || isHOD;
+  const isLecturer       = ['LECTURER','SENIOR_LECTURER','PROFESSOR'].includes(user?.role);
+  const isInstructor     = ['INSTRUCTOR','TRAINER'].includes(user?.role);
+  const isDean           = user?.role === 'DEAN';
+  const isHOD            = user?.role === 'HOD';
+  const isStudent        = user?.role === 'STUDENT';
+  const isParent         = user?.role === 'PARENT';
 
-  // ==================== SEARCHABLE SELECT (KEPT AS-IS) ====================
-  const SearchableSelect = ({ 
-    label, value, onChange, options = [], placeholder = "Search...", 
-    disabled, required, className,
-    noOptionsMessage = "No results found",
-    emptyMessage = "No options available"
+  const canAddResults = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal ||
+    isSeniorTeacher || isClassTeacher || isSubjectTeacher || isLecturer || isInstructor || isDean || isHOD;
+  const canPublishResults = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || isDean;
+  const canSendMessages   = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal ||
+    isSeniorTeacher || isClassTeacher || isDean || isHOD;
+  const canViewAllResults = canAddResults;
+  const canPrintAllResults = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal ||
+    isSeniorTeacher || isClassTeacher || isDean || isHOD;
+  const canViewClassMatrix = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal ||
+    isSeniorTeacher || isClassTeacher || isDean || isHOD;
+
+  // ==================== SEARCHABLE SELECT ====================
+  const SearchableSelect = ({
+    label, value, onChange, options = [], placeholder = 'Search...',
+    disabled, required, className, emptyMessage = 'No options available'
   }) => {
     const [search, setSearch] = useState('');
     const [isOpen, setIsOpen] = useState(false);
     const [isFocused, setIsFocused] = useState(false);
     const dropdownRef = useRef(null);
-    
+
     const filteredOptions = useMemo(() => {
-      if (!options || options.length === 0) return [];
+      if (!options?.length) return [];
       if (!search.trim()) return options;
-      const searchLower = search.toLowerCase();
-      return options.filter(opt => {
-        if (!opt) return false;
-        const label = opt.label?.toLowerCase() || '';
-        const subLabel = opt.subLabel?.toLowerCase() || '';
-        const valueStr = opt.value?.toString().toLowerCase() || '';
-        return label.includes(searchLower) || subLabel.includes(searchLower) || valueStr.includes(searchLower);
-      });
+      const s = search.toLowerCase();
+      return options.filter(o =>
+        o.label?.toLowerCase().includes(s) ||
+        o.subLabel?.toLowerCase().includes(s) ||
+        String(o.value ?? '').toLowerCase().includes(s)
+      );
     }, [options, search]);
-    
+
     const selectedOption = useMemo(() => {
-      if (!options || options.length === 0) return null;
       if (!value && value !== 0) return null;
-      return options.find(opt => opt.value === value) || null;
+      return options.find(o => o.value === value) || null;
     }, [options, value]);
-    
-    useEffect(() => {
-      const handleClickOutside = (event) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-          setIsOpen(false);
-          setIsFocused(false);
-        }
-      };
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
 
     useEffect(() => {
-      if (!isOpen) setSearch('');
-    }, [isOpen]);
-    
-    const handleSelect = (selectedValue) => {
-      onChange({ target: { value: selectedValue } });
-      setSearch('');
-      setIsOpen(false);
-      setIsFocused(false);
+      const h = (e) => {
+        if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+          setIsOpen(false); setIsFocused(false);
+        }
+      };
+      document.addEventListener('mousedown', h);
+      return () => document.removeEventListener('mousedown', h);
+    }, []);
+
+    useEffect(() => { if (!isOpen) setSearch(''); }, [isOpen]);
+
+    const handleSelect = (v) => {
+      onChange({ target: { value: v } });
+      setSearch(''); setIsOpen(false); setIsFocused(false);
     };
-    
-    const handleInputChange = (e) => {
-      const newValue = e.target.value;
-      setSearch(newValue);
-      setIsOpen(true);
-      setIsFocused(true);
-      if (newValue === '') onChange({ target: { value: '' } });
+    const handleChange = (e) => {
+      const v = e.target.value;
+      setSearch(v); setIsOpen(true); setIsFocused(true);
+      if (v === '') onChange({ target: { value: '' } });
     };
-    
     const handleFocus = () => {
       if (disabled) return;
-      setIsFocused(true);
-      setIsOpen(true);
+      setIsFocused(true); setIsOpen(true);
       if (selectedOption) setSearch(selectedOption.label);
     };
-    
     const handleBlur = () => {
       setTimeout(() => {
         if (!dropdownRef.current?.contains(document.activeElement)) {
-          setIsOpen(false);
-          setIsFocused(false);
+          setIsOpen(false); setIsFocused(false);
           if (!selectedOption) setSearch('');
         }
       }, 200);
     };
-    
     const handleClear = (e) => {
       e.stopPropagation();
       onChange({ target: { value: '' } });
-      setSearch('');
-      setIsOpen(false);
-      setIsFocused(false);
+      setSearch(''); setIsOpen(false); setIsFocused(false);
     };
-    
-    let displayValue = isFocused ? search : (selectedOption ? selectedOption.label : '');
-    
+
+    const displayValue = isFocused ? search : (selectedOption ? selectedOption.label : '');
+
     return (
       <div className="relative" ref={dropdownRef}>
         {label && (
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
+            {label}{required && <span className="text-red-500 ml-1">*</span>}
           </label>
         )}
         <div className="relative">
           <input
             type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 cursor-text ${
+            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
               disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
             } ${className || ''}`}
             value={displayValue}
-            onChange={handleInputChange}
+            onChange={handleChange}
             onFocus={handleFocus}
             onBlur={handleBlur}
             placeholder={placeholder}
             disabled={disabled}
             autoComplete="off"
           />
-          
           {value && !disabled && (
-            <button
-              type="button"
-              onClick={handleClear}
-              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-            >
+            <button type="button" onClick={handleClear}
+              className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           )}
-          
-          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </div>
         </div>
-        
         {isOpen && !disabled && (
           <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-            {options && options.length === 0 ? (
+            {!options?.length ? (
               <div className="px-3 py-4 text-center text-gray-500 text-sm">{emptyMessage}</div>
             ) : filteredOptions.length > 0 ? (
-              filteredOptions.map((opt) => (
-                <div
-                  key={opt.value || Math.random().toString()}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
-                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
-                  } ${opt.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+              filteredOptions.map(o => (
+                <div key={o.value}
+                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 ${
+                    o.value === value ? 'bg-indigo-50 text-indigo-700' : ''
+                  }`}
                   onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => { if (!opt.disabled) handleSelect(opt.value); }}
-                >
-                  <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+                  onClick={() => handleSelect(o.value)}>
+                  <div className="font-medium">{o.label}</div>
+                  {o.subLabel && <div className="text-xs text-gray-500">{o.subLabel}</div>}
                 </div>
               ))
             ) : (
               <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {search.trim() ? `No results for "${search}"` : noOptionsMessage}
+                No results for "{search}"
               </div>
             )}
           </div>
@@ -12398,17 +12477,25 @@ const ResultsModule = ({
   const [filteredSubjects, setFilteredSubjects] = useState([]);
   const [filterGrade, setFilterGrade] = useState('');
 
-  // ✅ NEW — Detailed report state
-  const [viewMode, setViewMode] = useState('marks'); // 'marks' | 'report'
+  // ---- View mode ----
+  const [viewMode, setViewMode] = useState('marks'); // 'marks' | 'report' | 'class-matrix'
+
+  // ---- Detailed Report state ----
   const [reportClassId, setReportClassId] = useState('');
   const [reportStudentId, setReportStudentId] = useState('');
-  const [reportExamTypeFilter, setReportExamTypeFilter] = useState(''); // '', 'OPENER', 'MIDTERM', ...
-  const [reportTermFilter, setReportTermFilter] = useState('');
+  const [reportTermFilter, setReportTermFilter] = useState('');     // '' | 'Term 1' | 'Term 2' | 'Term 3'
   const [reportYearFilter, setReportYearFilter] = useState('');
+  const [reportExamTypeFilter, setReportExamTypeFilter] = useState(''); // only used when term is empty
   const [reportData, setReportData] = useState(null);
   const [loadingReport, setLoadingReport] = useState(false);
-  const [positionsByExam, setPositionsByExam] = useState({});
-  
+
+  // ---- Class Matrix state ----
+  const [matrixClassId, setMatrixClassId] = useState('');
+  const [matrixExamId, setMatrixExamId] = useState('');
+  const [matrixData, setMatrixData] = useState(null);
+  const [loadingMatrix, setLoadingMatrix] = useState(false);
+
+  // ---- Messaging / print modals ----
   const [showMessageModal, setShowMessageModal] = useState(false);
   const [messageType, setMessageType] = useState('SMS');
   const [messageTemplate, setMessageTemplate] = useState('');
@@ -12416,13 +12503,14 @@ const ResultsModule = ({
   const [messageLog, setMessageLog] = useState([]);
   const [selectedStudentsForMessage, setSelectedStudentsForMessage] = useState([]);
   const [selectAllForMessage, setSelectAllForMessage] = useState(false);
-  
+
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [selectedStudentForReport, setSelectedStudentForReport] = useState(null);
   const [studentReportData, setStudentReportData] = useState(null);
   const [allResultsPrintData, setAllResultsPrintData] = useState(null);
   const [showAllResultsPrintModal, setShowAllResultsPrintModal] = useState(false);
-  
+
+  // ---- Student/Parent state ----
   const [myResults, setMyResults] = useState([]);
   const [myStudentRecord, setMyStudentRecord] = useState(null);
   const [loadingMyData, setLoadingMyData] = useState(false);
@@ -12431,16 +12519,15 @@ const ResultsModule = ({
   const [showStudentPrintModal, setShowStudentPrintModal] = useState(false);
   const [apiError, setApiError] = useState('');
   const [myResultsSummary, setMyResultsSummary] = useState(null);
-  const [myUnitStats, setMyUnitStats] = useState({});
   const [myChildren, setMyChildren] = useState([]);
   const [selectedChild, setSelectedChild] = useState(null);
   const [childResults, setChildResults] = useState([]);
   const [loadingChildren, setLoadingChildren] = useState(false);
 
-  const hasLoadedStudentData = React.useRef(false);
-  const hasLoadedChildrenData = React.useRef(false);
+  const hasLoadedStudentData = useRef(false);
+  const hasLoadedChildrenData = useRef(false);
 
-  // ==================== HELPER: RESOLVE STUDENT ID ====================
+  // ==================== HELPERS ====================
   const resolveStudentId = (id) => {
     if (!id) return null;
     if (students.some(s => s.id === id)) return id;
@@ -12451,27 +12538,15 @@ const ResultsModule = ({
     return null;
   };
 
-  // ============================================================
-  //  ✅ GRADE FUNCTIONS
-  //
-  //  Priority:
-  //   1. currentSchool.gradingConfig.scale  (custom per-school)
-  //   2. Built-in flavor (CBC / 844 / TVET / UNI)
-  // ============================================================
+  // ==================== GRADE LOGIC ====================
   const calculateGrade = (marks, maxMarks = 100, examCategory = null, levelHint = null) => {
-    if (marks === '' || marks === null || marks === undefined) {
-      return { grade: '', points: 0, remark: '' };
-    }
-    const numericMarks = parseFloat(marks);
-    if (isNaN(numericMarks)) return { grade: '', points: 0, remark: '' };
+    if (marks === '' || marks === null || marks === undefined) return { grade: '', points: 0, remark: '' };
+    const numeric = parseFloat(marks);
+    if (isNaN(numeric)) return { grade: '', points: 0, remark: '' };
+    const percentage = maxMarks > 0 ? (numeric / maxMarks) * 100 : 0;
 
-    const percentage = maxMarks > 0 ? (numericMarks / maxMarks) * 100 : 0;
-
-    // ✅ 1. Custom grading config takes priority
     if (currentSchool?.gradingConfig?.scale?.length > 0) {
-      const band = currentSchool.gradingConfig.scale.find(
-        b => percentage >= b.min && percentage <= b.max
-      );
+      const band = currentSchool.gradingConfig.scale.find(b => percentage >= b.min && percentage <= b.max);
       if (band) {
         return {
           grade: band.code || band.grade || '',
@@ -12479,10 +12554,8 @@ const ResultsModule = ({
           remark: band.label || band.code || ''
         };
       }
-      // fall through to defaults if no band matches
     }
 
-    // 2. Fallback to built-in flavors
     const category = examCategory || schoolCategory;
     const flavor = resolveGradingFlavor(category, levelHint);
 
@@ -12507,7 +12580,6 @@ const ResultsModule = ({
       if (percentage >= 30) return { grade: 'BE', points: 1, remark: 'Below Expectations' };
       return                     { grade: 'NI', points: 0, remark: 'Needs Improvement' };
     }
-    // 844
     if (percentage >= 80) return { grade: 'A',  points: 12, remark: 'Excellent' };
     if (percentage >= 75) return { grade: 'A-', points: 11, remark: 'Very Good' };
     if (percentage >= 70) return { grade: 'B+', points: 10, remark: 'Good' };
@@ -12523,46 +12595,31 @@ const ResultsModule = ({
   };
 
   const getGradeColor = (grade) => {
-    if (!grade || grade === '') return 'bg-gray-100 text-gray-500';
-    if (grade === 'DISTINCTION') return 'bg-green-100 text-green-800';
-    if (grade === 'CREDIT')      return 'bg-blue-100 text-blue-800';
-    if (grade === 'MERIT')       return 'bg-yellow-100 text-yellow-800';
-    if (grade === 'PASS')        return 'bg-orange-100 text-orange-800';
-    if (grade === 'FAIL')        return 'bg-red-100 text-red-800';
-    if (grade === 'EE' || grade === 'Exceeding Expectations') return 'bg-green-100 text-green-800';
-    if (grade === 'ME' || grade === 'Meeting Expectations')   return 'bg-blue-100 text-blue-800';
-    if (grade === 'AE' || grade === 'Approaching Expectations') return 'bg-yellow-100 text-yellow-800';
-    if (grade === 'BE' || grade === 'Below Expectations')     return 'bg-orange-100 text-orange-800';
-    if (grade === 'NI' || grade === 'Needs Improvement')      return 'bg-red-100 text-red-800';
-    if (['A', 'A-'].includes(grade)) return 'bg-green-100 text-green-800';
-    if (['B+', 'B', 'B-'].includes(grade)) return 'bg-blue-100 text-blue-800';
-    if (['C+', 'C', 'C-'].includes(grade)) return 'bg-yellow-100 text-yellow-800';
-    if (['D+', 'D', 'D-'].includes(grade)) return 'bg-orange-100 text-orange-800';
-    if (grade === 'E') return 'bg-red-100 text-red-800';
+    if (!grade) return 'bg-gray-100 text-gray-500';
+    if (['DISTINCTION','EE','A','A-'].includes(grade)) return 'bg-emerald-100 text-emerald-800';
+    if (['CREDIT','ME','B+','B','B-'].includes(grade))  return 'bg-blue-100 text-blue-800';
+    if (['MERIT','AE','C+','C','C-'].includes(grade))   return 'bg-amber-100 text-amber-800';
+    if (['PASS','BE','D+','D','D-'].includes(grade))    return 'bg-orange-100 text-orange-800';
+    if (['FAIL','NI','E'].includes(grade))              return 'bg-red-100 text-red-800';
     return 'bg-gray-100 text-gray-800';
   };
 
   const displayGrade = (grade, marks) => {
     if (marks === '' || marks === null || marks === undefined) return '—';
-    if (!grade || grade === '') return '—';
+    if (!grade) return '—';
     return grade;
   };
 
-  const calculateMeanGrade = (results, levelHint = null) => {
-    const valid = (results || []).filter(r =>
+  const calculateMeanGrade = (rows, levelHint = null) => {
+    const valid = (rows || []).filter(r =>
       r.marks !== '' && r.marks !== null && r.marks !== undefined && !isNaN(parseFloat(r.marks))
     );
     if (valid.length === 0) return 'N/A';
+    const avgPoints = valid.reduce((s, r) => s + (r.points || 0), 0) / valid.length;
 
-    const avgPoints = valid.reduce((sum, r) => sum + (r.points || 0), 0) / valid.length;
-
-    // Custom config
     if (currentSchool?.gradingConfig?.scale?.length > 0) {
-      // Find the band whose points is closest
       const sorted = [...currentSchool.gradingConfig.scale].sort((a, b) => (b.points || 0) - (a.points || 0));
-      for (const b of sorted) {
-        if (avgPoints >= (b.points || 0)) return b.code || b.grade;
-      }
+      for (const b of sorted) if (avgPoints >= (b.points || 0)) return b.code || b.grade;
       return sorted[sorted.length - 1]?.code || 'N/A';
     }
 
@@ -12602,10 +12659,9 @@ const ResultsModule = ({
     return 'E';
   };
 
-  // ==================== HELPER: GET ITEM NAME ====================
   const getItemName = (result, exam) => {
     if (isTVET || isUniversity) {
-      if (result.unitId) {
+      if (result?.unitId) {
         const u = units?.find(x => x.id === result.unitId);
         if (u?.name) return u.name;
       }
@@ -12614,7 +12670,7 @@ const ResultsModule = ({
         if (u?.name) return u.name;
       }
     } else {
-      if (result.subjectId) {
+      if (result?.subjectId) {
         const s = subjects?.find(x => x.id === result.subjectId);
         if (s?.name) return s.name;
       }
@@ -12659,14 +12715,9 @@ const ResultsModule = ({
         const hasMarks = result.marks !== null && result.marks !== undefined && result.marks !== '';
         const levelHint = getLevelHint(exam, studentInfo);
         const gradeInfo = hasMarks
-          ? calculateGrade(
-              result.marks,
-              exam?.maxMarks || result.maxMarks || 100,
-              exam?.schoolCategory || schoolCategory,
-              levelHint
-            )
+          ? calculateGrade(result.marks, exam?.maxMarks || result.maxMarks || 100,
+                           exam?.schoolCategory || schoolCategory, levelHint)
           : { grade: '', points: 0 };
-
         return {
           ...result,
           grade: gradeInfo.grade,
@@ -12694,16 +12745,14 @@ const ResultsModule = ({
     }
   };
 
-  // ==================== SUMMARY / UNIT STATS BUILDERS ====================
   const buildSummary = (enhancedResults) => {
     const valid = enhancedResults.filter(r =>
       r.marks !== '' && r.marks !== null && r.marks !== undefined && !isNaN(parseFloat(r.marks))
     );
-    const totalPoints = valid.reduce((sum, r) => sum + (r.points || 0), 0);
-    const totalMarks  = valid.reduce((sum, r) => sum + (parseFloat(r.marks) || 0), 0);
+    const totalPoints = valid.reduce((s, r) => s + (r.points || 0), 0);
+    const totalMarks  = valid.reduce((s, r) => s + (parseFloat(r.marks) || 0), 0);
     const average = valid.length > 0 ? (totalMarks / valid.length).toFixed(2) : 0;
     const levelHint = enhancedResults[0]?.levelHint || null;
-
     return {
       total: valid.length,
       totalRecords: enhancedResults.length,
@@ -12713,85 +12762,79 @@ const ResultsModule = ({
     };
   };
 
-  const buildUnitStats = (enhancedResults) => {
-    const stats = {};
-    enhancedResults.forEach(r => {
-      const key = r.itemName || 'Unknown';
-      if (!stats[key]) {
-        stats[key] = { name: key, marks: r.marks, grade: r.grade, points: r.points };
-      }
-    });
-    return stats;
-  };
-
-  // ==================================================================
-  //  ✅ NEW — BUILD DETAILED REPORT DATA
-  //
-  //  Groups results by (term + examType) per subject, then computes:
-  //    - horizontal columns per exam-type variant
-  //    - per-subject average + trend
-  //    - per-term averages
-  //    - class positions
-  //    - KNEC aptitude streams
-  // ==================================================================
+  // ==================== KNEC STREAM ====================
   const KnecStreams = {
-    STEM: ['mathematics', 'maths', 'math', 'physics', 'chemistry', 'biology', 'general science', 'science', 'computer', 'computer studies', 'technical drawing', 'metalwork', 'woodwork', 'electricity', 'electronics'],
-    LANGUAGES: ['english', 'kiswahili', 'literature', 'french', 'german', 'arabic', 'chinese', 'foreign language', 'language'],
-    SOCIAL: ['history', 'geography', 'cre', 'ire', 'social studies', 'citizenship', 'civics', 'government'],
-    ARTS: ['art', 'fine art', 'music', 'drama', 'creative arts', 'theatre'],
-    BUSINESS: ['business', 'business studies', 'commerce', 'accounts', 'accounting', 'economics'],
-    APPLIED: ['agriculture', 'home science', 'home science & technology', 'clothing', 'foods', 'nutrition', 'woodwork', 'metalwork']
+    STEM: ['mathematics','maths','math','physics','chemistry','biology','general science','science','computer','computer studies','technical drawing','metalwork','woodwork','electricity','electronics'],
+    LANGUAGES: ['english','kiswahili','literature','french','german','arabic','chinese','foreign language','language'],
+    SOCIAL: ['history','geography','cre','ire','social studies','citizenship','civics','government'],
+    ARTS: ['art','fine art','music','drama','creative arts','theatre'],
+    BUSINESS: ['business','business studies','commerce','accounts','accounting','economics'],
+    APPLIED: ['agriculture','home science','home science & technology','clothing','foods','nutrition','woodwork','metalwork']
   };
-
-  const classifySubjectStream = (subjectName) => {
-    if (!subjectName) return null;
-    const s = String(subjectName).toLowerCase();
+  const classifySubjectStream = (name) => {
+    if (!name) return null;
+    const s = String(name).toLowerCase();
     for (const [stream, keys] of Object.entries(KnecStreams)) {
       if (keys.some(k => s.includes(k))) return stream;
     }
     return null;
   };
 
-  const buildDetailedReport = (studentResults, positions) => {
-    // 1. Filter based on current report filters
-    let filtered = studentResults.filter(r => {
-      if (reportExamTypeFilter && r.examType !== reportExamTypeFilter) return false;
+  // ==================================================================
+  //  ✅ DETAILED REPORT BUILDER
+  //
+  //  Term-aware: when reportTermFilter is set, we include ALL exam types
+  //  within that term and render them as side-by-side columns.
+  //  When no term is set, group by (term + exam type) as before.
+  // ==================================================================
+  const buildDetailedReport = (studentResults) => {
+    const filtered = studentResults.filter(r => {
       if (reportTermFilter && r.examTerm !== reportTermFilter) return false;
       if (reportYearFilter && r.academicYear !== reportYearFilter) return false;
+      if (!reportTermFilter && reportExamTypeFilter && r.examType !== reportExamTypeFilter) return false;
       return true;
     });
 
-    // 2. Group by "term + year" — one report card per group
+    // --- Group key depends on whether we have a term filter ---
     const termGroups = new Map();
 
     filtered.forEach(r => {
-      const term = r.examTerm || 'Unspecified Term';
-      const year = r.academicYear || '';
-      const key = `${term}||${year}`;
+      // When term filter is active → all rows go into ONE group
+      // Otherwise → group by (term + year)
+      let key;
+      let termLabel;
+      let yearLabel;
+
+      if (reportTermFilter) {
+        key = reportTermFilter;
+        termLabel = reportTermFilter;
+        yearLabel = r.academicYear || '';
+      } else {
+        termLabel = r.examTerm || 'Unspecified Term';
+        yearLabel = r.academicYear || '';
+        key = `${termLabel}||${yearLabel}`;
+      }
 
       if (!termGroups.has(key)) {
         termGroups.set(key, {
-          key,
-          term,
-          year,
-          // subjectKey → { subjectName, cells: { examType: {...} }, sumMarks, count }
+          key, term: termLabel, year: yearLabel,
           subjects: new Map(),
           examTypeColumns: new Set()
         });
       }
       const g = termGroups.get(key);
-      const subjectKey = r.itemName || 'Unknown';
+      const subjKey = r.itemName || 'Unknown';
 
-      if (!g.subjects.has(subjectKey)) {
-        g.subjects.set(subjectKey, {
-          subjectName: subjectKey,
-          stream: classifySubjectStream(subjectKey),
+      if (!g.subjects.has(subjKey)) {
+        g.subjects.set(subjKey, {
+          subjectName: subjKey,
+          stream: classifySubjectStream(subjKey),
           cells: {},
           sumMarks: 0,
           count: 0
         });
       }
-      const subj = g.subjects.get(subjectKey);
+      const subj = g.subjects.get(subjKey);
       const typeKey = r.examType || 'OTHER';
       g.examTypeColumns.add(typeKey);
 
@@ -12810,17 +12853,12 @@ const ResultsModule = ({
       }
     });
 
-    // 3. Convert to arrays, compute averages and trends
     const termCards = [];
-    const allSubjectStats = []; // for aptitude
-
     for (const g of termGroups.values()) {
       const subjectList = [];
       for (const subj of g.subjects.values()) {
         const avg = subj.count > 0 ? subj.sumMarks / subj.count : 0;
-
-        // Trend: compare chronologically by exam date (fallback: OPENER → MIDTERM → ENDTERM → FINAL)
-        const orderedTypes = ['OPENER', 'MIDTERM', 'ENDTERM', 'MOCK', 'PRE_MOCK', 'FINAL', 'CAT'];
+        const orderedTypes = ['OPENER','MIDTERM','ENDTERM','MOCK','PRE_MOCK','FINAL','CAT'];
         const cellsArr = Object.entries(subj.cells)
           .map(([type, cell]) => ({ type, ...cell }))
           .filter(c => !isNaN(c.marks))
@@ -12839,32 +12877,18 @@ const ResultsModule = ({
           else if (last < prev) trend = 'down';
         }
 
-        subjectList.push({
-          ...subj,
-          avg,
-          trend,
-          cellsArr
-        });
-
-        // Collect for aptitude
-        allSubjectStats.push({
-          subjectName: subj.subjectName,
-          stream: subj.stream,
-          avg,
-          count: subj.count
-        });
+        subjectList.push({ ...subj, avg, trend, cellsArr });
       }
 
-      // Term average across subjects
-      const validAverages = subjectList.filter(s => s.count > 0).map(s => s.avg);
-      const termAverage = validAverages.length > 0
-        ? validAverages.reduce((a, b) => a + b, 0) / validAverages.length
+      const validAvgs = subjectList.filter(s => s.count > 0).map(s => s.avg);
+      const termAverage = validAvgs.length > 0
+        ? validAvgs.reduce((a, b) => a + b, 0) / validAvgs.length
         : 0;
 
       termCards.push({
         ...g,
         examTypeColumns: Array.from(g.examTypeColumns).sort((a, b) => {
-          const ordered = ['OPENER', 'MIDTERM', 'ENDTERM', 'MOCK', 'PRE_MOCK', 'FINAL', 'CAT'];
+          const ordered = ['OPENER','MIDTERM','ENDTERM','MOCK','PRE_MOCK','FINAL','CAT'];
           return ordered.indexOf(a) - ordered.indexOf(b);
         }),
         subjects: subjectList.sort((a, b) => a.subjectName.localeCompare(b.subjectName)),
@@ -12875,7 +12899,6 @@ const ResultsModule = ({
       });
     }
 
-    // Sort cards: most recent first
     termCards.sort((a, b) => {
       const an = parseInt(String(a.term).replace(/\D/g, '')) || 0;
       const bn = parseInt(String(b.term).replace(/\D/g, '')) || 0;
@@ -12883,17 +12906,18 @@ const ResultsModule = ({
       return (b.year || '').localeCompare(a.year || '');
     });
 
-    // 4. Overall average
     const allAvgs = termCards.flatMap(tc => tc.subjects.map(s => s.avg)).filter(v => v > 0);
     const overallAverage = allAvgs.length > 0 ? allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length : 0;
 
-    // 5. KNEC aptitude — per stream average
+    // KNEC aptitude streams
     const streamTotals = {};
-    allSubjectStats.forEach(s => {
-      if (!s.stream) return;
-      if (!streamTotals[s.stream]) streamTotals[s.stream] = { sum: 0, count: 0 };
-      streamTotals[s.stream].sum += s.avg * s.count;
-      streamTotals[s.stream].count += s.count;
+    termCards.forEach(card => {
+      card.subjects.forEach(s => {
+        if (!s.stream) return;
+        if (!streamTotals[s.stream]) streamTotals[s.stream] = { sum: 0, count: 0 };
+        streamTotals[s.stream].sum += s.avg * s.count;
+        streamTotals[s.stream].count += s.count;
+      });
     });
 
     const streamAverages = Object.entries(streamTotals).map(([stream, t]) => ({
@@ -12904,42 +12928,25 @@ const ResultsModule = ({
 
     const topStreams = streamAverages.slice(0, 2).map(s => s.stream);
 
-    // 6. Position summary — from provided positions map (per exam)
-    //    We'll show position per exam within each subject cell.
-    //    That's done in the UI, not here.
-
-    return {
-      termCards,
-      overallAverage,
-      streamAverages,
-      topStreams,
-      positionMap: positions || {}
-    };
+    return { termCards, overallAverage, streamAverages, topStreams };
   };
 
-  // ==================== LOAD DETAILED REPORT ====================
   const loadDetailedReport = async () => {
     if (!reportStudentId) { alert('Please select a student'); return; }
     setLoadingReport(true);
     setApiError('');
     try {
-      // 1. Load all results for this student
       const res = await api.get(`/results?studentId=${reportStudentId}`);
       const rawResults = res.data.results || [];
 
-      // 2. Enrich with exam metadata + recalculated grades
       const enriched = rawResults.map(r => {
         const exam = exams?.find(e => e.id === r.examId);
         const hasMarks = r.marks !== null && r.marks !== undefined && r.marks !== '';
         const student = students.find(s => s.id === reportStudentId);
         const levelHint = getLevelHint(exam, student);
         const gradeInfo = hasMarks
-          ? calculateGrade(
-              r.marks,
-              exam?.maxMarks || 100,
-              exam?.schoolCategory || schoolCategory,
-              levelHint
-            )
+          ? calculateGrade(r.marks, exam?.maxMarks || 100,
+                           exam?.schoolCategory || schoolCategory, levelHint)
           : { grade: '', points: 0 };
         return {
           ...r,
@@ -12955,25 +12962,9 @@ const ResultsModule = ({
         };
       });
 
-      // 3. Fetch positions for each unique exam
-      const uniqueExamIds = [...new Set(enriched.map(r => r.examId).filter(Boolean))];
-      const positions = {};
-      for (const examId of uniqueExamIds) {
-        try {
-          const pRes = await api.get(`/exams/${examId}/positions`);
-          positions[examId] = pRes.data.positions || {};
-        } catch (_) { /* ignore */ }
-      }
-      setPositionsByExam(positions);
-
-      // 4. Build the report
-      const built = buildDetailedReport(enriched, positions);
       const student = students.find(s => s.id === reportStudentId);
-      setReportData({
-        student,
-        ...built,
-        allEnriched: enriched
-      });
+      const built = buildDetailedReport(enriched);
+      setReportData({ student, ...built, allEnriched: enriched });
     } catch (err) {
       console.error('Failed to load report:', err);
       setApiError('Failed to load detailed report');
@@ -12982,50 +12973,117 @@ const ResultsModule = ({
     }
   };
 
-  // ==================== EXPORT REPORT TO CSV ====================
-  const exportReportCSV = () => {
-    if (!reportData) return;
-    const { student, termCards, overallAverage, streamAverages, topStreams } = reportData;
+  // ==================================================================
+  //  ✅ CLASS MATRIX BUILDER
+  //
+  //  Produces a grid:
+  //      Student rows × Subject columns
+  //  Each cell has { marks, grade, position } for the selected exam.
+  // ==================================================================
+  const buildClassMatrix = async () => {
+    if (!matrixClassId) { alert('Please select a class'); return; }
+    if (!matrixExamId)  { alert('Please select an exam'); return; }
 
-    const lines = [];
-    lines.push(`Student Report — ${student.firstName} ${student.lastName} (${student.admissionNumber})`);
-    lines.push(`Overall Average: ${overallAverage.toFixed(2)}%`);
-    lines.push(`Likely to Thrive In: ${topStreams.join(', ') || 'N/A'}`);
-    lines.push('');
+    setLoadingMatrix(true);
+    setMatrixData(null);
+    try {
+      const exam = exams.find(e => e.id === matrixExamId);
+      if (!exam) { alert('Exam not found'); return; }
 
-    // Aptitude block
-    lines.push('KNEC Aptitude Breakdown');
-    lines.push('Stream,Average %,Subjects Count');
-    streamAverages.forEach(s => lines.push(`${s.stream},${s.avg.toFixed(2)},${s.count}`));
-    lines.push('');
+      // Fetch results for this exam
+      let examResults = [];
+      try {
+        const r = await api.get(`/results/exam/${matrixExamId}`);
+        examResults = r.data.results || [];
+      } catch (_) { /* no results */ }
 
-    // Terms
-    termCards.forEach(card => {
-      lines.push(`--- ${card.term} ${card.year} ---`);
-      const headers = ['Subject', ...card.examTypeColumns, 'Average', 'Trend'];
-      lines.push(headers.join(','));
-      card.subjects.forEach(s => {
-        const cells = card.examTypeColumns.map(t => s.cells[t]?.marks ?? '');
-        lines.push([s.subjectName, ...cells, s.avg.toFixed(2), s.trend].join(','));
+      // Fetch students for this class
+      let studentList = [];
+      try {
+        const s = await api.get('/students', { params: { classId: matrixClassId } });
+        studentList = s.data.students || [];
+      } catch (_) { /* nothing */ }
+
+      if (studentList.length === 0) {
+        alert('No students found in this class');
+        setLoadingMatrix(false);
+        return;
+      }
+
+      // Get all subjects for this exam's class
+      const examItemName = getItemName({}, exam);
+
+      // Build a matrix: student × exam results
+      // Each result row for the same exam = one subject cell
+      // (In this app, each exam has ONE subject/unit; so a class matrix across
+      //  exams is what we really want — but user asked per selected exam.
+      //  So we treat the selected exam as the sole "column" and show rank in class.)
+      const levelHint = getLevelHint(exam, null, matrixClassId);
+
+      const rows = studentList.map(st => {
+        const result = examResults.find(r => r.studentId === st.id);
+        const hasMarks = result?.marks !== undefined && result?.marks !== null && result?.marks !== '';
+        const marks = hasMarks ? parseFloat(result.marks) : null;
+        const gradeInfo = hasMarks
+          ? calculateGrade(marks, exam.maxMarks || 100,
+                           exam.schoolCategory || schoolCategory, levelHint)
+          : { grade: '', points: 0 };
+        return {
+          studentId: st.id,
+          admissionNumber: st.admissionNumber,
+          studentName: `${st.firstName} ${st.lastName}`,
+          marks: hasMarks ? marks : '',
+          grade: gradeInfo.grade,
+          points: gradeInfo.points,
+          isAbsent: result?.isAbsent || false,
+          position: null // will compute below
+        };
       });
-      lines.push(`Term Average,${card.termAverage.toFixed(2)},,,,,`);
-      lines.push('');
-    });
 
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `report_${student.admissionNumber}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
+      // Compute positions (dense rank on marks)
+      const scored = rows
+        .filter(r => typeof r.marks === 'number' && !r.isAbsent)
+        .sort((a, b) => b.marks - a.marks);
+      let rank = 1;
+      let prev = null;
+      scored.forEach((r, i) => {
+        if (prev !== null && r.marks < prev) rank = i + 1;
+        prev = r.marks;
+        r.position = rank;
+      });
+
+      const validMarks = rows.filter(r => typeof r.marks === 'number' && !r.isAbsent).map(r => r.marks);
+      const average = validMarks.length ? validMarks.reduce((a, b) => a + b, 0) / validMarks.length : 0;
+      const highest = validMarks.length ? Math.max(...validMarks) : 0;
+      const lowest  = validMarks.length ? Math.min(...validMarks) : 0;
+      const passThreshold = (exam.maxMarks || 100) * 0.5;
+      const passCount = validMarks.filter(m => m >= passThreshold).length;
+      const passRate  = validMarks.length ? (passCount / validMarks.length) * 100 : 0;
+
+      setMatrixData({
+        exam,
+        itemName: examItemName,
+        rows,
+        average,
+        highest,
+        lowest,
+        passRate,
+        passCount,
+        totalScored: validMarks.length,
+        className: classes.find(c => c.id === matrixClassId)?.name || 'Class'
+      });
+    } catch (err) {
+      console.error('Matrix build error:', err);
+      alert('Failed to build class matrix: ' + (err.response?.data?.message || err.message));
+    } finally {
+      setLoadingMatrix(false);
+    }
   };
 
-  // ==================== STUDENT VIEW SETUP ====================
+  // ==================== STUDENT/PARENT LOADERS ====================
   React.useEffect(() => {
     if (!isStudent) return;
     if (hasLoadedStudentData.current) return;
-
     const run = async () => {
       const stored = localStorage.getItem('studentAdmissionNumber');
       if (stored && stored !== 'null') {
@@ -13035,7 +13093,6 @@ const ResultsModule = ({
           setMyResults(enhancedResults);
           setMyStudentRecord(studentInfo);
           setMyResultsSummary(buildSummary(enhancedResults));
-          setMyUnitStats(buildUnitStats(enhancedResults));
           setShowAdmissionModal(false);
           hasLoadedStudentData.current = true;
           return;
@@ -13048,29 +13105,10 @@ const ResultsModule = ({
           setMyResults(enhancedResults);
           setMyStudentRecord(studentInfo);
           setMyResultsSummary(buildSummary(enhancedResults));
-          setMyUnitStats(buildUnitStats(enhancedResults));
           setShowAdmissionModal(false);
           hasLoadedStudentData.current = true;
           return;
         }
-      }
-      if (user?.id) {
-        try {
-          const r = await api.get(`/students/by-user/${user.id}`);
-          if (r.data.student) {
-            const s = r.data.student;
-            localStorage.setItem('studentAdmissionNumber', s.admissionNumber);
-            setAdmissionNumber(s.admissionNumber);
-            const { enhancedResults, studentInfo } = await loadResultsWithAdmission(s.admissionNumber);
-            setMyResults(enhancedResults);
-            setMyStudentRecord(studentInfo);
-            setMyResultsSummary(buildSummary(enhancedResults));
-            setMyUnitStats(buildUnitStats(enhancedResults));
-            setShowAdmissionModal(false);
-            hasLoadedStudentData.current = true;
-            return;
-          }
-        } catch (_) {}
       }
       setShowAdmissionModal(true);
     };
@@ -13078,14 +13116,6 @@ const ResultsModule = ({
     return () => { if (!isStudent) hasLoadedStudentData.current = false; };
   }, [isStudent]);
 
-  React.useEffect(() => {
-    if (isStudent && propAdmissionNumber && propAdmissionNumber !== admissionNumber) {
-      hasLoadedStudentData.current = false;
-      setAdmissionNumber(propAdmissionNumber);
-    }
-  }, [propAdmissionNumber, isStudent]);
-
-  // ==================== PARENT VIEW SETUP ====================
   React.useEffect(() => {
     if (isParent && !hasLoadedChildrenData.current) {
       loadMyChildren();
@@ -13096,14 +13126,9 @@ const ResultsModule = ({
 
   const loadMyChildren = async () => {
     setLoadingChildren(true);
-    setApiError('');
     try {
       const res = await api.get('/parents/me/children');
-      const list = (res.data.children || []).map(c => ({
-        ...c,
-        programName: c.program?.name || programs?.find(p => p.id === c.programId)?.name || 'No Program',
-        moduleInfo: c.currentModule || (isTVET ? 'Module 1' : '')
-      }));
+      const list = res.data.children || [];
       setMyChildren(list);
       if (list.length > 0) {
         setSelectedChild(list[0]);
@@ -13124,9 +13149,6 @@ const ResultsModule = ({
       setChildResults(enhancedResults);
       setMyStudentRecord(studentInfo);
       setMyResultsSummary(buildSummary(enhancedResults));
-      setMyUnitStats(buildUnitStats(enhancedResults));
-    } catch (err) {
-      console.error('Error loading child results:', err);
     } finally {
       setLoadingMyData(false);
     }
@@ -13138,20 +13160,13 @@ const ResultsModule = ({
     setApiError('');
     try {
       const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(admissionNumber)}`);
-      if (!studentRes.data.student) {
-        setApiError('Student not found. Please check your admission number.');
-        return;
-      }
+      if (!studentRes.data.student) { setApiError('Student not found.'); return; }
       const student = studentRes.data.student;
       localStorage.setItem('studentAdmissionNumber', admissionNumber);
-      if (user?.id && !student.userId) {
-        try { await api.patch(`/students/${student.id}`, { userId: user.id }); } catch (_) {}
-      }
       const { enhancedResults, studentInfo } = await loadResultsWithAdmission(admissionNumber);
       setMyResults(enhancedResults);
       setMyStudentRecord(studentInfo || student);
       setMyResultsSummary(buildSummary(enhancedResults));
-      setMyUnitStats(buildUnitStats(enhancedResults));
       setShowAdmissionModal(false);
       hasLoadedStudentData.current = true;
     } catch (err) {
@@ -13160,38 +13175,6 @@ const ResultsModule = ({
       setLoadingMyData(false);
     }
   };
-
-  // ==================== OPTIONS ====================
-  const getProgramOptions = () => (programs || []).map(p => ({ value: p.id, label: p.name, subLabel: p.code || '' }));
-  const getCourseOptions  = () => (courses  || []).map(c => ({ value: c.id, label: c.name, subLabel: c.code || '' }));
-  const getClassOptions   = () => (classes  || []).map(c => ({ value: c.id, label: c.name, subLabel: `Capacity: ${c.capacity || 'N/A'}` }));
-  const getSubjectOptions = () => (filteredSubjects || []).map(s => ({ value: s.id, label: s.name, subLabel: `Code: ${s.code || ''}` }));
-  const getUnitOptions    = () => (filteredUnits || []).map(u => ({
-    value: u.id, label: u.name,
-    subLabel: isUniversity ? `Semester: ${u.semester || 'N/A'}` : `Module: ${u.module || 'N/A'}`
-  }));
-  const getExamOptions    = () => (filteredExams || []).map(e => ({
-    value: e.id, label: e.name,
-    subLabel: `Date: ${new Date(e.date).toLocaleDateString()}`
-  }));
-  const getReportStudentOptions = () => (students || [])
-    .filter(s => !reportClassId || s.classId === reportClassId)
-    .map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}`, subLabel: s.admissionNumber }));
-
-  const examTypeOptions = [
-    { value: '', label: 'All Types' },
-    { value: 'OPENER', label: 'Opener' },
-    { value: 'MIDTERM', label: 'Mid-Term' },
-    { value: 'ENDTERM', label: 'End Term' },
-    { value: 'CAT', label: 'CAT' },
-    { value: 'MOCK', label: 'Mock' },
-    { value: 'PRE_MOCK', label: 'Pre-Mock' },
-    { value: 'FINAL', label: 'Final Exam' },
-    { value: 'PRACTICAL', label: 'Practical' },
-    { value: 'PROJECT', label: 'Project' }
-  ];
-
-  const examTypeLabel = (t) => examTypeOptions.find(o => o.value === t)?.label || t;
 
   // ==================== FILTERS ====================
   React.useEffect(() => {
@@ -13213,87 +13196,253 @@ const ResultsModule = ({
     }
   }, [selectedClass, subjects, isRegularSchool]);
 
-  const filteredExams = React.useMemo(() => {
+  const filteredExams = useMemo(() => {
     let filtered = exams || [];
     if (isUniversity) {
-      if (selectedCourse) filtered = filtered.filter(e => e.courseId === selectedCourse);
-      if (selectedYear) filtered = filtered.filter(e => e.year === parseInt(selectedYear));
+      if (selectedCourse)   filtered = filtered.filter(e => e.courseId === selectedCourse);
+      if (selectedYear)     filtered = filtered.filter(e => e.year === parseInt(selectedYear));
       if (selectedSemester) filtered = filtered.filter(e => e.semester === parseInt(selectedSemester));
-      if (selectedUnit) filtered = filtered.filter(e => e.unitId === selectedUnit);
+      if (selectedUnit)     filtered = filtered.filter(e => e.unitId === selectedUnit);
     } else if (isTVET) {
       if (selectedProgram) filtered = filtered.filter(e => e.programId === selectedProgram);
-      if (selectedYear) filtered = filtered.filter(e => e.year === parseInt(selectedYear));
-      if (selectedModule) filtered = filtered.filter(e => e.module === parseInt(selectedModule));
-      if (selectedUnit) filtered = filtered.filter(e => e.unitId === selectedUnit);
+      if (selectedYear)    filtered = filtered.filter(e => e.year === parseInt(selectedYear));
+      if (selectedModule)  filtered = filtered.filter(e => e.module === parseInt(selectedModule));
+      if (selectedUnit)    filtered = filtered.filter(e => e.unitId === selectedUnit);
     } else {
-      if (selectedClass) filtered = filtered.filter(e => e.classId === selectedClass);
+      if (selectedClass)   filtered = filtered.filter(e => e.classId === selectedClass);
       if (selectedSubject) filtered = filtered.filter(e => e.subjectId === selectedSubject);
     }
     return filtered;
-  }, [exams, selectedCourse, selectedProgram, selectedYear, selectedSemester, selectedModule, selectedUnit, selectedClass, selectedSubject, isUniversity, isTVET]);
+  }, [exams, selectedCourse, selectedProgram, selectedYear, selectedSemester,
+      selectedModule, selectedUnit, selectedClass, selectedSubject, isUniversity, isTVET]);
 
-  // ==================== LOAD EXAM RESULTS (ADMIN) ====================
+  // ==================== OPTIONS ====================
+  const getProgramOptions = () => (programs || []).map(p => ({ value: p.id, label: p.name, subLabel: p.code || '' }));
+  const getCourseOptions  = () => (courses  || []).map(c => ({ value: c.id, label: c.name, subLabel: c.code || '' }));
+  const getClassOptions   = () => (classes  || []).map(c => ({ value: c.id, label: c.name, subLabel: c.capacity ? `Cap: ${c.capacity}` : '' }));
+  const getSubjectOptions = () => (filteredSubjects || []).map(s => ({ value: s.id, label: s.name, subLabel: `Code: ${s.code || ''}` }));
+  const getUnitOptions    = () => (filteredUnits || []).map(u => ({
+    value: u.id, label: u.name,
+    subLabel: isUniversity ? `Sem: ${u.semester || 'N/A'}` : `Module: ${u.module || 'N/A'}`
+  }));
+  const getExamOptions    = () => (filteredExams || []).map(e => ({
+    value: e.id, label: e.name,
+    subLabel: `${e.type || ''} • ${e.date ? new Date(e.date).toLocaleDateString() : ''}`
+  }));
+  const getReportStudentOptions = () => (students || [])
+    .filter(s => !reportClassId || s.classId === reportClassId)
+    .map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}`, subLabel: s.admissionNumber }));
+
+  const examTypeOptions = [
+    { value: '', label: 'All Types' },
+    { value: 'OPENER', label: 'Opener' },
+    { value: 'MIDTERM', label: 'Mid-Term' },
+    { value: 'ENDTERM', label: 'End Term' },
+    { value: 'CAT', label: 'CAT' },
+    { value: 'MOCK', label: 'Mock' },
+    { value: 'PRE_MOCK', label: 'Pre-Mock' },
+    { value: 'FINAL', label: 'Final Exam' },
+    { value: 'PRACTICAL', label: 'Practical' },
+    { value: 'PROJECT', label: 'Project' }
+  ];
+  const examTypeLabel = (t) => examTypeOptions.find(o => o.value === t)?.label || t;
+
+  const termOptions = [
+    { value: '', label: 'All Terms (grouped by term)' },
+    { value: 'Term 1', label: 'Term 1' },
+    { value: 'Term 2', label: 'Term 2' },
+    { value: 'Term 3', label: 'Term 3' },
+    { value: 'Semester 1', label: 'Semester 1' },
+    { value: 'Semester 2', label: 'Semester 2' },
+    { value: 'Module 1', label: 'Module 1' },
+    { value: 'Module 2', label: 'Module 2' }
+  ];
+
+  // ==================== TREND ====================
+  const TrendArrow = ({ trend, size = 'sm' }) => {
+    if (trend === 'up')   return <span className={`text-green-600 font-bold ${size === 'lg' ? 'text-lg' : ''}`} title="Improved">▲</span>;
+    if (trend === 'down') return <span className={`text-red-600 font-bold ${size === 'lg' ? 'text-lg' : ''}`} title="Dropped">▼</span>;
+    return <span className="text-gray-300 text-xs" title="Stable">●</span>;
+  };
+
+  // ==================================================================
+  //  ✅ PRINT-ONLY stylesheet — injected once
+  //     Only elements with class="results-print-area" will print.
+  //     Everything else is hidden.
+  // ==================================================================
+  React.useEffect(() => {
+    const id = '__results_print_style__';
+    if (document.getElementById(id)) return;
+    const style = document.createElement('style');
+    style.id = id;
+    style.innerHTML = `
+      @media print {
+        /* Hide absolutely everything */
+        body * { visibility: hidden !important; }
+
+        /* Show only the report/matrix print area */
+        .results-print-area,
+        .results-print-area * { visibility: visible !important; }
+
+        /* Reset layout for the print area */
+        .results-print-area {
+          position: absolute !important;
+          left: 0; top: 0;
+          width: 100% !important;
+          padding: 12mm !important;
+          background: #fff !important;
+          box-shadow: none !important;
+          border: none !important;
+          border-radius: 0 !important;
+        }
+
+        /* Hide UI chrome */
+        .no-print,
+        .no-print *,
+        nav, aside, header, footer,
+        button, input, select, textarea { display: none !important; }
+
+        /* Table sizing */
+        table { border-collapse: collapse !important; width: 100% !important; }
+        thead { display: table-header-group !important; }
+        tr { page-break-inside: avoid !important; }
+        th, td {
+          border: 1px solid #cbd5e1 !important;
+          padding: 6px 8px !important;
+          font-size: 11px !important;
+          color: #111 !important;
+          background: #fff !important;
+        }
+        th { background: #f1f5f9 !important; font-weight: 700 !important; }
+
+        /* Print-only signature block */
+        .print-only { display: block !important; }
+        @page { size: A4 portrait; margin: 10mm; }
+      }
+      .print-only { display: none; }
+    `;
+    document.head.appendChild(style);
+    return () => {
+      const el = document.getElementById(id);
+      if (el) el.remove();
+    };
+  }, []);
+
+  // ==================================================================
+  //  ✅ PRINT HANDLER — Report card / Class matrix
+  // ==================================================================
+  const handlePrintArea = (areaId) => {
+    const el = document.getElementById(areaId);
+    if (!el) { window.print(); return; }
+    el.classList.add('results-print-area');
+    setTimeout(() => {
+      window.print();
+      setTimeout(() => el.classList.remove('results-print-area'), 500);
+    }, 80);
+  };
+
+  // ==================================================================
+  //  ✅ SEND RESULTS TO PARENTS (unchanged behaviour)
+  // ==================================================================
+  const handleSendToParents = async () => {
+    if (!canSendMessages) { alert('You do not have permission'); return; }
+    if (selectedStudentsForMessage.length === 0) { alert('Select at least one student'); return; }
+    setSendingMessages(true);
+    setMessageLog([]);
+    try {
+      const exam = exams.find(e => e.id === selectedExam);
+      let sentCount = 0;
+      const logs = [];
+      for (const studentId of selectedStudentsForMessage) {
+        const student = resultEntries.find(e => e.studentId === studentId);
+        if (!student) continue;
+        let studentParents = [];
+        try {
+          const res = await api.get(`/parents?studentId=${studentId}`);
+          studentParents = res.data.parents || [];
+        } catch (_) {}
+        if (studentParents.length === 0) {
+          logs.push({ student: student.studentName, error: 'No parents found' });
+          continue;
+        }
+        const itemName = getItemName({}, exam);
+        const msg = (messageTemplate || `Dear Parent,\n\n{student_name} (Adm: {admission}) scored {marks} ({grade}) in {subject} for {exam_name}.\n\n{school_name}`)
+          .replace(/{student_name}/g, student.studentName)
+          .replace(/{admission}/g, student.admissionNumber)
+          .replace(/{exam_name}/g, exam.name)
+          .replace(/{subject}/g, itemName)
+          .replace(/{marks}/g, student.marks)
+          .replace(/{grade}/g, displayGrade(student.grade, student.marks))
+          .replace(/{points}/g, student.points)
+          .replace(/{school_name}/g, currentSchool?.name || 'School')
+          .replace(/{date}/g, new Date().toLocaleDateString());
+        for (const parent of studentParents) {
+          try {
+            if ((messageType === 'SMS' || messageType === 'BOTH') && parent.User?.phone) {
+              await api.post('/messages', { type: 'SMS', content: msg, recipientType: 'PARENT',
+                recipients: [{ type: 'user', id: parent.userId }], sendNow: true, schoolId: currentSchool?.id });
+            }
+            if ((messageType === 'EMAIL' || messageType === 'BOTH') && parent.User?.email) {
+              await api.post('/messages', { type: 'EMAIL', subject: `Results — ${student.studentName}`,
+                content: msg, recipientType: 'PARENT', recipients: [{ type: 'user', id: parent.userId }],
+                sendNow: true, schoolId: currentSchool?.id });
+            }
+            sentCount++;
+          } catch (_) {}
+        }
+        logs.push({ student: student.studentName, parents: studentParents.length, sent: true });
+      }
+      setMessageLog(logs);
+      alert(`✅ Sent to ${sentCount} parent contacts!`);
+    } catch (err) {
+      alert('❌ Failed to send messages');
+    } finally {
+      setSendingMessages(false);
+    }
+  };
+
+  // ==================== MARKS ENTRY (unchanged, but cleaner layout) ====================
+  const [examLevelHintCache] = useState({});
+
   const loadExamResults = async () => {
     if (!selectedExam) { alert('Please select an exam'); return; }
-    if (!canViewAllResults) { alert('You do not have permission to view results'); return; }
-    setLoading(true);
-    setApiError('');
+    if (!canViewAllResults) { alert('You do not have permission'); return; }
+    setLoading(true); setApiError('');
     try {
       const exam = exams.find(e => e.id === selectedExam);
       if (!exam) { alert('Exam not found'); return; }
-
       const examLevelHint = getLevelHint(exam, null, exam.classId || selectedClass);
-      const examFlavor = resolveGradingFlavor(schoolCategory, examLevelHint);
+      examLevelHintCache[selectedExam] = examLevelHint;
 
       let studentList = [];
-      const selectedStudentIds = exam.selectedStudents || [];
-
-      if (selectedStudentIds.length > 0) {
-        const resolvedIds = [];
-        for (const id of selectedStudentIds) {
-          const resolved = resolveStudentId(id);
-          if (resolved) resolvedIds.push(resolved);
-        }
-        if (resolvedIds.length > 0) {
-          const studentsRes = await api.get('/students', { params: { ids: resolvedIds.join(',') } });
-          studentList = studentsRes.data.students || [];
+      const selectedIds = exam.selectedStudents || [];
+      if (selectedIds.length > 0) {
+        const resolved = selectedIds.map(resolveStudentId).filter(Boolean);
+        if (resolved.length > 0) {
+          const res = await api.get('/students', { params: { ids: resolved.join(',') } });
+          studentList = res.data.students || [];
         }
       }
-
       if (studentList.length === 0) {
-        let params = {};
-        if (isUniversity && exam.courseId) {
-          params.courseId = exam.courseId;
-          if (exam.year) params.year = exam.year;
-        } else if (isTVET && exam.programId) {
-          params.programId = exam.programId;
-          if (exam.module) params.module = exam.module;
-          if (exam.year) params.year = exam.year;
-        } else if (exam.classId) {
-          params.classId = exam.classId;
-        }
+        const params = {};
+        if (isUniversity && exam.courseId) { params.courseId = exam.courseId; if (exam.year) params.year = exam.year; }
+        else if (isTVET && exam.programId) { params.programId = exam.programId; if (exam.module) params.module = exam.module; if (exam.year) params.year = exam.year; }
+        else if (exam.classId) { params.classId = exam.classId; }
         if (Object.keys(params).length > 0) {
           const res = await api.get('/students', { params });
           studentList = res.data.students || [];
         }
       }
-
       studentList = studentList.filter(s => s.schoolId === currentSchool?.id);
-
-      if (studentList.length === 0) {
-        alert('No students found for this exam. Please ensure students are assigned to this exam.');
-        setLoading(false);
-        return;
-      }
+      if (studentList.length === 0) { alert('No students found for this exam'); setLoading(false); return; }
 
       let existingResults = [];
       try {
         const res = await api.get(`/results/exam/${selectedExam}`);
         existingResults = res.data.results || [];
-      } catch (_) { /* no existing */ }
+      } catch (_) {}
 
       const itemName = getItemName({}, exam);
-
       const parentsByStudent = {};
       parents?.forEach(p => {
         if (!parentsByStudent[p.studentId]) parentsByStudent[p.studentId] = [];
@@ -13304,17 +13453,15 @@ const ResultsModule = ({
         const existing = existingResults.find(r => r.studentId === student.id);
         const hasMarks = existing?.marks !== undefined && existing?.marks !== null && existing?.marks !== '';
         const marks = hasMarks ? existing.marks : '';
-
         const gradeInfo = hasMarks
           ? calculateGrade(marks, exam.maxMarks || 100, exam.schoolCategory || schoolCategory, examLevelHint)
           : { grade: '', points: 0 };
-
         return {
           studentId: student.id,
           studentName: `${student.firstName} ${student.lastName}`,
           admissionNumber: student.admissionNumber,
           unitName: itemName,
-          marks: marks,
+          marks,
           grade: gradeInfo.grade,
           points: gradeInfo.points,
           isAbsent: existing?.isAbsent || false,
@@ -13322,473 +13469,159 @@ const ResultsModule = ({
           parents: parentsByStudent[student.id] || []
         };
       });
-
-      console.log(`📋 Loaded ${entries.length} entries — grading flavor: ${examFlavor} (level hint: ${examLevelHint})`);
       setResultEntries(entries);
     } catch (error) {
-      console.error('Error:', error);
       setApiError('Failed to load results: ' + (error.response?.data?.message || error.message));
     } finally {
       setLoading(false);
     }
   };
 
-  // ==================== SAVE RESULTS ====================
   const saveAllResults = async () => {
-    if (!canAddResults) { alert('You do not have permission to save results'); return; }
-
-    const entriesToSave = resultEntries.filter(e => e.marks !== '' || e.isAbsent);
-    if (entriesToSave.length === 0) {
-      alert('No marks entered. Please enter marks or mark students as absent.');
-      return;
-    }
-
+    if (!canAddResults) { alert('You do not have permission'); return; }
+    const toSave = resultEntries.filter(e => e.marks !== '' || e.isAbsent);
+    if (toSave.length === 0) { alert('No marks entered'); return; }
     setLoading(true);
-    let saved = 0;
-    let errors = 0;
-    const errorDetails = [];
-
+    let saved = 0, errors = 0;
     try {
       const exam = exams.find(e => e.id === selectedExam);
-      if (!exam) { alert('Exam not found. Please refresh.'); return; }
-
-      const examLevelHint = getLevelHint(exam, null, exam.classId || selectedClass);
+      if (!exam) { alert('Exam not found'); return; }
+      const examLevelHint = examLevelHintCache[selectedExam] || getLevelHint(exam, null, exam.classId || selectedClass);
 
       let existingByStudentId = {};
       try {
-        const existingRes = await api.get(`/results/exam/${selectedExam}`);
-        const existingList = existingRes.data?.results || [];
-        existingList.forEach(r => { existingByStudentId[r.studentId] = r; });
-      } catch (_) { /* will create new */ }
+        const r = await api.get(`/results/exam/${selectedExam}`);
+        (r.data?.results || []).forEach(x => { existingByStudentId[x.studentId] = x; });
+      } catch (_) {}
 
-      for (const entry of entriesToSave) {
+      for (const entry of toSave) {
         const marks = entry.isAbsent ? 0 : parseFloat(entry.marks) || 0;
-
         const student = students.find(s => s.id === entry.studentId);
-        if (!student) {
-          errors++; errorDetails.push(`${entry.studentName}: Student not found in system`); continue;
-        }
-        if (student.schoolId && student.schoolId !== currentSchool?.id) {
-          errors++; errorDetails.push(`${entry.studentName}: Student does not belong to this school`); continue;
-        }
+        if (!student) { errors++; continue; }
 
-        const { grade, points } = calculateGrade(
-          marks,
-          exam.maxMarks || 100,
-          exam.schoolCategory || schoolCategory,
-          examLevelHint
-        );
-
+        const { grade, points } = calculateGrade(marks, exam.maxMarks || 100, exam.schoolCategory || schoolCategory, examLevelHint);
         const data = {
-          studentId: student.id,
-          examId: selectedExam,
-          marks,
-          grade,
-          points,
+          studentId: student.id, examId: selectedExam,
+          marks, grade, points,
           isAbsent: entry.isAbsent,
           remarks: entry.isAbsent ? 'Absent' : ''
         };
-
-        if (isUniversity || isTVET) {
-          data.unitId = exam.unitId;
-        } else {
-          data.subjectId = exam.subjectId;
-        }
+        if (isUniversity || isTVET) data.unitId = exam.unitId;
+        else data.subjectId = exam.subjectId;
 
         const existing = entry.resultId ? { id: entry.resultId } : existingByStudentId[student.id];
-
         try {
-          if (existing?.id) {
-            await api.put(`/results/${existing.id}`, data);
-          } else {
-            await api.post('/results', data);
-          }
+          if (existing?.id) await api.put(`/results/${existing.id}`, data);
+          else await api.post('/results', data);
           saved++;
-        } catch (err) {
-          errors++;
-          const errorMsg = err.response?.data?.message || err.response?.data?.error || err.message || 'Unknown error';
-          errorDetails.push(`${entry.studentName}: ${errorMsg}`);
-        }
+        } catch (err) { errors++; }
       }
-
-      if (saved > 0 && errors === 0) {
-        alert(`✅ ${saved} result(s) saved successfully!`);
-      } else if (saved > 0 && errors > 0) {
-        alert(`⚠️ ${saved} saved, ${errors} failed:\n\n${errorDetails.slice(0, 10).join('\n')}` +
-              (errorDetails.length > 10 ? `\n... and ${errorDetails.length - 10} more` : ''));
-      } else {
-        alert(`❌ All saves failed:\n\n${errorDetails.slice(0, 10).join('\n')}`);
-      }
-
+      if (saved > 0) alert(`✅ ${saved} result(s) saved${errors > 0 ? `, ${errors} failed` : ''}`);
+      else alert(`❌ All saves failed (${errors})`);
       if (saved > 0) await loadExamResults();
-    } catch (error) {
-      console.error('❌ Fatal error in saveAllResults:', error);
-      alert('Failed to save: ' + (error.response?.data?.message || error.message));
+    } catch (err) {
+      alert('Failed to save: ' + (err.response?.data?.message || err.message));
     } finally {
       setLoading(false);
     }
   };
 
-  // ==================== PUBLISH RESULTS ====================
   const publishResults = async () => {
-    if (!canPublishResults) { alert('You do not have permission to publish results'); return; }
-    if (!selectedExam) { alert('Please select an exam first'); return; }
+    if (!canPublishResults) { alert('You do not have permission'); return; }
+    if (!selectedExam) { alert('Select an exam'); return; }
     setPublishing(true);
     try {
       const exam = exams.find(e => e.id === selectedExam);
       await api.put(`/exams/${selectedExam}`, { ...exam, isPublished: true, resultsPublished: true, publishedAt: new Date().toISOString() });
       setExams(prev => prev.map(e => e.id === selectedExam ? { ...e, isPublished: true, resultsPublished: true, publishedAt: new Date().toISOString() } : e));
-      alert('✅ Results published successfully!');
+      alert('✅ Results published!');
       await loadExamResults();
-    } catch (error) {
-      console.error('Error publishing results:', error);
-      alert('Failed to publish results: ' + (error.response?.data?.message || error.message));
+    } catch (err) {
+      alert('Failed to publish');
     } finally {
       setPublishing(false);
     }
   };
 
-  // ==================== LOAD STUDENT REPORT (PRINT) ====================
-  const loadStudentReport = async (student) => {
-    setLoading(true);
-    try {
-      const resultsRes = await api.get(`/results?studentId=${student.studentId}`);
-      const studentResults = resultsRes.data.results || [];
-      const exam = exams?.find(e => e.id === selectedExam);
-      const levelHint = getLevelHint(exam, null, exam?.classId || selectedClass);
-
-      const enrichedResults = studentResults.map(result => {
-        const examObj = exams?.find(e => e.id === result.examId);
-        const hasMarks = result.marks !== null && result.marks !== undefined && result.marks !== '';
-        const gradeInfo = hasMarks
-          ? calculateGrade(result.marks, examObj?.maxMarks || 100, examObj?.schoolCategory || schoolCategory, levelHint)
-          : { grade: '', points: 0 };
-        return {
-          id: result.id,
-          examId: result.examId,
-          examName: examObj?.name || 'Unknown Exam',
-          examDate: examObj?.date,
-          itemName: getItemName(result, examObj),
-          marks: result.marks || 0,
-          grade: gradeInfo.grade,
-          displayGrade: gradeInfo.grade,
-          points: gradeInfo.points,
-          isAbsent: result.isAbsent || false,
-          remarks: result.remarks,
-          studentName: student.studentName,
-          admissionNumber: student.admissionNumber,
-          studentId: student.studentId
-        };
-      });
-
-      const totalMarks = enrichedResults.reduce((sum, r) => sum + (r.marks || 0), 0);
-      const average = enrichedResults.length > 0 ? (totalMarks / enrichedResults.length).toFixed(2) : 0;
-      const totalPoints = enrichedResults.reduce((sum, r) => sum + (r.points || 0), 0);
-
-      setStudentReportData({
-        student: { name: student.studentName, admissionNumber: student.admissionNumber, studentId: student.studentId },
-        results: enrichedResults,
-        summary: {
-          totalExams: enrichedResults.length,
-          totalMarks,
-          average,
-          totalPoints,
-          meanGrade: calculateMeanGrade(enrichedResults, levelHint)
-        }
-      });
-      setSelectedStudentForReport(student);
-      setShowPrintModal(true);
-    } catch (error) {
-      console.error('Error loading student report:', error);
-      alert('Failed to load student report');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ==================== LOAD ALL RESULTS FOR PRINT ====================
-  const loadAllResultsForPrint = async () => {
-    if (!selectedExam) { alert('Please select an exam first'); return; }
-    setLoading(true);
-    try {
-      const exam = exams.find(e => e.id === selectedExam);
-      if (!exam) { alert('Exam not found'); return; }
-
-      const levelHint = getLevelHint(exam, null, exam.classId || selectedClass);
-
-      const resultsRes = await api.get(`/results/exam/${selectedExam}`);
-      const examResults = resultsRes.data.results || [];
-
-      let studentList = [];
-      const selectedStudentIds = exam.selectedStudents || [];
-
-      if (selectedStudentIds.length > 0) {
-        const resolvedIds = [];
-        for (const id of selectedStudentIds) {
-          const resolved = resolveStudentId(id);
-          if (resolved) resolvedIds.push(resolved);
-        }
-        if (resolvedIds.length > 0) {
-          const studentsRes = await api.get('/students', { params: { ids: resolvedIds.join(',') } });
-          studentList = studentsRes.data.students || [];
-        }
-      }
-
-      if (studentList.length === 0) {
-        let params = {};
-        if (isUniversity && exam.courseId) {
-          params.courseId = exam.courseId;
-          if (exam.year) params.year = exam.year;
-        } else if (isTVET && exam.programId) {
-          params.programId = exam.programId;
-          if (exam.module) params.module = exam.module;
-          if (exam.year) params.year = exam.year;
-        } else if (exam.classId) {
-          params.classId = exam.classId;
-        }
-        if (Object.keys(params).length > 0) {
-          const res = await api.get('/students', { params });
-          studentList = res.data.students || [];
-        }
-      }
-
-      studentList = studentList.filter(s => s.schoolId === currentSchool?.id);
-      const itemName = getItemName({}, exam);
-
-      const enrichedResults = studentList.map(student => {
-        const result = examResults.find(r => r.studentId === student.id);
-        const hasMarks = result?.marks !== undefined && result?.marks !== null && result?.marks !== '';
-        const gradeInfo = hasMarks
-          ? calculateGrade(result.marks, exam.maxMarks || 100, exam.schoolCategory || schoolCategory, levelHint)
-          : { grade: '', points: 0 };
-        return {
-          studentId: student.id,
-          studentName: `${student.firstName} ${student.lastName}`,
-          admissionNumber: student.admissionNumber,
-          unitName: itemName,
-          marks: hasMarks ? result.marks : '',
-          grade: gradeInfo.grade,
-          displayGrade: gradeInfo.grade,
-          points: gradeInfo.points,
-          isAbsent: result?.isAbsent || false,
-          remarks: result?.remarks || ''
-        };
-      }).filter(r => r.marks !== '' || r.isAbsent);
-
-      const totalMarks = enrichedResults.reduce((sum, r) => sum + (parseFloat(r.marks) || 0), 0);
-      const average = enrichedResults.length > 0 ? (totalMarks / enrichedResults.length).toFixed(2) : 0;
-      const totalPoints = enrichedResults.reduce((sum, r) => sum + (r.points || 0), 0);
-
-      setAllResultsPrintData({
-        exam: { name: exam.name, date: exam.date, itemName: itemName, maxMarks: exam.maxMarks },
-        results: enrichedResults,
-        summary: {
-          totalStudents: enrichedResults.length,
-          totalMarks,
-          average,
-          totalPoints,
-          meanGrade: calculateMeanGrade(enrichedResults, levelHint)
-        }
-      });
-      setShowAllResultsPrintModal(true);
-    } catch (error) {
-      console.error('Error loading all results:', error);
-      alert('Failed to load results for printing');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ==================== HANDLE INPUT CHANGES ====================
   const handleMarkChange = (studentId, value) => {
     setResultEntries(prev => prev.map(e => e.studentId === studentId ? { ...e, marks: value } : e));
   };
-
   const handleAbsentChange = (studentId, checked) => {
     setResultEntries(prev => prev.map(e => e.studentId === studentId ? { ...e, isAbsent: checked, marks: checked ? 0 : e.marks } : e));
   };
-
   const handleSelectAllForMessage = (checked) => {
     setSelectAllForMessage(checked);
     setSelectedStudentsForMessage(checked ? filteredResultEntries.map(s => s.studentId) : []);
   };
-
   const handleSelectForMessage = (studentId, checked) => {
     setSelectedStudentsForMessage(prev => checked ? [...prev, studentId] : prev.filter(id => id !== studentId));
     setSelectAllForMessage(false);
   };
 
-  const filteredResultEntries = resultEntries.filter(entry =>
-    entry.studentName?.toLowerCase().includes(studentSearch.toLowerCase()) ||
-    entry.admissionNumber?.toLowerCase().includes(studentSearch.toLowerCase())
-  ).filter(entry => !filterGrade || entry.grade === filterGrade);
+  const filteredResultEntries = resultEntries
+    .filter(e =>
+      !studentSearch ||
+      e.studentName?.toLowerCase().includes(studentSearch.toLowerCase()) ||
+      e.admissionNumber?.toLowerCase().includes(studentSearch.toLowerCase())
+    )
+    .filter(e => !filterGrade || e.grade === filterGrade);
 
   const uniqueGrades = [...new Set(resultEntries.map(e => e.grade).filter(Boolean))];
 
-  // ==================== SEND TO PARENTS ====================
-  const handleSendToParents = async () => {
-    if (!canSendMessages) { alert('You do not have permission to send messages'); return; }
-    if (selectedStudentsForMessage.length === 0) { alert('Please select at least one student'); return; }
-    setSendingMessages(true);
-    setMessageLog([]);
-    try {
-      const exam = exams.find(e => e.id === selectedExam);
-      let sentCount = 0;
-      const logs = [];
-      for (const studentId of selectedStudentsForMessage) {
-        const student = resultEntries.find(e => e.studentId === studentId);
-        if (!student) continue;
-
-        let studentParents = [];
-        try {
-          const parentsRes = await api.get(`/parents?studentId=${studentId}`);
-          studentParents = parentsRes.data.parents || [];
-        } catch (_) {}
-
-        if (studentParents.length === 0) {
-          logs.push({ student: student.studentName, error: 'No parents found' });
-          continue;
-        }
-
-        const itemName = getItemName({}, exam);
-        const message = (messageTemplate || `Dear Parent,\n\nYour child {student_name} (Adm: {admission}) has received the following results for {exam_name}:\n\nSubject: {subject}\nMarks: {marks}\nGrade: {grade}\nPoints: {points}\n\nThank you,\n{school_name}\n{date}`)
-          .replace(/{student_name}/g, student.studentName)
-          .replace(/{admission}/g, student.admissionNumber)
-          .replace(/{exam_name}/g, exam.name)
-          .replace(/{subject}/g, itemName)
-          .replace(/{marks}/g, student.marks)
-          .replace(/{grade}/g, displayGrade(student.grade, student.marks))
-          .replace(/{points}/g, student.points)
-          .replace(/{school_name}/g, currentSchool?.name || 'School')
-          .replace(/{date}/g, new Date().toLocaleDateString());
-
-        for (const parent of studentParents) {
-          try {
-            if (messageType === 'SMS' || messageType === 'BOTH') {
-              if (parent.User?.phone) {
-                await api.post('/messages', {
-                  type: 'SMS',
-                  content: message,
-                  recipientType: 'PARENT',
-                  recipients: [{ type: 'user', id: parent.userId }],
-                  sendNow: true,
-                  schoolId: currentSchool?.id
-                });
-              }
-            }
-            if (messageType === 'EMAIL' || messageType === 'BOTH') {
-              if (parent.User?.email) {
-                await api.post('/messages', {
-                  type: 'EMAIL',
-                  subject: `Results for ${student.studentName} - ${exam.name}`,
-                  content: message,
-                  recipientType: 'PARENT',
-                  recipients: [{ type: 'user', id: parent.userId }],
-                  sendNow: true,
-                  schoolId: currentSchool?.id
-                });
-              }
-            }
-            sentCount++;
-          } catch (err) { console.error('Error sending to parent:', err); }
-        }
-        logs.push({ student: student.studentName, parents: studentParents.length, sent: true });
-      }
-      setMessageLog(logs);
-      alert(`✅ Sent results to ${sentCount} parent contacts!`);
-    } catch (error) {
-      console.error('Error sending messages:', error);
-      alert('❌ Failed to send messages');
-    } finally {
-      setSendingMessages(false);
-    }
-  };
-
-  // ============================================================
-  //  SHARED TREND ARROW
-  // ============================================================
-  const TrendArrow = ({ trend, size = 'sm' }) => {
-    if (trend === 'up')   return <span className={`text-green-600 ${size === 'lg' ? 'text-xl' : 'text-base'}`} title="Improved">▲</span>;
-    if (trend === 'down') return <span className={`text-red-600 ${size === 'lg' ? 'text-xl' : 'text-base'}`} title="Dropped">▼</span>;
-    return <span className="text-gray-400">■</span>;
-  };
-
-  // ============================================================
-  //  STUDENT VIEW RENDER
-  // ============================================================
+  // ==================================================================
+  //  STUDENT VIEW
+  // ==================================================================
   if (isStudent) {
     return (
       <div className="space-y-6">
         {showAdmissionModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-2xl font-bold">View Your Results</h2>
-                <button onClick={() => setShowAdmissionModal(false)} className="text-gray-500 hover:text-gray-700">
-                  <i className="fas fa-times"></i>
-                </button>
-              </div>
+              <h2 className="text-2xl font-bold mb-4">View Your Results</h2>
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Admission Number</label>
-                  <input
-                    type="text"
+                  <input type="text"
                     className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
                     value={admissionNumber}
-                    onChange={(e) => {
-                      setAdmissionNumber(e.target.value.toUpperCase());
-                      hasLoadedStudentData.current = false;
-                    }}
+                    onChange={(e) => { setAdmissionNumber(e.target.value.toUpperCase()); hasLoadedStudentData.current = false; }}
                     placeholder="e.g., ADM/2026/0001"
-                    autoFocus
-                  />
+                    autoFocus />
                 </div>
-                {apiError && (
-                  <div className="bg-red-50 p-3 rounded-lg text-red-600 text-sm">
-                    <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
-                  </div>
-                )}
-                <button
-                  onClick={handleAdmissionSubmit}
-                  disabled={loadingMyData || !admissionNumber}
-                  className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center"
-                >
-                  {loadingMyData ? <><i className="fas fa-spinner fa-spin mr-2"></i>Loading...</> : <><i className="fas fa-arrow-right mr-2"></i>View Results</>}
+                {apiError && <div className="bg-red-50 p-3 rounded-lg text-red-600 text-sm">{apiError}</div>}
+                <button onClick={handleAdmissionSubmit} disabled={loadingMyData || !admissionNumber}
+                  className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                  {loadingMyData ? 'Loading...' : 'View Results'}
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {loadingMyData && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
+        {loadingMyData && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50" />}
 
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-center no-print">
           <h2 className="text-2xl font-bold">My Results</h2>
           {myStudentRecord && (
-            <button
-              onClick={() => {
-                localStorage.removeItem('studentAdmissionNumber');
-                setAdmissionNumber('');
-                setMyStudentRecord(null);
-                setMyResults([]);
-                hasLoadedStudentData.current = false;
-                setShowAdmissionModal(true);
-              }}
-              className="text-indigo-600 hover:text-indigo-800 text-sm flex items-center"
-            >
+            <button onClick={() => {
+              localStorage.removeItem('studentAdmissionNumber');
+              setAdmissionNumber(''); setMyStudentRecord(null); setMyResults([]);
+              hasLoadedStudentData.current = false;
+              setShowAdmissionModal(true);
+            }}
+              className="text-indigo-600 hover:text-indigo-800 text-sm">
               <i className="fas fa-exchange-alt mr-1"></i>Switch Account
             </button>
           )}
         </div>
 
         {myStudentRecord ? (
-          <div className="space-y-6">
-            <div className={`rounded-xl p-6 text-white ${isTVET ? 'bg-gradient-to-r from-purple-600 to-pink-600' : 'bg-gradient-to-r from-indigo-500 to-purple-600'}`}>
-              <div className="flex items-center space-x-4">
-                <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center">
-                  <span className="text-2xl font-bold text-indigo-600">
-                    {myStudentRecord.firstName?.[0]}{myStudentRecord.lastName?.[0]}
-                  </span>
+          <div id="student-results-print" className="space-y-6">
+            {/* Header */}
+            <div className={`rounded-xl p-6 text-white ${isTVET ? 'bg-gradient-to-r from-purple-600 to-pink-600' : 'bg-gradient-to-r from-indigo-600 to-blue-600'}`}>
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center text-2xl font-bold text-indigo-600">
+                  {myStudentRecord.firstName?.[0]}{myStudentRecord.lastName?.[0]}
                 </div>
                 <div>
                   <h3 className="text-2xl font-bold">{myStudentRecord.firstName} {myStudentRecord.lastName}</h3>
@@ -13797,59 +13630,51 @@ const ResultsModule = ({
               </div>
             </div>
 
+            {/* Summary Cards */}
             {myResultsSummary && (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-blue-50 p-4 rounded-lg text-center">
-                  <p className="text-sm text-blue-600">Total Exams</p>
-                  <p className="text-2xl font-bold text-blue-700">{myResultsSummary.total}</p>
-                </div>
-                <div className="bg-green-50 p-4 rounded-lg text-center">
-                  <p className="text-sm text-green-600">Average</p>
-                  <p className="text-2xl font-bold text-green-700">{myResultsSummary.average}%</p>
-                </div>
-                <div className="bg-purple-50 p-4 rounded-lg text-center">
-                  <p className="text-sm text-purple-600">Total Points</p>
-                  <p className="text-2xl font-bold text-purple-700">{myResultsSummary.totalPoints}</p>
-                </div>
-                <div className="bg-yellow-50 p-4 rounded-lg text-center">
-                  <p className="text-sm text-yellow-600">Mean Grade</p>
-                  <p className="text-2xl font-bold text-yellow-700">{myResultsSummary.meanGrade}</p>
-                </div>
+                <StatBox label="Total Exams" value={myResultsSummary.total} color="blue" icon="file-alt" />
+                <StatBox label="Average" value={`${myResultsSummary.average}%`} color="emerald" icon="chart-line" />
+                <StatBox label="Total Points" value={myResultsSummary.totalPoints} color="purple" icon="star" />
+                <StatBox label="Mean Grade" value={myResultsSummary.meanGrade} color="amber" icon="award" />
               </div>
             )}
 
+            {/* Results Table */}
             {myResults.length > 0 && (
-              <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+              <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-200">
                 <div className="px-6 py-4 bg-gray-50 border-b">
                   <h3 className="font-semibold text-lg">Detailed Results</h3>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full">
-                    <thead className="bg-gray-50">
+                    <thead className="bg-slate-100">
                       <tr>
-                        <th className="px-4 py-3 text-left">Exam</th>
-                        <th className="px-4 py-3 text-left">Date</th>
-                        <th className="px-4 py-3 text-left">{isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject'}</th>
-                        <th className="px-4 py-3 text-left">Marks</th>
-                        <th className="px-4 py-3 text-left">Grade</th>
-                        <th className="px-4 py-3 text-left">Points</th>
-                        <th className="px-4 py-3 text-left">Remarks</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wide">Exam</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wide">Date</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wide">
+                          {isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject'}
+                        </th>
+                        <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase tracking-wide">Marks</th>
+                        <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase tracking-wide">Grade</th>
+                        <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase tracking-wide">Points</th>
+                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wide">Remarks</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y">
-                      {myResults.map((result, index) => (
-                        <tr key={index} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 font-medium">{result.examName || 'Unknown'}</td>
-                          <td className="px-4 py-3">{result.examDate ? new Date(result.examDate).toLocaleDateString() : 'N/A'}</td>
-                          <td className="px-4 py-3">{result.itemName}</td>
-                          <td className="px-4 py-3 font-bold">{result.marks === '' || result.marks === null ? '—' : result.marks}</td>
-                          <td className="px-4 py-3">
-                            <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(result.grade)}`}>
-                              {displayGrade(result.grade, result.marks)}
+                    <tbody className="divide-y divide-gray-200">
+                      {myResults.map((r, i) => (
+                        <tr key={i} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 font-medium">{r.examName}</td>
+                          <td className="px-4 py-3 text-sm">{r.examDate ? new Date(r.examDate).toLocaleDateString() : '—'}</td>
+                          <td className="px-4 py-3">{r.itemName}</td>
+                          <td className="px-4 py-3 text-center font-bold">{r.marks ?? '—'}</td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradeColor(r.grade)}`}>
+                              {displayGrade(r.grade, r.marks)}
                             </span>
                           </td>
-                          <td className="px-4 py-3">{result.points}</td>
-                          <td className="px-4 py-3 text-sm text-gray-500">{result.remarks || '—'}</td>
+                          <td className="px-4 py-3 text-center">{r.points}</td>
+                          <td className="px-4 py-3 text-sm text-gray-500">{r.remarks || '—'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -13858,104 +13683,78 @@ const ResultsModule = ({
               </div>
             )}
 
-            {myResults.length > 0 && (
-              <div className="flex justify-end">
-                <button
-                  onClick={() => {
-                    setStudentReportData({
-                      student: {
-                        name: `${myStudentRecord.firstName} ${myStudentRecord.lastName}`,
-                        admissionNumber: myStudentRecord.admissionNumber,
-                        studentId: myStudentRecord.id
-                      },
-                      results: myResults,
-                      summary: myResultsSummary
-                    });
-                    setShowStudentPrintModal(true);
-                  }}
-                  className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 flex items-center"
-                >
-                  <i className="fas fa-print mr-2"></i>Print All Results
-                </button>
-              </div>
-            )}
+            <div className="flex justify-end no-print">
+              <button onClick={() => handlePrintArea('student-results-print')}
+                className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2">
+                <i className="fas fa-print"></i>Print My Results
+              </button>
+            </div>
           </div>
         ) : (
-          <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+          <div className="bg-white p-12 rounded-xl shadow-sm text-center no-print">
             <i className="fas fa-user-graduate text-6xl text-gray-300 mb-4"></i>
-            <p className="text-gray-500 text-lg">Enter your admission number to view your results.</p>
-            <button onClick={() => setShowAdmissionModal(true)} className="mt-4 bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700">
+            <p className="text-gray-500 text-lg">Enter your admission number to view results.</p>
+            <button onClick={() => setShowAdmissionModal(true)}
+              className="mt-4 bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700">
               Enter Admission Number
             </button>
           </div>
-        )}
-
-        {showStudentPrintModal && studentReportData && typeof StudentResultsPrintModal !== 'undefined' && (
-          <StudentResultsPrintModal
-            reportData={studentReportData}
-            onClose={() => { setShowStudentPrintModal(false); setStudentReportData(null); }}
-            currentSchool={currentSchool}
-          />
         )}
       </div>
     );
   }
 
-  // ============================================================
-  //  PARENT VIEW RENDER
-  // ============================================================
+  // ==================================================================
+  //  PARENT VIEW
+  // ==================================================================
   if (isParent) {
     return (
       <div className="space-y-6">
-        {loadingChildren && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
+        {loadingChildren && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50" />}
         {apiError && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg no-print">
             <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
           </div>
         )}
 
-        <h2 className="text-2xl font-bold">My Children's Results</h2>
+        <h2 className="text-2xl font-bold no-print">My Children's Results</h2>
 
         {loadingChildren ? (
           <div className="bg-white p-12 rounded-xl shadow-sm text-center">
             <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-4"></div>
-            <p className="text-gray-500">Loading your children...</p>
+            <p className="text-gray-500">Loading...</p>
           </div>
         ) : myChildren.length === 0 ? (
           <div className="bg-white p-12 rounded-xl shadow-sm text-center">
             <i className="fas fa-child text-6xl text-gray-300 mb-4"></i>
-            <p className="text-gray-500 text-lg">No children linked to your account.</p>
+            <p className="text-gray-500">No children linked.</p>
           </div>
         ) : (
           <div className="space-y-6">
-            <div className="bg-white p-6 rounded-xl shadow-sm">
+            <div className="bg-white p-6 rounded-xl shadow-sm no-print">
               <label className="block text-sm font-medium text-gray-700 mb-2">Select Child</label>
-              <select
-                value={selectedChild?.id || ''}
+              <select value={selectedChild?.id || ''}
                 onChange={(e) => {
-                  const child = myChildren.find(c => c.id === e.target.value);
-                  setSelectedChild(child);
-                  if (child) loadChildResults(child.admissionNumber);
+                  const c = myChildren.find(x => x.id === e.target.value);
+                  setSelectedChild(c);
+                  if (c) loadChildResults(c.admissionNumber);
                 }}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value="">-- Select Child --</option>
-                {myChildren.map(child => (
-                  <option key={child.id} value={child.id}>
-                    {child.firstName} {child.lastName} ({child.admissionNumber})
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
+                <option value="">-- Select --</option>
+                {myChildren.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.firstName} {c.lastName} ({c.admissionNumber})
                   </option>
                 ))}
               </select>
             </div>
 
             {selectedChild && myStudentRecord && (
-              <div className="space-y-6">
+              <div id="parent-results-print" className="space-y-6">
                 <div className={`rounded-xl p-6 text-white ${isTVET ? 'bg-gradient-to-r from-purple-500 to-pink-600' : 'bg-gradient-to-r from-indigo-500 to-purple-600'}`}>
-                  <div className="flex items-center space-x-4">
-                    <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center">
-                      <span className="text-2xl font-bold text-purple-600">
-                        {myStudentRecord.firstName?.[0]}{myStudentRecord.lastName?.[0]}
-                      </span>
+                  <div className="flex items-center gap-4">
+                    <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center text-2xl font-bold text-purple-600">
+                      {myStudentRecord.firstName?.[0]}{myStudentRecord.lastName?.[0]}
                     </div>
                     <div>
                       <h3 className="text-2xl font-bold">{myStudentRecord.firstName} {myStudentRecord.lastName}</h3>
@@ -13966,55 +13765,45 @@ const ResultsModule = ({
 
                 {myResultsSummary && (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="bg-blue-50 p-4 rounded-lg text-center">
-                      <p className="text-sm text-blue-600">Total Exams</p>
-                      <p className="text-2xl font-bold text-blue-700">{myResultsSummary.total}</p>
-                    </div>
-                    <div className="bg-green-50 p-4 rounded-lg text-center">
-                      <p className="text-sm text-green-600">Average</p>
-                      <p className="text-2xl font-bold text-green-700">{myResultsSummary.average}%</p>
-                    </div>
-                    <div className="bg-purple-50 p-4 rounded-lg text-center">
-                      <p className="text-sm text-purple-600">Total Points</p>
-                      <p className="text-2xl font-bold text-purple-700">{myResultsSummary.totalPoints}</p>
-                    </div>
-                    <div className="bg-yellow-50 p-4 rounded-lg text-center">
-                      <p className="text-sm text-yellow-600">Mean Grade</p>
-                      <p className="text-2xl font-bold text-yellow-700">{myResultsSummary.meanGrade}</p>
-                    </div>
+                    <StatBox label="Total Exams" value={myResultsSummary.total} color="blue" icon="file-alt" />
+                    <StatBox label="Average" value={`${myResultsSummary.average}%`} color="emerald" icon="chart-line" />
+                    <StatBox label="Total Points" value={myResultsSummary.totalPoints} color="purple" icon="star" />
+                    <StatBox label="Mean Grade" value={myResultsSummary.meanGrade} color="amber" icon="award" />
                   </div>
                 )}
 
                 {childResults.length > 0 ? (
-                  <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+                  <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-200">
                     <div className="px-6 py-4 bg-gray-50 border-b">
                       <h3 className="font-semibold text-lg">Detailed Results</h3>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full">
-                        <thead className="bg-gray-50">
+                        <thead className="bg-slate-100">
                           <tr>
-                            <th className="px-4 py-3 text-left">Exam</th>
-                            <th className="px-4 py-3 text-left">Date</th>
-                            <th className="px-4 py-3 text-left">{isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject'}</th>
-                            <th className="px-4 py-3 text-left">Marks</th>
-                            <th className="px-4 py-3 text-left">Grade</th>
-                            <th className="px-4 py-3 text-left">Points</th>
+                            <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Exam</th>
+                            <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Date</th>
+                            <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">
+                              {isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject'}
+                            </th>
+                            <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Marks</th>
+                            <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Grade</th>
+                            <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Points</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y">
-                          {childResults.map((result, index) => (
-                            <tr key={index} className="hover:bg-gray-50">
-                              <td className="px-4 py-3 font-medium">{result.examName || 'Unknown'}</td>
-                              <td className="px-4 py-3">{result.examDate ? new Date(result.examDate).toLocaleDateString() : 'N/A'}</td>
-                              <td className="px-4 py-3">{result.itemName}</td>
-                              <td className="px-4 py-3 font-bold">{result.marks === '' || result.marks === null ? '—' : result.marks}</td>
-                              <td className="px-4 py-3">
-                                <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(result.grade)}`}>
-                                  {displayGrade(result.grade, result.marks)}
+                        <tbody className="divide-y divide-gray-200">
+                          {childResults.map((r, i) => (
+                            <tr key={i} className="hover:bg-gray-50">
+                              <td className="px-4 py-3 font-medium">{r.examName}</td>
+                              <td className="px-4 py-3 text-sm">{r.examDate ? new Date(r.examDate).toLocaleDateString() : '—'}</td>
+                              <td className="px-4 py-3">{r.itemName}</td>
+                              <td className="px-4 py-3 text-center font-bold">{r.marks ?? '—'}</td>
+                              <td className="px-4 py-3 text-center">
+                                <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradeColor(r.grade)}`}>
+                                  {displayGrade(r.grade, r.marks)}
                                 </span>
                               </td>
-                              <td className="px-4 py-3">{result.points}</td>
+                              <td className="px-4 py-3 text-center">{r.points}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -14024,9 +13813,16 @@ const ResultsModule = ({
                 ) : (
                   <div className="bg-white p-12 rounded-xl shadow-sm text-center">
                     <i className="fas fa-file-alt text-6xl text-gray-300 mb-4"></i>
-                    <p className="text-gray-500 text-lg">No results found for this student.</p>
+                    <p className="text-gray-500">No results yet.</p>
                   </div>
                 )}
+
+                <div className="flex justify-end no-print">
+                  <button onClick={() => handlePrintArea('parent-results-print')}
+                    className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2">
+                    <i className="fas fa-print"></i>Print
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -14035,41 +13831,52 @@ const ResultsModule = ({
     );
   }
 
-  // ============================================================
-  //  ADMIN / TEACHER VIEW RENDER
-  // ============================================================
+  // ==================================================================
+  //  ADMIN / TEACHER VIEW
+  // ==================================================================
   return (
     <div className="space-y-6">
-      {(loading || publishing || sendingMessages || loadingReport) && <div className="h-1 bg-indigo-600 animate-pulse fixed top-0 left-0 w-full z-50" />}
+      {(loading || publishing || sendingMessages || loadingReport || loadingMatrix) && (
+        <div className="h-1 bg-indigo-600 animate-pulse fixed top-0 left-0 w-full z-50 no-print" />
+      )}
       {apiError && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg no-print">
           <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
         </div>
       )}
 
-      <div className="flex flex-wrap justify-between items-center gap-3">
-        <h2 className="text-2xl font-bold">
-          {isUniversity ? '📚 Course Results' : isTVET ? '🔧 Program Results' : isSecondary ? '📖 Secondary Results' : isPrimary ? '🎯 Primary Results' : '📊 Results Management'}
-        </h2>
+      {/* ============ HEADER ============ */}
+      <div className="flex flex-wrap justify-between items-center gap-3 no-print">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">
+            {isUniversity ? '📚 Course Results' : isTVET ? '🔧 Program Results'
+              : isSecondary ? '📖 Secondary Results' : '🎯 Primary Results'}
+          </h2>
+          <p className="text-sm text-slate-500">Manage marks, generate reports, and view class performance</p>
+        </div>
 
         {canViewAllResults && (
-          <div className="flex items-center bg-gray-100 rounded-lg p-1 text-sm">
-            <button
-              onClick={() => setViewMode('marks')}
-              className={`px-4 py-1.5 rounded-md transition-colors ${
-                viewMode === 'marks' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              <i className="fas fa-pen mr-1" />Marks Entry
+          <div className="flex items-center bg-slate-100 rounded-lg p-1 text-sm">
+            <button onClick={() => setViewMode('marks')}
+              className={`px-4 py-1.5 rounded-md font-medium transition-colors ${
+                viewMode === 'marks' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}>
+              <i className="fas fa-pen mr-1.5"></i>Marks Entry
             </button>
-            <button
-              onClick={() => setViewMode('report')}
-              className={`px-4 py-1.5 rounded-md transition-colors ${
-                viewMode === 'report' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              <i className="fas fa-chart-line mr-1" />Detailed Report
+            <button onClick={() => setViewMode('report')}
+              className={`px-4 py-1.5 rounded-md font-medium transition-colors ${
+                viewMode === 'report' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}>
+              <i className="fas fa-user-graduate mr-1.5"></i>Student Report
             </button>
+            {canViewClassMatrix && (
+              <button onClick={() => setViewMode('class-matrix')}
+                className={`px-4 py-1.5 rounded-md font-medium transition-colors ${
+                  viewMode === 'class-matrix' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                }`}>
+                <i className="fas fa-table mr-1.5"></i>Class Matrix
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -14079,9 +13886,20 @@ const ResultsModule = ({
       {/* ============================================================ */}
       {viewMode === 'report' && canViewAllResults && (
         <>
-          {/* Filters */}
-          <div className="bg-white p-6 rounded-xl shadow-sm">
-            <h3 className="text-lg font-semibold mb-4">🔍 Report Filters</h3>
+          {/* -------- FILTERS -------- */}
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 no-print">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <i className="fas fa-filter text-indigo-600"></i>
+                Report Filters
+              </h3>
+              <span className="text-xs text-slate-500">
+                {reportTermFilter
+                  ? `Showing all exam types within ${reportTermFilter}`
+                  : 'Pick a term to see all its exam types side-by-side'}
+              </span>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <SearchableSelect
                 label="Class"
@@ -14099,159 +13917,123 @@ const ResultsModule = ({
                 disabled={!reportClassId}
               />
               <SearchableSelect
+                label="Term (recommended)"
+                value={reportTermFilter}
+                onChange={(e) => setReportTermFilter(e.target.value)}
+                options={termOptions}
+                placeholder="All terms"
+              />
+              <SearchableSelect
                 label="Exam Type"
                 value={reportExamTypeFilter}
                 onChange={(e) => setReportExamTypeFilter(e.target.value)}
                 options={examTypeOptions}
                 placeholder="All types"
-              />
-              <SearchableSelect
-                label="Term"
-                value={reportTermFilter}
-                onChange={(e) => setReportTermFilter(e.target.value)}
-                options={[
-                  { value: '', label: 'All Terms' },
-                  { value: 'Term 1', label: 'Term 1' },
-                  { value: 'Term 2', label: 'Term 2' },
-                  { value: 'Term 3', label: 'Term 3' }
-                ]}
-                placeholder="All terms"
+                disabled={!!reportTermFilter}
               />
             </div>
 
-            <div className="mt-4 flex gap-2">
-              <button
-                onClick={loadDetailedReport}
+            <div className="mt-5 flex flex-wrap gap-2">
+              <button onClick={loadDetailedReport}
                 disabled={!reportStudentId || loadingReport}
-                className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-              >
-                {loadingReport ? 'Loading...' : 'Load Report'}
+                className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium flex items-center gap-2">
+                {loadingReport ? <><i className="fas fa-spinner fa-spin"></i>Loading...</> : <><i className="fas fa-chart-line"></i>Generate Report</>}
               </button>
               {reportData && (
-                <>
-                  <button onClick={() => window.print()}
-                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center">
-                    <i className="fas fa-print mr-2" />Print
-                  </button>
-                  <button onClick={exportReportCSV}
-                    className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 flex items-center">
-                    <i className="fas fa-download mr-2" />CSV
-                  </button>
-                </>
+                <button onClick={() => handlePrintArea('detailed-report-print')}
+                  className="bg-slate-800 text-white px-5 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
+                  <i className="fas fa-print"></i>Print Report
+                </button>
               )}
             </div>
           </div>
 
-          {/* Report Body */}
+          {/* -------- REPORT BODY -------- */}
           {reportData && (
-            <div className="space-y-6">
-              {/* Header + Aptitude */}
-              <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-                <div className="bg-gradient-to-r from-indigo-500 to-purple-600 p-6 text-white">
+            <div id="detailed-report-print" className="space-y-6">
+              {/* Header */}
+              <div className="rounded-xl overflow-hidden border border-slate-200 shadow-sm">
+                <div className="bg-gradient-to-r from-slate-800 to-slate-700 p-6 text-white">
                   <div className="flex flex-wrap justify-between items-start gap-4">
                     <div>
-                      <h3 className="text-2xl font-bold">
+                      <p className="text-xs uppercase tracking-widest text-slate-300 mb-1">Student Report</p>
+                      <h3 className="text-3xl font-bold">
                         {reportData.student.firstName} {reportData.student.lastName}
                       </h3>
-                      <p className="text-indigo-100 font-mono mt-1">
-                        {reportData.student.admissionNumber}
-                      </p>
-                      <p className="text-indigo-200 text-sm mt-1">
+                      <p className="text-slate-300 font-mono mt-1">{reportData.student.admissionNumber}</p>
+                      <p className="text-slate-400 text-sm mt-1">
                         {classes.find(c => c.id === reportData.student.classId)?.name || 'No Class'}
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm text-indigo-100">Overall Average</p>
-                      <p className="text-4xl font-bold">{reportData.overallAverage.toFixed(1)}%</p>
+                      <p className="text-xs uppercase tracking-widest text-slate-300">Overall Average</p>
+                      <p className="text-5xl font-black">{reportData.overallAverage.toFixed(1)}%</p>
                     </div>
                   </div>
                 </div>
-
-                {/* KNEC Aptitude */}
-                {reportData.streamAverages.length > 0 && (
-                  <div className="p-6 border-b">
-                    <h4 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                      <i className="fas fa-brain text-purple-600"></i>
-                      KNEC Aptitude Analysis
-                    </h4>
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                      {reportData.streamAverages.map(s => {
-                        const isTop = reportData.topStreams.includes(s.stream);
-                        return (
-                          <div key={s.stream} className={`p-3 rounded-lg border-2 text-center ${
-                            isTop ? 'border-purple-400 bg-purple-50' : 'border-gray-200 bg-gray-50'
-                          }`}>
-                            <p className="text-xs font-medium text-gray-600 uppercase">{s.stream}</p>
-                            <p className={`text-xl font-bold mt-1 ${isTop ? 'text-purple-700' : 'text-gray-700'}`}>
-                              {s.avg.toFixed(0)}%
-                            </p>
-                            {isTop && (
-                              <p className="text-xs text-purple-600 mt-1">⭐ Likely to thrive</p>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {reportData.topStreams.length > 0 && (
-                      <div className="mt-4 p-3 bg-purple-50 rounded-lg">
-                        <p className="text-sm text-purple-800">
-                          <strong>Recommendation:</strong> This student shows strongest potential in{' '}
-                          <strong>{reportData.topStreams.join(' and ')}</strong>. 
-                          Consider encouraging further development in these areas.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
 
               {/* Term Cards */}
               {reportData.termCards.length === 0 ? (
-                <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+                <div className="bg-white p-12 rounded-xl shadow-sm text-center border border-gray-200">
                   <i className="fas fa-file-alt text-6xl text-gray-300 mb-4"></i>
                   <p className="text-gray-500">No results match the selected filters.</p>
                 </div>
               ) : (
                 reportData.termCards.map((card, ci) => (
-                  <div key={ci} className="bg-white rounded-xl shadow-sm overflow-hidden">
+                  <div key={ci} className="bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
                     {/* Card header */}
-                    <div className="bg-gray-50 px-6 py-4 border-b flex justify-between items-center">
+                    <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center flex-wrap gap-2">
                       <div>
-                        <h4 className="font-bold text-gray-800 text-lg">
-                          {card.term} {card.year && `(${card.year})`}
+                        <h4 className="font-bold text-slate-800 text-lg">
+                          {card.term}{card.year && ` • ${card.year}`}
                         </h4>
-                        <p className="text-xs text-gray-500">
-                          {card.subjects.length} subjects • {card.examTypeColumns.length} exam types
+                        <p className="text-xs text-slate-500">
+                          {card.subjects.length} subject{card.subjects.length !== 1 ? 's' : ''} • {card.examTypeColumns.length} exam type{card.examTypeColumns.length !== 1 ? 's' : ''}
                         </p>
                       </div>
-                      <div className="text-right">
-                        <p className="text-xs text-gray-500">Term Average</p>
-                        <p className="text-2xl font-bold text-indigo-600">{card.termAverage.toFixed(1)}%</p>
+                      <div className="flex items-center gap-4">
+                        <div className="text-right">
+                          <p className="text-xs text-slate-500">Term Average</p>
+                          <p className="text-2xl font-bold text-indigo-600">{card.termAverage.toFixed(1)}%</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs text-slate-500">Mean Grade</p>
+                          <span className={`inline-block px-3 py-1 rounded-full text-sm font-bold ${getGradeColor(card.termGrade)}`}>
+                            {card.termGrade}
+                          </span>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Horizontal table */}
+                    {/* Subject table */}
                     <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Subject</th>
+                      <table className="w-full border-collapse">
+                        <thead>
+                          <tr className="bg-slate-100 border-b border-slate-200">
+                            <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider border-r border-slate-200">
+                              Subject
+                            </th>
                             {card.examTypeColumns.map(type => (
-                              <th key={type} className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
+                              <th key={type} className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase tracking-wider border-r border-slate-200">
                                 {examTypeLabel(type)}
                               </th>
                             ))}
-                            <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Average</th>
-                            <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Trend</th>
+                            <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase tracking-wider border-r border-slate-200">
+                              Average
+                            </th>
+                            <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase tracking-wider">
+                              Trend
+                            </th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y">
+                        <tbody className="divide-y divide-slate-200">
                           {card.subjects.map((s, si) => (
-                            <tr key={si} className="hover:bg-gray-50">
-                              <td className="px-4 py-3 font-medium">
-                                {s.subjectName}
+                            <tr key={si} className={si % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
+                              <td className="px-4 py-3 font-medium text-slate-800 border-r border-slate-200">
+                                <div>{s.subjectName}</div>
                                 {s.stream && (
-                                  <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 uppercase">
+                                  <span className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 uppercase tracking-wide">
                                     {s.stream}
                                   </span>
                                 )}
@@ -14259,21 +14041,21 @@ const ResultsModule = ({
                               {card.examTypeColumns.map(type => {
                                 const cell = s.cells[type];
                                 return (
-                                  <td key={type} className="px-4 py-3 text-center">
+                                  <td key={type} className="px-4 py-3 text-center border-r border-slate-200">
                                     {cell ? (
-                                      <div className="flex flex-col items-center">
-                                        <span className="font-semibold">{cell.marks}</span>
-                                        <span className={`mt-1 px-2 py-0.5 rounded-full text-[10px] ${getGradeColor(cell.grade)}`}>
+                                      <div className="flex flex-col items-center gap-1">
+                                        <span className="font-bold text-slate-800">{cell.marks}</span>
+                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${getGradeColor(cell.grade)}`}>
                                           {cell.grade || '—'}
                                         </span>
                                       </div>
                                     ) : (
-                                      <span className="text-gray-300">—</span>
+                                      <span className="text-slate-300">—</span>
                                     )}
                                   </td>
                                 );
                               })}
-                              <td className="px-4 py-3 text-center font-bold text-indigo-700">
+                              <td className="px-4 py-3 text-center font-bold text-indigo-700 border-r border-slate-200">
                                 {s.avg.toFixed(1)}
                               </td>
                               <td className="px-4 py-3 text-center">
@@ -14282,16 +14064,16 @@ const ResultsModule = ({
                             </tr>
                           ))}
                         </tbody>
-                        <tfoot className="bg-gray-50">
-                          <tr>
-                            <td colSpan={card.examTypeColumns.length + 1} className="px-4 py-3 font-semibold text-right">
+                        <tfoot>
+                          <tr className="bg-slate-100 border-t-2 border-slate-300">
+                            <td colSpan={card.examTypeColumns.length + 1} className="px-4 py-3 font-bold text-right text-slate-700 border-r border-slate-200">
                               Term Average
                             </td>
-                            <td className="px-4 py-3 text-center font-bold text-indigo-700">
+                            <td className="px-4 py-3 text-center font-bold text-indigo-700 border-r border-slate-200">
                               {card.termAverage.toFixed(1)}
                             </td>
-                            <td className="px-4 py-3 text-center text-xs text-gray-500">
-                              Grade: <strong>{card.termGrade}</strong>
+                            <td className="px-4 py-3 text-center text-xs text-slate-500">
+                              Grade: <strong className="text-slate-700">{card.termGrade}</strong>
                             </td>
                           </tr>
                         </tfoot>
@@ -14300,283 +14082,460 @@ const ResultsModule = ({
                   </div>
                 ))
               )}
+
+              {/* ============================================================ */}
+              {/* KNEC APTITUDE — moved to the BOTTOM                          */}
+              {/* ============================================================ */}
+              {reportData.streamAverages.length > 0 && (
+                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                  <div className="bg-gradient-to-r from-violet-600 to-indigo-600 px-6 py-4">
+                    <h4 className="text-white font-bold text-lg flex items-center gap-2">
+                      <i className="fas fa-brain"></i>
+                      KNEC Aptitude Analysis
+                    </h4>
+                    <p className="text-violet-100 text-xs mt-1">
+                      Based on the student's performance across subject streams
+                    </p>
+                  </div>
+                  <div className="p-6">
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                      {reportData.streamAverages.map(s => {
+                        const isTop = reportData.topStreams.includes(s.stream);
+                        return (
+                          <div key={s.stream}
+                            className={`p-4 rounded-xl border-2 text-center transition-all ${
+                              isTop
+                                ? 'border-violet-400 bg-violet-50 shadow-md'
+                                : 'border-slate-200 bg-slate-50'
+                            }`}>
+                            <p className="text-xs font-bold text-slate-600 uppercase tracking-wider">{s.stream}</p>
+                            <p className={`text-2xl font-black mt-2 ${isTop ? 'text-violet-700' : 'text-slate-700'}`}>
+                              {s.avg.toFixed(0)}%
+                            </p>
+                            <p className="text-[10px] text-slate-500 mt-1">{s.count} subject{s.count !== 1 ? 's' : ''}</p>
+                            {isTop && (
+                              <p className="text-[10px] text-violet-600 font-semibold mt-2">⭐ Likely to thrive</p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {reportData.topStreams.length > 0 && (
+                      <div className="mt-5 p-4 bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-200">
+                        <p className="text-sm text-violet-900">
+                          <strong>💡 Recommendation:</strong> This student shows strongest potential in{' '}
+                          <strong className="text-violet-700">{reportData.topStreams.join(' and ')}</strong>.
+                          Consider encouraging further development in these areas.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </>
       )}
 
       {/* ============================================================ */}
-      {/*  MARKS ENTRY VIEW                                             */}
+      {/*  CLASS MATRIX VIEW                                           */}
       {/* ============================================================ */}
-      {viewMode === 'marks' && canViewAllResults && (
-        <div className="bg-white p-6 rounded-xl shadow-sm">
-          <h3 className="text-lg font-semibold mb-4">🔍 Filter Results</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {isUniversity && (
-              <>
-                <SearchableSelect 
-                  label="Course" 
-                  value={selectedCourse} 
-                  onChange={(e) => { setSelectedCourse(e.target.value); setSelectedUnit(''); setSelectedSemester(''); }} 
-                  options={getCourseOptions()} 
-                  placeholder="Search course..."
-                />
-                <SearchableSelect 
-                  label="Year" 
-                  value={selectedYear} 
-                  onChange={(e) => setSelectedYear(e.target.value)} 
-                  options={[
-                    { value: '1', label: 'Year 1' },
-                    { value: '2', label: 'Year 2' },
-                    { value: '3', label: 'Year 3' },
-                    { value: '4', label: 'Year 4' }
-                  ]} 
-                  placeholder="All Years"
-                />
-                <SearchableSelect 
-                  label="Semester" 
-                  value={selectedSemester} 
-                  onChange={(e) => setSelectedSemester(e.target.value)} 
-                  options={[
-                    { value: '1', label: 'Semester 1' },
-                    { value: '2', label: 'Semester 2' }
-                  ]} 
-                  placeholder="All Semesters"
-                />
-              </>
-            )}
-
-            {isTVET && (
-              <>
-                <SearchableSelect 
-                  label="Program" 
-                  value={selectedProgram} 
-                  onChange={(e) => { setSelectedProgram(e.target.value); setSelectedUnit(''); setSelectedModule(''); }} 
-                  options={getProgramOptions()} 
-                  placeholder="Search program..."
-                />
-                <SearchableSelect 
-                  label="Year" 
-                  value={selectedYear} 
-                  onChange={(e) => setSelectedYear(e.target.value)} 
-                  options={[
-                    { value: '1', label: 'Year 1' },
-                    { value: '2', label: 'Year 2' },
-                    { value: '3', label: 'Year 3' }
-                  ]} 
-                  placeholder="All Years"
-                />
-                <SearchableSelect 
-                  label="Module" 
-                  value={selectedModule} 
-                  onChange={(e) => setSelectedModule(e.target.value)} 
-                  options={[
-                    { value: '1', label: 'Module 1' },
-                    { value: '2', label: 'Module 2' },
-                    { value: '3', label: 'Module 3' },
-                    { value: '4', label: 'Module 4' }
-                  ]} 
-                  placeholder="All Modules"
-                />
-              </>
-            )}
-
-            {isRegularSchool && (
-              <>
-                <SearchableSelect 
-                  label="Class" 
-                  value={selectedClass} 
-                  onChange={(e) => { setSelectedClass(e.target.value); setSelectedSubject(''); }} 
-                  options={getClassOptions()} 
-                  placeholder="Search class..."
-                />
-                <SearchableSelect 
-                  label="Subject" 
-                  value={selectedSubject} 
-                  onChange={(e) => setSelectedSubject(e.target.value)} 
-                  options={getSubjectOptions()} 
-                  placeholder="Search subject..."
-                  disabled={!selectedClass} 
-                />
-              </>
-            )}
-
-            {(isUniversity || isTVET) && (
-              <SearchableSelect 
-                label={isTVET ? "Module" : "Unit"} 
-                value={selectedUnit} 
-                onChange={(e) => setSelectedUnit(e.target.value)} 
-                options={getUnitOptions()} 
-                placeholder={`Search ${isTVET ? 'module' : 'unit'}...`}
+      {viewMode === 'class-matrix' && canViewClassMatrix && (
+        <>
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 no-print">
+            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <i className="fas fa-table text-indigo-600"></i>Class Results Matrix
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <SearchableSelect
+                label="Class"
+                value={matrixClassId}
+                onChange={(e) => { setMatrixClassId(e.target.value); setMatrixExamId(''); }}
+                options={getClassOptions()}
+                placeholder="Select class..."
               />
-            )}
-
-            <SearchableSelect 
-              label="Exam" 
-              value={selectedExam} 
-              onChange={(e) => setSelectedExam(e.target.value)} 
-              options={getExamOptions()} 
-              placeholder="Search exam..."
-            />
-
-            <div className="flex items-end">
-              <button onClick={loadExamResults} disabled={!selectedExam || loading} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 w-full">
-                {loading ? 'Loading...' : 'Load Results'}
-              </button>
+              <SearchableSelect
+                label="Exam"
+                value={matrixExamId}
+                onChange={(e) => setMatrixExamId(e.target.value)}
+                options={(exams || []).filter(e => !matrixClassId || e.classId === matrixClassId).map(e => ({
+                  value: e.id,
+                  label: e.name,
+                  subLabel: `${e.type || ''} • ${e.date ? new Date(e.date).toLocaleDateString() : ''}`
+                }))}
+                placeholder="Select exam..."
+                disabled={!matrixClassId}
+              />
+              <div className="flex items-end">
+                <button onClick={buildClassMatrix}
+                  disabled={!matrixClassId || !matrixExamId || loadingMatrix}
+                  className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium flex items-center justify-center gap-2">
+                  {loadingMatrix ? <><i className="fas fa-spinner fa-spin"></i>Building...</> : <><i className="fas fa-sync-alt"></i>Build Matrix</>}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+
+          {matrixData && (
+            <div id="class-matrix-print" className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+              {/* Header */}
+              <div className="bg-slate-800 text-white px-6 py-4">
+                <div className="flex justify-between items-start flex-wrap gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-widest text-slate-300">Class Results</p>
+                    <h3 className="text-2xl font-bold">{matrixData.className}</h3>
+                    <p className="text-slate-300 text-sm mt-1">{matrixData.exam.name} • {matrixData.itemName}</p>
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
+                      <p className="text-[10px] uppercase tracking-wider text-slate-300">Average</p>
+                      <p className="text-xl font-bold">{matrixData.average.toFixed(1)}%</p>
+                    </div>
+                    <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
+                      <p className="text-[10px] uppercase tracking-wider text-slate-300">Highest</p>
+                      <p className="text-xl font-bold">{matrixData.highest}</p>
+                    </div>
+                    <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
+                      <p className="text-[10px] uppercase tracking-wider text-slate-300">Pass Rate</p>
+                      <p className="text-xl font-bold">{matrixData.passRate.toFixed(0)}%</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 border-b-2 border-slate-300">
+                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200 w-16">#</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">Admission</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">Student Name</th>
+                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">{matrixData.itemName}</th>
+                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">Grade</th>
+                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">Points</th>
+                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider">Position</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {matrixData.rows.map((r, i) => (
+                      <tr key={r.studentId} className={`${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'} hover:bg-indigo-50/50`}>
+                        <td className="px-4 py-3 text-center text-slate-500 font-mono text-xs border-r border-slate-200">{i + 1}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-slate-600 border-r border-slate-200">{r.admissionNumber}</td>
+                        <td className="px-4 py-3 font-medium text-slate-800 border-r border-slate-200">{r.studentName}</td>
+                        <td className="px-4 py-3 text-center font-bold text-slate-800 border-r border-slate-200">
+                          {r.isAbsent ? <span className="text-red-500">ABS</span> : (r.marks ?? '—')}
+                        </td>
+                        <td className="px-4 py-3 text-center border-r border-slate-200">
+                          {r.grade ? (
+                            <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${getGradeColor(r.grade)}`}>
+                              {r.grade}
+                            </span>
+                          ) : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-center font-medium text-slate-700 border-r border-slate-200">
+                          {r.points || '—'}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {r.position ? (
+                            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
+                              r.position === 1 ? 'bg-amber-100 text-amber-700' :
+                              r.position === 2 ? 'bg-slate-200 text-slate-700' :
+                              r.position === 3 ? 'bg-orange-100 text-orange-700' :
+                              'bg-slate-100 text-slate-600'
+                            }`}>
+                              {r.position}
+                            </span>
+                          ) : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end no-print">
+                <button onClick={() => handlePrintArea('class-matrix-print')}
+                  className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
+                  <i className="fas fa-print"></i>Print Matrix
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
-      {viewMode === 'marks' && resultEntries.length > 0 && canViewAllResults && (
-        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-          <div className="p-4 bg-gray-50 border-b flex flex-wrap gap-3 justify-between items-center">
-            <div className="flex items-center space-x-2">
-              {canSendMessages && (
-                <label className="flex items-center space-x-2 mr-4">
-                  <input type="checkbox" checked={selectAllForMessage} onChange={(e) => handleSelectAllForMessage(e.target.checked)} className="rounded" />
-                  <span className="text-sm">Select All</span>
-                </label>
+      {/* ============================================================ */}
+      {/*  MARKS ENTRY VIEW                                            */}
+      {/* ============================================================ */}
+      {viewMode === 'marks' && canViewAllResults && (
+        <>
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 no-print">
+            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <i className="fas fa-search text-indigo-600"></i>Filter Results
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {isUniversity && (<>
+                <SearchableSelect label="Course" value={selectedCourse}
+                  onChange={(e) => { setSelectedCourse(e.target.value); setSelectedUnit(''); setSelectedSemester(''); }}
+                  options={getCourseOptions()} placeholder="Search course..." />
+                <SearchableSelect label="Year" value={selectedYear}
+                  onChange={(e) => setSelectedYear(e.target.value)}
+                  options={[{value:'1',label:'Year 1'},{value:'2',label:'Year 2'},{value:'3',label:'Year 3'},{value:'4',label:'Year 4'}]}
+                  placeholder="All Years" />
+                <SearchableSelect label="Semester" value={selectedSemester}
+                  onChange={(e) => setSelectedSemester(e.target.value)}
+                  options={[{value:'1',label:'Semester 1'},{value:'2',label:'Semester 2'}]}
+                  placeholder="All Semesters" />
+              </>)}
+              {isTVET && (<>
+                <SearchableSelect label="Program" value={selectedProgram}
+                  onChange={(e) => { setSelectedProgram(e.target.value); setSelectedUnit(''); setSelectedModule(''); }}
+                  options={getProgramOptions()} placeholder="Search program..." />
+                <SearchableSelect label="Year" value={selectedYear}
+                  onChange={(e) => setSelectedYear(e.target.value)}
+                  options={[{value:'1',label:'Year 1'},{value:'2',label:'Year 2'},{value:'3',label:'Year 3'}]}
+                  placeholder="All Years" />
+                <SearchableSelect label="Module" value={selectedModule}
+                  onChange={(e) => setSelectedModule(e.target.value)}
+                  options={[{value:'1',label:'Module 1'},{value:'2',label:'Module 2'},{value:'3',label:'Module 3'},{value:'4',label:'Module 4'}]}
+                  placeholder="All Modules" />
+              </>)}
+              {isRegularSchool && (<>
+                <SearchableSelect label="Class" value={selectedClass}
+                  onChange={(e) => { setSelectedClass(e.target.value); setSelectedSubject(''); }}
+                  options={getClassOptions()} placeholder="Search class..." />
+                <SearchableSelect label="Subject" value={selectedSubject}
+                  onChange={(e) => setSelectedSubject(e.target.value)}
+                  options={getSubjectOptions()} placeholder="Search subject..."
+                  disabled={!selectedClass} />
+              </>)}
+              {(isUniversity || isTVET) && (
+                <SearchableSelect label={isTVET ? "Module" : "Unit"} value={selectedUnit}
+                  onChange={(e) => setSelectedUnit(e.target.value)}
+                  options={getUnitOptions()}
+                  placeholder={`Search ${isTVET ? 'module' : 'unit'}...`} />
               )}
-              <span className="text-sm text-gray-600">Selected: {selectedStudentsForMessage.length} students</span>
-            </div>
-            <div className="flex space-x-2">
-              <input
-                type="text"
-                placeholder="Search students..."
-                className="px-3 py-2 border rounded-lg w-64"
-                value={studentSearch}
-                onChange={(e) => setStudentSearch(e.target.value)}
-              />
-              {uniqueGrades.length > 0 && (
-                <select value={filterGrade} onChange={(e) => setFilterGrade(e.target.value)} className="px-3 py-2 border rounded-lg">
-                  <option value="">All Grades</option>
-                  {uniqueGrades.map(g => <option key={g} value={g}>{g}</option>)}
-                </select>
-              )}
-              {canPrintAllResults && (
-                <button
-                  onClick={loadAllResultsForPrint}
-                  disabled={loading || !selectedExam}
-                  className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center disabled:opacity-50"
-                >
-                  <i className="fas fa-print mr-2"></i>Print All
+              <SearchableSelect label="Exam" value={selectedExam}
+                onChange={(e) => setSelectedExam(e.target.value)}
+                options={getExamOptions()} placeholder="Search exam..." />
+              <div className="flex items-end">
+                <button onClick={loadExamResults} disabled={!selectedExam || loading}
+                  className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium">
+                  {loading ? 'Loading...' : 'Load Results'}
                 </button>
-              )}
+              </div>
             </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  {canSendMessages && <th className="px-4 py-3 text-left w-10"></th>}
-                  <th className="px-4 py-3 text-left">Admission</th>
-                  <th className="px-4 py-3 text-left">Student</th>
-                  <th className="px-4 py-3 text-left">{isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject'}</th>
-                  <th className="px-4 py-3 text-left">Marks</th>
-                  <th className="px-4 py-3 text-left">Grade</th>
-                  <th className="px-4 py-3 text-left">Points</th>
-                  {canAddResults && <th className="px-4 py-3 text-left">Absent</th>}
-                  <th className="px-4 py-3 text-left">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {filteredResultEntries.length === 0 ? (
-                  <tr><td colSpan="10" className="px-4 py-8 text-center text-gray-500">No students match your filters</td></tr>
-                ) : (
-                  filteredResultEntries.map(entry => (
-                    <tr key={entry.studentId} className="hover:bg-gray-50">
-                      {canSendMessages && (
-                        <td className="px-4 py-3">
-                          <input
-                            type="checkbox"
-                            checked={selectedStudentsForMessage.includes(entry.studentId)}
-                            onChange={(e) => handleSelectForMessage(entry.studentId, e.target.checked)}
-                            className="rounded"
-                          />
-                        </td>
-                      )}
-                      <td className="px-4 py-3 font-mono">{entry.admissionNumber}</td>
-                      <td className="px-4 py-3">{entry.studentName}</td>
-                      <td className="px-4 py-3">{entry.unitName}</td>
-                      <td className="px-4 py-3">
-                        <input
-                          type="number"
-                          value={entry.marks}
-                          onChange={(e) => handleMarkChange(entry.studentId, e.target.value)}
-                          onBlur={(e) => {
-                            if (e.target.value !== '') {
-                              const exam = exams.find(x => x.id === selectedExam);
-                              const levelHint = getLevelHint(exam, null, exam?.classId || selectedClass);
-                              const newGradeInfo = calculateGrade(e.target.value, exam?.maxMarks || 100, exam?.schoolCategory || schoolCategory, levelHint);
-                              setResultEntries(prev => prev.map(x =>
-                                x.studentId === entry.studentId ? { ...x, grade: newGradeInfo.grade, points: newGradeInfo.points } : x
-                              ));
-                            }
-                          }}
-                          className={`w-20 px-2 py-1 border rounded ${!canAddResults ? 'bg-gray-100' : ''}`}
-                          disabled={entry.isAbsent || !canAddResults}
-                        />
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(entry.grade)}`}>
-                          {displayGrade(entry.grade, entry.marks)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">{(entry.points || 0).toFixed(1)}</td>
-                      {canAddResults && (
-                        <td className="px-4 py-3">
-                          <input
-                            type="checkbox"
-                            checked={entry.isAbsent}
-                            onChange={(e) => handleAbsentChange(entry.studentId, e.target.checked)}
-                            className="rounded"
-                          />
-                        </td>
-                      )}
-                      <td className="px-4 py-3">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); loadStudentReport(entry); }}
-                          className="text-indigo-600 hover:text-indigo-900 p-2 hover:bg-indigo-50 rounded-lg transition-colors"
-                          title="View Student Report"
-                        >
-                          <i className="fas fa-file-alt"></i>
-                        </button>
-                      </td>
+          {resultEntries.length > 0 && (
+            <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
+              {/* Toolbar */}
+              <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap gap-3 justify-between items-center no-print">
+                <div className="flex items-center gap-3">
+                  {canSendMessages && (
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={selectAllForMessage}
+                        onChange={(e) => handleSelectAllForMessage(e.target.checked)} className="rounded" />
+                      <span className="font-medium">Select All</span>
+                    </label>
+                  )}
+                  <span className="text-sm text-slate-600">
+                    Selected: <strong>{selectedStudentsForMessage.length}</strong> • Total: <strong>{resultEntries.length}</strong>
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <input type="text" placeholder="Search students..."
+                    className="px-3 py-2 border border-slate-300 rounded-lg w-56 text-sm"
+                    value={studentSearch} onChange={(e) => setStudentSearch(e.target.value)} />
+                  {uniqueGrades.length > 0 && (
+                    <select value={filterGrade} onChange={(e) => setFilterGrade(e.target.value)}
+                      className="px-3 py-2 border border-slate-300 rounded-lg text-sm">
+                      <option value="">All Grades</option>
+                      {uniqueGrades.map(g => <option key={g} value={g}>{g}</option>)}
+                    </select>
+                  )}
+                  {canPrintAllResults && (
+                    <button onClick={() => { loadAllResultsForPrint?.(); }}
+                      disabled={loading}
+                      className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 flex items-center gap-2 text-sm font-medium disabled:opacity-50">
+                      <i className="fas fa-print"></i>Print All
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 border-b-2 border-slate-300">
+                      {canSendMessages && <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200 w-12"></th>}
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">Admission</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">Student</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">
+                        {isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject'}
+                      </th>
+                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">Marks</th>
+                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">Grade</th>
+                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">Points</th>
+                      {canAddResults && <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">Absent</th>}
+                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider">Actions</th>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {filteredResultEntries.length === 0 ? (
+                      <tr>
+                        <td colSpan={10} className="px-4 py-8 text-center text-slate-500">No students match your filters</td>
+                      </tr>
+                    ) : (
+                      filteredResultEntries.map((entry, idx) => (
+                        <tr key={entry.studentId} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
+                          {canSendMessages && (
+                            <td className="px-4 py-3 text-center border-r border-slate-200">
+                              <input type="checkbox"
+                                checked={selectedStudentsForMessage.includes(entry.studentId)}
+                                onChange={(e) => handleSelectForMessage(entry.studentId, e.target.checked)}
+                                className="rounded" />
+                            </td>
+                          )}
+                          <td className="px-4 py-3 font-mono text-xs border-r border-slate-200">{entry.admissionNumber}</td>
+                          <td className="px-4 py-3 font-medium border-r border-slate-200">{entry.studentName}</td>
+                          <td className="px-4 py-3 border-r border-slate-200">{entry.unitName}</td>
+                          <td className="px-4 py-3 text-center border-r border-slate-200">
+                            <input type="number" value={entry.marks}
+                              onChange={(e) => handleMarkChange(entry.studentId, e.target.value)}
+                              onBlur={(e) => {
+                                if (e.target.value !== '') {
+                                  const exam = exams.find(x => x.id === selectedExam);
+                                  const levelHint = getLevelHint(exam, null, exam?.classId || selectedClass);
+                                  const gi = calculateGrade(e.target.value, exam?.maxMarks || 100, exam?.schoolCategory || schoolCategory, levelHint);
+                                  setResultEntries(prev => prev.map(x =>
+                                    x.studentId === entry.studentId ? { ...x, grade: gi.grade, points: gi.points } : x
+                                  ));
+                                }
+                              }}
+                              className={`w-20 px-2 py-1 border border-slate-300 rounded text-center ${!canAddResults ? 'bg-gray-100' : ''}`}
+                              disabled={entry.isAbsent || !canAddResults} />
+                          </td>
+                          <td className="px-4 py-3 text-center border-r border-slate-200">
+                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradeColor(entry.grade)}`}>
+                              {displayGrade(entry.grade, entry.marks)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center border-r border-slate-200">{(entry.points || 0).toFixed(1)}</td>
+                          {canAddResults && (
+                            <td className="px-4 py-3 text-center border-r border-slate-200">
+                              <input type="checkbox" checked={entry.isAbsent}
+                                onChange={(e) => handleAbsentChange(entry.studentId, e.target.checked)}
+                                className="rounded" />
+                            </td>
+                          )}
+                          <td className="px-4 py-3 text-center">
+                            <button onClick={() => loadStudentReport?.(entry)}
+                              className="text-indigo-600 hover:text-indigo-900 p-1.5 hover:bg-indigo-50 rounded-lg"
+                              title="View Student Report">
+                              <i className="fas fa-file-alt"></i>
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
 
-          {(canAddResults || canPublishResults || canSendMessages) && (
-            <div className="p-4 bg-gray-50 border-t flex flex-wrap gap-2">
-              {canAddResults && (
-                <button onClick={saveAllResults} disabled={loading} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center">
-                  <i className="fas fa-save mr-2"></i>Save All
-                </button>
-              )}
-              {canPublishResults && (
-                <button onClick={publishResults} disabled={publishing} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center">
-                  <i className="fas fa-globe mr-2"></i>Publish
-                </button>
-              )}
-              {canSendMessages && (
-                <button
-                  onClick={() => setShowMessageModal(true)}
-                  disabled={selectedStudentsForMessage.length === 0}
-                  className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 flex items-center disabled:opacity-50"
-                >
-                  <i className="fas fa-paper-plane mr-2"></i>Send to Parents ({selectedStudentsForMessage.length})
-                </button>
+              {/* Footer actions */}
+              {(canAddResults || canPublishResults || canSendMessages) && (
+                <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-wrap gap-2 no-print">
+                  {canAddResults && (
+                    <button onClick={saveAllResults} disabled={loading}
+                      className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 flex items-center gap-2 font-medium">
+                      <i className="fas fa-save"></i>Save All
+                    </button>
+                  )}
+                  {canPublishResults && (
+                    <button onClick={publishResults} disabled={publishing}
+                      className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 font-medium">
+                      <i className="fas fa-globe"></i>Publish
+                    </button>
+                  )}
+                  {canSendMessages && (
+                    <button onClick={() => setShowMessageModal(true)}
+                      disabled={selectedStudentsForMessage.length === 0}
+                      className="bg-violet-600 text-white px-4 py-2 rounded-lg hover:bg-violet-700 flex items-center gap-2 font-medium disabled:opacity-50">
+                      <i className="fas fa-paper-plane"></i>
+                      Send to Parents ({selectedStudentsForMessage.length})
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           )}
+        </>
+      )}
+
+      {/* ============ MESSAGE MODAL ============ */}
+      {showMessageModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 no-print">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold">Send Results to Parents</h3>
+              <button onClick={() => setShowMessageModal(false)} className="text-gray-500 hover:text-gray-700">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+            <div className="mb-4 p-3 bg-indigo-50 rounded-lg">
+              <p className="text-sm text-indigo-700">
+                <i className="fas fa-info-circle mr-2"></i>
+                Sending to {selectedStudentsForMessage.length} student(s)
+              </p>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Message Type</label>
+                <select value={messageType} onChange={(e) => setMessageType(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg">
+                  <option value="SMS">SMS Only</option>
+                  <option value="EMAIL">Email Only</option>
+                  <option value="BOTH">Both SMS and Email</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Message Template</label>
+                <textarea className="w-full border rounded-lg p-3 h-40 font-mono text-sm"
+                  value={messageTemplate} onChange={(e) => setMessageTemplate(e.target.value)}
+                  placeholder="Enter your message..." />
+              </div>
+              {messageLog.length > 0 && (
+                <div className="bg-green-50 p-3 rounded-lg max-h-40 overflow-auto">
+                  <p className="text-sm font-medium text-green-700 mb-2">Log:</p>
+                  {messageLog.map((log, i) => (
+                    <p key={i} className="text-xs text-green-600">
+                      {log.error ? <span className="text-red-600">❌ {log.student}: {log.error}</span>
+                        : <span>✓ {log.student}: Sent to {log.parents} parent(s)</span>}
+                    </p>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2 pt-4">
+                <button onClick={handleSendToParents}
+                  disabled={sendingMessages || selectedStudentsForMessage.length === 0}
+                  className="bg-violet-600 text-white px-6 py-2 rounded-lg hover:bg-violet-700 flex-1 flex items-center justify-center gap-2 disabled:opacity-50 font-medium">
+                  {sendingMessages ? <><i className="fas fa-spinner fa-spin"></i>Sending...</> : <><i className="fas fa-paper-plane"></i>Send Messages</>}
+                </button>
+                <button onClick={() => { setShowMessageModal(false); setMessageLog([]); }}
+                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
+      {/* ============ PRINT MODALS (delegated) ============ */}
       {showPrintModal && studentReportData && typeof StudentResultsPrintModal !== 'undefined' && (
         <StudentResultsPrintModal
           reportData={studentReportData}
@@ -14584,7 +14543,6 @@ const ResultsModule = ({
           currentSchool={currentSchool}
         />
       )}
-
       {showAllResultsPrintModal && allResultsPrintData && typeof AllResultsPrintModal !== 'undefined' && (
         <AllResultsPrintModal
           printData={allResultsPrintData}
@@ -14595,1277 +14553,6 @@ const ResultsModule = ({
           isRegularSchool={isRegularSchool}
         />
       )}
-
-      {showMessageModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
-            <h3 className="text-xl font-bold mb-4">Send Results to Parents</h3>
-
-            <div className="mb-4 p-3 bg-indigo-50 rounded-lg">
-              <p className="text-sm text-indigo-700">
-                <i className="fas fa-info-circle mr-2"></i>
-                Sending to {selectedStudentsForMessage.length} student(s)
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">Message Type</label>
-                <select value={messageType} onChange={(e) => setMessageType(e.target.value)} className="w-full px-3 py-2 border rounded-lg">
-                  <option value="SMS">SMS Only</option>
-                  <option value="EMAIL">Email Only</option>
-                  <option value="BOTH">Both SMS and Email</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">Message Template</label>
-                <textarea
-                  className="w-full border rounded-lg p-3 h-40 font-mono text-sm"
-                  value={messageTemplate}
-                  onChange={(e) => setMessageTemplate(e.target.value)}
-                  placeholder="Enter your message template..."
-                />
-                <div className="mt-2 text-xs text-gray-500 flex flex-wrap gap-2">
-                  <code className="bg-gray-100 px-1">{'{student_name}'}</code>
-                  <code className="bg-gray-100 px-1">{'{admission}'}</code>
-                  <code className="bg-gray-100 px-1">{'{exam_name}'}</code>
-                  <code className="bg-gray-100 px-1">{'{subject}'}</code>
-                  <code className="bg-gray-100 px-1">{'{marks}'}</code>
-                  <code className="bg-gray-100 px-1">{'{grade}'}</code>
-                  <code className="bg-gray-100 px-1">{'{points}'}</code>
-                  <code className="bg-gray-100 px-1">{'{school_name}'}</code>
-                  <code className="bg-gray-100 px-1">{'{date}'}</code>
-                </div>
-              </div>
-
-              {messageLog.length > 0 && (
-                <div className="bg-green-50 p-3 rounded-lg max-h-40 overflow-auto">
-                  <p className="text-sm font-medium text-green-700 mb-2">Message Log:</p>
-                  {messageLog.map((log, i) => (
-                    <p key={i} className="text-xs text-green-600">
-                      {log.error ? (
-                        <span className="text-red-600">❌ {log.student}: {log.error}</span>
-                      ) : (
-                        <span>✓ {log.student}: Sent to {log.parents} parent(s)</span>
-                      )}
-                    </p>
-                  ))}
-                </div>
-              )}
-
-              <div className="flex space-x-2 pt-4">
-                <button
-                  onClick={handleSendToParents}
-                  disabled={sendingMessages || selectedStudentsForMessage.length === 0}
-                  className="bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 flex-1 flex items-center justify-center disabled:opacity-50"
-                >
-                  {sendingMessages ? (
-                    <><i className="fas fa-spinner fa-spin mr-2"></i>Sending...</>
-                  ) : (
-                    <><i className="fas fa-paper-plane mr-2"></i>Send Messages</>
-                  )}
-                </button>
-                <button
-                  onClick={() => { setShowMessageModal(false); setMessageLog([]); }}
-                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-// ============================================================
-//  STUDENT RESULTS PRINT MODAL — v2 (school name, logo, groups)
-// ============================================================
-const StudentResultsPrintModal = ({ reportData, onClose, currentSchool }) => {
-
-  // ✅ No fake fallback — if name is missing, show generic
-  const schoolName = currentSchool?.name || 'School';
-  const schoolMotto = currentSchool?.motto || '';
-  const schoolLogo = currentSchool?.contact?.logo || '';
-  const schoolPhone = currentSchool?.contact?.phone || '';
-  const schoolEmail = currentSchool?.contact?.email || '';
-  const schoolAddress = currentSchool?.contact?.address || '';
-
-  const studentName = reportData?.student?.name || '—';
-  const admissionNo = reportData?.student?.admissionNumber || '—';
-  const results = reportData?.results || [];
-
-  // Group results by term + examType (fallback: single group)
-  const grouped = useMemo(() => {
-    const map = new Map();
-    results.forEach(r => {
-      const term = r.term || r.examTerm || 'Unspecified Term';
-      const type = (r.examType || 'OTHER').toUpperCase();
-      const key = `${term}||${type}`;
-      if (!map.has(key)) {
-        map.set(key, {
-          key, term, examType: type,
-          subjects: [], totalMarks: 0, totalPoints: 0, count: 0
-        });
-      }
-      const g = map.get(key);
-      g.subjects.push(r);
-      g.totalMarks += parseFloat(r.marks) || 0;
-      g.totalPoints += parseFloat(r.points) || 0;
-      g.count += 1;
-    });
-    return Array.from(map.values()).map(g => ({
-      ...g,
-      average: g.count > 0 ? g.totalMarks / g.count : 0
-    })).sort((a, b) => {
-      const na = parseInt(String(a.term).replace(/\D/g, '')) || 0;
-      const nb = parseInt(String(b.term).replace(/\D/g, '')) || 0;
-      return na - nb;
-    });
-  }, [results]);
-
-  const overallAverage = (() => {
-    if (results.length === 0) return 0;
-    const total = results.reduce((s, r) => s + (parseFloat(r.marks) || 0), 0);
-    return total / results.length;
-  })();
-
-  const overallMeanGrade = (() => {
-    if (results.length === 0) return '—';
-    const totalPoints = results.reduce((s, r) => s + (parseFloat(r.points) || 0), 0);
-    const avgPts = totalPoints / results.length;
-    // Simple mean grade mapping
-    if (avgPts >= 11.5) return 'A';
-    if (avgPts >= 10.5) return 'A-';
-    if (avgPts >= 9.5)  return 'B+';
-    if (avgPts >= 8.5)  return 'B';
-    if (avgPts >= 7.5)  return 'B-';
-    if (avgPts >= 6.5)  return 'C+';
-    if (avgPts >= 5.5)  return 'C';
-    if (avgPts >= 4.5)  return 'C-';
-    if (avgPts >= 3.5)  return 'D+';
-    if (avgPts >= 2.5)  return 'D';
-    if (avgPts >= 1.5)  return 'D-';
-    return 'E';
-  })();
-
-  const handlePrint = () => {
-    const printWindow = window.open('', '_blank');
-    const initials = schoolName.charAt(0) || 'S';
-
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Report Card — ${studentName}</title>
-          <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body {
-              font-family: 'Georgia', 'Times New Roman', serif;
-              padding: 30px;
-              background: white;
-              color: #111;
-              max-width: 1000px;
-              margin: 0 auto;
-            }
-
-            /* ============ SCHOOL HEADER ============ */
-            .school-header {
-              display: flex;
-              align-items: center;
-              gap: 16px;
-              padding-bottom: 16px;
-              border-bottom: 3px double #4f46e5;
-              margin-bottom: 20px;
-            }
-            .school-logo {
-              width: 80px;
-              height: 80px;
-              border-radius: 50%;
-              background: #4f46e5;
-              color: white;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              font-size: 36px;
-              font-weight: bold;
-              flex-shrink: 0;
-              overflow: hidden;
-              border: 3px solid #e0e7ff;
-            }
-            .school-logo img {
-              width: 100%;
-              height: 100%;
-              object-fit: cover;
-            }
-            .school-info {
-              flex: 1;
-            }
-            .school-name {
-              font-size: 26px;
-              font-weight: bold;
-              color: #4f46e5;
-              text-transform: uppercase;
-              letter-spacing: 1px;
-            }
-            .school-motto {
-              font-style: italic;
-              color: #555;
-              font-size: 13px;
-              margin-top: 2px;
-            }
-            .school-contact {
-              font-size: 11px;
-              color: #666;
-              margin-top: 6px;
-            }
-
-            /* ============ REPORT TITLE ============ */
-            .report-title {
-              text-align: center;
-              font-size: 20px;
-              font-weight: bold;
-              letter-spacing: 3px;
-              margin: 20px 0;
-              text-transform: uppercase;
-            }
-
-            /* ============ STUDENT BLOCK ============ */
-            .student-block {
-              display: grid;
-              grid-template-columns: 2fr 1fr;
-              gap: 20px;
-              background: #f9fafb;
-              border: 1px solid #e5e7eb;
-              border-radius: 8px;
-              padding: 16px;
-              margin-bottom: 24px;
-            }
-            .student-block .label {
-              font-size: 10px;
-              text-transform: uppercase;
-              letter-spacing: 1px;
-              color: #666;
-              font-weight: bold;
-            }
-            .student-block .value {
-              font-size: 18px;
-              font-weight: bold;
-              color: #111;
-              margin-top: 4px;
-            }
-            .student-block .sub-value {
-              font-size: 13px;
-              color: #555;
-              margin-top: 4px;
-            }
-
-            /* ============ TERM GROUP ============ */
-            .term-group {
-              margin-bottom: 24px;
-              page-break-inside: avoid;
-            }
-            .term-header {
-              background: #4f46e5;
-              color: white;
-              padding: 10px 16px;
-              border-radius: 6px 6px 0 0;
-              display: flex;
-              justify-content: space-between;
-              align-items: center;
-            }
-            .term-header h3 {
-              font-size: 16px;
-              font-weight: bold;
-              letter-spacing: 1px;
-            }
-            .term-header .exam-type {
-              background: rgba(255,255,255,0.25);
-              padding: 3px 10px;
-              border-radius: 12px;
-              font-size: 11px;
-              text-transform: uppercase;
-              letter-spacing: 1px;
-            }
-
-            /* ============ SUBJECT TABLE ============ */
-            table {
-              width: 100%;
-              border-collapse: collapse;
-              border: 1px solid #e5e7eb;
-              border-top: none;
-            }
-            thead th {
-              background: #f3f4f6;
-              padding: 8px 12px;
-              text-align: left;
-              font-size: 11px;
-              font-weight: bold;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-              color: #555;
-              border-bottom: 1px solid #e5e7eb;
-            }
-            thead th.center { text-align: center; }
-            tbody td {
-              padding: 9px 12px;
-              font-size: 13px;
-              border-bottom: 1px solid #f3f4f6;
-            }
-            tbody tr:last-child td { border-bottom: none; }
-            tbody td.center { text-align: center; }
-            tbody td.bold { font-weight: bold; }
-            tbody td.subject-name { font-weight: 500; }
-
-            .grade-pill {
-              display: inline-block;
-              padding: 2px 10px;
-              border-radius: 12px;
-              font-size: 11px;
-              font-weight: bold;
-            }
-            .grade-green  { background: #d1fae5; color: #065f46; }
-            .grade-blue   { background: #dbeafe; color: #1e40af; }
-            .grade-yellow { background: #fef3c7; color: #92400e; }
-            .grade-orange { background: #ffedd5; color: #9a3412; }
-            .grade-red    { background: #fee2e2; color: #991b1b; }
-            .grade-gray   { background: #f3f4f6; color: #374151; }
-
-            /* ============ TERM SUMMARY ============ */
-            .term-summary {
-              background: #eef2ff;
-              padding: 10px 16px;
-              display: flex;
-              justify-content: space-between;
-              font-size: 13px;
-              font-weight: bold;
-              border: 1px solid #e5e7eb;
-              border-top: none;
-              border-radius: 0 0 6px 6px;
-            }
-
-            /* ============ OVERALL BLOCK ============ */
-            .overall-block {
-              display: grid;
-              grid-template-columns: 1fr 1fr 1fr;
-              gap: 12px;
-              background: linear-gradient(to right, #eef2ff, #f5f3ff);
-              border: 2px solid #4f46e5;
-              border-radius: 8px;
-              padding: 18px;
-              margin: 24px 0;
-              text-align: center;
-            }
-            .overall-block .label {
-              font-size: 10px;
-              text-transform: uppercase;
-              color: #666;
-              letter-spacing: 1px;
-              font-weight: bold;
-            }
-            .overall-block .value {
-              font-size: 26px;
-              font-weight: bold;
-              color: #4f46e5;
-              margin-top: 6px;
-            }
-
-            /* ============ SIGNATURES ============ */
-            .signatures {
-              display: grid;
-              grid-template-columns: 1fr 1fr 1fr;
-              gap: 40px;
-              margin-top: 50px;
-              padding-top: 20px;
-            }
-            .signature {
-              text-align: center;
-            }
-            .signature-line {
-              border-top: 1px solid #333;
-              padding-top: 6px;
-              margin-top: 30px;
-              font-size: 11px;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-              color: #555;
-            }
-
-            /* ============ FOOTER ============ */
-            .footer {
-              text-align: center;
-              font-size: 10px;
-              color: #999;
-              margin-top: 30px;
-              padding-top: 15px;
-              border-top: 1px solid #e5e7eb;
-            }
-
-            /* ============ PRINT ============ */
-            @media print {
-              body { padding: 15px; }
-              .school-header { border-bottom: 3px double #4f46e5 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-              .term-header { background: #4f46e5 !important; color: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-              thead th { background: #f3f4f6 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-              .overall-block { background: #eef2ff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-              .grade-pill { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-              .page-break { page-break-before: always; }
-            }
-          </style>
-        </head>
-        <body>
-
-          <!-- ================= SCHOOL HEADER ================= -->
-          <div class="school-header">
-            <div class="school-logo">
-              ${schoolLogo
-                ? `<img src="${schoolLogo}" alt="${schoolName}" onerror="this.style.display='none'; this.parentElement.textContent='${initials}';">`
-                : initials
-              }
-            </div>
-            <div class="school-info">
-              <div class="school-name">${schoolName}</div>
-              ${schoolMotto ? `<div class="school-motto">"${schoolMotto}"</div>` : ''}
-              <div class="school-contact">
-                ${[schoolAddress, schoolPhone, schoolEmail].filter(Boolean).join(' • ')}
-              </div>
-            </div>
-          </div>
-
-          <!-- ================= TITLE ================= -->
-          <div class="report-title">Student Report Card</div>
-
-          <!-- ================= STUDENT BLOCK ================= -->
-          <div class="student-block">
-            <div>
-              <div class="label">Student Name</div>
-              <div class="value">${studentName}</div>
-            </div>
-            <div style="text-align: right;">
-              <div class="label">Admission Number</div>
-              <div class="value">${admissionNo}</div>
-              ${reportData?.student?.className ? `<div class="sub-value">${reportData.student.className}</div>` : ''}
-            </div>
-          </div>
-
-          <!-- ================= TERM GROUPS ================= -->
-          ${grouped.length === 0 ? `
-            <div style="text-align:center; padding: 40px; color: #999;">
-              No results available to print.
-            </div>
-          ` : grouped.map(g => `
-            <div class="term-group">
-              <div class="term-header">
-                <h3>${g.term}</h3>
-                <span class="exam-type">${g.examType}</span>
-              </div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Subject / Unit</th>
-                    <th class="center">Marks</th>
-                    <th class="center">Grade</th>
-                    <th class="center">Points</th>
-                    <th>Remarks</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${g.subjects.map(s => {
-                    const color = getGradeColorClass(s.grade);
-                    return `
-                      <tr>
-                        <td class="subject-name">${s.itemName || s.unitName || s.subjectName || 'N/A'}</td>
-                        <td class="center bold">${s.isAbsent ? 'ABS' : (s.marks ?? '—')}</td>
-                        <td class="center">
-                          <span class="grade-pill grade-${color}">${s.displayGrade || s.grade || '—'}</span>
-                        </td>
-                        <td class="center">${s.points ?? '—'}</td>
-                        <td>${s.remarks || '—'}</td>
-                      </tr>
-                    `;
-                  }).join('')}
-                </tbody>
-              </table>
-              <div class="term-summary">
-                <span>Term Average: ${g.average.toFixed(1)}%</span>
-                <span>${g.count} subject(s)</span>
-              </div>
-            </div>
-          `).join('')}
-
-          <!-- ================= OVERALL ================= -->
-          <div class="overall-block">
-            <div>
-              <div class="label">Overall Average</div>
-              <div class="value">${overallAverage.toFixed(1)}%</div>
-            </div>
-            <div>
-              <div class="label">Mean Grade</div>
-              <div class="value">${overallMeanGrade}</div>
-            </div>
-            <div>
-              <div class="label">Total Subjects</div>
-              <div class="value">${results.length}</div>
-            </div>
-          </div>
-
-          <!-- ================= SIGNATURES ================= -->
-          <div class="signatures">
-            <div class="signature">
-              <div class="signature-line">Class Teacher</div>
-            </div>
-            <div class="signature">
-              <div class="signature-line">Head of Department</div>
-            </div>
-            <div class="signature">
-              <div class="signature-line">Principal / Head Teacher</div>
-            </div>
-          </div>
-
-          <!-- ================= FOOTER ================= -->
-          <div class="footer">
-            This is a computer-generated report. For enquiries, contact ${schoolName}.
-            <br>
-            Generated on ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}
-          </div>
-
-        </body>
-      </html>
-    `);
-
-    printWindow.document.close();
-    setTimeout(() => printWindow.print(), 300);
-  };
-
-  // Helper — map grade to color class
-  const getGradeColorClass = (grade) => {
-    if (!grade) return 'gray';
-    const g = String(grade).toUpperCase();
-    if (['A', 'A-', 'EE', 'DISTINCTION'].includes(g)) return 'green';
-    if (['B+', 'B', 'B-', 'ME', 'CREDIT'].includes(g)) return 'blue';
-    if (['C+', 'C', 'C-', 'AE', 'MERIT'].includes(g)) return 'yellow';
-    if (['D+', 'D', 'D-', 'BE', 'PASS'].includes(g)) return 'orange';
-    if (['E', 'NI', 'FAIL'].includes(g)) return 'red';
-    return 'gray';
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-2xl font-bold">Print Report Card</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
-            <i className="fas fa-times"></i>
-          </button>
-        </div>
-
-        <div className="border rounded-lg p-6 bg-gray-50 mb-4">
-          <p className="text-center text-gray-700">
-            Ready to print report card for
-            <span className="font-bold block mt-1 text-indigo-700">{studentName}</span>
-          </p>
-          <p className="text-center text-sm text-gray-500 mt-2">
-            Admission: {admissionNo} • {results.length} result(s)
-          </p>
-          {currentSchool?.name && (
-            <p className="text-center text-xs text-gray-400 mt-1">
-              from {currentSchool.name}
-            </p>
-          )}
-        </div>
-
-        <div className="flex justify-end gap-2">
-          <button onClick={handlePrint}
-            className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2">
-            <i className="fas fa-print"></i>Print
-          </button>
-          <button onClick={onClose}
-            className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// ============================================================
-//  ALL RESULTS PRINT MODAL — v2
-//  School header, logo fallback, rankings, grade distribution
-// ============================================================
-const AllResultsPrintModal = ({
-  printData,
-  onClose,
-  currentSchool,
-  isUniversity,
-  isTVET,
-  isRegularSchool
-}) => {
-  // ---- School info (clean fallbacks) ----
-  const schoolName = currentSchool?.name || 'School';
-  const schoolMotto = currentSchool?.motto || '';
-  const schoolLogo = currentSchool?.contact?.logo || '';
-  const schoolPhone = currentSchool?.contact?.phone || '';
-  const schoolEmail = currentSchool?.contact?.email || '';
-  const schoolAddress = currentSchool?.contact?.address || '';
-  const schoolInitials = (schoolName.charAt(0) || 'S').toUpperCase();
-
-  // ---- Exam + results ----
-  const exam = printData?.exam || {};
-  const results = Array.isArray(printData?.results) ? printData.results : [];
-  const summary = printData?.summary || {};
-
-  const examDate = exam.date
-    ? new Date(exam.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
-    : '—';
-
-  const itemLabel = isUniversity ? 'Unit' : isTVET ? 'Module' : 'Subject';
-
-  // ============================================================
-  //  RANKING — sort by marks (desc), skip absentees
-  // ============================================================
-  const rankedResults = useMemo(() => {
-    const scored = results
-      .filter(r => !r.isAbsent && r.marks !== '' && r.marks !== null && r.marks !== undefined && !isNaN(parseFloat(r.marks)))
-      .map(r => ({ ...r, _marksNum: parseFloat(r.marks) }))
-      .sort((a, b) => b._marksNum - a._marksNum);
-
-    // Assign ranks with tie handling
-    let rank = 1;
-    let prevMarks = null;
-    const ranked = scored.map((r, idx) => {
-      if (prevMarks !== null && r._marksNum < prevMarks) rank = idx + 1;
-      prevMarks = r._marksNum;
-      return { ...r, _rank: rank };
-    });
-
-    // Absentees go at the end
-    const absentees = results
-      .filter(r => r.isAbsent)
-      .map(r => ({ ...r, _rank: '—' }));
-
-    return [...ranked, ...absentees];
-  }, [results]);
-
-  const totalRanked = rankedResults.filter(r => r._rank !== '—').length;
-
-  // ============================================================
-  //  GRADE DISTRIBUTION — count per grade
-  // ============================================================
-  const gradeDistribution = useMemo(() => {
-    const dist = {};
-    results.forEach(r => {
-      if (r.isAbsent) {
-        dist['ABS'] = (dist['ABS'] || 0) + 1;
-        return;
-      }
-      const g = r.grade || r.displayGrade || '—';
-      dist[g] = (dist[g] || 0) + 1;
-    });
-    return Object.entries(dist).sort((a, b) => b[1] - a[1]);
-  }, [results]);
-
-  // ============================================================
-  //  STATS — highest, lowest, pass rate
-  // ============================================================
-  const stats = useMemo(() => {
-    const scored = results
-      .filter(r => !r.isAbsent && r.marks !== '' && r.marks !== null && !isNaN(parseFloat(r.marks)))
-      .map(r => parseFloat(r.marks));
-
-    if (scored.length === 0) {
-      return { highest: 0, lowest: 0, passRate: 0, passCount: 0, totalScored: 0 };
-    }
-
-    const highest = Math.max(...scored);
-    const lowest = Math.min(...scored);
-    const maxMarks = exam.maxMarks || 100;
-    const passThreshold = maxMarks * 0.5;
-    const passCount = scored.filter(s => s >= passThreshold).length;
-    const passRate = (passCount / scored.length) * 100;
-
-    return { highest, lowest, passRate, passCount, totalScored: scored.length };
-  }, [results, exam.maxMarks]);
-
-  // ============================================================
-  //  GRADE COLOR HELPER
-  // ============================================================
-  const gradeColorClass = (grade) => {
-    if (!grade || grade === '—' || grade === 'ABS') return 'gray';
-    const g = String(grade).toUpperCase();
-    if (['A', 'A-', 'EE', 'DISTINCTION'].includes(g)) return 'green';
-    if (['B+', 'B', 'B-', 'ME', 'CREDIT'].includes(g)) return 'blue';
-    if (['C+', 'C', 'C-', 'AE', 'MERIT'].includes(g)) return 'yellow';
-    if (['D+', 'D', 'D-', 'BE', 'PASS'].includes(g)) return 'orange';
-    if (['E', 'NI', 'FAIL'].includes(g)) return 'red';
-    return 'gray';
-  };
-
-  // ============================================================
-  //  PRINT
-  // ============================================================
-  const handlePrint = () => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      alert('Please allow pop-ups to print');
-      return;
-    }
-
-    const html = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <title>Exam Results — ${exam.name || 'Exam'}</title>
-          <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body {
-              font-family: 'Georgia', 'Times New Roman', serif;
-              padding: 28px;
-              background: white;
-              color: #111;
-              max-width: 1100px;
-              margin: 0 auto;
-            }
-
-            /* ============ SCHOOL HEADER ============ */
-            .school-header {
-              display: flex;
-              align-items: center;
-              gap: 16px;
-              padding-bottom: 16px;
-              border-bottom: 3px double #4f46e5;
-              margin-bottom: 18px;
-            }
-            .school-logo {
-              width: 80px;
-              height: 80px;
-              border-radius: 50%;
-              background: #4f46e5;
-              color: white;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              font-size: 36px;
-              font-weight: bold;
-              flex-shrink: 0;
-              overflow: hidden;
-              border: 3px solid #e0e7ff;
-            }
-            .school-logo img {
-              width: 100%;
-              height: 100%;
-              object-fit: cover;
-            }
-            .school-info { flex: 1; }
-            .school-name {
-              font-size: 26px;
-              font-weight: bold;
-              color: #4f46e5;
-              text-transform: uppercase;
-              letter-spacing: 1px;
-            }
-            .school-motto {
-              font-style: italic;
-              color: #555;
-              font-size: 13px;
-              margin-top: 2px;
-            }
-            .school-contact {
-              font-size: 11px;
-              color: #666;
-              margin-top: 6px;
-            }
-
-            /* ============ REPORT TITLE ============ */
-            .report-title {
-              text-align: center;
-              font-size: 20px;
-              font-weight: bold;
-              letter-spacing: 3px;
-              margin: 18px 0;
-              text-transform: uppercase;
-            }
-            .report-subtitle {
-              text-align: center;
-              font-size: 13px;
-              color: #666;
-              margin-bottom: 18px;
-            }
-
-            /* ============ EXAM INFO BLOCK ============ */
-            .exam-block {
-              display: grid;
-              grid-template-columns: 2fr 1fr 1fr;
-              gap: 16px;
-              background: #f9fafb;
-              border: 1px solid #e5e7eb;
-              border-radius: 8px;
-              padding: 14px 18px;
-              margin-bottom: 20px;
-            }
-            .exam-block .label {
-              font-size: 10px;
-              text-transform: uppercase;
-              letter-spacing: 1px;
-              color: #666;
-              font-weight: bold;
-            }
-            .exam-block .value {
-              font-size: 16px;
-              font-weight: bold;
-              color: #111;
-              margin-top: 4px;
-            }
-
-            /* ============ STAT CARDS ============ */
-            .stat-grid {
-              display: grid;
-              grid-template-columns: repeat(4, 1fr);
-              gap: 10px;
-              margin-bottom: 20px;
-            }
-            .stat-card {
-              background: #eef2ff;
-              border: 1px solid #c7d2fe;
-              border-radius: 8px;
-              padding: 12px;
-              text-align: center;
-            }
-            .stat-card .label {
-              font-size: 10px;
-              text-transform: uppercase;
-              letter-spacing: 1px;
-              color: #4338ca;
-              font-weight: bold;
-            }
-            .stat-card .value {
-              font-size: 22px;
-              font-weight: bold;
-              color: #1e1b4b;
-              margin-top: 6px;
-            }
-
-            /* ============ GRADE DISTRIBUTION ============ */
-            .grade-dist {
-              background: #fffbeb;
-              border: 1px solid #fde68a;
-              border-radius: 8px;
-              padding: 12px 16px;
-              margin-bottom: 20px;
-            }
-            .grade-dist h4 {
-              font-size: 12px;
-              text-transform: uppercase;
-              letter-spacing: 1px;
-              color: #92400e;
-              margin-bottom: 10px;
-            }
-            .grade-chips {
-              display: flex;
-              flex-wrap: wrap;
-              gap: 8px;
-            }
-            .grade-chip {
-              display: inline-flex;
-              align-items: center;
-              gap: 6px;
-              padding: 4px 12px;
-              border-radius: 16px;
-              font-size: 12px;
-              font-weight: bold;
-              background: white;
-              border: 1px solid #e5e7eb;
-            }
-            .grade-chip .count {
-              background: #1e1b4b;
-              color: white;
-              padding: 1px 7px;
-              border-radius: 10px;
-              font-size: 11px;
-              font-weight: bold;
-            }
-
-            /* ============ RESULTS TABLE ============ */
-            table {
-              width: 100%;
-              border-collapse: collapse;
-              border: 1px solid #e5e7eb;
-            }
-            thead th {
-              background: #4f46e5;
-              color: white;
-              padding: 10px 12px;
-              text-align: left;
-              font-size: 11px;
-              font-weight: bold;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-            }
-            thead th.center { text-align: center; }
-            tbody td {
-              padding: 9px 12px;
-              font-size: 13px;
-              border-bottom: 1px solid #f3f4f6;
-            }
-            tbody tr:nth-child(even) { background: #fafafa; }
-            tbody tr:last-child td { border-bottom: none; }
-            tbody td.center { text-align: center; }
-            tbody td.bold { font-weight: bold; }
-            tbody td.rank {
-              font-weight: bold;
-              color: #4f46e5;
-              text-align: center;
-            }
-            tbody tr.rank-1 { background: #fef3c7 !important; }
-            tbody tr.rank-2 { background: #f3f4f6 !important; }
-            tbody tr.rank-3 { background: #ffedd5 !important; }
-
-            .grade-pill {
-              display: inline-block;
-              padding: 2px 10px;
-              border-radius: 12px;
-              font-size: 11px;
-              font-weight: bold;
-            }
-            .grade-green  { background: #d1fae5; color: #065f46; }
-            .grade-blue   { background: #dbeafe; color: #1e40af; }
-            .grade-yellow { background: #fef3c7; color: #92400e; }
-            .grade-orange { background: #ffedd5; color: #9a3412; }
-            .grade-red    { background: #fee2e2; color: #991b1b; }
-            .grade-gray   { background: #f3f4f6; color: #374151; }
-
-            .absent-pill {
-              background: #fee2e2;
-              color: #991b1b;
-              padding: 2px 10px;
-              border-radius: 12px;
-              font-size: 11px;
-              font-weight: bold;
-            }
-
-            /* ============ SIGNATURES ============ */
-            .signatures {
-              display: grid;
-              grid-template-columns: 1fr 1fr 1fr;
-              gap: 40px;
-              margin-top: 50px;
-              padding-top: 20px;
-            }
-            .signature { text-align: center; }
-            .signature-line {
-              border-top: 1px solid #333;
-              padding-top: 6px;
-              margin-top: 30px;
-              font-size: 11px;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-              color: #555;
-            }
-
-            /* ============ FOOTER ============ */
-            .footer {
-              text-align: center;
-              font-size: 10px;
-              color: #999;
-              margin-top: 30px;
-              padding-top: 15px;
-              border-top: 1px solid #e5e7eb;
-            }
-
-            @media print {
-              body { padding: 12px; }
-              thead th { background: #4f46e5 !important; color: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-              .school-header { border-bottom: 3px double #4f46e5 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-              .school-logo { background: #4f46e5 !important; color: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-              .stat-card { background: #eef2ff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-              .grade-dist { background: #fffbeb !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-              .grade-pill, .absent-pill { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-              tbody tr.rank-1 { background: #fef3c7 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-              tbody tr.rank-2 { background: #f3f4f6 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-              tbody tr.rank-3 { background: #ffedd5 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-              thead { display: table-header-group; }
-              tr { page-break-inside: avoid; }
-            }
-          </style>
-        </head>
-        <body>
-
-          <!-- ================= SCHOOL HEADER ================= -->
-          <div class="school-header">
-            <div class="school-logo">
-              ${schoolLogo
-                ? `<img src="${schoolLogo}" alt="${schoolName}"
-                    onerror="this.style.display='none'; this.parentElement.textContent='${schoolInitials}';">`
-                : schoolInitials
-              }
-            </div>
-            <div class="school-info">
-              <div class="school-name">${schoolName}</div>
-              ${schoolMotto ? `<div class="school-motto">"${schoolMotto}"</div>` : ''}
-              <div class="school-contact">
-                ${[schoolAddress, schoolPhone, schoolEmail].filter(Boolean).join(' • ')}
-              </div>
-            </div>
-          </div>
-
-          <!-- ================= TITLE ================= -->
-          <div class="report-title">Examination Results Summary</div>
-          <div class="report-subtitle">Ranked by Marks — Highest to Lowest</div>
-
-          <!-- ================= EXAM INFO ================= -->
-          <div class="exam-block">
-            <div>
-              <div class="label">Examination</div>
-              <div class="value">${exam.name || '—'}</div>
-            </div>
-            <div>
-              <div class="label">${itemLabel}</div>
-              <div class="value">${exam.itemName || '—'}</div>
-            </div>
-            <div>
-              <div class="label">Date</div>
-              <div class="value">${examDate}</div>
-            </div>
-          </div>
-
-          <!-- ================= STAT CARDS ================= -->
-          <div class="stat-grid">
-            <div class="stat-card">
-              <div class="label">Total Students</div>
-              <div class="value">${summary.totalStudents ?? results.length}</div>
-            </div>
-            <div class="stat-card">
-              <div class="label">Average</div>
-              <div class="value">${(parseFloat(summary.average) || 0).toFixed(1)}%</div>
-            </div>
-            <div class="stat-card">
-              <div class="label">Highest</div>
-              <div class="value">${stats.highest}</div>
-            </div>
-            <div class="stat-card">
-              <div class="label">Pass Rate</div>
-              <div class="value">${stats.passRate.toFixed(0)}%</div>
-            </div>
-          </div>
-
-          <!-- ================= GRADE DISTRIBUTION ================= -->
-          ${gradeDistribution.length > 0 ? `
-            <div class="grade-dist">
-              <h4>Grade Distribution</h4>
-              <div class="grade-chips">
-                ${gradeDistribution.map(([grade, count]) => `
-                  <span class="grade-chip">
-                    <span class="grade-pill grade-${gradeColorClass(grade)}">${grade}</span>
-                    <span class="count">${count}</span>
-                  </span>
-                `).join('')}
-              </div>
-            </div>
-          ` : ''}
-
-          <!-- ================= RESULTS TABLE ================= -->
-          <table>
-            <thead>
-              <tr>
-                <th class="center" style="width: 60px;">Rank</th>
-                <th style="width: 130px;">Admission</th>
-                <th>Student Name</th>
-                <th class="center" style="width: 80px;">Marks</th>
-                <th class="center" style="width: 100px;">Grade</th>
-                <th class="center" style="width: 70px;">Points</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rankedResults.length === 0 ? `
-                <tr>
-                  <td colspan="6" class="center" style="padding: 30px; color: #999;">
-                    No results available.
-                  </td>
-                </tr>
-              ` : rankedResults.map(r => {
-                const rankClass = r._rank === 1 ? 'rank-1' : r._rank === 2 ? 'rank-2' : r._rank === 3 ? 'rank-3' : '';
-                const gradeClass = gradeColorClass(r.grade || r.displayGrade);
-                return `
-                  <tr class="${rankClass}">
-                    <td class="rank">${r._rank === '—' ? '—' : `#${r._rank}`}</td>
-                    <td class="bold">${r.admissionNumber || '—'}</td>
-                    <td>${r.studentName || '—'}</td>
-                    <td class="center bold">
-                      ${r.isAbsent
-                        ? '<span class="absent-pill">ABSENT</span>'
-                        : (r.marks ?? '—')}
-                    </td>
-                    <td class="center">
-                      ${r.isAbsent
-                        ? '<span class="absent-pill">—</span>'
-                        : `<span class="grade-pill grade-${gradeClass}">${r.displayGrade || r.grade || '—'}</span>`}
-                    </td>
-                    <td class="center">${r.isAbsent ? '—' : (r.points ?? '—')}</td>
-                  </tr>
-                `;
-              }).join('')}
-            </tbody>
-          </table>
-
-          <!-- ================= SIGNATURES ================= -->
-          <div class="signatures">
-            <div class="signature">
-              <div class="signature-line">Class Teacher</div>
-            </div>
-            <div class="signature">
-              <div class="signature-line">Examinations Officer</div>
-            </div>
-            <div class="signature">
-              <div class="signature-line">Principal / Head Teacher</div>
-            </div>
-          </div>
-
-          <!-- ================= FOOTER ================= -->
-          <div class="footer">
-            This is a computer-generated summary. For enquiries, contact ${schoolName}.
-            <br>
-            Generated on ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}
-            <br>
-            Total Ranked: ${totalRanked} of ${results.length}
-          </div>
-
-        </body>
-      </html>
-    `;
-
-    printWindow.document.open();
-    printWindow.document.write(html);
-    printWindow.document.close();
-
-    // Wait for images (logo) to load, then print
-    setTimeout(() => {
-      printWindow.focus();
-      printWindow.print();
-    }, 400);
-  };
-
-  // ============================================================
-  //  PREVIEW MODAL
-  // ============================================================
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-auto">
-
-        {/* Header */}
-        <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center z-10">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-800">
-              <i className="fas fa-print text-indigo-600 mr-2"></i>
-              Print All Results
-            </h2>
-            <p className="text-sm text-gray-500 mt-1">
-              {exam.name || 'Exam'} — {results.length} students
-            </p>
-          </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 p-2">
-            <i className="fas fa-times text-xl"></i>
-          </button>
-        </div>
-
-        {/* Preview card */}
-        <div className="p-6 space-y-4">
-
-          {/* School info preview */}
-          <div className="flex items-center gap-4 bg-indigo-50 p-4 rounded-lg border border-indigo-100">
-            {schoolLogo ? (
-              <img
-                src={schoolLogo}
-                alt={schoolName}
-                className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-sm"
-                onError={(e) => {
-                  e.target.style.display = 'none';
-                  e.target.parentElement.querySelector('.logo-fallback')?.style.setProperty('display', 'flex');
-                }}
-              />
-            ) : null}
-            <div
-              className="w-16 h-16 rounded-full bg-indigo-600 text-white flex items-center justify-center text-2xl font-bold border-2 border-white shadow-sm logo-fallback"
-              style={{ display: schoolLogo ? 'none' : 'flex' }}
-            >
-              {schoolInitials}
-            </div>
-            <div>
-              <h3 className="text-xl font-bold text-indigo-800">{schoolName}</h3>
-              {schoolMotto && <p className="text-sm italic text-gray-600">"{schoolMotto}"</p>}
-              {(schoolPhone || schoolEmail || schoolAddress) && (
-                <p className="text-xs text-gray-500 mt-1">
-                  {[schoolAddress, schoolPhone, schoolEmail].filter(Boolean).join(' • ')}
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Stats preview */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center">
-              <p className="text-[10px] uppercase tracking-wide text-gray-500 font-bold">Total Students</p>
-              <p className="text-xl font-bold text-gray-800 mt-1">{summary.totalStudents ?? results.length}</p>
-            </div>
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center">
-              <p className="text-[10px] uppercase tracking-wide text-gray-500 font-bold">Average</p>
-              <p className="text-xl font-bold text-gray-800 mt-1">{(parseFloat(summary.average) || 0).toFixed(1)}%</p>
-            </div>
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center">
-              <p className="text-[10px] uppercase tracking-wide text-gray-500 font-bold">Highest</p>
-              <p className="text-xl font-bold text-gray-800 mt-1">{stats.highest}</p>
-            </div>
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center">
-              <p className="text-[10px] uppercase tracking-wide text-gray-500 font-bold">Pass Rate</p>
-              <p className="text-xl font-bold text-gray-800 mt-1">{stats.passRate.toFixed(0)}%</p>
-            </div>
-          </div>
-
-          {/* Grade distribution preview */}
-          {gradeDistribution.length > 0 && (
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-              <p className="text-[10px] uppercase tracking-wide text-yellow-800 font-bold mb-2">Grade Distribution</p>
-              <div className="flex flex-wrap gap-2">
-                {gradeDistribution.map(([grade, count]) => (
-                  <span key={grade} className="inline-flex items-center gap-1.5 bg-white border border-gray-200 px-3 py-1 rounded-full text-xs font-medium">
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                      gradeColorClass(grade) === 'green' ? 'bg-green-100 text-green-800' :
-                      gradeColorClass(grade) === 'blue' ? 'bg-blue-100 text-blue-800' :
-                      gradeColorClass(grade) === 'yellow' ? 'bg-yellow-100 text-yellow-800' :
-                      gradeColorClass(grade) === 'orange' ? 'bg-orange-100 text-orange-800' :
-                      gradeColorClass(grade) === 'red' ? 'bg-red-100 text-red-800' :
-                      'bg-gray-100 text-gray-800'
-                    }`}>{grade}</span>
-                    <span className="text-gray-700 font-bold">{count}</span>
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Info note */}
-          <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-sm text-indigo-800">
-            <i className="fas fa-info-circle mr-2"></i>
-            Ready to print <strong>{results.length}</strong> result(s) for <strong>{exam.name}</strong>.
-            The printout will include the school header, ranked table, grade distribution, and signatures.
-          </div>
-        </div>
-
-        {/* Footer actions */}
-        <div className="sticky bottom-0 bg-gray-50 border-t px-6 py-4 flex justify-end gap-2">
-          <button onClick={onClose}
-            className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
-            Cancel
-          </button>
-          <button onClick={handlePrint}
-            className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2">
-            <i className="fas fa-print"></i>
-            Print
-          </button>
-        </div>
-      </div>
     </div>
   );
 };
@@ -27097,950 +25784,22 @@ const response = await fetchApi(`/events/${editingEvent.id}`, {
       )}
     </div>
   );
-};
-// ==================== ACCOUNTING MODULE WITH SEARCHABLE SELECTS ====================
-const AccountingModule = ({ payments, expenses, dateRange, setDateRange, showIncomeOnly, showExpensesOnly, isOtherIncome, user }) => {
-  const [summary, setSummary] = useState({
-    totalIncome: 0,
-    totalExpenses: 0,
-    netIncome: 0,
-    incomeByMethod: {},
-    expensesByCategory: {},
-    incomeByCategory: {}
-  });
-  
-  const [showIncomeForm, setShowIncomeForm] = useState(false);
-  const [showExpenseForm, setShowExpenseForm] = useState(false);
-  const [students, setStudents] = useState([]);
-  const [fees, setFees] = useState([]);
-  const [incomeType, setIncomeType] = useState('fee');
-  const [isSponsored, setIsSponsored] = useState(false);
-  const [loading, setLoading] = useState(false);
-  
-  // Determine user permissions
-  const canAddIncome = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
-  const canAddExpense = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
-  const canView = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT', 'DEPUTY_PRINCIPAL'].includes(user?.role);
-
-  const [incomeForm, setIncomeForm] = useState({
-    studentId: '',
-    feeId: '',
-    amount: 0,
-    paymentMethod: 'CASH',
-    transactionId: '',
-    notes: '',
-    date: new Date().toISOString().split('T')[0],
-    incomeCategory: 'Tuition Fee',
-    description: '',
-    payer: '',
-    sponsorName: '',
-    sponsorAmount: 0,
-    isSponsorship: false,
-    mpesaCode: '',
-    mpesaPhone: '',
-    bankReference: '',
-    bankMessage: '',
-    cardLast4: '',
-    cardApprovalCode: '',
-    chequeNumber: '',
-    chequeBank: ''
-  });
-  
-  const [expenseForm, setExpenseForm] = useState({
-    category: '',
-    description: '',
-    amount: 0,
-    date: new Date().toISOString().split('T')[0],
-    paymentMethod: 'CASH',
-    vendor: '',
-    receiptNo: '',
-    notes: ''
-  });
-
-  // ==================== SEARCHABLE SELECT COMPONENT ====================
-  const SearchableSelect = ({ label, value, onChange, options, placeholder, disabled, required, className }) => {
-    const [search, setSearch] = useState('');
-    const [isOpen, setIsOpen] = useState(false);
-    const dropdownRef = useRef(null);
-    const inputRef = useRef(null);
-
-    const filteredOptions = useMemo(() => {
-      if (!search.trim()) return options;
-      const searchLower = search.toLowerCase();
-      return options.filter(opt => 
-        opt.label?.toLowerCase().includes(searchLower) ||
-        opt.subLabel?.toLowerCase().includes(searchLower) ||
-        opt.value?.toString().toLowerCase().includes(searchLower)
-      );
-    }, [options, search]);
-
-    const selectedOption = options.find(opt => opt.value === value);
-
-    useEffect(() => {
-      const handleClickOutside = (event) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-          setIsOpen(false);
-          if (selectedOption) {
-            setSearch(selectedOption.label);
-          } else {
-            setSearch('');
-          }
-        }
-      };
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [selectedOption]);
-
-    const handleSelect = (selectedValue) => {
-      onChange({ target: { value: selectedValue } });
-      const selected = options.find(opt => opt.value === selectedValue);
-      setSearch(selected ? selected.label : '');
-      setIsOpen(false);
-      setTimeout(() => {
-        if (inputRef.current) {
-          inputRef.current.focus();
-        }
-      }, 0);
-    };
-
-    const handleInputChange = (e) => {
-      const newValue = e.target.value;
-      setSearch(newValue);
-      setIsOpen(true);
-      if (newValue === '') {
-        onChange({ target: { value: '' } });
-      }
-    };
-
-    const handleFocus = () => {
-      setIsOpen(true);
-      if (selectedOption && !search) {
-        setSearch(selectedOption.label);
-      }
-    };
-
-    const handleBlur = (e) => {
-      const relatedTarget = e.relatedTarget;
-      if (dropdownRef.current && dropdownRef.current.contains(relatedTarget)) {
-        return;
-      }
-      setTimeout(() => {
-        if (document.activeElement !== inputRef.current) {
-          setIsOpen(false);
-          if (selectedOption) {
-            setSearch(selectedOption.label);
-          } else {
-            setSearch('');
-          }
-        }
-      }, 150);
-    };
-
-    const handleClear = (e) => {
-      e.stopPropagation();
-      onChange({ target: { value: '' } });
-      setSearch('');
-      setIsOpen(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
-    };
-
-    return (
-      <div className="relative" ref={dropdownRef}>
-        {label && (
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-        )}
-        <div className="relative">
-          <input
-            ref={inputRef}
-            type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
-            } ${className || ''}`}
-            value={search}
-            onChange={handleInputChange}
-            onFocus={handleFocus}
-            onBlur={handleBlur}
-            placeholder=""
-            disabled={disabled}
-            autoComplete="off"
-          />
-          {value && !disabled && (
-            <button
-              type="button"
-              onClick={handleClear}
-              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-        </div>
-        {isOpen && !disabled && (
-          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-            {filteredOptions.length > 0 ? (
-              filteredOptions.map((opt) => (
-                <div
-                  key={opt.value || Math.random().toString()}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
-                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
-                  }`}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => handleSelect(opt.value)}
-                >
-                  <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
-                </div>
-              ))
-            ) : (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {search.trim() ? 'No results found' : 'Type to search...'}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // ==================== INPUT FIELD ====================
-  const InputField = ({ label, type, value, onChange, placeholder, required, disabled, min, step, textarea, rows, maxLength }) => {
-    if (textarea) {
-      return (
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-          <textarea
-            rows={rows || 3}
-            value={value || ''}
-            onChange={onChange}
-            placeholder={placeholder}
-            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-            disabled={disabled}
-          />
-        </div>
-      );
-    }
-    return (
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
-        </label>
-        <input
-          type={type || 'text'}
-          value={value !== undefined && value !== null ? value : ''}
-          onChange={onChange}
-          placeholder={placeholder}
-          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-          disabled={disabled}
-          min={min}
-          step={step}
-          maxLength={maxLength}
-        />
-      </div>
-    );
-  };
-
-  // ==================== SELECT FIELD ====================
-  const SelectField = ({ label, value, onChange, options, required, disabled, placeholder }) => (
-    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">
-        {label}
-        {required && <span className="text-red-500 ml-1">*</span>}
-      </label>
-      <select
-        value={value || ''}
-        onChange={onChange}
-        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-        disabled={disabled}
-        required={required}
-      >
-        {placeholder && <option value="">{placeholder}</option>}
-        {options.map(opt => (
-          <option key={opt.value || opt} value={opt.value || opt}>
-            {opt.label || opt}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-
-  // ==================== FORMAT CURRENCY ====================
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-KE', {
-      style: 'currency',
-      currency: 'KES',
-      minimumFractionDigits: 0
-    }).format(amount || 0);
-  };
-
-  // ==================== EFFECTS ====================
-  useEffect(() => {
-    calculateSummary();
-    fetchStudents();
-    fetchFees();
-  }, [payments, expenses, dateRange]);
-
-  // ==================== FETCH FUNCTIONS ====================
-  const fetchStudents = async () => {
-    try {
-      const res = await api.get('/students');
-      setStudents(res.data.students || []);
-    } catch (error) {
-      console.error('Error fetching students:', error);
-    }
-  };
-
-  const fetchFees = async () => {
-    try {
-      const res = await api.get('/fees');
-      setFees(res.data.fees || []);
-    } catch (error) {
-      console.error('Error fetching fees:', error);
-    }
-  };
-
-  // ==================== CALCULATE SUMMARY ====================
-  const calculateSummary = () => {
-    const filteredPayments = dateRange.start && dateRange.end 
-      ? payments.filter(p => {
-          const paymentDate = new Date(p.date).toISOString().split('T')[0];
-          return paymentDate >= dateRange.start && paymentDate <= dateRange.end;
-        })
-      : payments;
-
-    const filteredExpenses = dateRange.start && dateRange.end
-      ? expenses.filter(e => {
-          const expenseDate = new Date(e.date).toISOString().split('T')[0];
-          return expenseDate >= dateRange.start && expenseDate <= dateRange.end;
-        })
-      : expenses;
-
-    const totalIncome = filteredPayments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
-    const totalExpenses = filteredExpenses.reduce((sum, e) => sum + parseFloat(e.amount), 0);
-
-    const incomeByMethod = {};
-    const incomeByCategory = {};
-    
-    filteredPayments.forEach(p => {
-      incomeByMethod[p.paymentMethod] = (incomeByMethod[p.paymentMethod] || 0) + parseFloat(p.amount);
-      const category = p.fee?.name || p.incomeCategory || 'Other Income';
-      incomeByCategory[category] = (incomeByCategory[category] || 0) + parseFloat(p.amount);
-    });
-
-    const expensesByCategory = {};
-    filteredExpenses.forEach(e => {
-      expensesByCategory[e.category] = (expensesByCategory[e.category] || 0) + parseFloat(e.amount);
-    });
-
-    setSummary({
-      totalIncome,
-      totalExpenses,
-      netIncome: totalIncome - totalExpenses,
-      incomeByMethod,
-      expensesByCategory,
-      incomeByCategory
-    });
-  };
-
-  // ==================== HANDLE INCOME SUBMIT ====================
-  const handleIncomeSubmit = async (e) => {
-    e.preventDefault();
-    if (!canAddIncome) {
-      alert('You do not have permission to record income');
-      return;
-    }
-    setLoading(true);
-    try {
-      if (incomeType === 'fee' && !incomeForm.studentId) {
-        alert('Please select a student');
-        setLoading(false);
-        return;
-      }
-      
-      if (!incomeForm.amount || incomeForm.amount <= 0) {
-        alert('Please enter a valid amount');
-        setLoading(false);
-        return;
-      }
-
-      const paymentData = { ...incomeForm };
-      
-      if (paymentData.paymentMethod !== 'MPESA') {
-        delete paymentData.mpesaCode;
-        delete paymentData.mpesaPhone;
-      }
-      if (paymentData.paymentMethod !== 'BANK') {
-        delete paymentData.bankReference;
-        delete paymentData.bankMessage;
-      }
-      if (paymentData.paymentMethod !== 'CARD') {
-        delete paymentData.cardLast4;
-        delete paymentData.cardApprovalCode;
-      }
-      if (paymentData.paymentMethod !== 'CHEQUE') {
-        delete paymentData.chequeNumber;
-        delete paymentData.chequeBank;
-      }
-
-      if (isSponsored && incomeForm.sponsorName) {
-        paymentData.notes = `${paymentData.notes || ''} | Sponsored by: ${incomeForm.sponsorName}${incomeForm.sponsorAmount ? ` (KES ${incomeForm.sponsorAmount})` : ''}`;
-      }
-      
-      let res;
-      if (incomeType === 'fee') {
-        res = await api.post('/payments', paymentData);
-      } else {
-        res = await api.post('/payments', {
-          ...paymentData,
-          feeId: null,
-          isOtherIncome: true
-        });
-      }
-      
-      setShowIncomeForm(false);
-      setIncomeForm({
-        studentId: '',
-        feeId: '',
-        amount: 0,
-        paymentMethod: 'CASH',
-        transactionId: '',
-        notes: '',
-        date: new Date().toISOString().split('T')[0],
-        incomeCategory: 'Tuition Fee',
-        description: '',
-        payer: '',
-        sponsorName: '',
-        sponsorAmount: 0,
-        isSponsorship: false,
-        mpesaCode: '',
-        mpesaPhone: '',
-        bankReference: '',
-        bankMessage: '',
-        cardLast4: '',
-        cardApprovalCode: '',
-        chequeNumber: '',
-        chequeBank: ''
-      });
-      setIsSponsored(false);
-      
-      alert('✅ Income recorded successfully!');
-      const paymentsRes = await api.get('/payments');
-      payments = paymentsRes.data.payments || [];
-      calculateSummary();
-    } catch (error) {
-      console.error('Error recording income:', error);
-      alert('❌ Error recording income: ' + (error.response?.data?.message || error.message));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ==================== HANDLE EXPENSE SUBMIT ====================
-  const handleExpenseSubmit = async (e) => {
-    e.preventDefault();
-    if (!canAddExpense) {
-      alert('You do not have permission to record expenses');
-      return;
-    }
-    setLoading(true);
-    try {
-      await api.post('/expenses', expenseForm);
-      setShowExpenseForm(false);
-      setExpenseForm({
-        category: '',
-        description: '',
-        amount: 0,
-        date: new Date().toISOString().split('T')[0],
-        paymentMethod: 'CASH',
-        vendor: '',
-        receiptNo: '',
-        notes: ''
-      });
-      
-      alert('Expense recorded successfully!');
-      const expensesRes = await api.get('/expenses');
-      expenses = expensesRes.data.expenses || [];
-      calculateSummary();
-    } catch (error) {
-      console.error('Error recording expense:', error);
-      alert('Error recording expense: ' + (error.response?.data?.message || error.message));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ==================== STUDENT OPTIONS ====================
-  const studentOptions = useMemo(() => {
-    return [
-      { value: '', label: '' },
-      ...students.map(s => ({
-        value: s.id,
-        label: `${s.firstName} ${s.lastName}`,
-        subLabel: `${s.admissionNumber}`
-      }))
-    ];
-  }, [students]);
-
-  // ==================== FEE OPTIONS ====================
-  const feeOptions = useMemo(() => {
-    return [
-      { value: '', label: '' },
-      ...fees.map(f => ({
-        value: f.id,
-        label: f.name,
-        subLabel: `KES ${f.amount}`
-      }))
-    ];
-  }, [fees]);
-
-  // ==================== PAYMENT METHOD OPTIONS ====================
-  const paymentMethodOptions = [
-    { value: 'CASH', label: '💵 Cash' },
-    { value: 'MPESA', label: '📱 M-Pesa' },
-    { value: 'BANK', label: '🏦 Bank Transfer' },
-    { value: 'CARD', label: '💳 Card' },
-    { value: 'CHEQUE', label: '📄 Cheque' }
-  ];
-
-  const expenseCategoryOptions = [
-    { value: '', label: '' },
-    { value: 'Salaries', label: '💰 Salaries' },
-    { value: 'Utilities', label: '💡 Utilities' },
-    { value: 'Maintenance', label: '🔧 Maintenance' },
-    { value: 'Supplies', label: '📦 Supplies' },
-    { value: 'Transport', label: '🚗 Transport' },
-    { value: 'Food', label: '🍔 Food' },
-    { value: 'Other', label: '📋 Other' }
-  ];
-
-  // ==================== RENDER ====================
-  if (!canView) {
-    return (
-      <div className="bg-white p-8 rounded-xl shadow-sm text-center">
-        <i className="fas fa-lock text-5xl text-gray-400 mb-4"></i>
-        <p className="text-gray-500">You do not have permission to view accounting information.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse"></div>}
-      
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold">
-          {showIncomeOnly ? 'Income Management' : showExpensesOnly ? 'Expense Management' : 'Accounting Overview'}
-        </h2>
-        <div className="flex space-x-2">
-          {(!showExpensesOnly) && canAddIncome && (
-            <button onClick={() => setShowIncomeForm(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center">
-              <i className="fas fa-plus-circle mr-2"></i>Record Income
-            </button>
-          )}
-          {(!showIncomeOnly) && canAddExpense && (
-            <button onClick={() => setShowExpenseForm(true)} className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 flex items-center">
-              <i className="fas fa-minus-circle mr-2"></i>Record Expense
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Income Form Modal */}
-      {showIncomeForm && canAddIncome && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
-          <div className="bg-white p-6 rounded-xl shadow-sm max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg font-semibold mb-4">Record Income</h3>
-            <form onSubmit={handleIncomeSubmit} className="space-y-4">
-              <div className="flex space-x-4 mb-4">
-                <label className="flex items-center">
-                  <input type="radio" checked={incomeType === 'fee'} onChange={() => setIncomeType('fee')} className="mr-2" /> Fee Payment
-                </label>
-                <label className="flex items-center">
-                  <input type="radio" checked={incomeType === 'other'} onChange={() => setIncomeType('other')} className="mr-2" /> Other Income
-                </label>
-              </div>
-
-              <InputField label="Date" type="date" value={incomeForm.date} onChange={(e) => setIncomeForm({...incomeForm, date: e.target.value})} required disabled={loading} />
-
-              {incomeType === 'fee' && (
-                <>
-                  <SearchableSelect
-                    label="Student"
-                    value={incomeForm.studentId}
-                    onChange={(e) => setIncomeForm({...incomeForm, studentId: e.target.value})}
-                    options={studentOptions}
-                    placeholder=""
-                    required
-                    disabled={loading}
-                  />
-                  <SearchableSelect
-                    label="Fee Type"
-                    value={incomeForm.feeId}
-                    onChange={(e) => setIncomeForm({...incomeForm, feeId: e.target.value})}
-                    options={feeOptions}
-                    placeholder=""
-                    required
-                    disabled={loading}
-                  />
-                </>
-              )}
-
-              {incomeType === 'other' && (
-                <>
-                  <InputField label="Income Category" value={incomeForm.incomeCategory} onChange={(e) => setIncomeForm({...incomeForm, incomeCategory: e.target.value})} placeholder="e.g., Donation, Grant" required disabled={loading} />
-                  <InputField label="Description" value={incomeForm.description} onChange={(e) => setIncomeForm({...incomeForm, description: e.target.value})} disabled={loading} />
-                  <InputField label="Payer" value={incomeForm.payer} onChange={(e) => setIncomeForm({...incomeForm, payer: e.target.value})} disabled={loading} />
-                </>
-              )}
-
-              <InputField label="Amount (KES)" type="number" value={incomeForm.amount} onChange={(e) => setIncomeForm({...incomeForm, amount: parseFloat(e.target.value)})} required disabled={loading} />
-
-              <SearchableSelect
-                label="Payment Method"
-                value={incomeForm.paymentMethod}
-                onChange={(e) => setIncomeForm({...incomeForm, paymentMethod: e.target.value})}
-                options={paymentMethodOptions}
-                placeholder=""
-                disabled={loading}
-              />
-
-              {incomeForm.paymentMethod === 'MPESA' && (
-                <div className="grid grid-cols-2 gap-4">
-                  <InputField label="M-Pesa Code" value={incomeForm.mpesaCode} onChange={(e) => setIncomeForm({...incomeForm, mpesaCode: e.target.value})} disabled={loading} />
-                  <InputField label="Phone Number" value={incomeForm.mpesaPhone} onChange={(e) => setIncomeForm({...incomeForm, mpesaPhone: e.target.value})} disabled={loading} />
-                </div>
-              )}
-
-              {incomeForm.paymentMethod === 'BANK' && (
-                <div className="grid grid-cols-2 gap-4">
-                  <InputField label="Bank Reference" value={incomeForm.bankReference} onChange={(e) => setIncomeForm({...incomeForm, bankReference: e.target.value})} disabled={loading} />
-                  <InputField label="Bank Message" value={incomeForm.bankMessage} onChange={(e) => setIncomeForm({...incomeForm, bankMessage: e.target.value})} disabled={loading} />
-                </div>
-              )}
-
-              {incomeForm.paymentMethod === 'CARD' && (
-                <div className="grid grid-cols-2 gap-4">
-                  <InputField label="Card Last 4" value={incomeForm.cardLast4} onChange={(e) => setIncomeForm({...incomeForm, cardLast4: e.target.value})} maxLength="4" disabled={loading} />
-                  <InputField label="Approval Code" value={incomeForm.cardApprovalCode} onChange={(e) => setIncomeForm({...incomeForm, cardApprovalCode: e.target.value})} disabled={loading} />
-                </div>
-              )}
-
-              {incomeForm.paymentMethod === 'CHEQUE' && (
-                <div className="grid grid-cols-2 gap-4">
-                  <InputField label="Cheque Number" value={incomeForm.chequeNumber} onChange={(e) => setIncomeForm({...incomeForm, chequeNumber: e.target.value})} disabled={loading} />
-                  <InputField label="Bank" value={incomeForm.chequeBank} onChange={(e) => setIncomeForm({...incomeForm, chequeBank: e.target.value})} disabled={loading} />
-                </div>
-              )}
-
-              <InputField label="Transaction ID" value={incomeForm.transactionId} onChange={(e) => setIncomeForm({...incomeForm, transactionId: e.target.value})} disabled={loading} />
-              
-              <div className="flex items-center space-x-2">
-                <input type="checkbox" checked={isSponsored} onChange={(e) => setIsSponsored(e.target.checked)} className="rounded" disabled={loading} />
-                <label>This payment is sponsored</label>
-              </div>
-
-              {isSponsored && (
-                <div className="grid grid-cols-2 gap-4">
-                  <InputField label="Sponsor Name" value={incomeForm.sponsorName} onChange={(e) => setIncomeForm({...incomeForm, sponsorName: e.target.value})} disabled={loading} />
-                  <InputField label="Sponsor Amount" type="number" value={incomeForm.sponsorAmount} onChange={(e) => setIncomeForm({...incomeForm, sponsorAmount: parseFloat(e.target.value)})} disabled={loading} />
-                </div>
-              )}
-
-              <InputField label="Notes" value={incomeForm.notes} onChange={(e) => setIncomeForm({...incomeForm, notes: e.target.value})} textarea rows="2" disabled={loading} />
-
-              <div className="flex space-x-2">
-                <button type="submit" className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex-1" disabled={loading}>
-                  {loading ? 'Processing...' : 'Record Income'}
-                </button>
-                <button type="button" onClick={() => setShowIncomeForm(false)} className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600" disabled={loading}>
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Expense Form Modal */}
-      {showExpenseForm && canAddExpense && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-xl shadow-sm max-w-md w-full">
-            <h3 className="text-lg font-semibold mb-4">Record Expense</h3>
-            <form onSubmit={handleExpenseSubmit} className="space-y-4">
-              <SearchableSelect
-                label="Category"
-                value={expenseForm.category}
-                onChange={(e) => setExpenseForm({...expenseForm, category: e.target.value})}
-                options={expenseCategoryOptions}
-                placeholder=""
-                required
-                disabled={loading}
-              />
-              <InputField label="Description" value={expenseForm.description} onChange={(e) => setExpenseForm({...expenseForm, description: e.target.value})} required disabled={loading} />
-              <InputField label="Amount (KES)" type="number" value={expenseForm.amount} onChange={(e) => setExpenseForm({...expenseForm, amount: parseFloat(e.target.value)})} required disabled={loading} />
-              <InputField label="Date" type="date" value={expenseForm.date} onChange={(e) => setExpenseForm({...expenseForm, date: e.target.value})} required disabled={loading} />
-              <SearchableSelect
-                label="Payment Method"
-                value={expenseForm.paymentMethod}
-                onChange={(e) => setExpenseForm({...expenseForm, paymentMethod: e.target.value})}
-                options={paymentMethodOptions}
-                placeholder=""
-                disabled={loading}
-              />
-              <InputField label="Vendor/Supplier" value={expenseForm.vendor} onChange={(e) => setExpenseForm({...expenseForm, vendor: e.target.value})} disabled={loading} />
-              <InputField label="Receipt No." value={expenseForm.receiptNo} onChange={(e) => setExpenseForm({...expenseForm, receiptNo: e.target.value})} disabled={loading} />
-              <InputField label="Notes" value={expenseForm.notes} onChange={(e) => setExpenseForm({...expenseForm, notes: e.target.value})} disabled={loading} />
-              <div className="flex space-x-2">
-                <button type="submit" className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 flex-1" disabled={loading}>
-                  {loading ? 'Processing...' : 'Record Expense'}
-                </button>
-                <button type="button" onClick={() => setShowExpenseForm(false)} className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600" disabled={loading}>
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Date Filter */}
-      <div className="bg-white p-6 rounded-xl shadow-sm">
-        <h3 className="text-lg font-semibold mb-4">Filter by Date</h3>
-        <div className="grid grid-cols-2 gap-4 max-w-md">
-          <InputField label="Start Date" type="date" value={dateRange.start} onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })} />
-          <InputField label="End Date" type="date" value={dateRange.end} onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })} />
-        </div>
-      </div>
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl p-6 text-white">
-          <h3 className="text-lg font-semibold mb-2">Total Income</h3>
-          <p className="text-3xl font-bold">{formatCurrency(summary.totalIncome)}</p>
-          <p className="text-sm mt-2 opacity-90">All income sources</p>
-        </div>
-        <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-xl p-6 text-white">
-          <h3 className="text-lg font-semibold mb-2">Total Expenses</h3>
-          <p className="text-3xl font-bold">{formatCurrency(summary.totalExpenses)}</p>
-          <p className="text-sm mt-2 opacity-90">All expenditures</p>
-        </div>
-        <div className={`bg-gradient-to-br rounded-xl p-6 text-white ${summary.netIncome >= 0 ? 'from-blue-500 to-blue-600' : 'from-orange-500 to-orange-600'}`}>
-          <h3 className="text-lg font-semibold mb-2">Net Income</h3>
-          <p className="text-3xl font-bold">{formatCurrency(summary.netIncome)}</p>
-          <p className="text-sm mt-2 opacity-90">{summary.netIncome >= 0 ? 'Profit' : 'Loss'}</p>
-        </div>
-      </div>
-
-      {/* Income and Expenses Breakdown */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white p-6 rounded-xl shadow-sm">
-          <h3 className="text-lg font-semibold mb-4">Income by Category</h3>
-          <div className="space-y-3 max-h-60 overflow-y-auto">
-            {Object.entries(summary.incomeByCategory).sort((a, b) => b[1] - a[1]).map(([category, amount]) => (
-              <div key={category} className="flex justify-between items-center">
-                <span className="text-gray-600">{category}</span>
-                <span className="font-semibold">{formatCurrency(amount)}</span>
-              </div>
-            ))}
-            {Object.keys(summary.incomeByCategory).length === 0 && (
-              <p className="text-gray-500 text-center py-4">No income data for selected period</p>
-            )}
-          </div>
-        </div>
-
-        <div className="bg-white p-6 rounded-xl shadow-sm">
-          <h3 className="text-lg font-semibold mb-4">Expenses by Category</h3>
-          <div className="space-y-3 max-h-60 overflow-y-auto">
-            {Object.entries(summary.expensesByCategory).sort((a, b) => b[1] - a[1]).map(([category, amount]) => (
-              <div key={category} className="flex justify-between items-center">
-                <span className="text-gray-600">{category}</span>
-                <span className="font-semibold">{formatCurrency(amount)}</span>
-              </div>
-            ))}
-            {Object.keys(summary.expensesByCategory).length === 0 && (
-              <p className="text-gray-500 text-center py-4">No expense data for selected period</p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Income by Payment Method */}
-      <div className="bg-white p-6 rounded-xl shadow-sm">
-        <h3 className="text-lg font-semibold mb-4">Income by Payment Method</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {Object.entries(summary.incomeByMethod).sort((a, b) => b[1] - a[1]).map(([method, amount]) => (
-            <div key={method} className="flex justify-between items-center border-b pb-2">
-              <span className="text-gray-600">{method}</span>
-              <span className="font-semibold">{formatCurrency(amount)}</span>
-            </div>
-          ))}
-          {Object.keys(summary.incomeByMethod).length === 0 && (
-            <p className="text-gray-500 text-center py-4 col-span-3">No income data for selected period</p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// ============================================================================
-// OTHER INCOME — helpers used by AccountingModule when isOtherIncome=true
-// Kenya only · ECDE, PRIMARY, JSS, SECONDARY, TVET, UNIVERSITY
+};// ============================================================================
+// ACCOUNTING MODULE — Full rewrite
+// Kenya · ECDE / PRIMARY / JSS / SECONDARY / TVET / UNIVERSITY
+//
+// Fixes:
+//   ✅ Fee payments never leak into "Other Income"
+//   ✅ SearchableSelect no longer blocks input / loses focus
+//   ✅ School category comes from currentSchool.category (same as rest of system)
+//   ✅ TRANSFER normalised to BANK
+//   ✅ Income-by-category shows REAL fee names for fees, category for other income
 // ============================================================================
 
 // ---------------------------------------------------------------------------
-// Searchable select — memoized OUTSIDE to prevent focus loss
+// 1. School category → income presets  (Kenya)
 // ---------------------------------------------------------------------------
-const OtherIncomeSearchableSelect = React.memo(({
-  label, value, onChange, options, placeholder,
-  disabled, required, error, className,
-}) => {
-  const [search, setSearch] = useState('');
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef(null);
-  const inputRef = useRef(null);
-  const onChangeRef = useRef(onChange);
-
-  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
-
-  const filteredOptions = useMemo(() => {
-    if (!search.trim()) return options;
-    const s = search.toLowerCase();
-    return options.filter(opt =>
-      opt.label?.toLowerCase().includes(s) ||
-      opt.subLabel?.toLowerCase().includes(s) ||
-      opt.value?.toString().toLowerCase().includes(s)
-    );
-  }, [options, search]);
-
-  const selectedOption = useMemo(
-    () => options.find(opt => opt.value === value),
-    [options, value]
-  );
-
-  useEffect(() => {
-    if (selectedOption) setSearch(selectedOption.label);
-    else if (!value) setSearch('');
-  }, [selectedOption, value]);
-
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const handleSelect = (selectedValue) => {
-    onChangeRef.current({ target: { value: selectedValue } });
-    const selected = options.find(opt => opt.value === selectedValue);
-    setSearch(selected ? selected.label : '');
-    setIsOpen(false);
-  };
-
-  const handleInputChange = (e) => {
-    setSearch(e.target.value);
-    setIsOpen(true);
-    if (e.target.value === '') onChangeRef.current({ target: { value: '' } });
-  };
-
-  const handleClear = (e) => {
-    e.stopPropagation();
-    onChangeRef.current({ target: { value: '' } });
-    setSearch('');
-    setIsOpen(false);
-    inputRef.current?.focus();
-  };
-
-  return (
-    <div className="relative" ref={dropdownRef}>
-      {label && (
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
-        </label>
-      )}
-      <div className="relative">
-        <input
-          ref={inputRef}
-          type="text"
-          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-            disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
-          } ${error ? 'border-red-400' : 'border-gray-300'} ${className || ''}`}
-          value={search}
-          onChange={handleInputChange}
-          onFocus={() => setIsOpen(true)}
-          placeholder={placeholder || ''}
-          disabled={disabled}
-          autoComplete="off"
-        />
-        {value && !disabled && (
-          <button
-            type="button"
-            onClick={handleClear}
-            className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        )}
-        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-          <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
-            fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </div>
-      </div>
-      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
-      {isOpen && !disabled && (
-        <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-          {filteredOptions.length > 0 ? (
-            filteredOptions.map((opt) => (
-              <div
-                key={opt.value}
-                className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 ${
-                  opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
-                }`}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => handleSelect(opt.value)}
-              >
-                <div className="font-medium">{opt.label}</div>
-                {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
-              </div>
-            ))
-          ) : (
-            <div className="px-3 py-4 text-center text-gray-500 text-sm">
-              {search.trim() ? 'No results found' : 'Type to search...'}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-});
-OtherIncomeSearchableSelect.displayName = 'OtherIncomeSearchableSelect';
-
-// ---------------------------------------------------------------------------
-// Kenyan school category presets
-// ---------------------------------------------------------------------------
-const OTHER_INCOME_SCHOOL_PRESETS = {
+const ACCOUNTING_SCHOOL_PRESETS = {
   ECDE: {
     label: 'ECDE (Pre-Primary)',
     incomeCategories: [
@@ -28096,7 +25855,7 @@ const OTHER_INCOME_SCHOOL_PRESETS = {
   }
 };
 
-const OTHER_INCOME_PAYMENT_METHODS = [
+const ACCOUNTING_PAYMENT_METHODS = [
   { value: 'CASH',   label: '💵 Cash' },
   { value: 'MPESA',  label: '📱 M-Pesa' },
   { value: 'BANK',   label: '🏦 Bank Transfer' },
@@ -28104,50 +25863,285 @@ const OTHER_INCOME_PAYMENT_METHODS = [
   { value: 'CHEQUE', label: '📄 Cheque' }
 ];
 
-const OTHER_INCOME_METHOD_LABELS = {
+const ACCOUNTING_METHOD_LABELS = {
   CASH: 'Cash',
   MPESA: 'M-Pesa',
   BANK: 'Bank Transfer',
+  TRANSFER: 'Bank Transfer', // ✅ alias — some records use TRANSFER
   CARD: 'Card',
   CHEQUE: 'Cheque'
 };
 
-const OTHER_INCOME_KE_PHONE_PATTERN = /^(?:\+?254|0)[17]\d{8}$/;
+const ACCOUNTING_KE_PHONE_PATTERN = /^(?:\+?254|0)[17]\d{8}$/;
 
-// Read school info from localStorage / context — adjust key to match your app
-function getOtherIncomeSchoolConfig(user) {
-  let school = {};
-  try {
-    const raw = localStorage.getItem('school');
-    if (raw) school = JSON.parse(raw);
-  } catch { /* ignore */ }
+// Map the system's school.category → an accounting preset key.
+// The system uses:  ECDE_PRIMARY_JSS | SENIOR_SECONDARY | COLLEGE_TVET | UNIVERSITY
+function resolveAccountingCategoryKey(currentSchool, user) {
+  const raw =
+    currentSchool?.category ||
+    currentSchool?.schoolCategory ||
+    user?.schoolCategory ||
+    'ECDE_PRIMARY_JSS';
 
-  const requestedCategory = (school.schoolCategory || user?.schoolCategory || 'PRIMARY').toUpperCase();
-  const categoryKey = OTHER_INCOME_SCHOOL_PRESETS[requestedCategory] ? requestedCategory : 'PRIMARY';
-  const categoryPreset = OTHER_INCOME_SCHOOL_PRESETS[categoryKey];
+  const upper = String(raw).toUpperCase();
 
+  // Direct matches first
+  if (ACCOUNTING_SCHOOL_PRESETS[upper]) return upper;
+
+  // System-wide category values → closest accounting preset
+  switch (upper) {
+    case 'ECDE_PRIMARY_JSS':
+      // Pick by class level if available, otherwise default to PRIMARY
+      return 'PRIMARY';
+    case 'SENIOR_SECONDARY':
+      return 'SECONDARY';
+    case 'COLLEGE_TVET':
+      return 'TVET';
+    case 'UNIVERSITY':
+      return 'UNIVERSITY';
+    default:
+      return 'PRIMARY';
+  }
+}
+
+function getAccountingSchoolConfig(currentSchool, user) {
+  const key = resolveAccountingCategoryKey(currentSchool, user);
+  const preset = ACCOUNTING_SCHOOL_PRESETS[key];
   return {
-    schoolId: school.id || school.schoolId || user?.schoolId || null,
-    schoolName: school.name || school.schoolName || 'School',
-    schoolCategory: categoryKey,
-    schoolCategoryLabel: categoryPreset.label,
-    currency: 'KES',
-    locale: 'en-KE',
-    phoneLabel: 'M-Pesa Phone Number',
-    phonePlaceholder: '0712345678',
-    phonePattern: OTHER_INCOME_KE_PHONE_PATTERN,
-    paymentMethods: OTHER_INCOME_PAYMENT_METHODS,
-    incomeCategories: categoryPreset.incomeCategories,
-    methodLabels: OTHER_INCOME_METHOD_LABELS
+    schoolId: currentSchool?.id || user?.schoolId || null,
+    schoolName: currentSchool?.name || currentSchool?.schoolName || '',
+    schoolCategory: key,
+    schoolCategoryLabel: preset.label,
+    incomeCategories: preset.incomeCategories,
+    paymentMethods: ACCOUNTING_PAYMENT_METHODS,
+    methodLabels: ACCOUNTING_METHOD_LABELS,
+    phonePattern: ACCOUNTING_KE_PHONE_PATTERN
   };
 }
 
 // ---------------------------------------------------------------------------
-// Reusable Other Income panel — renders INSIDE AccountingModule
-// when isOtherIncome === true
+// 2. SearchableSelect — FIXED
+//
+// Root cause of the old bug:
+//   - It re-seeded `search` from `selectedOption` on every render.
+//   - Typing fired `onChange({ value: '' })` on the parent, which re-rendered,
+//     which reset `search`, which killed the caret.
+//
+// Fix:
+//   - `search` is only used for filtering the dropdown.
+//   - We only sync `search` from the selected value when the value changes
+//     from the OUTSIDE (not on every keystroke).
+//   - We do NOT call `onChange('')` while the user is typing.
+//   - We track "last external value" to detect external changes.
 // ---------------------------------------------------------------------------
-const OtherIncomePanel = ({ user, dateRange, setDateRange }) => {
-  const cfg = useMemo(() => getOtherIncomeSchoolConfig(user), [user]);
+const AccountingSearchableSelect = React.memo(function AccountingSearchableSelect({
+  label, value, onChange, options = [], placeholder,
+  disabled, required, error, className,
+}) {
+  const [search, setSearch] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef(null);
+  const inputRef = useRef(null);
+  const onChangeRef = useRef(onChange);
+  const lastExternalValue = useRef(value);
+
+  // Keep onChange fresh without re-rendering
+  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+
+  // Only sync search text when the VALUE changes externally
+  useEffect(() => {
+    if (value === lastExternalValue.current) return;
+    lastExternalValue.current = value;
+
+    if (!value) {
+      // External clear — wipe search
+      setSearch('');
+      return;
+    }
+    const selected = options.find(opt => opt.value === value);
+    if (selected) setSearch(selected.label);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  // Click outside → close
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+        // On blur, if user typed something that doesn't match a selection,
+        // restore the selected label (or clear if nothing is selected).
+        if (value) {
+          const selected = options.find(opt => opt.value === value);
+          if (selected) setSearch(selected.label);
+        } else {
+          setSearch('');
+        }
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [value, options]);
+
+  const filteredOptions = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter(opt =>
+      String(opt.label || '').toLowerCase().includes(q) ||
+      String(opt.subLabel || '').toLowerCase().includes(q) ||
+      String(opt.value || '').toLowerCase().includes(q)
+    );
+  }, [options, search]);
+
+  const handleInputChange = (e) => {
+    // ✅ Never fires onChange('') on every keystroke — only updates local search
+    setSearch(e.target.value);
+    if (!isOpen) setIsOpen(true);
+  };
+
+  const handleSelect = (selectedValue) => {
+    lastExternalValue.current = selectedValue;
+    const selected = options.find(opt => opt.value === selectedValue);
+    setSearch(selected ? selected.label : '');
+    setIsOpen(false);
+    if (onChangeRef.current) {
+      onChangeRef.current({ target: { value: selectedValue } });
+    }
+  };
+
+  const handleClear = (e) => {
+    e.stopPropagation();
+    lastExternalValue.current = '';
+    setSearch('');
+    setIsOpen(false);
+    if (onChangeRef.current) {
+      onChangeRef.current({ target: { value: '' } });
+    }
+    inputRef.current?.focus();
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Escape') {
+      setIsOpen(false);
+      if (value) {
+        const selected = options.find(opt => opt.value === value);
+        if (selected) setSearch(selected.label);
+      } else setSearch('');
+    } else if (e.key === 'Enter' && isOpen && filteredOptions.length > 0) {
+      e.preventDefault();
+      handleSelect(filteredOptions[0].value);
+    }
+  };
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      {label && (
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          {label}
+          {required && <span className="text-red-500 ml-1">*</span>}
+        </label>
+      )}
+      <div className="relative">
+        <input
+          ref={inputRef}
+          type="text"
+          className={`w-full px-3 py-2 pr-16 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
+            disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
+          } ${error ? 'border-red-400' : 'border-gray-300'} ${className || ''}`}
+          value={search}
+          onChange={handleInputChange}
+          onFocus={() => setIsOpen(true)}
+          onKeyDown={handleKeyDown}
+          placeholder={placeholder || ''}
+          disabled={disabled}
+          autoComplete="off"
+          spellCheck={false}
+        />
+        {value && !disabled && (
+          <button
+            type="button"
+            onClick={handleClear}
+            aria-label="Clear"
+            className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10 p-1"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
+        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+          <svg
+            className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </div>
+      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+      {isOpen && !disabled && (
+        <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
+          {filteredOptions.length > 0 ? (
+            filteredOptions.map((opt) => (
+              <div
+                key={String(opt.value)}
+                className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 ${
+                  opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
+                }`}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handleSelect(opt.value)}
+              >
+                <div className="font-medium">{opt.label}</div>
+                {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+              </div>
+            ))
+          ) : (
+            <div className="px-3 py-4 text-center text-gray-500 text-sm">
+              {search.trim() ? 'No results found' : 'Type to search…'}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
+AccountingSearchableSelect.displayName = 'AccountingSearchableSelect';
+
+// ---------------------------------------------------------------------------
+// 3. Shared small input
+// ---------------------------------------------------------------------------
+const AccountingInput = ({
+  label, type = 'text', value, onChange, placeholder,
+  required, disabled, min, step, textarea, rows, maxLength, error
+}) => {
+  const cls = `w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+    error ? 'border-red-400' : 'border-gray-300'
+  } ${disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'}`;
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">
+        {label}{required && <span className="text-red-500 ml-1">*</span>}
+      </label>
+      {textarea ? (
+        <textarea rows={rows || 3} value={value ?? ''} onChange={onChange}
+          placeholder={placeholder} className={cls} disabled={disabled} />
+      ) : (
+        <input type={type} value={value ?? ''} onChange={onChange}
+          placeholder={placeholder} className={cls} disabled={disabled}
+          min={min} step={step} maxLength={maxLength} />
+      )}
+      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// 4. Other Income Panel
+// ---------------------------------------------------------------------------
+const OtherIncomePanel = ({ user, currentSchool, dateRange, setDateRange }) => {
+  const cfg = useMemo(
+    () => getAccountingSchoolConfig(currentSchool, user),
+    [currentSchool, user]
+  );
 
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -28176,7 +26170,7 @@ const OtherIncomePanel = ({ user, dateRange, setDateRange }) => {
     cardApprovalCode: '',
     chequeNumber: '',
     chequeBank: ''
-  }), [cfg]);
+  }), [cfg.incomeCategories]);
 
   const [incomeForm, setIncomeForm] = useState(emptyForm);
   useEffect(() => { setIncomeForm(emptyForm); }, [emptyForm]);
@@ -28184,10 +26178,8 @@ const OtherIncomePanel = ({ user, dateRange, setDateRange }) => {
   const formatCurrency = (amount) => {
     try {
       return new Intl.NumberFormat('en-KE', {
-        style: 'currency',
-        currency: 'KES',
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 2
+        style: 'currency', currency: 'KES',
+        minimumFractionDigits: 0, maximumFractionDigits: 2
       }).format(amount || 0);
     } catch {
       return `KES ${Number(amount || 0).toLocaleString()}`;
@@ -28199,39 +26191,6 @@ const OtherIncomePanel = ({ user, dateRange, setDateRange }) => {
     [cfg.incomeCategories]
   );
 
-  const InputField = ({
-    label, type, value, onChange, placeholder,
-    required, disabled, min, step, textarea, rows, maxLength, error
-  }) => {
-    const cls = `w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
-      error ? 'border-red-400' : 'border-gray-300'
-    }`;
-    if (textarea) {
-      return (
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}{required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-          <textarea rows={rows || 3} value={value || ''} onChange={onChange}
-            placeholder={placeholder} className={cls} disabled={disabled} />
-          {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
-        </div>
-      );
-    }
-    return (
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          {label}{required && <span className="text-red-500 ml-1">*</span>}
-        </label>
-        <input type={type || 'text'}
-          value={value !== undefined && value !== null ? value : ''}
-          onChange={onChange} placeholder={placeholder} className={cls}
-          disabled={disabled} min={min} step={step} maxLength={maxLength} />
-        {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
-      </div>
-    );
-  };
-
   const loadOtherIncome = async () => {
     setLoading(true);
     try {
@@ -28242,7 +26201,19 @@ const OtherIncomePanel = ({ user, dateRange, setDateRange }) => {
         params.endDate = dateRange.end;
       }
       const res = await api.get('/payments', { params });
-      const incomes = res.data.payments || res.data.data || [];
+      const raw = res.data.payments || res.data.data || [];
+
+      // ✅ STRICT: only records explicitly flagged as other income,
+      //    and never a fee payment (no feeId, no studentId).
+      const incomes = raw.filter(p => {
+        if (!p) return false;
+        if (p.isOtherIncome === false) return false;
+        if (p.feeId) return false;
+        if (p.studentId) return false;
+        if (p.isOtherIncome === true) return true;
+        return !!p.incomeCategory;
+      });
+
       setIncomeList(incomes);
 
       const total = incomes.reduce((s, inc) => s + parseFloat(inc.amount || 0), 0);
@@ -28252,7 +26223,8 @@ const OtherIncomePanel = ({ user, dateRange, setDateRange }) => {
         const cat = inc.incomeCategory || 'Other';
         const amt = parseFloat(inc.amount || 0);
         byCategory[cat] = (byCategory[cat] || 0) + amt;
-        byMethod[inc.paymentMethod] = (byMethod[inc.paymentMethod] || 0) + amt;
+        const method = inc.paymentMethod === 'TRANSFER' ? 'BANK' : (inc.paymentMethod || 'CASH');
+        byMethod[method] = (byMethod[method] || 0) + amt;
       });
       setSummary({ totalIncome: total, byCategory, byMethod });
     } catch (error) {
@@ -28278,7 +26250,7 @@ const OtherIncomePanel = ({ user, dateRange, setDateRange }) => {
 
     if (incomeForm.paymentMethod === 'MPESA') {
       if (!incomeForm.mpesaPhone) errs.mpesaPhone = 'Phone number is required';
-      else if (!OTHER_INCOME_KE_PHONE_PATTERN.test(incomeForm.mpesaPhone.trim()))
+      else if (!ACCOUNTING_KE_PHONE_PATTERN.test(incomeForm.mpesaPhone.trim()))
         errs.mpesaPhone = 'Enter a valid Kenyan phone (e.g. 0712345678)';
       if (incomeForm.mpesaCode && incomeForm.mpesaCode.length < 4)
         errs.mpesaCode = 'M-Pesa code looks too short';
@@ -28313,7 +26285,6 @@ const OtherIncomePanel = ({ user, dateRange, setDateRange }) => {
         schoolId: cfg.schoolId,
         schoolCategory: cfg.schoolCategory
       };
-
       const m = paymentData.paymentMethod;
       if (m !== 'MPESA')  { delete paymentData.mpesaCode; delete paymentData.mpesaPhone; }
       if (m !== 'BANK')   { delete paymentData.bankReference; delete paymentData.bankMessage; }
@@ -28321,7 +26292,6 @@ const OtherIncomePanel = ({ user, dateRange, setDateRange }) => {
       if (m !== 'CHEQUE') { delete paymentData.chequeNumber; delete paymentData.chequeBank; }
 
       await api.post('/payments', paymentData);
-
       setIncomeForm(emptyForm);
       setFormErrors({});
       setShowForm(false);
@@ -28392,9 +26362,9 @@ const OtherIncomePanel = ({ user, dateRange, setDateRange }) => {
       <div className="bg-white p-4 rounded-xl shadow-sm">
         <div className="flex flex-wrap items-end gap-4">
           <div className="grid grid-cols-2 gap-4">
-            <InputField label="Start Date" type="date" value={dateRange.start}
+            <AccountingInput label="Start Date" type="date" value={dateRange.start}
               onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })} />
-            <InputField label="End Date" type="date" value={dateRange.end}
+            <AccountingInput label="End Date" type="date" value={dateRange.end}
               onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })} />
           </div>
           {(dateRange.start || dateRange.end || searchTerm) && (
@@ -28449,11 +26419,11 @@ const OtherIncomePanel = ({ user, dateRange, setDateRange }) => {
           <h3 className="text-lg font-semibold mb-4">Record Other Income</h3>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <InputField label="Date" type="date" value={incomeForm.date}
+              <AccountingInput label="Date" type="date" value={incomeForm.date}
                 onChange={(e) => setIncomeForm({ ...incomeForm, date: e.target.value })}
                 required error={formErrors.date} />
 
-              <OtherIncomeSearchableSelect
+              <AccountingSearchableSelect
                 label="Income Category" required
                 value={incomeForm.incomeCategory}
                 onChange={(e) => setIncomeForm({ ...incomeForm, incomeCategory: e.target.value })}
@@ -28462,20 +26432,19 @@ const OtherIncomePanel = ({ user, dateRange, setDateRange }) => {
                 error={formErrors.incomeCategory}
               />
 
-              <InputField label="Description" value={incomeForm.description}
+              <AccountingInput label="Description" value={incomeForm.description}
                 onChange={(e) => setIncomeForm({ ...incomeForm, description: e.target.value })}
                 placeholder="What is this for?" />
 
-              <InputField label="Payer / Donor" value={incomeForm.payer}
+              <AccountingInput label="Payer / Donor" value={incomeForm.payer}
                 onChange={(e) => setIncomeForm({ ...incomeForm, payer: e.target.value })}
                 placeholder="Name of person or organization" />
 
-              <InputField label="Amount (KES)" type="number"
-                value={incomeForm.amount}
+              <AccountingInput label="Amount (KES)" type="number" value={incomeForm.amount}
                 onChange={(e) => setIncomeForm({ ...incomeForm, amount: e.target.value })}
                 required min="0" step="0.01" error={formErrors.amount} />
 
-              <OtherIncomeSearchableSelect
+              <AccountingSearchableSelect
                 label="Payment Method" required
                 value={incomeForm.paymentMethod}
                 onChange={(e) => setIncomeForm({ ...incomeForm, paymentMethod: e.target.value })}
@@ -28486,10 +26455,10 @@ const OtherIncomePanel = ({ user, dateRange, setDateRange }) => {
 
             {incomeForm.paymentMethod === 'MPESA' && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <InputField label="M-Pesa Code" value={incomeForm.mpesaCode}
+                <AccountingInput label="M-Pesa Code" value={incomeForm.mpesaCode}
                   onChange={(e) => setIncomeForm({ ...incomeForm, mpesaCode: e.target.value.toUpperCase() })}
                   placeholder="e.g., OK4321ABC" error={formErrors.mpesaCode} />
-                <InputField label="M-Pesa Phone Number" value={incomeForm.mpesaPhone}
+                <AccountingInput label="M-Pesa Phone Number" value={incomeForm.mpesaPhone}
                   onChange={(e) => setIncomeForm({ ...incomeForm, mpesaPhone: e.target.value })}
                   placeholder="0712345678" error={formErrors.mpesaPhone} />
               </div>
@@ -28497,10 +26466,10 @@ const OtherIncomePanel = ({ user, dateRange, setDateRange }) => {
 
             {incomeForm.paymentMethod === 'BANK' && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <InputField label="Bank Reference" value={incomeForm.bankReference}
+                <AccountingInput label="Bank Reference" value={incomeForm.bankReference}
                   onChange={(e) => setIncomeForm({ ...incomeForm, bankReference: e.target.value })}
                   placeholder="Reference number" error={formErrors.bankReference} />
-                <InputField label="Bank Message" value={incomeForm.bankMessage}
+                <AccountingInput label="Bank Message" value={incomeForm.bankMessage}
                   onChange={(e) => setIncomeForm({ ...incomeForm, bankMessage: e.target.value })}
                   placeholder="Any bank message" />
               </div>
@@ -28508,10 +26477,10 @@ const OtherIncomePanel = ({ user, dateRange, setDateRange }) => {
 
             {incomeForm.paymentMethod === 'CARD' && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <InputField label="Card Last 4" value={incomeForm.cardLast4}
+                <AccountingInput label="Card Last 4" value={incomeForm.cardLast4}
                   onChange={(e) => setIncomeForm({ ...incomeForm, cardLast4: e.target.value.replace(/\D/g, '') })}
                   placeholder="Last 4 digits" maxLength="4" error={formErrors.cardLast4} />
-                <InputField label="Approval Code" value={incomeForm.cardApprovalCode}
+                <AccountingInput label="Approval Code" value={incomeForm.cardApprovalCode}
                   onChange={(e) => setIncomeForm({ ...incomeForm, cardApprovalCode: e.target.value })}
                   placeholder="Approval code" />
               </div>
@@ -28519,26 +26488,26 @@ const OtherIncomePanel = ({ user, dateRange, setDateRange }) => {
 
             {incomeForm.paymentMethod === 'CHEQUE' && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <InputField label="Cheque Number" value={incomeForm.chequeNumber}
+                <AccountingInput label="Cheque Number" value={incomeForm.chequeNumber}
                   onChange={(e) => setIncomeForm({ ...incomeForm, chequeNumber: e.target.value })}
                   placeholder="Cheque number" error={formErrors.chequeNumber} />
-                <InputField label="Bank" value={incomeForm.chequeBank}
+                <AccountingInput label="Bank" value={incomeForm.chequeBank}
                   onChange={(e) => setIncomeForm({ ...incomeForm, chequeBank: e.target.value })}
                   placeholder="Bank name" />
               </div>
             )}
 
-            <InputField label="Transaction ID (Optional)" value={incomeForm.transactionId}
+            <AccountingInput label="Transaction ID (Optional)" value={incomeForm.transactionId}
               onChange={(e) => setIncomeForm({ ...incomeForm, transactionId: e.target.value })} />
 
-            <InputField label="Notes" value={incomeForm.notes}
+            <AccountingInput label="Notes" value={incomeForm.notes}
               onChange={(e) => setIncomeForm({ ...incomeForm, notes: e.target.value })}
               textarea rows="2" />
 
             <div className="flex gap-2">
               <button type="submit" disabled={loading}
                 className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-60">
-                {loading ? 'Saving...' : 'Record Income'}
+                {loading ? 'Saving…' : 'Record Income'}
               </button>
               <button type="button"
                 onClick={() => { setShowForm(false); setFormErrors({}); }}
@@ -28553,7 +26522,7 @@ const OtherIncomePanel = ({ user, dateRange, setDateRange }) => {
       <div className="bg-white rounded-xl shadow-sm overflow-hidden">
         <div className="p-4 border-b">
           <input type="text"
-            placeholder="Search by category, description, payer, or method..."
+            placeholder="Search by category, description, payer, or method…"
             className="w-full px-3 py-2 border rounded-lg"
             value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
         </div>
@@ -28569,9 +26538,7 @@ const OtherIncomePanel = ({ user, dateRange, setDateRange }) => {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Amount</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Method</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Reference</th>
-                {canDelete && (
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Actions</th>
-                )}
+                {canDelete && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -28620,6 +26587,647 @@ const OtherIncomePanel = ({ user, dateRange, setDateRange }) => {
   );
 };
 
+// ---------------------------------------------------------------------------
+// 5. Accounting Module
+// ---------------------------------------------------------------------------
+const AccountingModule = ({
+  payments = [],
+  expenses = [],
+  dateRange,
+  setDateRange,
+  showIncomeOnly,
+  showExpensesOnly,
+  isOtherIncome,
+  user,
+  currentSchool
+}) => {
+  const [summary, setSummary] = useState({
+    totalIncome: 0, totalFeeIncome: 0, totalOtherIncome: 0,
+    totalExpenses: 0, netIncome: 0,
+    incomeByMethod: {}, expensesByCategory: {}, incomeByCategory: {}
+  });
+
+  const [showIncomeForm, setShowIncomeForm] = useState(false);
+  const [showExpenseForm, setShowExpenseForm] = useState(false);
+  const [students, setStudents] = useState([]);
+  const [fees, setFees] = useState([]);
+  const [incomeType, setIncomeType] = useState('fee');
+  const [isSponsored, setIsSponsored] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const canAddIncome = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT', 'BURSAR', 'VICE_CHANCELLOR', 'REGISTRAR'].includes(user?.role);
+  const canAddExpense = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT', 'VICE_CHANCELLOR'].includes(user?.role);
+  const canView = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT', 'DEPUTY_PRINCIPAL', 'BURSAR', 'VICE_CHANCELLOR', 'REGISTRAR', 'DEPUTY_VICE_CHANCELLOR'].includes(user?.role);
+
+  const cfg = useMemo(
+    () => getAccountingSchoolConfig(currentSchool, user),
+    [currentSchool, user]
+  );
+
+  const defaultIncomeForm = useMemo(() => ({
+    studentId: '', feeId: '', amount: '', paymentMethod: 'CASH',
+    transactionId: '', notes: '',
+    date: new Date().toISOString().split('T')[0],
+    incomeCategory: cfg.incomeCategories[0] || 'Other',
+    description: '', payer: '',
+    sponsorName: '', sponsorAmount: '', isSponsorship: false,
+    mpesaCode: '', mpesaPhone: '',
+    bankReference: '', bankMessage: '',
+    cardLast4: '', cardApprovalCode: '',
+    chequeNumber: '', chequeBank: ''
+  }), [cfg.incomeCategories]);
+
+  const [incomeForm, setIncomeForm] = useState(defaultIncomeForm);
+  useEffect(() => { setIncomeForm(defaultIncomeForm); }, [defaultIncomeForm]);
+
+  const [expenseForm, setExpenseForm] = useState({
+    category: '', description: '', amount: '',
+    date: new Date().toISOString().split('T')[0],
+    paymentMethod: 'CASH', vendor: '', receiptNo: '', notes: ''
+  });
+
+  const formatCurrency = (amount) => {
+    try {
+      return new Intl.NumberFormat('en-KE', {
+        style: 'currency', currency: 'KES', minimumFractionDigits: 0
+      }).format(amount || 0);
+    } catch {
+      return `KES ${Number(amount || 0).toLocaleString()}`;
+    }
+  };
+
+  // ========================================================================
+  //  FEE vs OTHER-INCOME classification
+  // ========================================================================
+  const isFeePayment = (p) => {
+    if (!p) return false;
+    if (p.isOtherIncome === true) return false;   // explicit other income
+    if (p.isOtherIncome === false) return true;   // explicit fee
+    if (p.feeId) return true;
+    if (p.studentId) return true;                  // student-linked → fee payment
+    if (p.fee?.name || p.feeName) return true;
+    return false;
+  };
+
+  const isOtherIncomePayment = (p) => {
+    if (!p) return false;
+    if (p.isOtherIncome === true) return true;
+    if (p.isOtherIncome === false) return false;
+    if (p.feeId || p.studentId) return false;      // fee payment — not other income
+    return !!p.incomeCategory;
+  };
+
+  // Resolve display category for a payment
+  const resolvePaymentCategory = (p) => {
+    if (isFeePayment(p)) {
+      if (p.feeId) {
+        const fee = fees.find(f => String(f.id) === String(p.feeId));
+        if (fee?.name) return fee.name;
+      }
+      if (p.fee?.name) return p.fee.name;
+      if (p.feeName) return p.feeName;
+      return 'Fee Payment';
+    }
+    return p.incomeCategory || 'Other Income';
+  };
+
+  const normaliseMethod = (m) => (m === 'TRANSFER' ? 'BANK' : (m || 'CASH'));
+
+  // ========================================================================
+  //  Load students + fees once (skip when in other-income-only mode)
+  // ========================================================================
+  useEffect(() => {
+    if (isOtherIncome) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [sRes, fRes] = await Promise.all([
+          api.get('/students').catch(() => ({ data: {} })),
+          api.get('/fees').catch(() => ({ data: {} }))
+        ]);
+        if (cancelled) return;
+        setStudents(sRes.data?.students || []);
+        setFees(fRes.data?.fees || []);
+      } catch (err) {
+        console.error('Error loading students/fees:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOtherIncome]);
+
+  // ========================================================================
+  //  calculateSummary — recompute when payments / expenses / range / fees change
+  // ========================================================================
+  useEffect(() => {
+    if (isOtherIncome) return;
+
+    const withinRange = (row, dateField) => {
+      if (!dateRange?.start || !dateRange?.end) return true;
+      const raw = row?.[dateField] || row?.date || row?.createdAt;
+      if (!raw) return true;
+      const d = new Date(raw).toISOString().split('T')[0];
+      return d >= dateRange.start && d <= dateRange.end;
+    };
+
+    const filteredPayments = payments.filter(p => withinRange(p, 'date'));
+    const filteredExpenses = expenses.filter(e => withinRange(e, 'date'));
+
+    const feePayments = filteredPayments.filter(isFeePayment);
+    const otherIncomePayments = filteredPayments.filter(isOtherIncomePayment);
+
+    const totalFeeIncome = feePayments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+    const totalOtherIncome = otherIncomePayments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+    const totalIncome = totalFeeIncome + totalOtherIncome;
+    const totalExpenses = filteredExpenses.reduce((s, e) => s + parseFloat(e.amount || 0), 0);
+
+    // Income by payment method — split fee vs other for clarity
+    const incomeByMethod = {};
+    filteredPayments.forEach(p => {
+      const amt = parseFloat(p.amount || 0);
+      const key = normaliseMethod(p.paymentMethod);
+      if (!incomeByMethod[key]) incomeByMethod[key] = { fee: 0, other: 0, total: 0 };
+      if (isFeePayment(p)) incomeByMethod[key].fee += amt;
+      else if (isOtherIncomePayment(p)) incomeByMethod[key].other += amt;
+      incomeByMethod[key].total += amt;
+    });
+
+    // Income by category — real fee names for fees, category for other income
+    const incomeByCategory = {};
+    filteredPayments.forEach(p => {
+      const amt = parseFloat(p.amount || 0);
+      const category = resolvePaymentCategory(p);
+      incomeByCategory[category] = (incomeByCategory[category] || 0) + amt;
+    });
+
+    // Expenses by category
+    const expensesByCategory = {};
+    filteredExpenses.forEach(e => {
+      const key = e.category || 'Uncategorised';
+      expensesByCategory[key] = (expensesByCategory[key] || 0) + parseFloat(e.amount || 0);
+    });
+
+    setSummary({
+      totalIncome,
+      totalFeeIncome,
+      totalOtherIncome,
+      totalExpenses,
+      netIncome: totalIncome - totalExpenses,
+      incomeByMethod,
+      expensesByCategory,
+      incomeByCategory
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payments, expenses, dateRange, fees, isOtherIncome]);
+
+  // ========================================================================
+  //  Submit handlers
+  // ========================================================================
+  const handleIncomeSubmit = async (e) => {
+    e.preventDefault();
+    if (!canAddIncome) { alert('You do not have permission to record income'); return; }
+
+    if (incomeType === 'fee' && !incomeForm.studentId) { alert('Please select a student'); return; }
+    if (incomeType === 'fee' && !incomeForm.feeId) { alert('Please select a fee type'); return; }
+    if (!incomeForm.amount || parseFloat(incomeForm.amount) <= 0) {
+      alert('Please enter a valid amount'); return;
+    }
+
+    setLoading(true);
+    try {
+      const paymentData = { ...incomeForm, amount: parseFloat(incomeForm.amount) };
+      const m = paymentData.paymentMethod;
+      if (m !== 'MPESA')  { delete paymentData.mpesaCode; delete paymentData.mpesaPhone; }
+      if (m !== 'BANK')   { delete paymentData.bankReference; delete paymentData.bankMessage; }
+      if (m !== 'CARD')   { delete paymentData.cardLast4; delete paymentData.cardApprovalCode; }
+      if (m !== 'CHEQUE') { delete paymentData.chequeNumber; delete paymentData.chequeBank; }
+
+      if (isSponsored && incomeForm.sponsorName) {
+        paymentData.notes = `${paymentData.notes || ''} | Sponsored by: ${incomeForm.sponsorName}${
+          incomeForm.sponsorAmount ? ` (KES ${incomeForm.sponsorAmount})` : ''
+        }`;
+      }
+
+      if (incomeType === 'fee') {
+        paymentData.isOtherIncome = false;
+        await api.post('/payments', paymentData);
+      } else {
+        await api.post('/payments', {
+          ...paymentData,
+          feeId: null,
+          studentId: null,
+          isOtherIncome: true
+        });
+      }
+
+      setShowIncomeForm(false);
+      setIncomeForm(defaultIncomeForm);
+      setIsSponsored(false);
+      alert('✅ Income recorded successfully!');
+    } catch (error) {
+      console.error('Error recording income:', error);
+      alert('❌ Error recording income: ' + (error.response?.data?.message || error.message));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExpenseSubmit = async (e) => {
+    e.preventDefault();
+    if (!canAddExpense) { alert('You do not have permission to record expenses'); return; }
+    if (!expenseForm.amount || parseFloat(expenseForm.amount) <= 0) {
+      alert('Please enter a valid amount'); return;
+    }
+    setLoading(true);
+    try {
+      await api.post('/expenses', { ...expenseForm, amount: parseFloat(expenseForm.amount) });
+      setShowExpenseForm(false);
+      setExpenseForm({
+        category: '', description: '', amount: '',
+        date: new Date().toISOString().split('T')[0],
+        paymentMethod: 'CASH', vendor: '', receiptNo: '', notes: ''
+      });
+      alert('✅ Expense recorded successfully!');
+    } catch (error) {
+      console.error('Error recording expense:', error);
+      alert('❌ Error recording expense: ' + (error.response?.data?.message || error.message));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ========================================================================
+  //  Options
+  // ========================================================================
+  const studentOptions = useMemo(() => students.map(s => ({
+    value: s.id,
+    label: `${s.firstName} ${s.lastName}`,
+    subLabel: s.admissionNumber
+  })), [students]);
+
+  const feeOptions = useMemo(() => fees.map(f => ({
+    value: f.id,
+    label: f.name,
+    subLabel: `KES ${f.amount}`
+  })), [fees]);
+
+  const incomeCategoryOptions = useMemo(
+    () => cfg.incomeCategories.map(c => ({ value: c, label: c })),
+    [cfg.incomeCategories]
+  );
+
+  const expenseCategoryOptions = [
+    { value: 'Salaries',    label: '💰 Salaries' },
+    { value: 'Utilities',   label: '💡 Utilities' },
+    { value: 'Maintenance', label: '🔧 Maintenance' },
+    { value: 'Supplies',    label: '📦 Supplies' },
+    { value: 'Transport',   label: '🚗 Transport' },
+    { value: 'Food',        label: '🍔 Food' },
+    { value: 'Other',       label: '📋 Other' }
+  ];
+
+  // ========================================================================
+  //  Permission gate
+  // ========================================================================
+  if (!canView) {
+    return (
+      <div className="bg-white p-8 rounded-xl shadow-sm text-center">
+        <i className="fas fa-lock text-5xl text-gray-400 mb-4"></i>
+        <p className="text-gray-500">You do not have permission to view accounting information.</p>
+      </div>
+    );
+  }
+
+  // Other-income mode → render panel
+  if (isOtherIncome) {
+    return (
+      <OtherIncomePanel
+        user={user}
+        currentSchool={currentSchool}
+        dateRange={dateRange}
+        setDateRange={setDateRange}
+      />
+    );
+  }
+
+  // ========================================================================
+  //  Main view
+  // ========================================================================
+  return (
+    <div className="space-y-6">
+      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
+
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold">
+          {showIncomeOnly ? 'Income Management' : showExpensesOnly ? 'Expense Management' : 'Accounting Overview'}
+        </h2>
+        <div className="flex space-x-2">
+          {!showExpensesOnly && canAddIncome && (
+            <button onClick={() => setShowIncomeForm(true)}
+              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center">
+              <i className="fas fa-plus-circle mr-2"></i>Record Income
+            </button>
+          )}
+          {!showIncomeOnly && canAddExpense && (
+            <button onClick={() => setShowExpenseForm(true)}
+              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 flex items-center">
+              <i className="fas fa-minus-circle mr-2"></i>Record Expense
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ---------------- Income Form Modal ---------------- */}
+      {showIncomeForm && canAddIncome && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto p-4">
+          <div className="bg-white p-6 rounded-xl shadow-sm max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg font-semibold mb-4">Record Income</h3>
+            <form onSubmit={handleIncomeSubmit} className="space-y-4">
+              <div className="flex space-x-4 mb-2">
+                <label className="flex items-center cursor-pointer">
+                  <input type="radio" checked={incomeType === 'fee'}
+                    onChange={() => setIncomeType('fee')} className="mr-2" />
+                  Fee Payment
+                </label>
+                <label className="flex items-center cursor-pointer">
+                  <input type="radio" checked={incomeType === 'other'}
+                    onChange={() => setIncomeType('other')} className="mr-2" />
+                  Other Income
+                </label>
+              </div>
+
+              <AccountingInput label="Date" type="date" value={incomeForm.date}
+                onChange={(e) => setIncomeForm({ ...incomeForm, date: e.target.value })}
+                required disabled={loading} />
+
+              {incomeType === 'fee' && (
+                <>
+                  <AccountingSearchableSelect label="Student" required
+                    value={incomeForm.studentId}
+                    onChange={(e) => setIncomeForm({ ...incomeForm, studentId: e.target.value })}
+                    options={studentOptions} disabled={loading} placeholder="Search student…" />
+                  <AccountingSearchableSelect label="Fee Type" required
+                    value={incomeForm.feeId}
+                    onChange={(e) => setIncomeForm({ ...incomeForm, feeId: e.target.value })}
+                    options={feeOptions} disabled={loading} placeholder="Search fee…" />
+                </>
+              )}
+
+              {incomeType === 'other' && (
+                <>
+                  <AccountingSearchableSelect label="Income Category" required
+                    value={incomeForm.incomeCategory}
+                    onChange={(e) => setIncomeForm({ ...incomeForm, incomeCategory: e.target.value })}
+                    options={incomeCategoryOptions}
+                    disabled={loading} placeholder="Search or select a category" />
+                  <AccountingInput label="Description" value={incomeForm.description}
+                    onChange={(e) => setIncomeForm({ ...incomeForm, description: e.target.value })}
+                    disabled={loading} />
+                  <AccountingInput label="Payer" value={incomeForm.payer}
+                    onChange={(e) => setIncomeForm({ ...incomeForm, payer: e.target.value })}
+                    disabled={loading} />
+                </>
+              )}
+
+              <AccountingInput label="Amount (KES)" type="number" value={incomeForm.amount}
+                onChange={(e) => setIncomeForm({ ...incomeForm, amount: e.target.value })}
+                required disabled={loading} min="0" step="0.01" />
+
+              <AccountingSearchableSelect label="Payment Method"
+                value={incomeForm.paymentMethod}
+                onChange={(e) => setIncomeForm({ ...incomeForm, paymentMethod: e.target.value })}
+                options={ACCOUNTING_PAYMENT_METHODS} disabled={loading} placeholder="Select payment method" />
+
+              {incomeForm.paymentMethod === 'MPESA' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <AccountingInput label="M-Pesa Code" value={incomeForm.mpesaCode}
+                    onChange={(e) => setIncomeForm({ ...incomeForm, mpesaCode: e.target.value.toUpperCase() })}
+                    disabled={loading} />
+                  <AccountingInput label="Phone Number" value={incomeForm.mpesaPhone}
+                    onChange={(e) => setIncomeForm({ ...incomeForm, mpesaPhone: e.target.value })}
+                    disabled={loading} placeholder="0712345678" />
+                </div>
+              )}
+              {incomeForm.paymentMethod === 'BANK' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <AccountingInput label="Bank Reference" value={incomeForm.bankReference}
+                    onChange={(e) => setIncomeForm({ ...incomeForm, bankReference: e.target.value })}
+                    disabled={loading} />
+                  <AccountingInput label="Bank Message" value={incomeForm.bankMessage}
+                    onChange={(e) => setIncomeForm({ ...incomeForm, bankMessage: e.target.value })}
+                    disabled={loading} />
+                </div>
+              )}
+              {incomeForm.paymentMethod === 'CARD' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <AccountingInput label="Card Last 4" value={incomeForm.cardLast4}
+                    onChange={(e) => setIncomeForm({ ...incomeForm, cardLast4: e.target.value.replace(/\D/g, '') })}
+                    maxLength="4" disabled={loading} />
+                  <AccountingInput label="Approval Code" value={incomeForm.cardApprovalCode}
+                    onChange={(e) => setIncomeForm({ ...incomeForm, cardApprovalCode: e.target.value })}
+                    disabled={loading} />
+                </div>
+              )}
+              {incomeForm.paymentMethod === 'CHEQUE' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <AccountingInput label="Cheque Number" value={incomeForm.chequeNumber}
+                    onChange={(e) => setIncomeForm({ ...incomeForm, chequeNumber: e.target.value })}
+                    disabled={loading} />
+                  <AccountingInput label="Bank" value={incomeForm.chequeBank}
+                    onChange={(e) => setIncomeForm({ ...incomeForm, chequeBank: e.target.value })}
+                    disabled={loading} />
+                </div>
+              )}
+
+              <AccountingInput label="Transaction ID" value={incomeForm.transactionId}
+                onChange={(e) => setIncomeForm({ ...incomeForm, transactionId: e.target.value })}
+                disabled={loading} />
+
+              <div className="flex items-center space-x-2">
+                <input type="checkbox" checked={isSponsored}
+                  onChange={(e) => setIsSponsored(e.target.checked)}
+                  className="rounded" disabled={loading} />
+                <label>This payment is sponsored</label>
+              </div>
+
+              {isSponsored && (
+                <div className="grid grid-cols-2 gap-4">
+                  <AccountingInput label="Sponsor Name" value={incomeForm.sponsorName}
+                    onChange={(e) => setIncomeForm({ ...incomeForm, sponsorName: e.target.value })}
+                    disabled={loading} />
+                  <AccountingInput label="Sponsor Amount" type="number" value={incomeForm.sponsorAmount}
+                    onChange={(e) => setIncomeForm({ ...incomeForm, sponsorAmount: e.target.value })}
+                    disabled={loading} />
+                </div>
+              )}
+
+              <AccountingInput label="Notes" value={incomeForm.notes}
+                onChange={(e) => setIncomeForm({ ...incomeForm, notes: e.target.value })}
+                textarea rows="2" disabled={loading} />
+
+              <div className="flex space-x-2">
+                <button type="submit" disabled={loading}
+                  className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex-1 disabled:opacity-60">
+                  {loading ? 'Processing…' : 'Record Income'}
+                </button>
+                <button type="button" onClick={() => setShowIncomeForm(false)} disabled={loading}
+                  className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600">
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------- Expense Form Modal ---------------- */}
+      {showExpenseForm && canAddExpense && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white p-6 rounded-xl shadow-sm max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg font-semibold mb-4">Record Expense</h3>
+            <form onSubmit={handleExpenseSubmit} className="space-y-4">
+              <AccountingSearchableSelect label="Category" required
+                value={expenseForm.category}
+                onChange={(e) => setExpenseForm({ ...expenseForm, category: e.target.value })}
+                options={expenseCategoryOptions} disabled={loading} placeholder="Select category" />
+              <AccountingInput label="Description" value={expenseForm.description}
+                onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })}
+                required disabled={loading} />
+              <AccountingInput label="Amount (KES)" type="number" value={expenseForm.amount}
+                onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })}
+                required min="0" step="0.01" disabled={loading} />
+              <AccountingInput label="Date" type="date" value={expenseForm.date}
+                onChange={(e) => setExpenseForm({ ...expenseForm, date: e.target.value })}
+                required disabled={loading} />
+              <AccountingSearchableSelect label="Payment Method"
+                value={expenseForm.paymentMethod}
+                onChange={(e) => setExpenseForm({ ...expenseForm, paymentMethod: e.target.value })}
+                options={ACCOUNTING_PAYMENT_METHODS} disabled={loading} placeholder="Select payment method" />
+              <AccountingInput label="Vendor/Supplier" value={expenseForm.vendor}
+                onChange={(e) => setExpenseForm({ ...expenseForm, vendor: e.target.value })}
+                disabled={loading} />
+              <AccountingInput label="Receipt No." value={expenseForm.receiptNo}
+                onChange={(e) => setExpenseForm({ ...expenseForm, receiptNo: e.target.value })}
+                disabled={loading} />
+              <AccountingInput label="Notes" value={expenseForm.notes}
+                onChange={(e) => setExpenseForm({ ...expenseForm, notes: e.target.value })}
+                disabled={loading} />
+              <div className="flex space-x-2">
+                <button type="submit" disabled={loading}
+                  className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 flex-1 disabled:opacity-60">
+                  {loading ? 'Processing…' : 'Record Expense'}
+                </button>
+                <button type="button" onClick={() => setShowExpenseForm(false)} disabled={loading}
+                  className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600">
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Date Filter */}
+      <div className="bg-white p-6 rounded-xl shadow-sm">
+        <h3 className="text-lg font-semibold mb-4">Filter by Date</h3>
+        <div className="grid grid-cols-2 gap-4 max-w-md">
+          <AccountingInput label="Start Date" type="date" value={dateRange.start}
+            onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })} />
+          <AccountingInput label="End Date" type="date" value={dateRange.end}
+            onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })} />
+        </div>
+      </div>
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl p-6 text-white">
+          <h3 className="text-lg font-semibold mb-2">Total Income</h3>
+          <p className="text-3xl font-bold">{formatCurrency(summary.totalIncome)}</p>
+          <p className="text-xs mt-2 opacity-90">
+            Fees: {formatCurrency(summary.totalFeeIncome)} · Other: {formatCurrency(summary.totalOtherIncome)}
+          </p>
+        </div>
+        <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-xl p-6 text-white">
+          <h3 className="text-lg font-semibold mb-2">Total Expenses</h3>
+          <p className="text-3xl font-bold">{formatCurrency(summary.totalExpenses)}</p>
+          <p className="text-sm mt-2 opacity-90">All expenditures</p>
+        </div>
+        <div className={`bg-gradient-to-br rounded-xl p-6 text-white ${
+          summary.netIncome >= 0 ? 'from-blue-500 to-blue-600' : 'from-orange-500 to-orange-600'
+        }`}>
+          <h3 className="text-lg font-semibold mb-2">Net Income</h3>
+          <p className="text-3xl font-bold">{formatCurrency(summary.netIncome)}</p>
+          <p className="text-sm mt-2 opacity-90">{summary.netIncome >= 0 ? 'Profit' : 'Loss'}</p>
+        </div>
+      </div>
+
+      {/* Income & Expenses Breakdown */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="bg-white p-6 rounded-xl shadow-sm">
+          <h3 className="text-lg font-semibold mb-4">Income by Category</h3>
+          <div className="space-y-3 max-h-60 overflow-y-auto">
+            {Object.entries(summary.incomeByCategory)
+              .sort((a, b) => b[1] - a[1])
+              .map(([category, amount]) => (
+                <div key={category} className="flex justify-between items-center">
+                  <span className="text-gray-600 truncate">{category}</span>
+                  <span className="font-semibold ml-3 whitespace-nowrap">{formatCurrency(amount)}</span>
+                </div>
+              ))}
+            {Object.keys(summary.incomeByCategory).length === 0 && (
+              <p className="text-gray-500 text-center py-4">No income data for selected period</p>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-xl shadow-sm">
+          <h3 className="text-lg font-semibold mb-4">Expenses by Category</h3>
+          <div className="space-y-3 max-h-60 overflow-y-auto">
+            {Object.entries(summary.expensesByCategory)
+              .sort((a, b) => b[1] - a[1])
+              .map(([category, amount]) => (
+                <div key={category} className="flex justify-between items-center">
+                  <span className="text-gray-600 truncate">{category}</span>
+                  <span className="font-semibold ml-3 whitespace-nowrap">{formatCurrency(amount)}</span>
+                </div>
+              ))}
+            {Object.keys(summary.expensesByCategory).length === 0 && (
+              <p className="text-gray-500 text-center py-4">No expense data for selected period</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Income by Payment Method */}
+      <div className="bg-white p-6 rounded-xl shadow-sm">
+        <h3 className="text-lg font-semibold mb-4">Income by Payment Method</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {Object.entries(summary.incomeByMethod)
+            .sort((a, b) => b[1].total - a[1].total)
+            .map(([method, bucket]) => (
+              <div key={method} className="border-b pb-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-700 font-medium">
+                    {ACCOUNTING_METHOD_LABELS[method] || method}
+                  </span>
+                  <span className="font-semibold">{formatCurrency(bucket.total)}</span>
+                </div>
+                <div className="flex justify-between text-xs text-gray-500 mt-0.5">
+                  <span>Fees: {formatCurrency(bucket.fee)}</span>
+                  <span>Other: {formatCurrency(bucket.other)}</span>
+                </div>
+              </div>
+            ))}
+          {Object.keys(summary.incomeByMethod).length === 0 && (
+            <p className="text-gray-500 text-center py-4 col-span-3">
+              No income data for selected period
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
 // ==================== FIXED MESSAGE MODULE WITH EMPTY SEARCHABLE SELECTS ====================
 const MessageModule = ({ 
   form, 
@@ -72857,7 +71465,14 @@ function App() {
   const [features, setFeatures] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [stats, setStats] = useState(null);
-  const [currentSchool, setCurrentSchool] = useState(null);
+const [currentSchool, setCurrentSchool] = useState(() => {
+  try {
+    const cached = localStorage.getItem('currentSchool');
+    return cached ? JSON.parse(cached) : null;
+  } catch {
+    return null;
+  }
+});
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
@@ -74130,8 +72745,23 @@ const fetchUser = async () => {
 
     // ✅ Persist the effective role
     localStorage.setItem('user', JSON.stringify(userData));
-
     setUser(userData);
+
+    // ✅ NEW: hydrate the school as well
+    if (res.data.school) {
+      localStorage.setItem('currentSchool', JSON.stringify(res.data.school));
+      setCurrentSchool(res.data.school);
+    } else {
+      // Fallback: keep whatever was cached from login
+      const cached = localStorage.getItem('currentSchool');
+      if (cached && !currentSchool) {
+        try {
+          setCurrentSchool(JSON.parse(cached));
+        } catch {
+          localStorage.removeItem('currentSchool');
+        }
+      }
+    }
   } catch (err) {
     console.error('Fetch user error:', err);
     if (err.response?.status === 401) handleLogout();
@@ -74357,48 +72987,54 @@ const fetchUser = async () => {
     }
   };
 
-  // ===== 8. handleLogin, handleLogout, handleCreate, handleUpdate, handleDelete =====
-  const handleLogin = async (e) => {
-    e.preventDefault(); 
-    setLoading(true); 
-    setError('');
-    try {
-      const res = await api.post('/auth/login', loginForm);
-      localStorage.setItem('token', res.data.token);
-      localStorage.setItem('user', JSON.stringify(res.data.user));
-      
-      const permissions = res.data.user.permissions || [];
-      localStorage.setItem('userPermissions', JSON.stringify(permissions));
-      
-      setToken(res.data.token);
-      setUser(res.data.user);
-      
-      if (res.data.user.role === 'STUDENT') {
-        try {
-          const studentRes = await api.get(`/students/by-user/${res.data.user.id}`);
-          const student = studentRes.data.student;
-          if (student) {
-            const studentWithVerification = {
-              ...student,
-              userId: res.data.user.id,
-              userEmail: res.data.user.email
-            };
-            localStorage.setItem('studentAdmissionNumber', student.admissionNumber);
-            localStorage.setItem('studentData', JSON.stringify(studentWithVerification));
-          }
-        } catch (err) {
-          console.error('❌ Error fetching student record:', err);
-        }
-      }
-      
-      setSuccess('Login successful!');
-      setTimeout(() => setSuccess(''), 3000);
-    } catch (err) {
-      setError(err.response?.data?.message || 'Invalid email or password');
-    } finally { 
-      setLoading(false); 
+ const handleLogin = async (e) => {
+  e.preventDefault();
+  setLoading(true);
+  setError('');
+  try {
+    const res = await api.post('/auth/login', loginForm);
+
+    // ─── Auth state ───────────────────────────────────────────────
+    localStorage.setItem('token', res.data.token);
+    localStorage.setItem('user', JSON.stringify(res.data.user));
+    const permissions = res.data.user.permissions || [];
+    localStorage.setItem('userPermissions', JSON.stringify(permissions));
+    setToken(res.data.token);
+    setUser(res.data.user);
+
+    // ─── ✅ NEW: persist the school so refresh doesn't lose it ───
+    if (res.data.school) {
+      localStorage.setItem('currentSchool', JSON.stringify(res.data.school));
+      setCurrentSchool(res.data.school);
     }
-  };
+
+    // ─── Student bootstrap ────────────────────────────────────────
+    if (res.data.user.role === 'STUDENT') {
+      try {
+        const studentRes = await api.get(`/students/by-user/${res.data.user.id}`);
+        const student = studentRes.data.student;
+        if (student) {
+          const studentWithVerification = {
+            ...student,
+            userId: res.data.user.id,
+            userEmail: res.data.user.email
+          };
+          localStorage.setItem('studentAdmissionNumber', student.admissionNumber);
+          localStorage.setItem('studentData', JSON.stringify(studentWithVerification));
+        }
+      } catch (err) {
+        console.error('❌ Error fetching student record:', err);
+      }
+    }
+
+    setSuccess('Login successful!');
+    setTimeout(() => setSuccess(''), 3000);
+  } catch (err) {
+    setError(err.response?.data?.message || 'Invalid email or password');
+  } finally {
+    setLoading(false);
+  }
+};
   const handleForgotPassword = async (e) => {
   e.preventDefault();
   setLoading(true);
@@ -74419,21 +73055,37 @@ const fetchUser = async () => {
   }
 };
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    localStorage.removeItem('activeModule');
-    localStorage.removeItem('studentAdmissionNumber');
-    localStorage.removeItem('studentData');
-    localStorage.removeItem('studentAttendanceAdmission');
-    localStorage.removeItem('studentExamAdmission');
-    
-    setToken(null);
-    setUser(null);
-    setCurrentSchool(null);
-    setSchoolSettings({ logo: '', name: '', category: '' });
-    window.location.href = '/';
-  };
+const handleLogout = () => {
+  // ── Auth ──────────────────────────────────────────────
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+  localStorage.removeItem('userPermissions');
+
+  // ── School context ────────────────────────────────────
+  localStorage.removeItem('currentSchool');
+
+  // ── UI state ──────────────────────────────────────────
+  localStorage.removeItem('activeModule');
+
+  // ── Student-specific caches ───────────────────────────
+  localStorage.removeItem('studentAdmissionNumber');
+  localStorage.removeItem('studentData');
+  localStorage.removeItem('studentAttendanceAdmission');
+  localStorage.removeItem('studentExamAdmission');
+
+  // ── Parent-specific caches (if you use any) ───────────
+  // localStorage.removeItem('parentChildren');
+  // localStorage.removeItem('parentSelectedChild');
+
+  // ── React state ───────────────────────────────────────
+  setToken(null);
+  setUser(null);
+  setCurrentSchool(null);
+  setSchoolSettings({ logo: '', name: '', category: '' });
+
+  // ── Redirect ──────────────────────────────────────────
+  window.location.href = '/';
+};
 
   const handleCreate = async (endpoint, data, setter, state) => {
     setLoading(true); 
@@ -76636,6 +75288,8 @@ return (
             showExpensesOnly={true} 
             isOtherIncome={false} 
             user={user} 
+             currentSchool={currentSchool}
+
           />
         )}
 
@@ -76649,6 +75303,7 @@ return (
             showExpensesOnly={false} 
             isOtherIncome={true}
             user={user}
+            currentSchool={currentSchool} 
           />
         )}
 
