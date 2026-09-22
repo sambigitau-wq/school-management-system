@@ -1889,6 +1889,58 @@ const Exam = sequelize.define('Exam', {
   invigilator: { type: DataTypes.STRING, allowNull: true },
   invigilatorId: { type: DataTypes.UUID, allowNull: true } // ADD THIS FIELD
 });
+
+// ============================================================
+//  EXAM SESSIONS — logical grouping of exam papers
+//  One session = one exam event (e.g. "END TERM 1")
+//  Many papers (Exams rows) belong to it, one per subject/unit
+// ============================================================
+const ExamSession = sequelize.define('ExamSession', {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true
+  },
+  schoolId: { type: DataTypes.UUID, allowNull: false },
+  name: { type: DataTypes.STRING, allowNull: false },
+  type: {
+    type: DataTypes.ENUM(
+      'OPENER', 'MIDTERM', 'ENDTERM', 'CAT', 'MOCK', 'PRE_MOCK',
+      'PRACTICAL', 'PROJECT', 'MAIN_EXAM', 'SUPPLEMENTARY', 'SPECIAL',
+      'QUIZ', 'ASSIGNMENT', 'FINAL', 'LAB', 'PRESENTATION', 'THESIS', 'DEFENSE'
+    ),
+    allowNull: false
+  },
+  term: { type: DataTypes.STRING, allowNull: true },              // "Term 1", "Semester 1", "Module 1"
+  academicYear: { type: DataTypes.STRING, allowNull: true },      // "2026"
+
+  // Scope — same as Exams. Only one of these will be set based on school category.
+  classId:    { type: DataTypes.UUID, allowNull: true },          // Primary/Secondary
+  courseId:   { type: DataTypes.UUID, allowNull: true },          // University
+  programId:  { type: DataTypes.UUID, allowNull: true },          // TVET
+  year:       { type: DataTypes.INTEGER, allowNull: true },
+  semester:   { type: DataTypes.INTEGER, allowNull: true },
+  module:     { type: DataTypes.INTEGER, allowNull: true },
+
+  // Defaults inherited by all papers
+  startDate: { type: DataTypes.DATEONLY, allowNull: true },
+  endDate:   { type: DataTypes.DATEONLY, allowNull: true },
+  maxMarks:  { type: DataTypes.INTEGER, allowNull: false, defaultValue: 100 },
+
+  // Meta
+  isPublished: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  notes:       { type: DataTypes.TEXT, allowNull: true },
+  createdBy:   { type: DataTypes.UUID, allowNull: true }
+}, {
+  timestamps: true,
+  tableName: 'ExamSessions',
+  indexes: [
+    { fields: ['schoolId'] },
+    { fields: ['schoolId', 'name'] },
+    { fields: ['schoolId', 'classId'] },
+    { fields: ['schoolId', 'term', 'academicYear'] }
+  ]
+});
 const Result = sequelize.define('Result', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
   studentId: { type: DataTypes.UUID, allowNull: false },
@@ -4407,6 +4459,8 @@ HomeworkSubmission.belongsTo(Student, { foreignKey: 'studentId', as: 'Student' }
 HomeworkSubmission.belongsTo(User,    { foreignKey: 'gradedBy',  as: 'Grader' });
 Student.hasMany(HomeworkSubmission, { foreignKey: 'studentId', as: 'HomeworkSubmissions' });
 User.hasMany(HomeworkSubmission,    { foreignKey: 'gradedBy',  as: 'GradedSubmissions' });
+ExamSession.hasMany(Exam, { foreignKey: 'sessionId', as: 'papers' });
+Exam.belongsTo(ExamSession, { foreignKey: 'sessionId', as: 'session' });
 // ==================== PERMISSION DEFINITIONS ====================
 const PERMISSIONS = {
   SUPER_ADMIN: '*',
@@ -28379,6 +28433,302 @@ app.get('/api/exams/:id/positions', authenticate, async (req, res) => {
   }
 });
 
+
+app.post('/api/exam-sessions', authenticate, async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    // Permissions
+    if (!['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER'].includes(req.user.role)) {
+      await transaction.rollback();
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    const {
+      name, type, term, academicYear,
+      classId, courseId, programId, year, semester, module,
+      startDate, endDate, maxMarks, notes,
+      papers = []
+    } = req.body;
+
+    // ─────────────────────────────────────────────────────────
+    //  Validation
+    // ─────────────────────────────────────────────────────────
+    if (!name || !String(name).trim()) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'Session name is required' });
+    }
+    if (!type) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'Exam type is required' });
+    }
+    if (!papers || papers.length === 0) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'At least one subject paper is required' });
+    }
+
+    const school = await School.findByPk(req.user.schoolId, { transaction });
+    if (!school) {
+      await transaction.rollback();
+      return res.status(404).json({ success: false, message: 'School not found' });
+    }
+
+    const isUniversity = school.category === 'UNIVERSITY';
+    const isTVET       = school.category === 'COLLEGE_TVET';
+    const isRegular    = !isUniversity && !isTVET;
+
+    if (isRegular && !classId) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'Class is required' });
+    }
+    if (isUniversity && !courseId) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'Course is required' });
+    }
+    if (isTVET && !programId) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'Program is required' });
+    }
+
+    // ─────────────────────────────────────────────────────────
+    //  Duplicate check
+    // ─────────────────────────────────────────────────────────
+    const dupeWhere = {
+      schoolId: req.user.schoolId,
+      name: String(name).trim(),
+      term: term || null,
+      academicYear: academicYear || null,
+      classId: classId || null,
+      courseId: courseId || null,
+      programId: programId || null
+    };
+    const existing = await ExamSession.findOne({ where: dupeWhere, transaction });
+    if (existing) {
+      await transaction.rollback();
+      return res.status(409).json({
+        success: false,
+        message: `An exam session named "${name}" already exists for this scope and term.`,
+        existingSessionId: existing.id
+      });
+    }
+
+    // ─────────────────────────────────────────────────────────
+    //  Create the session
+    // ─────────────────────────────────────────────────────────
+    const session = await ExamSession.create({
+      schoolId: req.user.schoolId,
+      name: String(name).trim(),
+      type,
+      term: term || null,
+      academicYear: academicYear || new Date().getFullYear().toString(),
+      classId: classId || null,
+      courseId: courseId || null,
+      programId: programId || null,
+      year: year || null,
+      semester: semester || null,
+      module: module || null,
+      startDate: startDate || null,
+      endDate: endDate || null,
+      maxMarks: maxMarks ? parseInt(maxMarks, 10) : 100,
+      notes: notes || null,
+      createdBy: req.user.id
+    }, { transaction });
+
+    // ─────────────────────────────────────────────────────────
+    //  Create the papers (Exams rows) under the session
+    // ─────────────────────────────────────────────────────────
+    const createdPapers = [];
+    for (const paper of papers) {
+      // Validate paper fields
+      if (!paper.subjectId && !paper.unitId) {
+        throw new Error('Each paper must have either subjectId or unitId');
+      }
+      if (!paper.date) {
+        throw new Error('Each paper must have a date');
+      }
+
+      const paperPayload = {
+        schoolId: req.user.schoolId,
+        sessionId: session.id,
+        name: session.name,               // keep name in sync for legacy code
+        type: session.type,
+        term: session.term,
+        academicYear: session.academicYear,
+        classId: session.classId,
+        courseId: session.courseId,
+        programId: session.programId,
+        year: session.year,
+        semester: session.semester,
+        module: session.module,
+        date: paper.date,
+        startTime: paper.startTime || null,
+        endTime: paper.endTime || null,
+        maxMarks: paper.maxMarks ? parseInt(paper.maxMarks, 10) : (session.maxMarks || 100),
+        examHall: paper.examHall || null,
+        invigilator: paper.invigilator || null,
+        invigilatorId: paper.invigilatorId || null,
+        subjectId: paper.subjectId || null,
+        unitId: paper.unitId || null,
+        isPublished: false,
+        resultsPublished: false
+      };
+
+      const created = await Exam.create(paperPayload, { transaction });
+      createdPapers.push(created);
+    }
+
+    await transaction.commit();
+
+    // Reload with papers
+    const full = await ExamSession.findByPk(session.id, {
+      include: [{ model: Exam, as: 'papers' }]
+    });
+
+    res.status(201).json({
+      success: true,
+      session: full,
+      papersCreated: createdPapers.length,
+      message: `Exam session "${session.name}" created with ${createdPapers.length} paper(s).`
+    });
+
+  } catch (error) {
+    await transaction.rollback();
+    console.error('❌ Create exam session error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ============================================================
+//  GET /api/exam-sessions
+//  List all sessions for the current school, with paper counts.
+// ============================================================
+app.get('/api/exam-sessions', authenticate, async (req, res) => {
+  try {
+    const where = {};
+    if (req.user.role !== 'SUPER_ADMIN') {
+      where.schoolId = req.user.schoolId;
+    } else if (req.query.schoolId) {
+      where.schoolId = req.query.schoolId;
+    }
+
+    const sessions = await ExamSession.findAll({
+      where,
+      include: [{
+        model: Exam,
+        as: 'papers',
+        attributes: ['id', 'subjectId', 'unitId', 'date', 'startTime', 'endTime', 'examHall', 'invigilatorId', 'isPublished']
+      }],
+      order: [['createdAt', 'DESC']]
+    });
+
+    res.json({ success: true, sessions });
+  } catch (err) {
+    console.error('❌ List exam sessions error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ============================================================
+//  GET /api/exam-sessions/:id
+// ============================================================
+app.get('/api/exam-sessions/:id', authenticate, async (req, res) => {
+  try {
+    const session = await ExamSession.findByPk(req.params.id, {
+      include: [{ model: Exam, as: 'papers' }]
+    });
+    if (!session) return res.status(404).json({ success: false, message: 'Session not found' });
+    if (req.user.role !== 'SUPER_ADMIN' && session.schoolId !== req.user.schoolId) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+    res.json({ success: true, session });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ============================================================
+//  PATCH /api/exam-sessions/:id
+//  Update session metadata and/or replace its papers.
+// ============================================================
+app.patch('/api/exam-sessions/:id', authenticate, async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const session = await ExamSession.findByPk(req.params.id, { transaction });
+    if (!session) {
+      await transaction.rollback();
+      return res.status(404).json({ success: false, message: 'Session not found' });
+    }
+    if (req.user.role !== 'SUPER_ADMIN' && session.schoolId !== req.user.schoolId) {
+      await transaction.rollback();
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    const { name, type, term, academicYear, startDate, endDate, maxMarks, notes, isPublished } = req.body;
+
+    await session.update({
+      ...(name !== undefined && { name }),
+      ...(type !== undefined && { type }),
+      ...(term !== undefined && { term }),
+      ...(academicYear !== undefined && { academicYear }),
+      ...(startDate !== undefined && { startDate }),
+      ...(endDate !== undefined && { endDate }),
+      ...(maxMarks !== undefined && { maxMarks }),
+      ...(notes !== undefined && { notes }),
+      ...(isPublished !== undefined && { isPublished })
+    }, { transaction });
+
+    await transaction.commit();
+
+    const full = await ExamSession.findByPk(session.id, {
+      include: [{ model: Exam, as: 'papers' }]
+    });
+    res.json({ success: true, session: full });
+  } catch (err) {
+    await transaction.rollback();
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ============================================================
+//  DELETE /api/exam-sessions/:id
+//  Deletes the session AND all its papers, plus any results.
+// ============================================================
+app.delete('/api/exam-sessions/:id', authenticate, async (req, res) => {
+  const transaction = await sequelize.transaction();
+  try {
+    const session = await ExamSession.findByPk(req.params.id, {
+      include: [{ model: Exam, as: 'papers' }],
+      transaction
+    });
+    if (!session) {
+      await transaction.rollback();
+      return res.status(404).json({ success: false, message: 'Session not found' });
+    }
+    if (!['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL'].includes(req.user.role)) {
+      await transaction.rollback();
+      return res.status(403).json({ success: false, message: 'Only admins can delete sessions' });
+    }
+
+    const paperIds = (session.papers || []).map(p => p.id);
+
+    // Delete results
+    if (paperIds.length > 0) {
+      await Result.destroy({ where: { examId: paperIds }, transaction });
+    }
+
+    // Delete papers
+    await Exam.destroy({ where: { sessionId: session.id }, transaction });
+
+    // Delete session
+    await session.destroy({ transaction });
+
+    await transaction.commit();
+
+    res.json({ success: true, message: `Deleted session and ${paperIds.length} paper(s)` });
+  } catch (err) {
+    await transaction.rollback();
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 // ============================================================
 // ==================== GRADE HELPER FUNCTION ====================
 // ============================================================
@@ -28665,6 +29015,33 @@ try {
   }
 } catch (err) {
   console.error('⚠️  gradingConfig migration failed:', err.message);
+}
+// Create ExamSessions table if missing
+try {
+  if (!(await tableExists('ExamSessions'))) {
+    await ExamSession.sync();
+    console.log('✅ Migration: created ExamSessions table');
+  }
+} catch (err) {
+  console.error('⚠️  ExamSessions migration failed:', err.message);
+}
+
+// Add sessionId column to Exams table
+try {
+  if (await tableExists('Exams')) {
+    if (!(await columnExists('Exams', 'sessionId'))) {
+      await queryInterface.addColumn('Exams', 'sessionId', {
+        type: DataTypes.UUID,
+        allowNull: true,
+        references: { model: 'ExamSessions', key: 'id' },
+        onUpdate: 'CASCADE',
+        onDelete: 'SET NULL'
+      });
+      console.log('✅ Migration: added Exams.sessionId');
+    }
+  }
+} catch (err) {
+  console.error('⚠️  Exams.sessionId migration failed:', err.message);
 }
     // ============================================================
     //  4. Startup summary
