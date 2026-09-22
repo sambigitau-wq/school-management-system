@@ -24,8 +24,6 @@ const resolveLogoUrl = (school) => {
   return `${API_ORIGIN}${raw.startsWith('/') ? '' : '/'}${raw}`;
 };
 
-// Usage:
-<img src={resolveLogoUrl(currentSchool)} />
 // ✅ Global 402 handler — subscription expired / blocked
 api.interceptors.response.use(
   (response) => response,
@@ -71623,10 +71621,10 @@ useEffect(() => {
 const getFilteredDashboardSections = (user, schoolCategory) => {
   if (!user) return [];
 
-  const isUniversity = schoolCategory === 'UNIVERSITY';
-  const isTVET = schoolCategory === 'COLLEGE_TVET';
-  const isPrimary = schoolCategory === 'ECDE_PRIMARY_JSS';
-  const isSecondary = schoolCategory === 'SENIOR_SECONDARY';
+  const isUniversity         = schoolCategory === 'UNIVERSITY';
+  const isTVET               = schoolCategory === 'COLLEGE_TVET';
+  const isPrimary            = schoolCategory === 'ECDE_PRIMARY_JSS';
+  const isSecondary          = schoolCategory === 'SENIOR_SECONDARY';
   const isSecondaryOrPrimary = isPrimary || isSecondary;
   const showCourseAndUnitMenus = isUniversity || isTVET;
 
@@ -71646,18 +71644,18 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
   // ============================================
   if (user.role === 'STUDENT') {
     const studentItems = [
-      { icon: 'file-alt',       label: 'My Results',      id: 'results' },
-      { icon: 'calendar-check', label: 'My Attendance',   id: 'attendance' },
-      { icon: 'id-card',        label: 'Exam Card',       id: 'exam-cards' },
-      { icon: 'book-open',      label: 'Homework',        id: 'homework' },
-      { icon: 'clock',          label: 'Timetable',       id: 'timetable' },
-      { icon: 'money-bill',     label: 'Fee Statement',   id: 'fee-statement' },
-      { icon: 'book-open',      label: 'Library',         id: 'library' },
-      { icon: 'calendar-alt',   label: 'Events',          id: 'events' },
-      { icon: 'bullhorn',       label: 'Announcements',   id: 'announcements' },
-      { icon: 'video',          label: 'Live Classroom',  id: 'live-classroom' },
-      { icon: 'laptop',         label: 'Online Exams',    id: 'online-exams' },
-      { icon: 'cog',            label: 'Settings',        id: 'settings' }
+      { icon: 'file-alt',       label: 'My Results',     id: 'results' },
+      { icon: 'calendar-check', label: 'My Attendance',  id: 'attendance' },
+      { icon: 'id-card',        label: 'Exam Card',      id: 'exam-cards' },
+      { icon: 'book-open',      label: 'Homework',       id: 'homework' },
+      { icon: 'clock',          label: 'Timetable',      id: 'timetable' },
+      { icon: 'money-bill',     label: 'Fee Statement',  id: 'fee-statement' },
+      { icon: 'book-open',      label: 'Library',        id: 'library' },
+      { icon: 'calendar-alt',   label: 'Events',         id: 'events' },
+      { icon: 'bullhorn',       label: 'Announcements',  id: 'announcements' },
+      { icon: 'video',          label: 'Live Classroom', id: 'live-classroom' },
+      { icon: 'laptop',         label: 'Online Exams',   id: 'online-exams' },
+      { icon: 'cog',            label: 'Settings',       id: 'settings' }
     ];
 
     if (showCourseAndUnitMenus) {
@@ -71685,17 +71683,17 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
   // ============================================
   else if (user.role === 'PARENT') {
     const parentItems = [
-      { icon: 'child',          label: 'My Children',    id: 'students' },
-      { icon: 'calendar-check', label: 'Attendance',     id: 'attendance' },
-      { icon: 'file-alt',       label: 'Results',        id: 'results' },
-      { icon: 'id-card',        label: 'Exam Cards',     id: 'exam-cards' },
-      { icon: 'book-open',      label: 'Homework',       id: 'homework' },
-      { icon: 'money-bill',     label: 'Fee Statement',  id: 'fee-statement' },
-      { icon: 'book-open',      label: 'Library',        id: 'library' },
-      { icon: 'clock',          label: 'Timetable',      id: 'timetable' },
-      { icon: 'calendar-alt',   label: 'Events',         id: 'events' },
-      { icon: 'bullhorn',       label: 'Announcements',  id: 'announcements' },
-      { icon: 'cog',            label: 'Settings',       id: 'settings' }
+      { icon: 'child',          label: 'My Children',   id: 'students' },
+      { icon: 'calendar-check', label: 'Attendance',    id: 'attendance' },
+      { icon: 'file-alt',       label: 'Results',       id: 'results' },
+      { icon: 'id-card',        label: 'Exam Cards',    id: 'exam-cards' },
+      { icon: 'book-open',      label: 'Homework',      id: 'homework' },
+      { icon: 'money-bill',     label: 'Fee Statement', id: 'fee-statement' },
+      { icon: 'book-open',      label: 'Library',       id: 'library' },
+      { icon: 'clock',          label: 'Timetable',     id: 'timetable' },
+      { icon: 'calendar-alt',   label: 'Events',        id: 'events' },
+      { icon: 'bullhorn',       label: 'Announcements', id: 'announcements' },
+      { icon: 'cog',            label: 'Settings',      id: 'settings' }
     ];
 
     sections = [
@@ -71708,23 +71706,23 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
   // TEACHER VIEW
   // ============================================
   else if (['TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER', 'SENIOR_TEACHER'].includes(user.role)) {
-    let teacherItems = [
-      { icon: 'users',          label: 'My Students',      id: 'students' },
-      { icon: 'calendar-check', label: 'Take Attendance',  id: 'attendance' },
-      { icon: 'book-open',      label: 'Homework',         id: 'homework' },
-      { icon: 'edit',           label: 'Enter Results',    id: 'results' },
-      { icon: 'file-alt',       label: 'Exams',            id: 'exams' },
-      { icon: 'book',           label: 'Schemes of Work',  id: 'schemes-of-work' },
-      { icon: 'clock',          label: 'My Timetable',     id: 'timetable' },
-      { icon: 'user-check',     label: 'Student Arrival',  id: 'student-arrival' },
-      { icon: 'video',          label: 'Live Classroom',   id: 'live-classroom' },
-      { icon: 'laptop',         label: 'Online Exams',     id: 'online-exams' },
-      { icon: 'users',          label: 'Alumni',           id: 'alumni' },
-      { icon: 'concierge',      label: 'Receptionist',     id: 'receptionist' },
-      { icon: 'calendar-alt',   label: 'Events',           id: 'events' },
-      { icon: 'bullhorn',       label: 'Announcements',    id: 'announcements' },
-      { icon: 'cog',            label: 'Settings',         id: 'settings' },
-      { icon: 'microscope',     label: 'Labs',             id: 'labs' }
+    const teacherItems = [
+      { icon: 'users',          label: 'My Students',     id: 'students' },
+      { icon: 'calendar-check', label: 'Take Attendance', id: 'attendance' },
+      { icon: 'book-open',      label: 'Homework',        id: 'homework' },
+      { icon: 'edit',           label: 'Enter Results',   id: 'results' },
+      { icon: 'file-alt',       label: 'Exams',           id: 'exams' },
+      { icon: 'book',           label: 'Schemes of Work', id: 'schemes-of-work' },
+      { icon: 'clock',          label: 'My Timetable',    id: 'timetable' },
+      { icon: 'user-check',     label: 'Student Arrival', id: 'student-arrival' },
+      { icon: 'video',          label: 'Live Classroom',  id: 'live-classroom' },
+      { icon: 'laptop',         label: 'Online Exams',    id: 'online-exams' },
+      { icon: 'users',          label: 'Alumni',          id: 'alumni' },
+      { icon: 'concierge',      label: 'Receptionist',    id: 'receptionist' },
+      { icon: 'calendar-alt',   label: 'Events',          id: 'events' },
+      { icon: 'bullhorn',       label: 'Announcements',   id: 'announcements' },
+      { icon: 'cog',            label: 'Settings',        id: 'settings' },
+      { icon: 'microscope',     label: 'Labs',            id: 'labs' }
     ];
 
     if (isSecondaryOrPrimary) {
@@ -71747,25 +71745,25 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
   // ============================================
   else if (['LECTURER', 'SENIOR_LECTURER', 'PROFESSOR'].includes(user.role)) {
     const lecturerItems = [
-      { icon: 'users',          label: 'My Students',         id: 'students' },
-      { icon: 'calendar-check', label: 'Take Attendance',     id: 'attendance' },
-      { icon: 'edit',           label: 'Enter Results',       id: 'results' },
-      { icon: 'file-alt',       label: 'Exams',               id: 'exams' },
-      { icon: 'clock',          label: 'My Timetable',        id: 'timetable' },
-      { icon: 'book-open',      label: 'My Units',            id: 'course-units' },
-      { icon: 'book',           label: 'Schemes of Work',     id: 'schemes-of-work' },
-      { icon: 'user-plus',      label: 'Course Enrollment',   id: 'course-enrollment' },
-      { icon: 'book',           label: 'Unit Registration',   id: 'unit-registration' },
-      { icon: 'user-check',     label: 'Student Arrival',     id: 'student-arrival' },
-      { icon: 'flask',          label: 'Research',            id: 'research' },
-      { icon: 'video',          label: 'Live Classroom',      id: 'live-classroom' },
-      { icon: 'laptop',         label: 'Online Exams',        id: 'online-exams' },
-      { icon: 'users',          label: 'Alumni',              id: 'alumni' },
-      { icon: 'concierge',      label: 'Receptionist',        id: 'receptionist' },
-      { icon: 'calendar-alt',   label: 'Events',              id: 'events' },
-      { icon: 'bullhorn',       label: 'Announcements',       id: 'announcements' },
-      { icon: 'cog',            label: 'Settings',            id: 'settings' },
-      { icon: 'microscope',     label: 'Labs',                id: 'labs' }
+      { icon: 'users',          label: 'My Students',       id: 'students' },
+      { icon: 'calendar-check', label: 'Take Attendance',   id: 'attendance' },
+      { icon: 'edit',           label: 'Enter Results',     id: 'results' },
+      { icon: 'file-alt',       label: 'Exams',             id: 'exams' },
+      { icon: 'clock',          label: 'My Timetable',      id: 'timetable' },
+      { icon: 'book-open',      label: 'My Units',          id: 'course-units' },
+      { icon: 'book',           label: 'Schemes of Work',   id: 'schemes-of-work' },
+      { icon: 'user-plus',      label: 'Course Enrollment', id: 'course-enrollment' },
+      { icon: 'book',           label: 'Unit Registration', id: 'unit-registration' },
+      { icon: 'user-check',     label: 'Student Arrival',   id: 'student-arrival' },
+      { icon: 'flask',          label: 'Research',          id: 'research' },
+      { icon: 'video',          label: 'Live Classroom',    id: 'live-classroom' },
+      { icon: 'laptop',         label: 'Online Exams',      id: 'online-exams' },
+      { icon: 'users',          label: 'Alumni',            id: 'alumni' },
+      { icon: 'concierge',      label: 'Receptionist',      id: 'receptionist' },
+      { icon: 'calendar-alt',   label: 'Events',            id: 'events' },
+      { icon: 'bullhorn',       label: 'Announcements',     id: 'announcements' },
+      { icon: 'cog',            label: 'Settings',          id: 'settings' },
+      { icon: 'microscope',     label: 'Labs',              id: 'labs' }
     ];
 
     sections = [
@@ -71783,36 +71781,36 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
       {
         title: 'FACULTY MANAGEMENT',
         items: [
-          { icon: 'building',     label: 'Faculties',        id: 'faculties' },
-          { icon: 'layer-group',  label: 'Departments',      id: 'departments' },
-          { icon: 'graduation-cap', label: 'Courses',        id: 'courses' },
-          { icon: 'book-open',    label: 'Units',            id: 'course-units' },
-          { icon: 'book',         label: 'Schemes of Work',  id: 'schemes-of-work' },
-          { icon: 'flask',        label: 'Research',         id: 'research' },
-          { icon: 'microscope',   label: 'Labs',             id: 'labs' }
+          { icon: 'building',       label: 'Faculties',       id: 'faculties' },
+          { icon: 'layer-group',    label: 'Departments',     id: 'departments' },
+          { icon: 'graduation-cap', label: 'Courses',         id: 'courses' },
+          { icon: 'book-open',      label: 'Units',           id: 'course-units' },
+          { icon: 'book',           label: 'Schemes of Work', id: 'schemes-of-work' },
+          { icon: 'flask',          label: 'Research',        id: 'research' },
+          { icon: 'microscope',     label: 'Labs',            id: 'labs' }
         ]
       },
       {
         title: 'STUDENTS & STAFF',
         items: [
-          { icon: 'users',             label: 'Students',           id: 'students' },
+          { icon: 'users',              label: 'Students',          id: 'students' },
           { icon: 'chalkboard-teacher', label: 'Staff',             id: 'staff' },
-          { icon: 'user-check',        label: 'Student Arrival',    id: 'student-arrival' },
-          { icon: 'user-plus',         label: 'Course Enrollment',  id: 'course-enrollment' },
-          { icon: 'book',              label: 'Unit Registration',  id: 'unit-registration' }
+          { icon: 'user-check',         label: 'Student Arrival',   id: 'student-arrival' },
+          { icon: 'user-plus',          label: 'Course Enrollment', id: 'course-enrollment' },
+          { icon: 'book',               label: 'Unit Registration', id: 'unit-registration' }
         ]
       },
       {
         title: 'ACADEMICS',
         items: [
-          { icon: 'file-alt',       label: 'Exams',                id: 'exams' },
-          { icon: 'user-check',     label: 'Exam Card Overrides',  id: 'exam-card-overrides' },
-          { icon: 'chart-line',     label: 'Results',              id: 'results' },
-          { icon: 'clock',          label: 'Timetable',            id: 'timetable' },
-          { icon: 'calendar-check', label: 'Attendance',           id: 'attendance' },
-          { icon: 'arrow-up',       label: 'Promotion',            id: 'promotion' },
-          { icon: 'video',          label: 'Live Classroom',       id: 'live-classroom' },
-          { icon: 'laptop',         label: 'Online Exams',         id: 'online-exams' }
+          { icon: 'file-alt',       label: 'Exams',               id: 'exams' },
+          { icon: 'user-check',     label: 'Exam Card Overrides', id: 'exam-card-overrides' },
+          { icon: 'chart-line',     label: 'Results',             id: 'results' },
+          { icon: 'clock',          label: 'Timetable',           id: 'timetable' },
+          { icon: 'calendar-check', label: 'Attendance',          id: 'attendance' },
+          { icon: 'arrow-up',       label: 'Promotion',           id: 'promotion' },
+          { icon: 'video',          label: 'Live Classroom',      id: 'live-classroom' },
+          { icon: 'laptop',         label: 'Online Exams',        id: 'online-exams' }
         ]
       },
       {
@@ -71840,12 +71838,12 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
   // ============================================
   else if (user.role === 'HOD' || user.role === 'HEAD_OF_DEPARTMENT') {
     const hodItems = [
-      { icon: 'users',             label: 'Students',           id: 'students' },
+      { icon: 'users',              label: 'Students',          id: 'students' },
       { icon: 'chalkboard-teacher', label: 'Staff',             id: 'staff' },
-      { icon: 'user-check',        label: 'Student Arrival',    id: 'student-arrival' },
-      { icon: 'user-plus',         label: 'Course Enrollment',  id: 'course-enrollment' },
-      { icon: 'book',              label: 'Unit Registration',  id: 'unit-registration' },
-      { icon: 'microscope',        label: 'Labs',               id: 'labs' }
+      { icon: 'user-check',         label: 'Student Arrival',   id: 'student-arrival' },
+      { icon: 'user-plus',          label: 'Course Enrollment', id: 'course-enrollment' },
+      { icon: 'book',               label: 'Unit Registration', id: 'unit-registration' },
+      { icon: 'microscope',         label: 'Labs',              id: 'labs' }
     ];
 
     if (isUniversity) {
@@ -71866,13 +71864,13 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
       {
         title: 'ACADEMICS',
         items: [
-          { icon: 'file-alt',       label: 'Exams',                 id: 'exams' },
-          { icon: 'user-check',     label: 'Exam Card Overrides',   id: 'exam-card-overrides' },
-          { icon: 'chart-line',     label: 'Results',               id: 'results' },
-          { icon: 'clock',          label: 'Timetable',             id: 'timetable' },
-          { icon: 'calendar-check', label: 'Attendance',            id: 'attendance' },
-          { icon: 'book',           label: 'Schemes of Work',       id: 'schemes-of-work' },
-          { icon: 'arrow-up',       label: 'Promotion',             id: 'promotion' }
+          { icon: 'file-alt',       label: 'Exams',               id: 'exams' },
+          { icon: 'user-check',     label: 'Exam Card Overrides', id: 'exam-card-overrides' },
+          { icon: 'chart-line',     label: 'Results',             id: 'results' },
+          { icon: 'clock',          label: 'Timetable',           id: 'timetable' },
+          { icon: 'calendar-check', label: 'Attendance',          id: 'attendance' },
+          { icon: 'book',           label: 'Schemes of Work',     id: 'schemes-of-work' },
+          { icon: 'arrow-up',       label: 'Promotion',           id: 'promotion' }
         ]
       },
       {
@@ -71906,11 +71904,11 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
       {
         title: 'SCHOOL OVERVIEW',
         items: [
-          { icon: 'school',             label: 'Classes',   id: 'classes' },
-          { icon: 'book',               label: 'Subjects',  id: 'subjects' },
-          { icon: 'users',              label: 'Students',  id: 'students' },
-          { icon: 'chalkboard-teacher', label: 'Staff',     id: 'staff' },
-          { icon: 'microscope',         label: 'Labs',      id: 'labs' }
+          { icon: 'school',             label: 'Classes',  id: 'classes' },
+          { icon: 'book',               label: 'Subjects', id: 'subjects' },
+          { icon: 'users',              label: 'Students', id: 'students' },
+          { icon: 'chalkboard-teacher', label: 'Staff',    id: 'staff' },
+          { icon: 'microscope',         label: 'Labs',     id: 'labs' }
         ]
       },
       {
@@ -71928,30 +71926,30 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
       {
         title: 'STUDENT MANAGEMENT',
         items: [
-          { icon: 'user-check',  label: 'Student Arrival',      id: 'student-arrival' },
-          { icon: 'book-open',   label: 'Homework',             id: 'homework' },
-          { icon: 'user-check',  label: 'Exam Card Overrides',  id: 'exam-card-overrides' },
-          { icon: 'stethoscope', label: 'Health Records',       id: 'health' },
-          { icon: 'bed',         label: 'Sick Bay',             id: 'sickbay' }
+          { icon: 'user-check',  label: 'Student Arrival',     id: 'student-arrival' },
+          { icon: 'book-open',   label: 'Homework',            id: 'homework' },
+          { icon: 'user-check',  label: 'Exam Card Overrides', id: 'exam-card-overrides' },
+          { icon: 'stethoscope', label: 'Health Records',      id: 'health' },
+          { icon: 'bed',         label: 'Sick Bay',            id: 'sickbay' }
         ]
       },
       {
         title: 'FINANCE',
         items: [
-          { icon: 'money-bill',       label: 'Fee Management',   id: 'fees' },
-          { icon: 'hand-holding-usd', label: 'Fee Allocation',   id: 'fee-allocation' },
-          { icon: 'credit-card',      label: 'Fee Collection',   id: 'fee-collection' },
-          { icon: 'receipt',          label: 'Receipt History',  id: 'receipt-history' },
-          { icon: 'file-invoice',     label: 'Reports',          id: 'reports' },
-          { icon: 'bell',             label: 'Fee Reminders',    id: 'fee-reminders' },
-          { icon: 'exchange-alt',     label: 'Fee Transfers',    id: 'fee-transfers' }
+          { icon: 'money-bill',       label: 'Fee Management',  id: 'fees' },
+          { icon: 'hand-holding-usd', label: 'Fee Allocation',  id: 'fee-allocation' },
+          { icon: 'credit-card',      label: 'Fee Collection',  id: 'fee-collection' },
+          { icon: 'receipt',          label: 'Receipt History', id: 'receipt-history' },
+          { icon: 'file-invoice',     label: 'Reports',         id: 'reports' },
+          { icon: 'bell',             label: 'Fee Reminders',   id: 'fee-reminders' },
+          { icon: 'exchange-alt',     label: 'Fee Transfers',   id: 'fee-transfers' }
         ]
       },
       {
         title: 'STAFF',
         items: [
-          { icon: 'clipboard-list',   label: 'Staff Attendance', id: 'staff-attendance' },
-          { icon: 'money-bill-wave',  label: 'Payroll',          id: 'payroll' }
+          { icon: 'clipboard-list',  label: 'Staff Attendance', id: 'staff-attendance' },
+          { icon: 'money-bill-wave', label: 'Payroll',          id: 'payroll' }
         ]
       },
       {
@@ -71991,14 +71989,14 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
       {
         title: 'STUDENT AFFAIRS',
         items: [
-          { icon: 'users',          label: 'Students',             id: 'students' },
-          { icon: 'calendar-check', label: 'Attendance',           id: 'attendance' },
-          { icon: 'clock',          label: 'Timetable',            id: 'timetable' },
-          { icon: 'id-card',        label: 'Exam Cards',           id: 'exam-cards' },
-          { icon: 'user-check',     label: 'Exam Card Overrides',  id: 'exam-card-overrides' },
-          { icon: 'book-open',      label: 'Homework',             id: 'homework' },
-          { icon: 'user-check',     label: 'Student Arrival',      id: 'student-arrival' },
-          { icon: 'microscope',     label: 'Labs',                 id: 'labs' }
+          { icon: 'users',          label: 'Students',            id: 'students' },
+          { icon: 'calendar-check', label: 'Attendance',          id: 'attendance' },
+          { icon: 'clock',          label: 'Timetable',           id: 'timetable' },
+          { icon: 'id-card',        label: 'Exam Cards',          id: 'exam-cards' },
+          { icon: 'user-check',     label: 'Exam Card Overrides', id: 'exam-card-overrides' },
+          { icon: 'book-open',      label: 'Homework',            id: 'homework' },
+          { icon: 'user-check',     label: 'Student Arrival',     id: 'student-arrival' },
+          { icon: 'microscope',     label: 'Labs',                id: 'labs' }
         ]
       },
       {
@@ -72075,10 +72073,10 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
       {
         title: 'LIBRARY',
         items: [
-          { icon: 'book',         label: 'Books',          id: 'library' },
-          { icon: 'hand-holding', label: 'Borrow Books',   id: 'library' },
-          { icon: 'undo-alt',     label: 'Return Books',   id: 'library' },
-          { icon: 'users',        label: 'Students',       id: 'students' }
+          { icon: 'book',         label: 'Books',        id: 'library' },
+          { icon: 'hand-holding', label: 'Borrow Books', id: 'library' },
+          { icon: 'undo-alt',     label: 'Return Books', id: 'library' },
+          { icon: 'users',        label: 'Students',     id: 'students' }
         ]
       },
       {
@@ -72102,10 +72100,10 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
       {
         title: 'HEALTH MANAGEMENT',
         items: [
-          { icon: 'users',          label: 'Students',        id: 'students' },
-          { icon: 'stethoscope',    label: 'Health Records',  id: 'health' },
-          { icon: 'bed',            label: 'Sick Bay',        id: 'sickbay' },
-          { icon: 'calendar-check', label: 'Attendance',      id: 'attendance' }
+          { icon: 'users',          label: 'Students',       id: 'students' },
+          { icon: 'stethoscope',    label: 'Health Records', id: 'health' },
+          { icon: 'bed',            label: 'Sick Bay',       id: 'sickbay' },
+          { icon: 'calendar-check', label: 'Attendance',     id: 'attendance' }
         ]
       },
       {
@@ -72157,10 +72155,10 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
       {
         title: 'FLEET MANAGEMENT',
         items: [
-          { icon: 'bus',            label: 'Vehicles',             id: 'transport' },
-          { icon: 'route',          label: 'Routes',               id: 'transport' },
+          { icon: 'bus',            label: 'Vehicles',              id: 'transport' },
+          { icon: 'route',          label: 'Routes',                id: 'transport' },
           { icon: 'users',          label: 'Students on Transport', id: 'students' },
-          { icon: 'calendar-check', label: 'Attendance',           id: 'attendance' }
+          { icon: 'calendar-check', label: 'Attendance',            id: 'attendance' }
         ]
       },
       {
@@ -72184,10 +72182,10 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
       {
         title: 'HUMAN RESOURCES',
         items: [
-          { icon: 'users',           label: 'Staff',             id: 'staff' },
-          { icon: 'clipboard-list',  label: 'Staff Attendance',  id: 'staff-attendance' },
-          { icon: 'money-bill-wave', label: 'Payroll',           id: 'payroll' },
-          { icon: 'file-invoice',    label: 'Reports',           id: 'reports' }
+          { icon: 'users',           label: 'Staff',            id: 'staff' },
+          { icon: 'clipboard-list',  label: 'Staff Attendance', id: 'staff-attendance' },
+          { icon: 'money-bill-wave', label: 'Payroll',          id: 'payroll' },
+          { icon: 'file-invoice',    label: 'Reports',          id: 'reports' }
         ]
       },
       {
@@ -72213,13 +72211,13 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
         {
           title: 'TVET',
           items: [
-            { icon: 'building',       label: 'Faculties',          id: 'faculties' },
-            { icon: 'layer-group',    label: 'Departments',        id: 'departments' },
-            { icon: 'graduation-cap', label: 'Programs',           id: 'programs' },
-            { icon: 'book-open',      label: 'Modules',            id: 'course-units' },
-            { icon: 'microscope',     label: 'Labs',               id: 'labs' },
-            { icon: 'user-plus',      label: 'Course Enrollment',  id: 'course-enrollment' },
-            { icon: 'book',           label: 'Unit Registration',  id: 'unit-registration' }
+            { icon: 'building',       label: 'Faculties',         id: 'faculties' },
+            { icon: 'layer-group',    label: 'Departments',       id: 'departments' },
+            { icon: 'graduation-cap', label: 'Programs',          id: 'programs' },
+            { icon: 'book-open',      label: 'Modules',           id: 'course-units' },
+            { icon: 'microscope',     label: 'Labs',              id: 'labs' },
+            { icon: 'user-plus',      label: 'Course Enrollment', id: 'course-enrollment' },
+            { icon: 'book',           label: 'Unit Registration', id: 'unit-registration' }
           ]
         },
         {
@@ -72236,14 +72234,14 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
       sections.push({
         title: 'UNIVERSITY',
         items: [
-          { icon: 'building',       label: 'Faculties',          id: 'faculties' },
-          { icon: 'layer-group',    label: 'Departments',        id: 'departments' },
-          { icon: 'graduation-cap', label: 'Courses',            id: 'courses' },
-          { icon: 'book-open',      label: 'Units',              id: 'course-units' },
-          { icon: 'flask',          label: 'Research',           id: 'research' },
-          { icon: 'microscope',     label: 'Labs',               id: 'labs' },
-          { icon: 'user-plus',      label: 'Course Enrollment',  id: 'course-enrollment' },
-          { icon: 'book',           label: 'Unit Registration',  id: 'unit-registration' }
+          { icon: 'building',       label: 'Faculties',         id: 'faculties' },
+          { icon: 'layer-group',    label: 'Departments',       id: 'departments' },
+          { icon: 'graduation-cap', label: 'Courses',           id: 'courses' },
+          { icon: 'book-open',      label: 'Units',             id: 'course-units' },
+          { icon: 'flask',          label: 'Research',          id: 'research' },
+          { icon: 'microscope',     label: 'Labs',              id: 'labs' },
+          { icon: 'user-plus',      label: 'Course Enrollment', id: 'course-enrollment' },
+          { icon: 'book',           label: 'Unit Registration', id: 'unit-registration' }
         ]
       });
     }
@@ -72274,36 +72272,36 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
       {
         title: 'STUDENT MANAGEMENT',
         items: [
-          { icon: 'user-check',     label: 'Student Arrival',      id: 'student-arrival' },
-          { icon: 'calendar-check', label: 'Attendance',           id: 'attendance' },
-          { icon: 'id-card',        label: 'Exam Cards',           id: 'exam-cards' },
-          { icon: 'user-check',     label: 'Exam Card Overrides',  id: 'exam-card-overrides' },
-          { icon: 'book-open',      label: 'Homework',             id: 'homework' },
-          { icon: 'arrow-up',       label: 'Promotion',            id: 'promotion' },
-          { icon: 'stethoscope',    label: 'Health Records',       id: 'health' },
-          { icon: 'bed',            label: 'Sick Bay',             id: 'sickbay' }
+          { icon: 'user-check',     label: 'Student Arrival',     id: 'student-arrival' },
+          { icon: 'calendar-check', label: 'Attendance',          id: 'attendance' },
+          { icon: 'id-card',        label: 'Exam Cards',          id: 'exam-cards' },
+          { icon: 'user-check',     label: 'Exam Card Overrides', id: 'exam-card-overrides' },
+          { icon: 'book-open',      label: 'Homework',            id: 'homework' },
+          { icon: 'arrow-up',       label: 'Promotion',           id: 'promotion' },
+          { icon: 'stethoscope',    label: 'Health Records',      id: 'health' },
+          { icon: 'bed',            label: 'Sick Bay',            id: 'sickbay' }
         ]
       },
       {
         title: 'FINANCE',
         items: [
-          { icon: 'money-bill',       label: 'Fee Management',   id: 'fees' },
-          { icon: 'hand-holding-usd', label: 'Fee Allocation',   id: 'fee-allocation' },
-          { icon: 'credit-card',      label: 'Fee Collection',   id: 'fee-collection' },
-          { icon: 'receipt',          label: 'Receipt History',  id: 'receipt-history' },
-          { icon: 'plus-circle',      label: 'Other Income',     id: 'other-income' },
-          { icon: 'minus-circle',     label: 'Expenses',         id: 'expenses' },
-          { icon: 'file-invoice',     label: 'Reports',          id: 'reports' },
-          { icon: 'bell',             label: 'Fee Reminders',    id: 'fee-reminders' },
-          { icon: 'exchange-alt',     label: 'Fee Transfers',    id: 'fee-transfers' }
+          { icon: 'money-bill',       label: 'Fee Management',  id: 'fees' },
+          { icon: 'hand-holding-usd', label: 'Fee Allocation',  id: 'fee-allocation' },
+          { icon: 'credit-card',      label: 'Fee Collection',  id: 'fee-collection' },
+          { icon: 'receipt',          label: 'Receipt History', id: 'receipt-history' },
+          { icon: 'plus-circle',      label: 'Other Income',    id: 'other-income' },
+          { icon: 'minus-circle',     label: 'Expenses',        id: 'expenses' },
+          { icon: 'file-invoice',     label: 'Reports',         id: 'reports' },
+          { icon: 'bell',             label: 'Fee Reminders',   id: 'fee-reminders' },
+          { icon: 'exchange-alt',     label: 'Fee Transfers',   id: 'fee-transfers' }
         ]
       },
       {
         title: 'HUMAN RESOURCES',
         items: [
-          { icon: 'clipboard-list',   label: 'Staff Attendance', id: 'staff-attendance' },
-          { icon: 'money-bill-wave',  label: 'Payroll',          id: 'payroll' },
-          { icon: 'users',            label: 'Users',            id: 'users' }
+          { icon: 'clipboard-list',  label: 'Staff Attendance', id: 'staff-attendance' },
+          { icon: 'money-bill-wave', label: 'Payroll',          id: 'payroll' },
+          { icon: 'users',           label: 'Users',            id: 'users' }
         ]
       },
       {
@@ -72361,10 +72359,10 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
       {
         title: 'SYSTEM MANAGEMENT',
         items: [
-          { icon: 'university',   label: 'Schools',  id: 'schools' },
-          { icon: 'users',        label: 'Users',    id: 'users' },
-          { icon: 'user-shield',  label: 'Roles',    id: 'roles' },
-          { icon: 'cog',          label: 'Settings', id: 'settings' }
+          { icon: 'university',  label: 'Schools',  id: 'schools' },
+          { icon: 'users',       label: 'Users',    id: 'users' },
+          { icon: 'user-shield', label: 'Roles',    id: 'roles' },
+          { icon: 'cog',         label: 'Settings', id: 'settings' }
         ]
       },
       {
@@ -72386,13 +72384,7 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
     ];
   }
 
-  // ------------------------------------------------------------------
-  // ✅ THE ACTUAL FIX
-  // ------------------------------------------------------------------
-  // Filter every section's items through canAccessModule. Also drop
-  // any section that ends up empty (e.g., the whole section was
-  // gated by a feature the school doesn't have).
-  // ------------------------------------------------------------------
+  
   return sections
     .map(section => ({
       ...section,
@@ -72400,7 +72392,6 @@ const getFilteredDashboardSections = (user, schoolCategory) => {
     }))
     .filter(section => section.items.length > 0);
 };
-
 
 const fetchUser = async () => {
   try {
@@ -74377,23 +74368,27 @@ return (
       <div className="bg-white shadow-sm p-4 sticky top-0 z-10">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            {schoolSettings.logo ? (
-              <img 
-                src={schoolSettings.logo} 
-                alt="School Logo" 
-                className="h-10 w-10 rounded-full object-cover"
-                onError={(e) => {
-                  e.target.onerror = null;
-                  const parent = e.target.parentNode;
-                  const letter = schoolSettings.name?.charAt(0) || 'S';
-                  parent.innerHTML = `<div class="h-10 w-10 bg-indigo-600 rounded-full flex items-center justify-center text-white font-bold">${letter}</div>`;
-                }}
-              />
-            ) : (
-              <div className="h-10 w-10 bg-indigo-600 rounded-full flex items-center justify-center text-white font-bold">
-                {schoolSettings.name?.charAt(0) || 'S'}
-              </div>
-            )}
+       {schoolSettings.logo ? (
+  <img 
+    src={resolveLogoUrl(currentSchool)}   
+    alt="School Logo" 
+    className="h-10 w-10 rounded-full object-cover"
+    onError={(e) => {
+      e.target.style.display = 'none';
+      const parent = e.target.parentElement;
+      if (parent && !parent.querySelector('.logo-fb')) {
+        const fb = document.createElement('div');
+        fb.className = 'logo-fb h-10 w-10 bg-indigo-600 rounded-full flex items-center justify-center text-white font-bold';
+        fb.textContent = schoolSettings.name?.charAt(0) || 'S';
+        parent.appendChild(fb);
+      }
+    }}
+  />
+) : (
+  <div className="h-10 w-10 bg-indigo-600 rounded-full flex items-center justify-center text-white font-bold">
+    {schoolSettings.name?.charAt(0) || 'S'}
+  </div>
+)}
             <div>
               <h1 className="text-2xl font-bold text-gray-800">{schoolSettings.name || 'SchoolAid'}</h1>
               <p className="text-xs text-gray-500">{schoolSettings.category}</p>
