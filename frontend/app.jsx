@@ -10157,15 +10157,17 @@ const CourseUnitsModule = ({
   );
 };
 // ============================================================================
-//  EXAM MODULE — v12 (Model A: ExamSession + Papers)
+//  EXAM MODULE — v13
 //
-//  v12 CHANGES:
-//   • Backend now returns papers inline in GET /exam-sessions
-//   • Removed lazy hydration — papers render directly from list payload
-//   • Paper counts render immediately (no "Expand to load" placeholder)
-//   • No extra GET /exam-sessions/:id on row expand
-//   • Print logo enlarged (72px → 120px) in Timetable & Mark Sheet headers
-//   • Kept: safe edit diff, delete verification, duplicate-submit guard
+//  v13 changes vs v12:
+//   • Papers now carry a stable _key (not derived from subjectId/unitId)
+//     so updatePaper/removePaper always target the right row, even for
+//     rows loaded from the DB with stale references.
+//   • Editing state fully resets on open/close (saveError, savingPhase).
+//   • openEditSession warns if backend returns 0 papers for a session
+//     that we know had papers, so users aren't silently confused.
+//   • Save phase labels are clearer.
+//   • No functional regression to v12 features (bulk results, print, filters).
 // ============================================================================
 const ExamModule = ({
   exams, setExams,
@@ -10174,7 +10176,7 @@ const ExamModule = ({
   handleCreate, handleUpdate, handleDelete,
   currentSchool, courses, programs, units, user
 }) => {
-  console.log('📝 ExamModule v12 initialized');
+  console.log('📝 ExamModule v13 initialized');
 
   const SearchableSelect = StudentSearchableSelect;
 
@@ -10202,10 +10204,22 @@ const ExamModule = ({
   const canDeleteSessions = isSuperAdmin || isSchoolAdmin || isPrincipal;
 
   // ============================================================
+  // STABLE PAPER KEY
+  // A paper's identity is its database id if it exists, else a locally
+  // generated key. NEVER derive a key from subjectId/unitId — the same
+  // subject can appear twice, and both fields can be empty for a row.
+  // ============================================================
+  const makePaperKey = (paper) => {
+    if (paper?.id) return `db:${paper.id}`;
+    if (paper?._key) return paper._key;
+    return `tmp:${Math.random().toString(36).slice(2, 11)}`;
+  };
+
+  // ============================================================
   // STATE
   // ============================================================
-  const [sessions, setSessions]               = useState([]);
-  const [loadingSessions, setLoadingSessions] = useState(false);
+  const [sessions, setSessions]                 = useState([]);
+  const [loadingSessions, setLoadingSessions]   = useState(false);
   const [expandedSessions, setExpandedSessions] = useState(new Set());
 
   const [selectedSessionType, setSelectedSessionType] = useState('');
@@ -10256,21 +10270,21 @@ const ExamModule = ({
   const [selectedStudentsForMessage, setSelectedStudentsForMessage] = useState([]);
   const [selectAllForMessage, setSelectAllForMessage] = useState(false);
 
-  const [loading, setLoading]       = useState(false);
+  const [loading, setLoading]         = useState(false);
   const [savingPhase, setSavingPhase] = useState('');
-  const [apiError, setApiError]     = useState('');
-  const [saveError, setSaveError]   = useState('');
+  const [apiError, setApiError]       = useState('');
+  const [saveError, setSaveError]     = useState('');
 
-  const submittingRef = React.useRef(false);
+  const submittingRef = useRef(false);
+  const mountedRef = useRef(true);
 
-  const mountedRef = React.useRef(true);
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
 
   // ============================================================
-  // HELPERS — staff display
+  // STAFF
   // ============================================================
   const extractStaffArray = (payload) => {
     if (!payload) return [];
@@ -10363,7 +10377,7 @@ const ExamModule = ({
   useEffect(() => { fetchTeachingStaff(); }, [currentSchool?.id]);
 
   // ============================================================
-  // HELPERS — lookups
+  // LOOKUPS
   // ============================================================
   const getClassName   = (id) => classes?.find(c => c.id === id)?.name || 'N/A';
   const getSubjectName = (id) => subjects?.find(s => s.id === id)?.name || 'N/A';
@@ -10424,7 +10438,7 @@ const ExamModule = ({
   }, [units, sessionForm.courseId, sessionForm.programId, isUniversity, isTVET]);
 
   // ============================================================
-  // GRADE CALC
+  // GRADE
   // ============================================================
   const calculateGrade = (marks, maxMarks = 100, examCategory = null) => {
     if (marks === '' || marks === null || marks === undefined) return { grade: '', points: 0, remark: '' };
@@ -10479,7 +10493,7 @@ const ExamModule = ({
   };
 
   // ============================================================
-  // LOAD SESSIONS — backend returns papers inline
+  // LOAD SESSIONS
   // ============================================================
   const loadSessions = async () => {
     setLoadingSessions(true);
@@ -10492,7 +10506,7 @@ const ExamModule = ({
         (Array.isArray(res.data) ? res.data : []) ||
         [];
 
-      console.log(`✅ Loaded ${list.length} exam sessions (papers inline)`);
+      console.log(`✅ Loaded ${list.length} exam sessions`);
 
       if (!mountedRef.current) return;
       setSessions(Array.isArray(list) ? list : []);
@@ -10515,7 +10529,7 @@ const ExamModule = ({
   useEffect(() => { loadSessions(); }, []);
 
   // ============================================================
-  // FILTER SESSIONS
+  // FILTER
   // ============================================================
   const filteredSessions = useMemo(() => {
     let list = Array.isArray(sessions) ? sessions : [];
@@ -10539,7 +10553,7 @@ const ExamModule = ({
   ]);
 
   // ============================================================
-  // EXPAND / COLLAPSE — synchronous
+  // EXPAND / COLLAPSE
   // ============================================================
   const toggleSession = (sessionId) => {
     setExpandedSessions(prev => {
@@ -10551,7 +10565,7 @@ const ExamModule = ({
   };
 
   // ============================================================
-  // FETCH FULL SESSION (used by edit only)
+  // FETCH FULL SESSION
   // ============================================================
   const fetchFullSession = async (sessionId) => {
     if (!sessionId) throw new Error('Session ID is required');
@@ -10604,6 +10618,8 @@ const ExamModule = ({
     setEditingSession(null);
     setApiError('');
     setSaveError('');
+    setSavingPhase('');
+    submittingRef.current = false;
     setShowSessionForm(true);
   };
 
@@ -10619,6 +10635,8 @@ const ExamModule = ({
     setLoading(true);
     setApiError('');
     setSaveError('');
+    setSavingPhase('');
+    submittingRef.current = false;
 
     try {
       const fullSession = await fetchFullSession(sessionSummary.id);
@@ -10641,6 +10659,8 @@ const ExamModule = ({
       });
 
       const paperRows = fullSession.papers.map(p => ({
+        // Stable internal key, survives add/remove/edit
+        _key: p.id ? `db:${p.id}` : `tmp:${Math.random().toString(36).slice(2, 11)}`,
         id: p.id,
         subjectId: p.subjectId || '',
         unitId: p.unitId || '',
@@ -10654,6 +10674,12 @@ const ExamModule = ({
       }));
 
       console.log(`📄 Preloaded ${paperRows.length} papers for editing`);
+      if (paperRows.length === 0 && Array.isArray(sessionSummary.papers) && sessionSummary.papers.length > 0) {
+        console.warn(
+          `⚠️ Session ${sessionSummary.id} shows ${sessionSummary.papers.length} papers in the list, ` +
+          `but the detail endpoint returned 0. Check that GET /exam-sessions/:id includes the papers association.`
+        );
+      }
       setSessionPapers(paperRows);
 
       setEditingSession(fullSession);
@@ -10671,7 +10697,7 @@ const ExamModule = ({
   };
 
   // ============================================================
-  // PAPER PICKER LOGIC
+  // PAPER PICKER
   // ============================================================
   const paperSubjectIds = useMemo(
     () => sessionPapers.map(p => p.subjectId).filter(Boolean),
@@ -10687,6 +10713,8 @@ const ExamModule = ({
       const exists = prev.find(p => p.subjectId === subject.id);
       if (exists) return prev.filter(p => p.subjectId !== subject.id);
       return [...prev, {
+        _key: `tmp:${Math.random().toString(36).slice(2, 11)}`,
+        id: null,
         subjectId: subject.id,
         unitId: '',
         date: sessionForm.startDate || new Date().toISOString().split('T')[0],
@@ -10705,6 +10733,8 @@ const ExamModule = ({
       const exists = prev.find(p => p.unitId === unit.id);
       if (exists) return prev.filter(p => p.unitId !== unit.id);
       return [...prev, {
+        _key: `tmp:${Math.random().toString(36).slice(2, 11)}`,
+        id: null,
         subjectId: '',
         unitId: unit.id,
         date: sessionForm.startDate || new Date().toISOString().split('T')[0],
@@ -10718,18 +10748,15 @@ const ExamModule = ({
     });
   };
 
+  // Update by stable _key, not by subjectId/unitId
   const updatePaper = (key, patch) => {
     setSessionPapers(prev => prev.map(p =>
-      (p.subjectId && p.subjectId === key) || (p.unitId && p.unitId === key)
-        ? { ...p, ...patch }
-        : p
+      p._key === key ? { ...p, ...patch } : p
     ));
   };
 
   const removePaper = (key) => {
-    setSessionPapers(prev => prev.filter(p =>
-      !((p.subjectId && p.subjectId === key) || (p.unitId && p.unitId === key))
-    ));
+    setSessionPapers(prev => prev.filter(p => p._key !== key));
   };
 
   // ============================================================
@@ -10793,7 +10820,7 @@ const ExamModule = ({
   });
 
   // ============================================================
-  // SUBMIT SESSION — SAFE DIFF STRATEGY
+  // SUBMIT
   // ============================================================
   const handleSessionSubmit = async (e) => {
     e.preventDefault();
@@ -10837,8 +10864,9 @@ const ExamModule = ({
     };
 
     try {
+      // ---------- CREATE ----------
       if (!editingSession) {
-        console.log('➕ CREATE MODE — single session with', sessionPapers.length, 'papers');
+        console.log('➕ CREATE MODE —', sessionPapers.length, 'papers');
 
         const createPayload = {
           ...payload,
@@ -10869,6 +10897,7 @@ const ExamModule = ({
         return;
       }
 
+      // ---------- EDIT ----------
       console.log('✏️ EDIT MODE — session:', editingSession.id);
 
       const existingPapers =
@@ -10882,21 +10911,25 @@ const ExamModule = ({
       );
       const existingIds = new Set(existingById.keys());
 
+      // Papers with a real DB id that still exist server-side → UPDATE
       const papersToUpdate = sessionPapers.filter(
         p => p.id && existingIds.has(p.id)
       );
+      // Papers with no id, or with an id not seen in the fetched set → CREATE
       const papersToCreate = sessionPapers.filter(
         p => !p.id || !existingIds.has(p.id)
       );
       const submittedIds = new Set(
         sessionPapers.filter(p => p.id).map(p => p.id)
       );
+      // Existing papers that we did NOT receive back in the submit → DELETE
       const papersToDelete = existingPapers.filter(
         p => p.id && !submittedIds.has(p.id)
       );
 
       console.log(`📊 Paper diff: update=${papersToUpdate.length}, create=${papersToCreate.length}, delete=${papersToDelete.length}`);
 
+      // 1. Session metadata
       setSavingPhase('session');
       try {
         await api.patch(`/exam-sessions/${editingSession.id}`, payload);
@@ -10905,16 +10938,16 @@ const ExamModule = ({
         throw new Error(`Failed to update session: ${err.response?.data?.message || err.message}`);
       }
 
+      // 2. Create new papers
       setSavingPhase('creating');
-      const createdPapers = [];
       for (const paper of papersToCreate) {
         const paperData = buildPaperData(paper, payload, editingSession.id);
         try {
           const res = await api.post('/exams', paperData);
           const created = res.data?.exam || res.data?.paper || res.data;
           if (created?.id) {
-            createdPapers.push(created);
             paper.id = created.id;
+            paper._key = `db:${created.id}`;
           }
           console.log(`  ✓ Created paper ${created?.id || '(no id)'}`);
         } catch (err) {
@@ -10929,6 +10962,7 @@ const ExamModule = ({
         }
       }
 
+      // 3. Update existing papers
       setSavingPhase('updating');
       for (const paper of papersToUpdate) {
         const paperData = buildPaperData(paper, payload, editingSession.id);
@@ -10941,7 +10975,10 @@ const ExamModule = ({
             try {
               const res = await api.post('/exams', paperData);
               const created = res.data?.exam || res.data?.paper || res.data;
-              if (created?.id) paper.id = created.id;
+              if (created?.id) {
+                paper.id = created.id;
+                paper._key = `db:${created.id}`;
+              }
             } catch (createErr) {
               const label = paper.subjectId
                 ? subjects.find(s => s.id === paper.subjectId)?.name
@@ -10964,6 +11001,7 @@ const ExamModule = ({
         }
       }
 
+      // 4. Delete removed papers
       setSavingPhase('deleting');
       for (const paper of papersToDelete) {
         try {
@@ -11002,14 +11040,14 @@ const ExamModule = ({
   };
 
   // ============================================================
-  // DELETE SESSION — verifies backend actually removed it
+  // DELETE SESSION
   // ============================================================
   const handleDeleteSession = async (session) => {
     if (!canDeleteSessions) { alert('You do not have permission'); return; }
     if (!session?.id) { alert('❌ Invalid session'); return; }
 
-    const paperCount = session.papers?.length;
-    const paperMsg = typeof paperCount === 'number'
+    const paperCount = Array.isArray(session.papers) ? session.papers.length : null;
+    const paperMsg = paperCount != null
       ? ` and all ${paperCount} paper(s)`
       : ' and all its papers';
 
@@ -11308,7 +11346,7 @@ const ExamModule = ({
   };
 
   // ============================================================
-  // PRINT EXAMS — logo enlarged to 120px
+  // PRINT EXAMS
   // ============================================================
   const handlePrintExams = () => {
     if (filteredSessions.length === 0) { alert('No sessions to print'); return; }
@@ -11412,7 +11450,7 @@ const ExamModule = ({
   };
 
   // ============================================================
-  // PRINT RESULTS — logo enlarged to 120px
+  // PRINT RESULTS
   // ============================================================
   const handlePrintResults = () => {
     if (!selectedExamForResults) return;
@@ -11812,6 +11850,8 @@ const ExamModule = ({
                   setEditingSession(null);
                   setSessionPapers([]);
                   setSaveError('');
+                  setSavingPhase('');
+                  submittingRef.current = false;
                 }}
                 disabled={loading}
                 className="text-gray-500 hover:text-gray-700 text-xl disabled:opacity-50"
@@ -12077,20 +12117,20 @@ const ExamModule = ({
                 {sessionPapers.length > 0 && (
                   <div className="space-y-3">
                     <p className="text-sm font-medium text-indigo-700">Paper Details:</p>
-                    {sessionPapers.map((paper, idx) => {
-                      const paperKey = paper.subjectId || paper.unitId;
+                    {sessionPapers.map((paper) => {
                       const paperName = paper.subjectId
                         ? subjectsForSelectedClass.find(s => s.id === paper.subjectId)?.name
                         : unitsForSelectedScope.find(u => u.id === paper.unitId)?.name;
+
                       return (
-                        <div key={paperKey} className="bg-white border border-indigo-200 rounded-lg p-3">
+                        <div key={paper._key} className="bg-white border border-indigo-200 rounded-lg p-3">
                           <div className="flex justify-between items-center mb-2">
                             <span className="font-semibold text-sm text-indigo-700">
                               <i className="fas fa-file-alt mr-2"></i>
                               {paperName}
                             </span>
                             <button type="button"
-                              onClick={() => removePaper(paperKey)}
+                              onClick={() => removePaper(paper._key)}
                               disabled={loading}
                               className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50">
                               <i className="fas fa-trash mr-1"></i>Remove
@@ -12100,7 +12140,7 @@ const ExamModule = ({
                             <div>
                               <label className="text-xs text-gray-500 block mb-0.5">Date *</label>
                               <input type="date" value={paper.date || ''}
-                                onChange={(e) => updatePaper(paperKey, { date: e.target.value })}
+                                onChange={(e) => updatePaper(paper._key, { date: e.target.value })}
                                 className="w-full px-2 py-1 text-sm border rounded"
                                 required
                                 disabled={loading}
@@ -12109,7 +12149,7 @@ const ExamModule = ({
                             <div>
                               <label className="text-xs text-gray-500 block mb-0.5">Start</label>
                               <input type="time" value={paper.startTime || ''}
-                                onChange={(e) => updatePaper(paperKey, { startTime: e.target.value })}
+                                onChange={(e) => updatePaper(paper._key, { startTime: e.target.value })}
                                 className="w-full px-2 py-1 text-sm border rounded"
                                 disabled={loading}
                               />
@@ -12117,7 +12157,7 @@ const ExamModule = ({
                             <div>
                               <label className="text-xs text-gray-500 block mb-0.5">End</label>
                               <input type="time" value={paper.endTime || ''}
-                                onChange={(e) => updatePaper(paperKey, { endTime: e.target.value })}
+                                onChange={(e) => updatePaper(paper._key, { endTime: e.target.value })}
                                 className="w-full px-2 py-1 text-sm border rounded"
                                 disabled={loading}
                               />
@@ -12125,7 +12165,7 @@ const ExamModule = ({
                             <div>
                               <label className="text-xs text-gray-500 block mb-0.5">Hall</label>
                               <input type="text" value={paper.examHall || ''}
-                                onChange={(e) => updatePaper(paperKey, { examHall: e.target.value })}
+                                onChange={(e) => updatePaper(paper._key, { examHall: e.target.value })}
                                 placeholder="Hall A"
                                 className="w-full px-2 py-1 text-sm border rounded"
                                 disabled={loading}
@@ -12134,7 +12174,7 @@ const ExamModule = ({
                             <div>
                               <label className="text-xs text-gray-500 block mb-0.5">Max Marks</label>
                               <input type="number" value={paper.maxMarks || 100}
-                                onChange={(e) => updatePaper(paperKey, { maxMarks: e.target.value })}
+                                onChange={(e) => updatePaper(paper._key, { maxMarks: e.target.value })}
                                 className="w-full px-2 py-1 text-sm border rounded"
                                 min="1"
                                 disabled={loading}
@@ -12144,7 +12184,7 @@ const ExamModule = ({
                               <label className="text-xs text-gray-500 block mb-0.5">Invigilator</label>
                               <SearchableSelect
                                 value={paper.invigilatorId || ''}
-                                onChange={(e) => updatePaper(paperKey, { invigilatorId: e.target.value })}
+                                onChange={(e) => updatePaper(paper._key, { invigilatorId: e.target.value })}
                                 options={invigilatorOptions}
                                 placeholder={loadingStaff ? 'Loading staff...' : 'Select invigilator'}
                                 disabled={loading}
@@ -12176,6 +12216,8 @@ const ExamModule = ({
                     setEditingSession(null);
                     setSessionPapers([]);
                     setSaveError('');
+                    setSavingPhase('');
+                    submittingRef.current = false;
                   }}
                   disabled={loading}
                   className="bg-gray-500 text-white px-5 py-2 rounded-lg hover:bg-gray-600 disabled:opacity-50">
@@ -12187,8 +12229,9 @@ const ExamModule = ({
                     ? <>
                         <i className="fas fa-spinner fa-spin"></i>
                         {savingPhase === 'session'  ? 'Saving session...'
-                          : savingPhase === 'deleting' ? 'Replacing papers...'
+                          : savingPhase === 'deleting' ? 'Removing papers...'
                           : savingPhase === 'creating' ? 'Creating papers...'
+                          : savingPhase === 'updating' ? 'Updating papers...'
                           : 'Saving...'}
                       </>
                     : <><i className="fas fa-save"></i>{editingSession ? 'Update Session' : 'Create Session'}</>}
@@ -12376,16 +12419,14 @@ const ExamModule = ({
   );
 };
 // ============================================================================
-//  RESULTS MODULE — v13
+//  RESULTS MODULE — v15
 //
-//  v13 CHANGES:
-//   • Print scope tightened — only the report/matrix body prints
-//   • Removed "Average" and "Mean Points" stat cards from report header
-//   • Trend arrows fixed (proper ▲▼● with correct colors)
-//   • Print header: logo BESIDE school name (flex row)
-//   • "By Student" view: Class + Term + Student required.
-//     Class narrows the student list; the report shows ALL subjects ×
-//     ALL exam types for that student for the selected term.
+//  v15 CHANGES:
+//   • "By Student" shows ALL exam types as columns
+//   • Trend badge INLINE inside each exam cell, comparing to previous exam
+//   • No separate Trend column, no Δ vs Mean column
+//   • Every matrix header uses logo-beside-school-name layout
+//   • Print Report button made robust
 // ============================================================================
 const ResultsModule = ({
   exams, setExams, results, students, subjects, classes, courses, programs,
@@ -12571,31 +12612,6 @@ const ResultsModule = ({
   };
 
   // ============================================================
-  // TREND ARROW — ▲ / ▼ / ● with colours
-  // ============================================================
-  const TrendArrow = ({ direction, delta, compact = false }) => {
-    if (!direction || direction === 'flat') {
-      return (
-        <span className={`inline-flex items-center gap-0.5 font-bold text-gray-400 ${compact ? 'text-[11px]' : 'text-xs'}`}>
-          ● <span className="font-semibold">0</span>
-        </span>
-      );
-    }
-    const isUp = direction === 'up';
-    return (
-      <span
-        className={`inline-flex items-center gap-0.5 font-bold ${
-          isUp ? 'text-emerald-600' : 'text-red-600'
-        } ${compact ? 'text-[11px]' : 'text-xs'}`}
-        title={isUp ? `Improved by ${delta}` : `Declined by ${Math.abs(delta)}`}
-      >
-        {isUp ? '▲' : '▼'}
-        <span className="font-semibold">{isUp ? `+${delta}` : delta}</span>
-      </span>
-    );
-  };
-
-  // ============================================================
   // OPTIONS
   // ============================================================
   const termOptions = useMemo(() => {
@@ -12701,9 +12717,8 @@ const ResultsModule = ({
   const [termMatrixExamType, setTermMatrixExamType]   = useState('');
   const [termMatrixSubjectId, setTermMatrixSubjectId] = useState('');
   const [termMatrixStudentId, setTermMatrixStudentId] = useState('');
-  const [termMatrixView, setTermMatrixView]           = useState('subject');
+  const [termMatrixView, setTermMatrixView]           = useState('student');
   const [showTrendArrows, setShowTrendArrows]         = useState(true);
-  const [showDeltaVsMean, setShowDeltaVsMean]         = useState(false);
   const [termMatrixData, setTermMatrixData]           = useState(null);
   const [loadingTermMatrix, setLoadingTermMatrix]     = useState(false);
 
@@ -12777,19 +12792,6 @@ const ResultsModule = ({
     }
     return exam?.name || 'Unknown';
   }, [isTVET, isUniversity, units, subjects]);
-
-  const computeTrend = useCallback((cellsArray) => {
-    if (!Array.isArray(cellsArray) || cellsArray.length < 2) {
-      return { direction: null, delta: 0 };
-    }
-    const first = cellsArray[0];
-    const last = cellsArray[cellsArray.length - 1];
-    if (first == null || last == null) return { direction: null, delta: 0 };
-    const delta = last - first;
-    if (delta > 0) return { direction: 'up', delta };
-    if (delta < 0) return { direction: 'down', delta };
-    return { direction: 'flat', delta: 0 };
-  }, []);
 
   // ============================================================
   // KNEC APTITUDE
@@ -12959,13 +12961,7 @@ const ResultsModule = ({
       const subjectList = [];
       for (const subj of g.subjects.values()) {
         const avg = subj.count > 0 ? subj.sumMarks / subj.count : 0;
-        const sortedEntries = [...subj.entries].sort((a, b) => {
-          const da = a.examDate ? new Date(a.examDate).getTime() : 0;
-          const db = b.examDate ? new Date(b.examDate).getTime() : 0;
-          return da - db;
-        });
-        const trend = computeTrend(sortedEntries.map(e => e.marks));
-        subjectList.push({ ...subj, avg, sortedEntries, trend });
+        subjectList.push({ ...subj, avg });
       }
 
       const validAvgs = subjectList.filter(s => s.count > 0).map(s => s.avg);
@@ -13064,21 +13060,21 @@ const ResultsModule = ({
   };
 
   // ============================================================
-  // TERMLY MATRIX — By Student now requires Class + Term + Student
+  // TERMLY MATRIX
   // ============================================================
   const buildTermMatrix = async () => {
     if (termMatrixView === 'student') {
-      if (!termMatrixClassId) { alert('Please select a class'); return; }
-      if (!termMatrixTerm)    { alert('Please select a term'); return; }
+      if (!termMatrixClassId)   { alert('Please select a class'); return; }
+      if (!termMatrixTerm)      { alert('Please select a term'); return; }
       if (!termMatrixStudentId) { alert('Please select a student'); return; }
     } else if (termMatrixView === 'subject' || termMatrixView === 'class') {
-      if (!termMatrixClassId) { alert('Please select a class'); return; }
-      if (!termMatrixTerm)    { alert('Please select a term'); return; }
+      if (!termMatrixClassId)   { alert('Please select a class'); return; }
+      if (!termMatrixTerm)      { alert('Please select a term'); return; }
       if (!termMatrixSubjectId) { alert('Please select a subject'); return; }
     } else if (termMatrixView === 'exam') {
-      if (!termMatrixClassId) { alert('Please select a class'); return; }
-      if (!termMatrixTerm)    { alert('Please select a term'); return; }
-      if (!termMatrixExamType) { alert('Please select an exam type'); return; }
+      if (!termMatrixClassId)   { alert('Please select a class'); return; }
+      if (!termMatrixTerm)      { alert('Please select a term'); return; }
+      if (!termMatrixExamType)  { alert('Please select an exam type'); return; }
     }
 
     setLoadingTermMatrix(true);
@@ -13100,7 +13096,6 @@ const ResultsModule = ({
       const termExams = (exams || []).filter(e => {
         if (e.classId !== termMatrixClassId) return false;
         if (String(e.term || '').toLowerCase() !== String(termMatrixTerm).toLowerCase()) return false;
-        if (termMatrixView === 'exam' && termMatrixExamType && e.type !== termMatrixExamType) return false;
         if (termMatrixExamType && e.type !== termMatrixExamType) return false;
         return true;
       });
@@ -13125,7 +13120,12 @@ const ResultsModule = ({
       }
 
       const classObj = classes.find(c => c.id === termMatrixClassId);
-      const presentExamTypes = [...new Set(sortedExams.map(e => e.type).filter(Boolean))];
+
+      // Build exam-type order from a fixed canonical order, keeping only present ones
+      const CANONICAL_ORDER = ['OPENER', 'MIDTERM', 'CAT', 'PRE_MOCK', 'MOCK', 'ENDTERM', 'FINAL', 'PRACTICAL', 'PROJECT'];
+      const presentTypes = [...new Set(sortedExams.map(e => e.type).filter(Boolean))];
+      const orderedExamTypes = CANONICAL_ORDER.filter(t => presentTypes.includes(t))
+        .concat(presentTypes.filter(t => !CANONICAL_ORDER.includes(t)));
 
       // ---------- BY STUDENT ----------
       if (termMatrixView === 'student') {
@@ -13138,14 +13138,29 @@ const ResultsModule = ({
           const subjResults = studentResults.filter(r => r.subjectId === subj.id);
           const cells = {};
           let sum = 0, count = 0;
+          let prevMarks = null;
 
-          presentExamTypes.forEach(type => {
+          orderedExamTypes.forEach(type => {
             const matches = subjResults.filter(r => r.__exam?.type === type);
-            if (matches.length === 0) { cells[type] = null; return; }
+            if (matches.length === 0) {
+              cells[type] = null;
+              prevMarks = null;
+              return;
+            }
             const avg = matches.reduce((s, r) => s + (parseFloat(r.marks) || 0), 0) / matches.length;
             const gi = calculateGrade(avg, 100, schoolCategory);
-            cells[type] = { marks: Number(avg.toFixed(1)), grade: gi.grade, points: gi.points };
+
+            let delta = null;
+            if (prevMarks != null) delta = Number((avg - prevMarks).toFixed(1));
+
+            cells[type] = {
+              marks: Number(avg.toFixed(1)),
+              grade: gi.grade,
+              points: gi.points,
+              delta
+            };
             sum += avg; count += 1;
+            prevMarks = avg;
           });
 
           const average = count > 0 ? sum / count : 0;
@@ -13153,17 +13168,18 @@ const ResultsModule = ({
             Object.values(cells).filter(Boolean).map(c => ({ marks: c.marks, points: c.points }))
           );
 
-          // Trend: only meaningful if there are 2+ exam types to compare
-          const trendValues = presentExamTypes
-            .map(t => cells[t]?.marks)
-            .filter(m => m != null && !isNaN(m));
-          const trend = computeTrend(trendValues);
-
-          return { subjectId: subj.id, subjectName: subj.name, cells, average, meanGrade, trend, hasData: count > 0 };
+          return {
+            subjectId: subj.id,
+            subjectName: subj.name,
+            cells,
+            average,
+            meanGrade,
+            hasData: count > 0
+          };
         });
 
         const columnMeans = {};
-        presentExamTypes.forEach(type => {
+        orderedExamTypes.forEach(type => {
           const colMarks = rows.map(r => r.cells[type]?.marks).filter(m => m != null && !isNaN(m));
           columnMeans[type] = colMarks.length > 0 ? colMarks.reduce((a, b) => a + b, 0) / colMarks.length : 0;
         });
@@ -13178,7 +13194,7 @@ const ResultsModule = ({
           className: classObj?.name || 'Class',
           term: termMatrixTerm,
           student: studentObj,
-          examTypes: presentExamTypes,
+          examTypes: orderedExamTypes,
           rows,
           columnMeans,
           overallAverage: overallAvg,
@@ -13194,7 +13210,9 @@ const ResultsModule = ({
         if (!subjectObj) { alert('Subject not found'); return; }
 
         const subjectExams = sortedExams.filter(e => e.subjectId === subjectObj.id || e.subjectId == null);
-        const usedExamTypes = [...new Set(subjectExams.map(e => e.type).filter(Boolean))];
+        const subjectTypes = [...new Set(subjectExams.map(e => e.type).filter(Boolean))];
+        const usedExamTypes = CANONICAL_ORDER.filter(t => subjectTypes.includes(t))
+          .concat(subjectTypes.filter(t => !CANONICAL_ORDER.includes(t)));
 
         const rows = studentList.map(st => {
           const stResults = allResults.filter(r =>
@@ -13217,8 +13235,6 @@ const ResultsModule = ({
           const meanGrade = calculateMeanGradeFromCells(
             Object.values(cells).filter(Boolean).map(c => ({ marks: c.marks, points: c.points }))
           );
-          const trendValues = usedExamTypes.map(t => cells[t]?.marks).filter(m => m != null && !isNaN(m));
-          const trend = computeTrend(trendValues);
 
           return {
             studentId: st.id,
@@ -13227,7 +13243,6 @@ const ResultsModule = ({
             cells,
             average,
             meanGrade,
-            trend,
             hasData: count > 0
           };
         });
@@ -13572,8 +13587,8 @@ const ResultsModule = ({
     el.classList.add('results-print-area');
     setTimeout(() => {
       window.print();
-      setTimeout(() => el.classList.remove('results-print-area'), 500);
-    }, 80);
+      setTimeout(() => el.classList.remove('results-print-area'), 800);
+    }, 100);
   };
 
   // ============================================================
@@ -13736,7 +13751,7 @@ const ResultsModule = ({
   const uniqueGrades = [...new Set(resultEntries.map(e => e.grade).filter(Boolean))];
 
   // ============================================================
-  // PRINT HEADER — logo BESIDE school name
+  // PRINT HEADER — logo beside school name
   // ============================================================
   const PrintHeader = ({ title, subtitle }) => (
     <div className="flex items-center gap-5 border-b-2 border-slate-300 pb-4 mb-4">
@@ -14056,9 +14071,7 @@ const ResultsModule = ({
         )}
       </div>
 
-      {/* ============================================================ */}
-      {/* STUDENT REPORT                                               */}
-      {/* ============================================================ */}
+      {/* STUDENT REPORT */}
       {viewMode === 'report' && canViewAllResults && (
         <>
           <div className="bg-white p-6 rounded-xl shadow-sm border no-print">
@@ -14179,8 +14192,7 @@ const ResultsModule = ({
                               {examTypeLabel(type)}
                             </th>
                           ))}
-                          <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase border-r">Average</th>
-                          <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Trend</th>
+                          <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Average</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
@@ -14204,18 +14216,14 @@ const ResultsModule = ({
                                 </td>
                               );
                             })}
-                            <td className="px-4 py-3 text-center font-bold text-indigo-700 border-r">{s.avg.toFixed(1)}</td>
-                            <td className="px-4 py-3 text-center">
-                              <TrendArrow direction={s.trend?.direction} delta={s.trend?.delta || 0} />
-                            </td>
+                            <td className="px-4 py-3 text-center font-bold text-indigo-700">{s.avg.toFixed(1)}</td>
                           </tr>
                         ))}
                       </tbody>
                       <tfoot>
                         <tr className="bg-slate-100 border-t-2 border-slate-300">
                           <td colSpan={card.examTypeColumns.length + 1} className="px-4 py-3 font-bold text-right text-slate-700 border-r">Term Average</td>
-                          <td className="px-4 py-3 text-center font-bold text-indigo-700 border-r">{card.termAverage.toFixed(1)}</td>
-                          <td></td>
+                          <td className="px-4 py-3 text-center font-bold text-indigo-700">{card.termAverage.toFixed(1)}</td>
                         </tr>
                       </tfoot>
                     </table>
@@ -14279,9 +14287,7 @@ const ResultsModule = ({
         </>
       )}
 
-      {/* ============================================================ */}
-      {/* TERMLY MATRIX                                                */}
-      {/* ============================================================ */}
+      {/* TERMLY MATRIX */}
       {viewMode === 'term-matrix' && canViewAllResults && (
         <>
           <div className="bg-white p-6 rounded-xl shadow-sm border no-print">
@@ -14296,7 +14302,7 @@ const ResultsModule = ({
                   { key: 'student', label: 'By Student',  desc: 'One student · all subjects × all exams', icon: 'fa-user' },
                   { key: 'subject', label: 'By Subject',  desc: 'One subject · all students',  icon: 'fa-book' },
                   { key: 'exam',    label: 'By Exam',     desc: 'One exam · all subjects',     icon: 'fa-file-alt' },
-                  { key: 'class',   label: 'By Class',    desc: 'One subject · all students + delta', icon: 'fa-users' }
+                  { key: 'class',   label: 'By Class',    desc: 'One subject · all students', icon: 'fa-users' }
                 ].map(v => (
                   <button
                     key={v.key}
@@ -14365,16 +14371,6 @@ const ResultsModule = ({
             </div>
 
             <div className="mt-4 flex flex-wrap items-center gap-6">
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={showTrendArrows}
-                  onChange={(e) => setShowTrendArrows(e.target.checked)} />
-                <span>Show trend arrows</span>
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={showDeltaVsMean}
-                  onChange={(e) => setShowDeltaVsMean(e.target.checked)} />
-                <span>Show delta vs class mean</span>
-              </label>
               <button onClick={buildTermMatrix}
                 disabled={!termMatrixClassId || !termMatrixTerm || loadingTermMatrix}
                 className="ml-auto bg-indigo-600 text-white px-5 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium flex items-center gap-2">
@@ -14385,21 +14381,16 @@ const ResultsModule = ({
             </div>
           </div>
 
-          {/* ============= VIEW: BY STUDENT ============= */}
+          {/* BY STUDENT */}
           {termMatrixData && termMatrixData.view === 'student' && (
             <div id="term-matrix-print" className="bg-white rounded-xl shadow-sm border overflow-hidden">
-              <div className="bg-slate-800 text-white px-6 py-5">
-                <div className="text-center mb-4">
-                  {schoolLogo && (
-                    <img src={schoolLogo} alt="" className="w-24 h-24 object-contain rounded-full mx-auto mb-2 border-2 border-white/20" />
-                  )}
-                  <h1 className="text-2xl font-black uppercase tracking-wider">{schoolName}</h1>
-                  {schoolMotto && <p className="text-slate-300 text-sm italic mt-1">"{schoolMotto}"</p>}
-                  <p className="text-slate-400 text-xs mt-2">
-                    {termMatrixData.term} · {termMatrixData.className}
-                  </p>
-                </div>
-                <div className="flex justify-between items-center flex-wrap gap-3 border-t border-slate-700 pt-4">
+              <div className="p-6">
+                <PrintHeader
+                  title={`Termly Matrix — ${termMatrixData.term}`}
+                  subtitle={`${termMatrixData.className}`}
+                />
+
+                <div className="bg-slate-800 text-white rounded-lg p-4 mb-4 flex justify-between items-center flex-wrap gap-3">
                   <div>
                     <p className="text-xs uppercase tracking-widest text-slate-300">Student</p>
                     <h3 className="text-2xl font-bold">
@@ -14418,102 +14409,91 @@ const ResultsModule = ({
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-slate-100 border-b-2 border-slate-300">
-                      <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">{subjectColumnLabel}</th>
-                      {termMatrixData.examTypes.map(type => (
-                        <th key={type} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">
-                          {examTypeLabel(type)}
-                        </th>
-                      ))}
-                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Avg</th>
-                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Trend</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {termMatrixData.rows.map((r, ri) => (
-                      <tr key={r.subjectId} className={ri % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
-                        <td className="px-3 py-2 font-medium border-r">{r.subjectName}</td>
-                        {termMatrixData.examTypes.map(type => {
-                          const cell = r.cells[type];
-                          const colMean = termMatrixData.columnMeans[type];
-                          const delta = cell && colMean ? (cell.marks - colMean) : null;
-                          return (
-                            <td key={type} className="px-3 py-2 text-center border-r">
-                              {cell ? (
-                                <div className="flex flex-col items-center gap-0.5">
-                                  <div className="flex items-center gap-1">
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-slate-100 border-b-2 border-slate-300">
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">{subjectColumnLabel}</th>
+                        {termMatrixData.examTypes.map(type => (
+                          <th key={type} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">
+                            {examTypeLabel(type)}
+                          </th>
+                        ))}
+                        <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Avg</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {termMatrixData.rows.map((r, ri) => (
+                        <tr key={r.subjectId} className={ri % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
+                          <td className="px-3 py-2 font-medium border-r">{r.subjectName}</td>
+                          {termMatrixData.examTypes.map(type => {
+                            const cell = r.cells[type];
+                            return (
+                              <td key={type} className="px-3 py-2 text-center border-r">
+                                {cell ? (
+                                  <div className="flex items-center justify-center gap-1.5">
                                     <span className="font-bold text-slate-800">{cell.marks}</span>
                                     <span className={`text-[10px] px-1.5 py-0.5 rounded ${getGradePillClasses(cell.grade)}`}>
                                       {cell.grade}
                                     </span>
+                                    {cell.delta != null && cell.delta !== 0 && (
+                                      <span className={`ml-0.5 inline-flex items-center gap-0.5 font-bold text-[10px] ${
+                                        cell.delta > 0 ? 'text-emerald-600' : 'text-red-600'
+                                      }`}>
+                                        {cell.delta > 0 ? '▲' : '▼'}
+                                        <span>{cell.delta > 0 ? `+${cell.delta}` : cell.delta}</span>
+                                      </span>
+                                    )}
                                   </div>
-                                  {showDeltaVsMean && delta !== null && (
-                                    <span className={`text-[9px] ${delta >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                      {delta >= 0 ? `+${delta.toFixed(1)}` : delta.toFixed(1)} vs mean
-                                    </span>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-slate-300">—</span>
-                              )}
-                            </td>
-                          );
-                        })}
-                        <td className="px-3 py-2 text-center font-bold text-indigo-700 border-r bg-slate-50">
-                          {r.hasData ? r.average.toFixed(1) : '—'}
-                        </td>
-                        <td className="px-3 py-2 text-center bg-slate-50">
-                          {showTrendArrows && <TrendArrow direction={r.trend?.direction} delta={r.trend?.delta || 0} />}
+                                ) : (
+                                  <span className="text-slate-300">—</span>
+                                )}
+                              </td>
+                            );
+                          })}
+                          <td className="px-3 py-2 text-center font-bold text-indigo-700 bg-slate-50">
+                            {r.hasData ? r.average.toFixed(1) : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-slate-200 border-t-2 border-slate-400">
+                        <td className="px-3 py-3 font-bold text-right text-slate-700 border-r">Class Mean:</td>
+                        {termMatrixData.examTypes.map(type => (
+                          <td key={type} className="px-3 py-3 text-center font-bold text-slate-700 border-r">
+                            {termMatrixData.columnMeans[type]?.toFixed(1) || '—'}
+                          </td>
+                        ))}
+                        <td className="px-3 py-3 text-center font-bold text-slate-800 bg-slate-300">
+                          {termMatrixData.overallAverage.toFixed(1)}
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="bg-slate-200 border-t-2 border-slate-400">
-                      <td className="px-3 py-3 font-bold text-right text-slate-700 border-r">Class Mean:</td>
-                      {termMatrixData.examTypes.map(type => (
-                        <td key={type} className="px-3 py-3 text-center font-bold text-slate-700 border-r">
-                          {termMatrixData.columnMeans[type]?.toFixed(1) || '—'}
-                        </td>
-                      ))}
-                      <td className="px-3 py-3 text-center font-bold text-slate-800 border-r bg-slate-300">
-                        {termMatrixData.overallAverage.toFixed(1)}
-                      </td>
-                      <td className="px-3 py-3 bg-slate-300"></td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
+                    </tfoot>
+                  </table>
+                </div>
 
-              <div className="px-6 py-4 bg-slate-50 border-t flex justify-end no-print">
-                <button onClick={() => handlePrintArea('term-matrix-print')}
-                  className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
-                  <i className="fas fa-print"></i>Print Matrix
-                </button>
+                <div className="mt-4 flex justify-end no-print">
+                  <button onClick={() => handlePrintArea('term-matrix-print')}
+                    className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
+                    <i className="fas fa-print"></i>Print Matrix
+                  </button>
+                </div>
               </div>
             </div>
           )}
 
-          {/* ============= VIEW: BY SUBJECT ============= */}
+          {/* BY SUBJECT */}
           {termMatrixData && termMatrixData.view === 'subject' && (
             <div id="term-matrix-print" className="bg-white rounded-xl shadow-sm border overflow-hidden">
-              <div className="bg-slate-800 text-white px-6 py-5">
-                <div className="text-center mb-4">
-                  {schoolLogo && (
-                    <img src={schoolLogo} alt="" className="w-24 h-24 object-contain rounded-full mx-auto mb-2 border-2 border-white/20" />
-                  )}
-                  <h1 className="text-2xl font-black uppercase tracking-wider">{schoolName}</h1>
-                  {schoolMotto && <p className="text-slate-300 text-sm italic mt-1">"{schoolMotto}"</p>}
-                  <p className="text-slate-400 text-xs mt-2">
-                    {termMatrixData.className} · {termMatrixData.subjectName} · {termMatrixData.term}
-                  </p>
-                </div>
-                <div className="flex justify-between items-start flex-wrap gap-3 border-t border-slate-700 pt-4">
+              <div className="p-6">
+                <PrintHeader
+                  title={`Termly Matrix — ${termMatrixData.term}`}
+                  subtitle={`${termMatrixData.className} · ${termMatrixData.subjectName}`}
+                />
+
+                <div className="bg-slate-800 text-white rounded-lg p-4 mb-4 flex justify-between items-center flex-wrap gap-3">
                   <div>
                     <p className="text-xs uppercase tracking-widest text-slate-300">Class Mean per Exam</p>
                     <p className="text-sm font-mono mt-1">
@@ -14537,320 +14517,289 @@ const ResultsModule = ({
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-slate-100 border-b-2 border-slate-300">
-                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r w-16">Pos</th>
-                      <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Student</th>
-                      <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Adm</th>
-                      {termMatrixData.examTypes.map(type => (
-                        <th key={type} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">
-                          {examTypeLabel(type)}
-                        </th>
-                      ))}
-                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Avg</th>
-                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Grade</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {termMatrixData.rows.map((r, i) => (
-                      <tr key={r.studentId} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
-                        <td className="px-3 py-2 text-center border-r">
-                          {r.position ? (
-                            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
-                              r.position === 1 ? 'bg-amber-100 text-amber-700 ring-2 ring-amber-300' :
-                              r.position === 2 ? 'bg-slate-200 text-slate-700' :
-                              r.position === 3 ? 'bg-orange-100 text-orange-700' :
-                              'bg-slate-100 text-slate-600'
-                            }`}>
-                              {r.position}
-                            </span>
-                          ) : (
-                            <span className="text-slate-300">—</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 font-medium border-r whitespace-nowrap">{r.studentName}</td>
-                        <td className="px-3 py-2 font-mono text-xs text-slate-600 border-r whitespace-nowrap">{r.admissionNumber}</td>
-                        {termMatrixData.examTypes.map(type => {
-                          const cell = r.cells[type];
-                          const colMean = termMatrixData.columnMeans[type];
-                          const delta = cell && colMean ? (cell.marks - colMean) : null;
-                          return (
-                            <td key={type} className="px-3 py-2 text-center border-r">
-                              {cell ? (
-                                <div className="flex flex-col items-center gap-0.5">
-                                  <div className="flex items-center gap-1">
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-slate-100 border-b-2 border-slate-300">
+                        <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r w-16">Pos</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Student</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Adm</th>
+                        {termMatrixData.examTypes.map(type => (
+                          <th key={type} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">
+                            {examTypeLabel(type)}
+                          </th>
+                        ))}
+                        <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Avg</th>
+                        <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Grade</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {termMatrixData.rows.map((r, i) => (
+                        <tr key={r.studentId} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
+                          <td className="px-3 py-2 text-center border-r">
+                            {r.position ? (
+                              <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
+                                r.position === 1 ? 'bg-amber-100 text-amber-700 ring-2 ring-amber-300' :
+                                r.position === 2 ? 'bg-slate-200 text-slate-700' :
+                                r.position === 3 ? 'bg-orange-100 text-orange-700' :
+                                'bg-slate-100 text-slate-600'
+                              }`}>
+                                {r.position}
+                              </span>
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 font-medium border-r whitespace-nowrap">{r.studentName}</td>
+                          <td className="px-3 py-2 font-mono text-xs text-slate-600 border-r whitespace-nowrap">{r.admissionNumber}</td>
+                          {termMatrixData.examTypes.map(type => {
+                            const cell = r.cells[type];
+                            return (
+                              <td key={type} className="px-3 py-2 text-center border-r">
+                                {cell ? (
+                                  <div className="flex flex-col items-center gap-0.5">
                                     <span className="font-bold text-slate-800">{cell.marks}</span>
                                     <span className={`text-[10px] px-1.5 py-0.5 rounded ${getGradePillClasses(cell.grade)}`}>
                                       {cell.grade}
                                     </span>
                                   </div>
-                                  {showDeltaVsMean && delta !== null && (
-                                    <span className={`text-[9px] ${delta >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                      {delta >= 0 ? `+${delta.toFixed(1)}` : delta.toFixed(1)} vs mean
-                                    </span>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-slate-300">—</span>
-                              )}
-                            </td>
-                          );
-                        })}
-                        <td className="px-3 py-2 text-center font-bold text-indigo-700 border-r bg-slate-50">
-                          {r.hasData ? r.average.toFixed(1) : '—'}
-                        </td>
-                        <td className="px-3 py-2 text-center bg-slate-50">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getGradePillClasses(r.meanGrade)}`}>
-                            {r.meanGrade}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="bg-slate-200 border-t-2 border-slate-400">
-                      <td colSpan={3} className="px-3 py-3 font-bold text-right text-slate-700 border-r">Class Mean:</td>
-                      {termMatrixData.examTypes.map(type => (
-                        <td key={type} className="px-3 py-3 text-center font-bold text-slate-700 border-r">
-                          {termMatrixData.columnMeans[type]?.toFixed(1) || '—'}
-                        </td>
+                                ) : (
+                                  <span className="text-slate-300">—</span>
+                                )}
+                              </td>
+                            );
+                          })}
+                          <td className="px-3 py-2 text-center font-bold text-indigo-700 border-r bg-slate-50">
+                            {r.hasData ? r.average.toFixed(1) : '—'}
+                          </td>
+                          <td className="px-3 py-2 text-center bg-slate-50">
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getGradePillClasses(r.meanGrade)}`}>
+                              {r.meanGrade}
+                            </span>
+                          </td>
+                        </tr>
                       ))}
-                      <td className="px-3 py-3 text-center font-bold text-slate-800 border-r bg-slate-300">
-                        {termMatrixData.classAverage.toFixed(1)}
-                      </td>
-                      <td className="px-3 py-3 bg-slate-300"></td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-slate-200 border-t-2 border-slate-400">
+                        <td colSpan={3} className="px-3 py-3 font-bold text-right text-slate-700 border-r">Class Mean:</td>
+                        {termMatrixData.examTypes.map(type => (
+                          <td key={type} className="px-3 py-3 text-center font-bold text-slate-700 border-r">
+                            {termMatrixData.columnMeans[type]?.toFixed(1) || '—'}
+                          </td>
+                        ))}
+                        <td className="px-3 py-3 text-center font-bold text-slate-800 border-r bg-slate-300">
+                          {termMatrixData.classAverage.toFixed(1)}
+                        </td>
+                        <td className="px-3 py-3 bg-slate-300"></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
 
-              <div className="px-6 py-4 bg-slate-50 border-t flex justify-end no-print">
-                <button onClick={() => handlePrintArea('term-matrix-print')}
-                  className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
-                  <i className="fas fa-print"></i>Print Matrix
-                </button>
+                <div className="mt-4 flex justify-end no-print">
+                  <button onClick={() => handlePrintArea('term-matrix-print')}
+                    className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
+                    <i className="fas fa-print"></i>Print Matrix
+                  </button>
+                </div>
               </div>
             </div>
           )}
 
-          {/* ============= VIEW: BY EXAM ============= */}
+          {/* BY EXAM */}
           {termMatrixData && termMatrixData.view === 'exam' && (
             <div id="term-matrix-print" className="bg-white rounded-xl shadow-sm border overflow-hidden">
-              <div className="bg-slate-800 text-white px-6 py-5">
-                <div className="text-center mb-4">
-                  {schoolLogo && (
-                    <img src={schoolLogo} alt="" className="w-24 h-24 object-contain rounded-full mx-auto mb-2 border-2 border-white/20" />
-                  )}
-                  <h1 className="text-2xl font-black uppercase tracking-wider">{schoolName}</h1>
-                  {schoolMotto && <p className="text-slate-300 text-sm italic mt-1">"{schoolMotto}"</p>}
-                  <p className="text-slate-400 text-xs mt-2">
-                    {termMatrixData.className} · {examTypeLabel(termMatrixData.examType)} · {termMatrixData.term}
-                  </p>
-                </div>
-                <div className="flex justify-end">
+              <div className="p-6">
+                <PrintHeader
+                  title={`Termly Matrix — ${termMatrixData.term}`}
+                  subtitle={`${termMatrixData.className} · ${examTypeLabel(termMatrixData.examType)}`}
+                />
+
+                <div className="bg-slate-800 text-white rounded-lg p-4 mb-4 flex justify-end">
                   <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
                     <p className="text-[10px] uppercase text-slate-300">Class Avg</p>
                     <p className="text-xl font-bold">{termMatrixData.classAverage.toFixed(1)}%</p>
                   </div>
                 </div>
-              </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-slate-100 border-b-2 border-slate-300">
-                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r w-16">Pos</th>
-                      <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Student</th>
-                      <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Adm</th>
-                      {termMatrixData.subjects.map(subj => (
-                        <th key={subj.id} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r whitespace-nowrap">
-                          {subj.name}
-                        </th>
-                      ))}
-                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Avg</th>
-                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Grade</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {termMatrixData.rows.map((r, i) => (
-                      <tr key={r.studentId} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
-                        <td className="px-3 py-2 text-center border-r">
-                          {r.position ? (
-                            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
-                              r.position === 1 ? 'bg-amber-100 text-amber-700 ring-2 ring-amber-300' :
-                              r.position === 2 ? 'bg-slate-200 text-slate-700' :
-                              r.position === 3 ? 'bg-orange-100 text-orange-700' :
-                              'bg-slate-100 text-slate-600'
-                            }`}>
-                              {r.position}
-                            </span>
-                          ) : (
-                            <span className="text-slate-300">—</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 font-medium border-r whitespace-nowrap">{r.studentName}</td>
-                        <td className="px-3 py-2 font-mono text-xs text-slate-600 border-r whitespace-nowrap">{r.admissionNumber}</td>
-                        {termMatrixData.subjects.map(subj => {
-                          const cell = r.cells[subj.id];
-                          return (
-                            <td key={subj.id} className="px-3 py-2 text-center border-r">
-                              {cell ? (
-                                <div className="flex flex-col items-center gap-0.5">
-                                  <span className="font-bold text-slate-800">{cell.marks}</span>
-                                  <span className={`text-[9px] px-1.5 py-0.5 rounded ${getGradePillClasses(cell.grade)}`}>
-                                    {cell.grade}
-                                  </span>
-                                </div>
-                              ) : (
-                                <span className="text-slate-300">—</span>
-                              )}
-                            </td>
-                          );
-                        })}
-                        <td className="px-3 py-2 text-center font-bold text-indigo-700 border-r bg-slate-50">
-                          {r.hasData ? r.average.toFixed(1) : '—'}
-                        </td>
-                        <td className="px-3 py-2 text-center bg-slate-50">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getGradePillClasses(r.meanGrade)}`}>
-                            {r.meanGrade}
-                          </span>
-                        </td>
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-slate-100 border-b-2 border-slate-300">
+                        <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r w-16">Pos</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Student</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Adm</th>
+                        {termMatrixData.subjects.map(subj => (
+                          <th key={subj.id} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r whitespace-nowrap">
+                            {subj.name}
+                          </th>
+                        ))}
+                        <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Avg</th>
+                        <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Grade</th>
                       </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="bg-slate-200 border-t-2 border-slate-400">
-                      <td colSpan={3} className="px-3 py-3 font-bold text-right text-slate-700 border-r">Class Mean:</td>
-                      {termMatrixData.subjects.map(subj => (
-                        <td key={subj.id} className="px-3 py-3 text-center font-bold text-slate-700 border-r">
-                          {termMatrixData.columnMeans[subj.id]?.toFixed(1) || '—'}
-                        </td>
+                    </thead>
+                    <tbody className="divide-y">
+                      {termMatrixData.rows.map((r, i) => (
+                        <tr key={r.studentId} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
+                          <td className="px-3 py-2 text-center border-r">
+                            {r.position ? (
+                              <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
+                                r.position === 1 ? 'bg-amber-100 text-amber-700 ring-2 ring-amber-300' :
+                                r.position === 2 ? 'bg-slate-200 text-slate-700' :
+                                r.position === 3 ? 'bg-orange-100 text-orange-700' :
+                                'bg-slate-100 text-slate-600'
+                              }`}>
+                                {r.position}
+                              </span>
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 font-medium border-r whitespace-nowrap">{r.studentName}</td>
+                          <td className="px-3 py-2 font-mono text-xs text-slate-600 border-r whitespace-nowrap">{r.admissionNumber}</td>
+                          {termMatrixData.subjects.map(subj => {
+                            const cell = r.cells[subj.id];
+                            return (
+                              <td key={subj.id} className="px-3 py-2 text-center border-r">
+                                {cell ? (
+                                  <div className="flex flex-col items-center gap-0.5">
+                                    <span className="font-bold text-slate-800">{cell.marks}</span>
+                                    <span className={`text-[9px] px-1.5 py-0.5 rounded ${getGradePillClasses(cell.grade)}`}>
+                                      {cell.grade}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-300">—</span>
+                                )}
+                              </td>
+                            );
+                          })}
+                          <td className="px-3 py-2 text-center font-bold text-indigo-700 border-r bg-slate-50">
+                            {r.hasData ? r.average.toFixed(1) : '—'}
+                          </td>
+                          <td className="px-3 py-2 text-center bg-slate-50">
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getGradePillClasses(r.meanGrade)}`}>
+                              {r.meanGrade}
+                            </span>
+                          </td>
+                        </tr>
                       ))}
-                      <td className="px-3 py-3 text-center font-bold text-slate-800 border-r bg-slate-300">
-                        {termMatrixData.classAverage.toFixed(1)}
-                      </td>
-                      <td className="px-3 py-3 bg-slate-300"></td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-slate-200 border-t-2 border-slate-400">
+                        <td colSpan={3} className="px-3 py-3 font-bold text-right text-slate-700 border-r">Class Mean:</td>
+                        {termMatrixData.subjects.map(subj => (
+                          <td key={subj.id} className="px-3 py-3 text-center font-bold text-slate-700 border-r">
+                            {termMatrixData.columnMeans[subj.id]?.toFixed(1) || '—'}
+                          </td>
+                        ))}
+                        <td className="px-3 py-3 text-center font-bold text-slate-800 border-r bg-slate-300">
+                          {termMatrixData.classAverage.toFixed(1)}
+                        </td>
+                        <td className="px-3 py-3 bg-slate-300"></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
 
-              <div className="px-6 py-4 bg-slate-50 border-t flex justify-end no-print">
-                <button onClick={() => handlePrintArea('term-matrix-print')}
-                  className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
-                  <i className="fas fa-print"></i>Print Matrix
-                </button>
+                <div className="mt-4 flex justify-end no-print">
+                  <button onClick={() => handlePrintArea('term-matrix-print')}
+                    className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
+                    <i className="fas fa-print"></i>Print Matrix
+                  </button>
+                </div>
               </div>
             </div>
           )}
 
-          {/* ============= VIEW: BY CLASS ============= */}
+          {/* BY CLASS */}
           {termMatrixData && termMatrixData.view === 'class' && (
             <div id="term-matrix-print" className="bg-white rounded-xl shadow-sm border overflow-hidden">
-              <div className="bg-slate-800 text-white px-6 py-5">
-                <div className="text-center mb-4">
-                  {schoolLogo && (
-                    <img src={schoolLogo} alt="" className="w-24 h-24 object-contain rounded-full mx-auto mb-2 border-2 border-white/20" />
-                  )}
-                  <h1 className="text-2xl font-black uppercase tracking-wider">{schoolName}</h1>
-                  {schoolMotto && <p className="text-slate-300 text-sm italic mt-1">"{schoolMotto}"</p>}
-                  <p className="text-slate-400 text-xs mt-2">
-                    {termMatrixData.className} · {termMatrixData.subjectName} · {termMatrixData.term}
-                  </p>
-                </div>
-              </div>
+              <div className="p-6">
+                <PrintHeader
+                  title={`Termly Matrix — ${termMatrixData.term}`}
+                  subtitle={`${termMatrixData.className} · ${termMatrixData.subjectName}`}
+                />
 
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-slate-100 border-b-2 border-slate-300">
-                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r w-16">Pos</th>
-                      <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Student</th>
-                      {termMatrixData.examTypes.map(type => (
-                        <th key={type} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">
-                          {examTypeLabel(type)}
-                        </th>
-                      ))}
-                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Avg</th>
-                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Grade</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {termMatrixData.rows.map((r, i) => (
-                      <tr key={r.studentId} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
-                        <td className="px-3 py-2 text-center border-r">
-                          {r.position ? (
-                            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
-                              r.position === 1 ? 'bg-amber-100 text-amber-700 ring-2 ring-amber-300' :
-                              r.position === 2 ? 'bg-slate-200 text-slate-700' :
-                              r.position === 3 ? 'bg-orange-100 text-orange-700' :
-                              'bg-slate-100 text-slate-600'
-                            }`}>
-                              {r.position}
-                            </span>
-                          ) : (
-                            <span className="text-slate-300">—</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 font-medium border-r whitespace-nowrap">{r.studentName}</td>
-                        {termMatrixData.examTypes.map(type => {
-                          const cell = r.cells[type];
-                          const colMean = termMatrixData.columnMeans[type];
-                          const delta = cell && colMean ? (cell.marks - colMean) : null;
-                          return (
-                            <td key={type} className="px-3 py-2 text-center border-r">
-                              {cell ? (
-                                <div className="flex flex-col items-center gap-0.5">
-                                  <div className="flex items-center gap-1">
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-slate-100 border-b-2 border-slate-300">
+                        <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r w-16">Pos</th>
+                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Student</th>
+                        {termMatrixData.examTypes.map(type => (
+                          <th key={type} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">
+                            {examTypeLabel(type)}
+                          </th>
+                        ))}
+                        <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Avg</th>
+                        <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Grade</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {termMatrixData.rows.map((r, i) => (
+                        <tr key={r.studentId} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
+                          <td className="px-3 py-2 text-center border-r">
+                            {r.position ? (
+                              <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
+                                r.position === 1 ? 'bg-amber-100 text-amber-700 ring-2 ring-amber-300' :
+                                r.position === 2 ? 'bg-slate-200 text-slate-700' :
+                                r.position === 3 ? 'bg-orange-100 text-orange-700' :
+                                'bg-slate-100 text-slate-600'
+                              }`}>
+                                {r.position}
+                              </span>
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 font-medium border-r whitespace-nowrap">{r.studentName}</td>
+                          {termMatrixData.examTypes.map(type => {
+                            const cell = r.cells[type];
+                            return (
+                              <td key={type} className="px-3 py-2 text-center border-r">
+                                {cell ? (
+                                  <div className="flex items-center justify-center gap-1.5">
                                     <span className="font-bold text-slate-800">{cell.marks}</span>
                                     <span className={`text-[10px] px-1.5 py-0.5 rounded ${getGradePillClasses(cell.grade)}`}>
                                       {cell.grade}
                                     </span>
                                   </div>
-                                  {delta !== null && (
-                                    <span className={`text-[9px] ${delta >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                      {delta >= 0 ? `+${delta.toFixed(1)}` : delta.toFixed(1)} vs mean
-                                    </span>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-slate-300">—</span>
-                              )}
-                            </td>
-                          );
-                        })}
-                        <td className="px-3 py-2 text-center font-bold text-indigo-700 border-r bg-slate-50">
-                          {r.hasData ? r.average.toFixed(1) : '—'}
-                        </td>
-                        <td className="px-3 py-2 text-center bg-slate-50">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getGradePillClasses(r.meanGrade)}`}>
-                            {r.meanGrade}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                                ) : (
+                                  <span className="text-slate-300">—</span>
+                                )}
+                              </td>
+                            );
+                          })}
+                          <td className="px-3 py-2 text-center font-bold text-indigo-700 border-r bg-slate-50">
+                            {r.hasData ? r.average.toFixed(1) : '—'}
+                          </td>
+                          <td className="px-3 py-2 text-center bg-slate-50">
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getGradePillClasses(r.meanGrade)}`}>
+                              {r.meanGrade}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
 
-              <div className="px-6 py-4 bg-slate-50 border-t flex justify-end no-print">
-                <button onClick={() => handlePrintArea('term-matrix-print')}
-                  className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
-                  <i className="fas fa-print"></i>Print Matrix
-                </button>
+                <div className="mt-4 flex justify-end no-print">
+                  <button onClick={() => handlePrintArea('term-matrix-print')}
+                    className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
+                    <i className="fas fa-print"></i>Print Matrix
+                  </button>
+                </div>
               </div>
             </div>
           )}
         </>
       )}
 
-      {/* ============================================================ */}
-      {/* MARKS ENTRY                                                  */}
-      {/* ============================================================ */}
+      {/* MARKS ENTRY */}
       {viewMode === 'marks' && canViewAllResults && (
         <>
           <div className="bg-white p-6 rounded-xl shadow-sm border no-print">
