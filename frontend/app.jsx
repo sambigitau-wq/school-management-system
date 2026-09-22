@@ -12376,30 +12376,24 @@ const ExamModule = ({
   );
 };
 // ============================================================================
-//  RESULTS MODULE — v12
+//  RESULTS MODULE — v13
 //
-//  v12 CHANGE (over v11):
-//   • Exam dropdown now groups papers under their parent session so you
-//     no longer see "END TERM 1" repeated for each paper.
-//   • Selecting a session loads ALL its papers for bulk marks entry.
-//
-//  Preserved from v11:
-//   • Aptitude (KNEC) below term cards
-//   • Removed Report Cards / Subjects / Exams stat cards
-//   • Kept Average + Mean Points stat cards
-//   • Trend arrows: green ▲ / red ▼ / grey ●
-//   • PrintHeader logo enlarged
+//  v13 CHANGES:
+//   • Print scope tightened — only the report/matrix body prints
+//   • Removed "Average" and "Mean Points" stat cards from report header
+//   • Trend arrows fixed (proper ▲▼● with correct colors)
+//   • Print header: logo BESIDE school name (flex row)
+//   • "By Student" view: Class + Term + Student required.
+//     Class narrows the student list; the report shows ALL subjects ×
+//     ALL exam types for that student for the selected term.
 // ============================================================================
 const ResultsModule = ({
   exams, setExams, results, students, subjects, classes, courses, programs,
   currentSchool, parents, units, user,
-  admissionSessionId, // optional, if parent passes preselected session
+  admissionSessionId,
   admissionNumber: propAdmissionNumber
 }) => {
 
-  // ============================================================
-  // SCHOOL TYPE
-  // ============================================================
   const schoolCategory   = currentSchool?.category || 'ECDE_PRIMARY_JSS';
   const isUniversity     = schoolCategory === 'UNIVERSITY';
   const isTVET           = schoolCategory === 'COLLEGE_TVET';
@@ -12577,13 +12571,13 @@ const ResultsModule = ({
   };
 
   // ============================================================
-  // TREND ARROW — clear colours
+  // TREND ARROW — ▲ / ▼ / ● with colours
   // ============================================================
   const TrendArrow = ({ direction, delta, compact = false }) => {
     if (!direction || direction === 'flat') {
       return (
-        <span className={`text-gray-400 ${compact ? 'text-[11px]' : 'text-xs'}`}>
-          ● <span className="text-gray-400 font-medium">0</span>
+        <span className={`inline-flex items-center gap-0.5 font-bold text-gray-400 ${compact ? 'text-[11px]' : 'text-xs'}`}>
+          ● <span className="font-semibold">0</span>
         </span>
       );
     }
@@ -12684,7 +12678,6 @@ const ResultsModule = ({
   const [filterGrade, setFilterGrade]           = useState('');
   const [filteredUnits, setFilteredUnits]       = useState([]);
   const [filteredSubjects, setFilteredSubjects] = useState([]);
-  // Session list with papers, for the grouped dropdown
   const [examSessions, setExamSessions]         = useState([]);
   const [loadingSessions, setLoadingSessions]   = useState(false);
 
@@ -12736,7 +12729,7 @@ const ResultsModule = ({
   }, [defaultTermValue]);
 
   // ============================================================
-  // LOAD EXAM SESSIONS (with papers) — for the grouped dropdown
+  // LOAD EXAM SESSIONS
   // ============================================================
   useEffect(() => {
     let cancelled = false;
@@ -12744,23 +12737,19 @@ const ResultsModule = ({
       setLoadingSessions(true);
       try {
         const res = await api.get('/exam-sessions');
-        // Backend returns { success: true, sessions: [...] } with papers inline
         const list = res.data?.sessions || res.data?.data?.sessions || res.data?.data || [];
         if (!cancelled) {
           const cleaned = (Array.isArray(list) ? list : []).map(s => ({
             ...s,
-            papers: Array.isArray(s.papers)
-              ? s.papers
-              : Array.isArray(s.exams)
-                ? s.exams
-                : Array.isArray(s.ExamPapers)
-                  ? s.ExamPapers
-                  : []
+            papers: Array.isArray(s.papers) ? s.papers
+              : Array.isArray(s.exams) ? s.exams
+              : Array.isArray(s.ExamPapers) ? s.ExamPapers
+              : []
           }));
           setExamSessions(cleaned);
         }
       } catch (err) {
-        console.warn('Could not load exam sessions (Results dropdown):', err.message);
+        console.warn('Could not load exam sessions:', err.message);
       } finally {
         if (!cancelled) setLoadingSessions(false);
       }
@@ -13075,20 +13064,21 @@ const ResultsModule = ({
   };
 
   // ============================================================
-  // TERMLY MATRIX
+  // TERMLY MATRIX — By Student now requires Class + Term + Student
   // ============================================================
   const buildTermMatrix = async () => {
-    if (!termMatrixClassId) { alert('Please select a class'); return; }
-    if (!termMatrixTerm)    { alert('Please select a term'); return; }
-
-    if (termMatrixView === 'student' && !termMatrixStudentId) {
-      alert('Please select a student'); return;
-    }
-    if ((termMatrixView === 'subject' || termMatrixView === 'class') && !termMatrixSubjectId) {
-      alert('Please select a subject'); return;
-    }
-    if (termMatrixView === 'exam' && !termMatrixExamType) {
-      alert('Please select an exam type'); return;
+    if (termMatrixView === 'student') {
+      if (!termMatrixClassId) { alert('Please select a class'); return; }
+      if (!termMatrixTerm)    { alert('Please select a term'); return; }
+      if (!termMatrixStudentId) { alert('Please select a student'); return; }
+    } else if (termMatrixView === 'subject' || termMatrixView === 'class') {
+      if (!termMatrixClassId) { alert('Please select a class'); return; }
+      if (!termMatrixTerm)    { alert('Please select a term'); return; }
+      if (!termMatrixSubjectId) { alert('Please select a subject'); return; }
+    } else if (termMatrixView === 'exam') {
+      if (!termMatrixClassId) { alert('Please select a class'); return; }
+      if (!termMatrixTerm)    { alert('Please select a term'); return; }
+      if (!termMatrixExamType) { alert('Please select an exam type'); return; }
     }
 
     setLoadingTermMatrix(true);
@@ -13137,6 +13127,7 @@ const ResultsModule = ({
       const classObj = classes.find(c => c.id === termMatrixClassId);
       const presentExamTypes = [...new Set(sortedExams.map(e => e.type).filter(Boolean))];
 
+      // ---------- BY STUDENT ----------
       if (termMatrixView === 'student') {
         const studentObj = studentList.find(s => s.id === termMatrixStudentId);
         if (!studentObj) { alert('Student not found'); return; }
@@ -13161,9 +13152,12 @@ const ResultsModule = ({
           const meanGrade = calculateMeanGradeFromCells(
             Object.values(cells).filter(Boolean).map(c => ({ marks: c.marks, points: c.points }))
           );
-          const trend = computeTrend(
-            presentExamTypes.map(t => cells[t]?.marks).filter(m => m != null)
-          );
+
+          // Trend: only meaningful if there are 2+ exam types to compare
+          const trendValues = presentExamTypes
+            .map(t => cells[t]?.marks)
+            .filter(m => m != null && !isNaN(m));
+          const trend = computeTrend(trendValues);
 
           return { subjectId: subj.id, subjectName: subj.name, cells, average, meanGrade, trend, hasData: count > 0 };
         });
@@ -13194,6 +13188,7 @@ const ResultsModule = ({
         });
       }
 
+      // ---------- BY SUBJECT / BY CLASS ----------
       else if (termMatrixView === 'subject' || termMatrixView === 'class') {
         const subjectObj = classSubjects.find(s => s.id === termMatrixSubjectId);
         if (!subjectObj) { alert('Subject not found'); return; }
@@ -13222,7 +13217,8 @@ const ResultsModule = ({
           const meanGrade = calculateMeanGradeFromCells(
             Object.values(cells).filter(Boolean).map(c => ({ marks: c.marks, points: c.points }))
           );
-          const trend = computeTrend(usedExamTypes.map(t => cells[t]?.marks).filter(m => m != null));
+          const trendValues = usedExamTypes.map(t => cells[t]?.marks).filter(m => m != null && !isNaN(m));
+          const trend = computeTrend(trendValues);
 
           return {
             studentId: st.id,
@@ -13279,6 +13275,7 @@ const ResultsModule = ({
         });
       }
 
+      // ---------- BY EXAM ----------
       else if (termMatrixView === 'exam') {
         const targetType = termMatrixExamType;
         const examsOfType = sortedExams.filter(e => e.type === targetType);
@@ -13476,9 +13473,6 @@ const ResultsModule = ({
     }
   }, [selectedClass, subjects, isRegularSchool]);
 
-  // ============================================================
-  // SESSION-GROUPED DROPDOWN OPTIONS
-  // ============================================================
   const getProgramOptions = () => (programs || []).map(p => ({ value: p.id, label: p.name, subLabel: p.code || '' }));
   const getCourseOptions  = () => (courses  || []).map(c => ({ value: c.id, label: c.name, subLabel: c.code || '' }));
   const getClassOptions   = () => (classes  || []).map(c => ({ value: c.id, label: c.name, subLabel: c.capacity ? `Cap: ${c.capacity}` : '' }));
@@ -13488,7 +13482,6 @@ const ResultsModule = ({
     subLabel: isUniversity ? `Sem: ${u.semester || 'N/A'}` : `Module: ${u.module || 'N/A'}`
   }));
 
-  // 🔑 The session-grouped options used by the Exam <SearchableSelect>
   const getExamOptions = () => {
     const opts = [];
     (examSessions || []).forEach(session => {
@@ -13506,10 +13499,10 @@ const ResultsModule = ({
       ].filter(Boolean).join(' • ');
 
       opts.push({
-        value: session.id,                      // session id, not exam id
+        value: session.id,
         label: session.name || 'Untitled Session',
         subLabel,
-        isSession: true                         // marker to distinguish from legacy paper rows
+        isSession: true
       });
     });
     return opts;
@@ -13584,21 +13577,19 @@ const ResultsModule = ({
   };
 
   // ============================================================
-  // MARKS ENTRY — now driven by SESSION
+  // MARKS ENTRY
   // ============================================================
   const loadExamResults = async () => {
     if (!selectedSession) { alert('Please select an exam session'); return; }
     setLoading(true); setApiError('');
 
     try {
-      // Find the session with papers
       const session = (examSessions || []).find(s => s.id === selectedSession);
       if (!session) { alert('Session not found'); return; }
 
       const papers = session.papers || [];
       if (papers.length === 0) { alert('This session has no papers'); return; }
 
-      // Collect students once — use first paper's classId (all papers share class)
       const firstPaper = papers[0];
       let studentList = [];
       const params = {};
@@ -13611,7 +13602,6 @@ const ResultsModule = ({
 
       if (studentList.length === 0) { alert('No students found for this session'); return; }
 
-      // For each paper, fetch existing results
       const existingByPaper = {};
       for (const paper of papers) {
         try {
@@ -13622,7 +13612,6 @@ const ResultsModule = ({
         }
       }
 
-      // Build one row per student × paper
       const entries = [];
       for (const student of studentList) {
         for (const paper of papers) {
@@ -13637,7 +13626,7 @@ const ResultsModule = ({
             studentId: student.id,
             studentName: `${student.firstName} ${student.lastName}`,
             admissionNumber: student.admissionNumber,
-            examId: paper.id,                    // 🔑 the paper's exam id
+            examId: paper.id,
             sessionId: session.id,
             sessionName: session.name,
             unitName: getItemName({}, paper) || paper.name || 'Paper',
@@ -13664,11 +13653,9 @@ const ResultsModule = ({
     setLoading(true);
     let saved = 0, errors = 0;
     try {
-      // Look up paper by exam id for maxMarks / subjectId / unitId
       const paperById = {};
       (examSessions || []).forEach(s => (s.papers || []).forEach(p => { paperById[p.id] = p; }));
 
-      // Cache existing per exam
       const existingByExam = {};
       const uniqueExamIds = [...new Set(toSave.map(e => e.examId))];
       for (const examId of uniqueExamIds) {
@@ -13749,30 +13736,32 @@ const ResultsModule = ({
   const uniqueGrades = [...new Set(resultEntries.map(e => e.grade).filter(Boolean))];
 
   // ============================================================
-  // PRINT HEADER — logo enlarged
+  // PRINT HEADER — logo BESIDE school name
   // ============================================================
   const PrintHeader = ({ title, subtitle }) => (
-    <div className="text-center border-b-2 border-slate-300 pb-4 mb-4">
+    <div className="flex items-center gap-5 border-b-2 border-slate-300 pb-4 mb-4">
       {schoolLogo && (
         <img
           src={schoolLogo}
           alt=""
-          className="w-32 h-32 object-contain rounded-full mx-auto mb-3 border-2 border-slate-200"
+          className="w-28 h-28 object-contain rounded-full border-2 border-slate-200 flex-shrink-0"
           onError={(e) => { e.currentTarget.style.display = 'none'; }}
         />
       )}
-      <h1 className="text-3xl font-black text-slate-800 uppercase tracking-wider">
-        {schoolName}
-      </h1>
-      {schoolMotto && (
-        <p className="text-sm italic text-slate-500 mt-1">"{schoolMotto}"</p>
-      )}
-      {title && (
-        <p className="text-base font-bold text-slate-700 mt-2 uppercase tracking-wider">{title}</p>
-      )}
-      {subtitle && (
-        <p className="text-xs text-slate-500 mt-1">{subtitle}</p>
-      )}
+      <div className="flex-1 text-left">
+        <h1 className="text-3xl font-black text-slate-800 uppercase tracking-wider leading-tight">
+          {schoolName}
+        </h1>
+        {schoolMotto && (
+          <p className="text-sm italic text-slate-500 mt-1">"{schoolMotto}"</p>
+        )}
+        {title && (
+          <p className="text-base font-bold text-slate-700 mt-1 uppercase tracking-wider">{title}</p>
+        )}
+        {subtitle && (
+          <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
+        )}
+      </div>
     </div>
   );
 
@@ -14031,7 +14020,6 @@ const ResultsModule = ({
         </div>
       )}
 
-      {/* HEADER */}
       <div className="flex flex-wrap justify-between items-center gap-3 no-print">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">
@@ -14123,7 +14111,6 @@ const ResultsModule = ({
             <div id="detailed-report-print" className="space-y-6">
               <PrintHeader title="Student Report Card" />
 
-              {/* Student banner */}
               <div className="bg-slate-800 text-white rounded-xl p-6">
                 <div className="flex flex-wrap justify-between items-start gap-4">
                   <div>
@@ -14152,19 +14139,6 @@ const ResultsModule = ({
                 </div>
               </div>
 
-              {/* Summary cards — only Average + Mean Points */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-amber-50 p-4 rounded-xl text-center border border-amber-100">
-                  <p className="text-xs uppercase tracking-wider text-amber-700 font-bold">Average</p>
-                  <p className="text-3xl font-black text-amber-700 mt-1">{reportData.overallAverage.toFixed(1)}%</p>
-                </div>
-                <div className="bg-pink-50 p-4 rounded-xl text-center border border-pink-100">
-                  <p className="text-xs uppercase tracking-wider text-pink-700 font-bold">Mean Points</p>
-                  <p className="text-3xl font-black text-pink-700 mt-1">{reportData.meanPoints}</p>
-                </div>
-              </div>
-
-              {/* Term cards */}
               {reportData.termCards.length === 0 ? (
                 <div className="bg-white p-12 rounded-xl shadow-sm text-center border">
                   <i className="fas fa-file-alt text-6xl text-gray-300 mb-4"></i>
@@ -14249,7 +14223,6 @@ const ResultsModule = ({
                 ))
               )}
 
-              {/* KNEC — below term cards */}
               {reportData.knec.length > 0 && (
                 <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
                   <div className="bg-gradient-to-r from-purple-500 to-indigo-500 px-6 py-3 text-white">
@@ -14320,7 +14293,7 @@ const ResultsModule = ({
               <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">View</label>
               <div className="flex flex-wrap gap-2">
                 {[
-                  { key: 'student', label: 'By Student',  desc: 'One student · all subjects', icon: 'fa-user' },
+                  { key: 'student', label: 'By Student',  desc: 'One student · all subjects × all exams', icon: 'fa-user' },
                   { key: 'subject', label: 'By Subject',  desc: 'One subject · all students',  icon: 'fa-book' },
                   { key: 'exam',    label: 'By Exam',     desc: 'One exam · all subjects',     icon: 'fa-file-alt' },
                   { key: 'class',   label: 'By Class',    desc: 'One subject · all students + delta', icon: 'fa-users' }
@@ -14927,7 +14900,6 @@ const ResultsModule = ({
                   placeholder={`Search ${isTVET ? 'module' : 'unit'}...`} />
               )}
 
-              {/* 🔑 Session-grouped exam dropdown */}
               <SearchableSelect label="Exam Session" value={selectedSession}
                 onChange={(e) => setSelectedSession(e.target.value)}
                 options={getExamOptions()}
@@ -15003,9 +14975,6 @@ const ResultsModule = ({
                             onChange={(e) => handleMarkChange(entry.studentId, entry.examId, e.target.value)}
                             onBlur={(e) => {
                               if (e.target.value !== '') {
-                                const paper = resultEntries.find(x =>
-                                  x.studentId === entry.studentId && x.examId === entry.examId
-                                );
                                 const gi = calculateGrade(e.target.value, 100, schoolCategory);
                                 setResultEntries(prev => prev.map(x =>
                                   (x.studentId === entry.studentId && x.examId === entry.examId)
