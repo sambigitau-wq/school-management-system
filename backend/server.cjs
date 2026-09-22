@@ -7619,7 +7619,7 @@ app.get('/api/students/next-admission-number', authenticate, async (req, res) =>
 
 
 
-// ==================== CREATE STUDENT (transaction-safe) ====================
+// ==================== CREATE STUDENT (transaction-safe + hardened) ====================
 app.post('/api/students', authenticate, async (req, res) => {
   const transaction = await sequelize.transaction();
   try {
@@ -7639,7 +7639,7 @@ app.post('/api/students', authenticate, async (req, res) => {
     ['classId', 'courseId', 'programId', 'facultyId', 'departmentId', 'transportRouteId']
       .forEach(f => { if (studentFields[f] === '') studentFields[f] = null; });
 
-    // ---- Normalize DOB: empty string -> null, invalid -> null ----
+    // ---- Normalize DOB ----
     if ('dateOfBirth' in studentFields) {
       if (!studentFields.dateOfBirth) {
         studentFields.dateOfBirth = null;
@@ -7648,6 +7648,72 @@ app.post('/api/students', authenticate, async (req, res) => {
         studentFields.dateOfBirth = Number.isNaN(d.getTime())
           ? null
           : d.toISOString().split('T')[0];
+      }
+    }
+
+    // ================================================================
+    //  ✅ GUARD 1 — Required fields
+    // ================================================================
+    if (!studentFields.firstName || !String(studentFields.firstName).trim()) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'First name is required' });
+    }
+    if (!studentFields.lastName || !String(studentFields.lastName).trim()) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'Last name is required' });
+    }
+    if (!studentFields.dateOfBirth) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'Date of birth is required' });
+    }
+    if (!studentFields.gender) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'Gender is required' });
+    }
+
+    // Normalize name casing before we go further
+    studentFields.firstName = String(studentFields.firstName).trim();
+    studentFields.lastName  = String(studentFields.lastName).trim();
+    if (studentFields.middleName) {
+      studentFields.middleName = String(studentFields.middleName).trim() || null;
+    }
+
+    // ================================================================
+    //  ✅ GUARD 2 — Email format (only if provided)
+    // ================================================================
+    if (studentFields.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(studentFields.email).trim())) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'Student email is not valid' });
+    }
+
+    // ================================================================
+    //  ✅ GUARD 3 — Student login validation (before we touch the DB)
+    // ================================================================
+    if (studentLogin?.createAccount) {
+      if (!studentLogin.email || !String(studentLogin.email).trim()) {
+        await transaction.rollback();
+        return res.status(400).json({ success: false, message: 'Student login email is required when creating a login account' });
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(studentLogin.email).trim())) {
+        await transaction.rollback();
+        return res.status(400).json({ success: false, message: 'Student login email is not valid' });
+      }
+      if (!studentLogin.password || String(studentLogin.password).length < 6) {
+        await transaction.rollback();
+        return res.status(400).json({ success: false, message: 'Student login password must be at least 6 characters' });
+      }
+
+      // Check the email isn't already taken
+      const duplicateUser = await User.findOne({
+        where: { email: String(studentLogin.email).trim().toLowerCase() },
+        transaction
+      });
+      if (duplicateUser) {
+        await transaction.rollback();
+        return res.status(409).json({
+          success: false,
+          message: `A user with email ${studentLogin.email} already exists`
+        });
       }
     }
 
@@ -7671,10 +7737,22 @@ app.post('/api/students', authenticate, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Class is required' });
     }
 
-    // ---- Admission number ----
+    // ================================================================
+    //  ✅ GUARD 4 — Admission number validation
+    // ================================================================
     let admissionNumber = (studentFields.admissionNumber || '').trim();
     if (admissionNumber) {
-      // User supplied a number — check uniqueness
+      // Manual entry: enforce format + uniqueness
+      admissionNumber = admissionNumber.toUpperCase();
+
+      if (admissionNumber.length < 3) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'Admission number must be at least 3 characters'
+        });
+      }
+
       const existing = await Student.findOne({
         where: { schoolId, admissionNumber },
         transaction
@@ -7686,8 +7764,6 @@ app.post('/api/students', authenticate, async (req, res) => {
           message: `Admission number '${admissionNumber}' already exists in this school`
         });
       }
-      // Normalize format if possible
-      admissionNumber = admissionNumber.toUpperCase();
     } else {
       // Auto-generate
       admissionNumber = await generateAdmissionNumber(
@@ -7716,7 +7792,7 @@ app.post('/api/students', authenticate, async (req, res) => {
     if (studentLogin?.createAccount && studentLogin.email && studentLogin.password) {
       const hashed = await bcrypt.hash(studentLogin.password, 10);
       const studentUser = await User.create({
-        email: studentLogin.email.trim(),
+        email: String(studentLogin.email).trim().toLowerCase(),
         password: hashed,
         firstName: studentFields.firstName,
         lastName: studentFields.lastName,
@@ -7727,145 +7803,225 @@ app.post('/api/students', authenticate, async (req, res) => {
 
       await student.update({ userId: studentUser.id }, { transaction });
     }
-// ==================== 3. Parents / Guardians ====================
-const guardians = Array.isArray(req.body.guardians)
-  ? req.body.guardians
-  : (parent ? [parent] : []); // backward compat with old single-parent payload
 
-if (guardians.length > 0) {
-  // Only ONE primary across all guardians
-  let primaryAssigned = false;
+    // ==================== 3. Parents / Guardians ====================
+    const guardians = Array.isArray(req.body.guardians)
+      ? req.body.guardians
+      : (parent ? [parent] : []);
 
-  for (let i = 0; i < guardians.length; i++) {
-    const g = guardians[i];
-    const isFirst = i === 0;
-
-    // Skip completely empty optional guardians
-    const filled = g.firstName?.trim() || g.lastName?.trim() ||
-                   g.email?.trim() || g.phone?.trim() || g.useExisting;
-    if (!isFirst && !filled) continue;
-
-    // ---- Case A: link to an existing parent user ----
-    if (g.useExisting && g.existingUserId) {
-      const existingUser = await User.findOne({
-        where: { id: g.existingUserId, schoolId },
-        transaction,
+    // ================================================================
+    //  ✅ GUARD 5 — At least one guardian is required
+    // ================================================================
+    if (guardians.length === 0) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'At least one parent or guardian is required'
       });
+    }
 
-      if (!existingUser) {
-        if (isFirst) {
+    // Filter out completely empty optional guardians BEFORE validation
+    const nonEmptyGuardians = guardians.filter((g, i) => {
+      if (i === 0) return true;  // first guardian is always kept
+      const filled = g.firstName?.trim() || g.lastName?.trim() ||
+                     g.email?.trim() || g.phone?.trim() || g.useExisting;
+      return !!filled;
+    });
+
+    // Primary guardian checks
+    const primary = nonEmptyGuardians[0];
+    if (primary.useExisting) {
+      if (!primary.existingUserId) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'Please select an existing primary guardian'
+        });
+      }
+    } else {
+      if (!primary.firstName?.trim() || !primary.lastName?.trim()) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'Primary guardian first and last name are required'
+        });
+      }
+      if (!primary.phone?.trim() && !primary.email?.trim()) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'Provide at least a phone or email for the primary guardian'
+        });
+      }
+      if (primary.grantPortalAccess) {
+        if (!primary.email?.trim()) {
           await transaction.rollback();
-          return res.status(400).json({ success: false, message: 'Selected existing guardian not found' });
+          return res.status(400).json({
+            success: false,
+            message: 'Email is required for primary guardian portal access'
+          });
         }
-        continue; // skip extra invalid one
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(primary.email.trim())) {
+          await transaction.rollback();
+          return res.status(400).json({
+            success: false,
+            message: 'Primary guardian email is not valid'
+          });
+        }
+        if (!primary.password?.trim() || primary.password.length < 6) {
+          await transaction.rollback();
+          return res.status(400).json({
+            success: false,
+            message: 'Primary guardian portal password must be at least 6 characters'
+          });
+        }
+      }
+    }
+
+    // Validate additional guardians
+    for (let i = 1; i < nonEmptyGuardians.length; i++) {
+      const g = nonEmptyGuardians[i];
+      if (g.useExisting) {
+        if (!g.existingUserId) {
+          await transaction.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `Guardian ${i + 1}: please select an existing guardian`
+          });
+        }
+      } else {
+        if (!g.firstName?.trim() || !g.lastName?.trim()) {
+          await transaction.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `Guardian ${i + 1}: first and last name are required`
+          });
+        }
+        if (g.grantPortalAccess) {
+          if (!g.email?.trim()) {
+            await transaction.rollback();
+            return res.status(400).json({
+              success: false,
+              message: `Guardian ${i + 1}: email required for portal access`
+            });
+          }
+          if (!g.password?.trim() || g.password.length < 6) {
+            await transaction.rollback();
+            return res.status(400).json({
+              success: false,
+              message: `Guardian ${i + 1}: password (min 6 chars) required`
+            });
+          }
+        }
+      }
+    }
+
+    // Process guardians
+    let primaryAssigned = false;
+
+    for (let i = 0; i < nonEmptyGuardians.length; i++) {
+      const g = nonEmptyGuardians[i];
+      const isFirst = i === 0;
+
+      // ---- Case A: link to an existing parent user ----
+      if (g.useExisting && g.existingUserId) {
+        const existingUser = await User.findOne({
+          where: { id: g.existingUserId, schoolId },
+          transaction,
+        });
+
+        if (!existingUser) {
+          if (isFirst) {
+            await transaction.rollback();
+            return res.status(400).json({ success: false, message: 'Selected existing guardian not found' });
+          }
+          continue;
+        }
+
+        let makePrimary = !!g.isPrimary && !primaryAssigned;
+        if (isFirst && !primaryAssigned) makePrimary = true;
+        if (makePrimary) primaryAssigned = true;
+
+        await Parent.create({
+          userId: existingUser.id,
+          studentId: student.id,
+          relationship: g.relationship || 'Guardian',
+          isPrimary: makePrimary,
+          emergencyContact: !!g.emergencyContact,
+          occupation: g.occupation || null,
+          employer: g.employer || null,
+          monthlyIncome: g.monthlyIncome || null,
+          schoolId,
+          hasPortalAccount: true,
+        }, { transaction });
+
+        continue;
       }
 
-      // Determine if this should be primary
-      let makePrimary = !!g.isPrimary && !primaryAssigned;
+      // ---- Case B: new guardian ----
+      const {
+        firstName, lastName, email, phone,
+        relationship = 'Guardian',
+        isPrimary = false,
+        emergencyContact = false,
+        occupation = null,
+        employer = null,
+        monthlyIncome = null,
+        grantPortalAccess = false,
+        password = null,
+      } = g;
+
+      let linkedUserId = null;
+
+      // ================================================================
+      //  ✅ GUARD 6 — Idempotent user creation
+      //  If a user with this email already exists in this school,
+      //  reuse them instead of throwing a unique constraint error.
+      // ================================================================
+      if (grantPortalAccess) {
+        const existingUser = await User.findOne({
+          where: { email: String(email).trim().toLowerCase(), schoolId },
+          transaction,
+        });
+
+        if (existingUser) {
+          linkedUserId = existingUser.id;
+        } else {
+          const hashed = await bcrypt.hash(password, 10);
+          const newUser = await User.create({
+            email: String(email).trim().toLowerCase(),
+            password: hashed,
+            firstName: firstName.trim(),
+            lastName: lastName.trim(),
+            phone: phone?.trim() || null,
+            role: 'PARENT',
+            schoolId,
+          }, { transaction });
+          linkedUserId = newUser.id;
+        }
+      }
+
+      let makePrimary = !!isPrimary && !primaryAssigned;
       if (isFirst && !primaryAssigned) makePrimary = true;
       if (makePrimary) primaryAssigned = true;
 
       await Parent.create({
-        userId: existingUser.id,
+        userId: linkedUserId,
         studentId: student.id,
-        relationship: g.relationship || 'Guardian',
+        relationship,
         isPrimary: makePrimary,
-        emergencyContact: !!g.emergencyContact,
-        occupation: g.occupation || null,
-        employer: g.employer || null,
-        monthlyIncome: g.monthlyIncome || null,
+        emergencyContact,
+        occupation,
+        employer,
+        monthlyIncome,
         schoolId,
-        hasPortalAccount: true,
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        email: email?.trim() || null,
+        phone: phone?.trim() || null,
+        hasPortalAccount: !!linkedUserId,
       }, { transaction });
-
-      continue;
     }
-
-    // ---- Case B: new guardian ----
-    const {
-      firstName, lastName, email, phone,
-      relationship = 'Guardian',
-      isPrimary = false,
-      emergencyContact = false,
-      occupation = null,
-      employer = null,
-      monthlyIncome = null,
-      grantPortalAccess = false,
-      password = null,
-    } = g;
-
-    // First guardian MUST have a name
-    if (isFirst && (!firstName?.trim() || !lastName?.trim())) {
-      await transaction.rollback();
-      return res.status(400).json({ success: false, message: 'Primary guardian first and last name are required' });
-    }
-    // Extra guardians: only enforce name IF they have any other content
-    if (!isFirst && (!firstName?.trim() || !lastName?.trim())) continue;
-
-    // Contact required for first guardian
-    if (isFirst && !phone?.trim() && !email?.trim()) {
-      await transaction.rollback();
-      return res.status(400).json({ success: false, message: 'Provide at least a phone or email for the guardian' });
-    }
-
-    if (grantPortalAccess) {
-      if (!email?.trim()) {
-        await transaction.rollback();
-        return res.status(400).json({ success: false, message: 'Email is required to grant portal access' });
-      }
-      if (!password || password.length < 6) {
-        await transaction.rollback();
-        return res.status(400).json({ success: false, message: 'Password (min 6 chars) is required for portal access' });
-      }
-    }
-
-    let linkedUserId = null;
-    if (grantPortalAccess) {
-      const existingUser = await User.findOne({
-        where: { email: email.trim(), schoolId },
-        transaction,
-      });
-
-      if (existingUser) {
-        linkedUserId = existingUser.id;
-      } else {
-        const hashed = await bcrypt.hash(password, 10);
-        const newUser = await User.create({
-          email: email.trim(),
-          password: hashed,
-          firstName: firstName.trim(),
-          lastName: lastName.trim(),
-          phone: phone?.trim() || null,
-          role: 'PARENT',
-          schoolId,
-        }, { transaction });
-        linkedUserId = newUser.id;
-      }
-    }
-
-    // Determine primary
-    let makePrimary = !!isPrimary && !primaryAssigned;
-    if (isFirst && !primaryAssigned) makePrimary = true;
-    if (makePrimary) primaryAssigned = true;
-
-    await Parent.create({
-      userId: linkedUserId,
-      studentId: student.id,
-      relationship,
-      isPrimary: makePrimary,
-      emergencyContact,
-      occupation,
-      employer,
-      monthlyIncome,
-      schoolId,
-      firstName: firstName.trim(),
-      lastName: lastName.trim(),
-      email: email?.trim() || null,
-      phone: phone?.trim() || null,
-      hasPortalAccount: !!linkedUserId,
-    }, { transaction });
-  }
-}
 
     // ==================== Commit ====================
     await transaction.commit();
@@ -7890,9 +8046,23 @@ if (guardians.length > 0) {
     console.error('❌ Create student error:', error);
 
     if (error.name === 'SequelizeUniqueConstraintError') {
+      // Identify which constraint fired
+      const field = error.errors?.[0]?.path || 'field';
+      if (field.includes('admissionNumber')) {
+        return res.status(409).json({
+          success: false,
+          message: 'Admission number already exists. Please try again.'
+        });
+      }
+      if (field.includes('email')) {
+        return res.status(409).json({
+          success: false,
+          message: 'A user with this email already exists.'
+        });
+      }
       return res.status(409).json({
         success: false,
-        message: 'Admission number already exists. Please try again.'
+        message: 'Duplicate value: ' + field
       });
     }
     if (error.name === 'SequelizeValidationError') {
@@ -13377,47 +13547,203 @@ app.get('/api/fees/:id', authenticate, async (req, res) => {
   }
 });
 
-// ==================== CREATE FEE ====================
+// ==================== CREATE FEE (hardened) ====================
 app.post('/api/fees', authenticate, requireSchoolAdmin, async (req, res) => {
   try {
     const feeData = { ...req.body, schoolId: req.user.schoolId };
-    
-    // Clean up empty UUID fields
+
+    // ────────────────────────────────────────────────────────────
+    //  Normalize empty UUIDs / numeric fields
+    // ────────────────────────────────────────────────────────────
     const uuidFields = ['classId', 'courseId', 'facultyId', 'departmentId', 'programId', 'moduleId', 'transportRouteId'];
     uuidFields.forEach(field => {
       if (feeData[field] === '') feeData[field] = null;
     });
 
-    // Convert string numbers to proper types
     if (feeData.amount) feeData.amount = parseFloat(feeData.amount);
-    if (feeData.year) feeData.year = parseInt(feeData.year);
-    if (feeData.semester) feeData.semester = parseInt(feeData.semester);
-    if (feeData.module) feeData.module = parseInt(feeData.module);
+    if (feeData.year) feeData.year = parseInt(feeData.year, 10);
+    if (feeData.semester) feeData.semester = parseInt(feeData.semester, 10);
+    if (feeData.module) feeData.module = parseInt(feeData.module, 10);
 
+    // ────────────────────────────────────────────────────────────
+    //  ✅ GUARD 1 — Fee name required, non-empty
+    // ────────────────────────────────────────────────────────────
+    if (!feeData.name || !String(feeData.name).trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Fee name is required (e.g. "Tuition Fee", "Boarding Fee").'
+      });
+    }
+    feeData.name = String(feeData.name).trim();
+
+    // ────────────────────────────────────────────────────────────
+    //  ✅ GUARD 2 — Amount must be a positive number
+    // ────────────────────────────────────────────────────────────
+    if (!Number.isFinite(feeData.amount) || feeData.amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Fee amount must be a positive number.'
+      });
+    }
+
+    // ────────────────────────────────────────────────────────────
+    //  ✅ GUARD 3 — Must have a term identifier
+    //  (Term, semester, OR module — depends on school category)
+    // ────────────────────────────────────────────────────────────
+    const school = await School.findByPk(req.user.schoolId, {
+      attributes: ['id', 'category', 'name']
+    });
+    if (!school) {
+      return res.status(404).json({
+        success: false,
+        message: 'School not found for this user.'
+      });
+    }
+
+    const isUniversity = school.category === 'UNIVERSITY';
+    const isTVET       = school.category === 'COLLEGE_TVET';
+    const isRegular    = !isUniversity && !isTVET;
+
+    if (isUniversity) {
+      if (!feeData.semester && !feeData.term) {
+        return res.status(400).json({
+          success: false,
+          message: 'University fees must specify a semester (or term).'
+        });
+      }
+    } else if (isTVET) {
+      if (!feeData.module && !feeData.term) {
+        return res.status(400).json({
+          success: false,
+          message: 'TVET fees must specify a module (or term).'
+        });
+      }
+    } else {
+      if (!feeData.term || !String(feeData.term).trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Fees must specify a term (e.g. "Term 1", "Term 2", "Term 3").'
+        });
+      }
+      feeData.term = String(feeData.term).trim();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    //  ✅ GUARD 4 — Must have a scope (class / course / program)
+    //  (Or explicitly marked as a global fee that applies to all)
+    // ────────────────────────────────────────────────────────────
+    const hasScope =
+      feeData.classId ||
+      feeData.courseId ||
+      feeData.programId ||
+      feeData.facultyId ||
+      feeData.departmentId ||
+      feeData.transportRouteId;
+
+    if (!hasScope) {
+      return res.status(400).json({
+        success: false,
+        message: 'A fee must be scoped to a class, course, program, faculty, department, or transport route.'
+      });
+    }
+
+    // ────────────────────────────────────────────────────────────
+    //  ✅ GUARD 5 — Verify scope FK values belong to this school
+    // ────────────────────────────────────────────────────────────
+    if (feeData.classId) {
+      const cls = await Class.findOne({
+        where: { id: feeData.classId, schoolId: req.user.schoolId },
+        attributes: ['id']
+      });
+      if (!cls) {
+        return res.status(400).json({
+          success: false,
+          message: 'Selected class does not belong to your school.'
+        });
+      }
+    }
+
+    if (feeData.courseId) {
+      const course = await Course.findOne({
+        where: { id: feeData.courseId, schoolId: req.user.schoolId },
+        attributes: ['id']
+      });
+      if (!course) {
+        return res.status(400).json({
+          success: false,
+          message: 'Selected course does not belong to your school.'
+        });
+      }
+    }
+
+    if (feeData.programId) {
+      const program = await Program.findOne({
+        where: { id: feeData.programId, schoolId: req.user.schoolId },
+        attributes: ['id']
+      });
+      if (!program) {
+        return res.status(400).json({
+          success: false,
+          message: 'Selected program does not belong to your school.'
+        });
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────
+    //  Duplicate check — same name + same term + same scope
+    // ────────────────────────────────────────────────────────────
+    const duplicateWhere = {
+      schoolId: req.user.schoolId,
+      name: feeData.name
+    };
+    if (isUniversity) {
+      duplicateWhere.semester = feeData.semester || null;
+      duplicateWhere.courseId = feeData.courseId || null;
+    } else if (isTVET) {
+      duplicateWhere.module = feeData.module || null;
+      duplicateWhere.programId = feeData.programId || null;
+    } else {
+      duplicateWhere.term = feeData.term;
+      duplicateWhere.classId = feeData.classId || null;
+    }
+
+    const duplicate = await Fee.findOne({ where: duplicateWhere });
+    if (duplicate) {
+      return res.status(409).json({
+        success: false,
+        message: `A fee named "${feeData.name}" already exists for this ${isUniversity ? 'semester' : isTVET ? 'module' : 'term'}.`,
+        existingFeeId: duplicate.id
+      });
+    }
+
+    // ────────────────────────────────────────────────────────────
+    //  Create the fee
+    // ────────────────────────────────────────────────────────────
     const fee = await Fee.create(feeData);
-    
-    // Create audit log
+
     await createAuditLog(req, 'CREATE', 'FEE', fee.id, null, fee);
-    
-    // Fetch with associations
+
     const createdFee = await Fee.findByPk(fee.id, {
       include: [
-        { model: Class, required: false },
-        { model: Course, required: false },
+        { model: Class,   required: false },
+        { model: Course,  required: false },
         { model: Program, required: false }
       ]
     });
-    
-    // If allocationType is 'AUTO', auto-allocate to all eligible students
+
+    // ────────────────────────────────────────────────────────────
+    //  Auto-allocate if requested
+    // ────────────────────────────────────────────────────────────
+    let autoAllocated = 0;
+
     if (feeData.allocationType === 'AUTO') {
       try {
-        const school = await School.findByPk(req.user.schoolId);
         let where = { schoolId: req.user.schoolId, isActive: true };
-        
-        if (school.category === 'UNIVERSITY') {
+
+        if (isUniversity) {
           if (feeData.courseId) where.courseId = feeData.courseId;
           if (feeData.year) where.currentYear = feeData.year;
-        } else if (school.category === 'COLLEGE_TVET') {
+        } else if (isTVET) {
           if (feeData.programId) where.programId = feeData.programId;
           if (feeData.module) where.currentModule = `Module ${feeData.module}`;
         } else {
@@ -13425,18 +13751,16 @@ app.post('/api/fees', authenticate, requireSchoolAdmin, async (req, res) => {
         }
 
         const students = await Student.findAll({ where });
-        
-        let autoAllocated = 0;
+
         for (const student of students) {
-          // Check if already allocated
           const existing = await FeeAllocation.findOne({
-            where: { 
-              studentId: student.id, 
+            where: {
+              studentId: student.id,
               feeId: fee.id,
               isActive: true
             }
           });
-          
+
           if (!existing) {
             await FeeAllocation.create({
               studentId: student.id,
@@ -13445,36 +13769,58 @@ app.post('/api/fees', authenticate, requireSchoolAdmin, async (req, res) => {
               allocatedBy: req.user.id,
               schoolId: req.user.schoolId,
               allocationType: 'AUTO',
-              notes: `Auto-allocated on creation`
+              notes: 'Auto-allocated on creation'
             });
             autoAllocated++;
           }
         }
-        
-        console.log(`✅ Auto-allocated fee to ${autoAllocated} students`);
+
+        console.log(`✅ Auto-allocated fee ${fee.id} to ${autoAllocated} students`);
       } catch (autoError) {
-        console.error('Auto-allocation failed:', autoError);
-        // Don't fail the fee creation if auto-allocation fails
+        console.error('⚠️ Auto-allocation failed (fee was created):', autoError.message);
+        // Deliberately do not throw — the fee itself was created successfully
       }
     }
-    
-    res.status(201).json({ 
-      success: true, 
+
+    res.status(201).json({
+      success: true,
       fee: createdFee,
-      message: feeData.allocationType === 'AUTO' 
-        ? 'Fee created and auto-allocated to eligible students' 
-        : 'Fee created successfully (manual allocation required)'
+      autoAllocated,
+      message: feeData.allocationType === 'AUTO'
+        ? `Fee created and auto-allocated to ${autoAllocated} student${autoAllocated === 1 ? '' : 's'}.`
+        : 'Fee created successfully (manual allocation required).'
     });
+
   } catch (error) {
-    console.error('Create fee error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error', 
-      error: error.message 
+    console.error('❌ Create fee error:', error);
+
+    if (error.name === 'SequelizeValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: error.errors.map(e => e.message)
+      });
+    }
+    if (error.name === 'SequelizeForeignKeyConstraintError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid reference: one of the selected class/course/program does not exist.'
+      });
+    }
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      return res.status(409).json({
+        success: false,
+        message: 'A fee with these details already exists.'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
     });
   }
 });
-
 // ==================== UPDATE FEE ====================
 app.put('/api/fees/:id', authenticate, requireSchoolAdmin, async (req, res) => {
   try {
@@ -14340,56 +14686,116 @@ app.get('/api/students/:studentId/fee-summary', authenticate, async (req, res) =
   }
 });
 
-// ==================== PAYMENT ROUTE (FIXED) ====================
+// ==================== PAYMENT ROUTE (HARDENED) ====================
 app.post('/api/payments', authenticate, async (req, res) => {
   try {
-    const { 
+    const {
       studentId, feeId, amount, paymentMethod, transactionId, notes,
       mpesaCode, mpesaPhone, bankReference, bankMessage,
       cardLast4, cardApprovalCode, chequeNumber, chequeBank,
       isOtherIncome, incomeCategory, description, payer,
-      studentName, admissionNumber, courseName, className, feeName, discountAmount 
+      studentName, admissionNumber, courseName, className, feeName, discountAmount
     } = req.body;
 
-    // Validate required fields
-    if (!amount || amount <= 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Valid amount is required' 
+    // ────────────────────────────────────────────────────────────
+    //  ✅ GUARD 1 — Basic field validation
+    // ────────────────────────────────────────────────────────────
+    if (!amount || Number(amount) <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid amount is required'
       });
     }
 
     if (!studentId && !isOtherIncome) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Student ID is required for fee payments' 
+      return res.status(400).json({
+        success: false,
+        message: 'Student ID is required for fee payments'
       });
     }
 
-    // Generate receipt number
-    const receiptNo = await generateReceiptNo();
+    // ────────────────────────────────────────────────────────────
+    //  ✅ GUARD 2 — Fee payments MUST have a feeId
+    //  (The specific fix for the "General Payments" bug)
+    // ────────────────────────────────────────────────────────────
+    if (!isOtherIncome && !feeId) {
+      return res.status(400).json({
+        success: false,
+        message: 'feeId is required when recording a fee payment. If this is not a fee, set isOtherIncome: true.',
+        code: 'FEE_ID_REQUIRED'
+      });
+    }
 
-    // If this is a fee payment, verify the student exists
+    // ────────────────────────────────────────────────────────────
+    //  ✅ GUARD 3 — Verify the student belongs to this school
+    // ────────────────────────────────────────────────────────────
     if (!isOtherIncome && studentId) {
       const student = await Student.findOne({
-        where: { 
-          id: studentId, 
-          schoolId: req.user.schoolId 
-        }
+        where: { id: studentId, schoolId: req.user.schoolId }
       });
-      
       if (!student) {
-        return res.status(404).json({ 
-          success: false, 
-          message: 'Student not found in your school' 
+        return res.status(404).json({
+          success: false,
+          message: 'Student not found in your school'
         });
       }
     }
 
-    // Create the payment
+    // ────────────────────────────────────────────────────────────
+    //  ✅ GUARD 4 — Verify the fee exists, belongs to this school,
+    //              and (best-effort) matches the student's scope
+    // ────────────────────────────────────────────────────────────
+    let verifiedFee = null;
+    if (!isOtherIncome && feeId) {
+      verifiedFee = await Fee.findOne({
+        where: { id: feeId, schoolId: req.user.schoolId }
+      });
+
+      if (!verifiedFee) {
+        return res.status(400).json({
+          success: false,
+          message: 'Fee not found in your school',
+          code: 'FEE_NOT_FOUND'
+        });
+      }
+
+      // Best-effort scope match — logs a warning but doesn't block.
+      // Some schools legitimately have generic fees that apply to all
+      // students of a school, so we don't want to over-restrict here.
+      if (studentId) {
+        const student = await Student.findOne({
+          where: { id: studentId, schoolId: req.user.schoolId }
+        });
+
+        if (student) {
+          const matchesClass   = !verifiedFee.classId   || String(verifiedFee.classId)   === String(student.classId);
+          const matchesCourse  = !verifiedFee.courseId  || String(verifiedFee.courseId)  === String(student.courseId);
+          const matchesProgram = !verifiedFee.programId || String(verifiedFee.programId) === String(student.programId);
+
+          const scoped = matchesClass && matchesCourse && matchesProgram;
+
+          if (!scoped) {
+            console.warn(
+              `⚠️ Fee ${verifiedFee.id} (${verifiedFee.name}) may not apply to student ${student.id}. ` +
+              `Fee scope: class=${verifiedFee.classId} course=${verifiedFee.courseId} program=${verifiedFee.programId}. ` +
+              `Student scope: class=${student.classId} course=${student.courseId} program=${student.programId}.`
+            );
+          }
+        }
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────
+    //  Generate receipt number
+    // ────────────────────────────────────────────────────────────
+    const receiptNo = await generateReceiptNo();
+
+    // ────────────────────────────────────────────────────────────
+    //  Create the payment
+    // ────────────────────────────────────────────────────────────
     const payment = await Payment.create({
       studentId: isOtherIncome ? null : studentId,
-      feeId: feeId || null,
+      feeId: isOtherIncome ? null : feeId,         // ✅ only null for other income
       amount,
       paymentMethod: paymentMethod || 'CASH',
       transactionId: transactionId || null,
@@ -14397,7 +14803,7 @@ app.post('/api/payments', authenticate, async (req, res) => {
       notes: notes || null,
       recordedBy: req.user.id,
       schoolId: req.user.schoolId,
-      
+
       // Payment method specific fields
       mpesaCode: mpesaCode || null,
       mpesaPhone: mpesaPhone || null,
@@ -14407,73 +14813,96 @@ app.post('/api/payments', authenticate, async (req, res) => {
       cardApprovalCode: cardApprovalCode || null,
       chequeNumber: chequeNumber || null,
       chequeBank: chequeBank || null,
-      
+
       paymentDate: new Date(),
       isOtherIncome: isOtherIncome || false,
       incomeCategory: incomeCategory || null,
       description: description || null,
       payer: payer || null,
-      
+
       studentName: studentName || null,
       admissionNumber: admissionNumber || null,
       courseName: courseName || null,
       className: className || null,
-      feeName: feeName || null,
-      discountAmount: parseFloat(discountAmount) || 0  // ✅ NEW
+      feeName: verifiedFee?.name || feeName || null,   // ✅ use the real fee name
+      discountAmount: parseFloat(discountAmount) || 0
     });
 
-    // If this payment is for a specific fee, update the allocation status
-    if (feeId && studentId) {
-      // Find and update allocations
-      const allocations = await FeeAllocation.findAll({
-        where: { 
-          studentId, 
-          feeId,
-          isActive: true
+    // ────────────────────────────────────────────────────────────
+    //  Mark fee allocations as touched (for audit trail)
+    // ────────────────────────────────────────────────────────────
+    if (!isOtherIncome && feeId && studentId) {
+      try {
+        const allocations = await FeeAllocation.findAll({
+          where: { studentId, feeId, isActive: true }
+        });
+        for (const allocation of allocations) {
+          console.log(`✅ Payment ${payment.id} touches allocation ${allocation.id}`);
         }
-      });
-      
-      // Mark allocations as paid (or partially paid)
-      for (const allocation of allocations) {
-        // You could track paid amount per allocation here
-        // For now, we just log it
-        console.log(`✅ Payment recorded for allocation ${allocation.id}`);
+      } catch (allocErr) {
+        console.warn('Allocation lookup failed (non-critical):', allocErr.message);
       }
     }
 
-    await createAuditLog(req, 'RECORD', 'PAYMENT', payment.id, null, payment);
+    // ────────────────────────────────────────────────────────────
+    //  Audit log
+    // ────────────────────────────────────────────────────────────
+    try {
+      await createAuditLog(req, 'RECORD', 'PAYMENT', payment.id, null, {
+        amount,
+        studentId,
+        feeId,
+        isOtherIncome: !!isOtherIncome,
+        receiptNo
+      });
+    } catch (logErr) {
+      console.warn('Audit log failed (non-critical):', logErr.message);
+    }
 
-    // Fetch the created payment with associations
+    // ────────────────────────────────────────────────────────────
+    //  Return the created payment with associations
+    // ────────────────────────────────────────────────────────────
     const createdPayment = await Payment.findByPk(payment.id, {
       include: [
-        { 
-          model: Student, 
+        {
+          model: Student,
           attributes: ['id', 'firstName', 'lastName', 'admissionNumber'],
-          required: false 
+          required: false
         },
-        { 
-          model: Fee, 
-          attributes: ['id', 'name', 'amount'],
-          required: false 
+        {
+          model: Fee,
+          attributes: ['id', 'name', 'amount', 'term'],
+          required: false
         }
       ]
     });
 
-    res.status(201).json({ 
-      success: true, 
+    res.status(201).json({
+      success: true,
       payment: createdPayment,
-      message: 'Payment recorded successfully' 
+      message: 'Payment recorded successfully'
     });
+
   } catch (error) {
     console.error('❌ Record payment error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error', 
-      error: error.message 
+
+    // Handle the DB CHECK constraint we're about to add
+    if (error.name === 'SequelizeDatabaseError' &&
+        /payment_needs_fee_or_other_income/.test(error.message)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Fee payments must be linked to a specific fee. Please select a fee.',
+        code: 'FEE_ID_REQUIRED'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
     });
   }
 });
-
 // ==================== GET PAYMENTS ====================
 app.get('/api/payments', authenticate, async (req, res) => {
   try {
