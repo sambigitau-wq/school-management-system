@@ -27898,27 +27898,16 @@ const AccountingModule = ({ payments, expenses, dateRange, setDateRange, showInc
 };
 
 // ============================================================================
-// OtherIncomeModule.jsx
-// Works for ALL school categories: ECDE, Primary, JSS, Secondary, TVET,
-// Special Needs, International, Mixed, Boarding, Day, etc.
+// OTHER INCOME — helpers used by AccountingModule when isOtherIncome=true
+// Kenya only · ECDE, PRIMARY, JSS, SECONDARY, TVET, UNIVERSITY
 // ============================================================================
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import api from '../api'; // adjust to your project's api path
-
-// ============================================================================
-// SEARCHABLE SELECT (defined OUTSIDE — prevents focus loss on re-render)
-// ============================================================================
+// ---------------------------------------------------------------------------
+// Searchable select — memoized OUTSIDE to prevent focus loss
+// ---------------------------------------------------------------------------
 const OtherIncomeSearchableSelect = React.memo(({
-  label,
-  value,
-  onChange,
-  options,
-  placeholder,
-  disabled,
-  required,
-  error,
-  className,
+  label, value, onChange, options, placeholder,
+  disabled, required, error, className,
 }) => {
   const [search, setSearch] = useState('');
   const [isOpen, setIsOpen] = useState(false);
@@ -28013,12 +28002,8 @@ const OtherIncomeSearchableSelect = React.memo(({
           </button>
         )}
         <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-          <svg
-            className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
+          <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+            fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
           </svg>
         </div>
@@ -28052,328 +28037,131 @@ const OtherIncomeSearchableSelect = React.memo(({
 });
 OtherIncomeSearchableSelect.displayName = 'OtherIncomeSearchableSelect';
 
-// ============================================================================
-// SCHOOL CATEGORY PRESETS
-// Every school category has its own defaults. Override per-school in config.
-// ============================================================================
-const SCHOOL_CATEGORY_PRESETS = {
+// ---------------------------------------------------------------------------
+// Kenyan school category presets
+// ---------------------------------------------------------------------------
+const OTHER_INCOME_SCHOOL_PRESETS = {
   ECDE: {
     label: 'ECDE (Pre-Primary)',
     incomeCategories: [
-      'Donation',
-      'Parent Contribution',
-      'Feeding Programme Support',
-      'Learning Materials Donation',
-      'Church/Religious Support',
-      'NGO Support',
-      'Government Capitation',
-      'Fundraising (Harambee)',
-      'Rental Income',
-      'Other'
+      'Donation', 'Parent Contribution', 'Feeding Programme Support',
+      'Learning Materials Donation', 'Church/Religious Support', 'NGO Support',
+      'Government Capitation', 'Fundraising (Harambee)', 'Rental Income', 'Other'
     ]
   },
   PRIMARY: {
     label: 'Primary School',
     incomeCategories: [
-      'Donation',
-      'Grant',
-      'Fundraising (Harambee)',
-      'Alumni Contribution',
-      'Church/Religious Support',
-      'NGO Support',
-      'Government Capitation',
-      'CDF Bursary',
-      'Rental Income',
-      'Interest Income',
-      'Sale of Assets',
-      'Farm/Agricultural Income',
-      'Other'
+      'Donation', 'Grant', 'Fundraising (Harambee)', 'Alumni Contribution',
+      'Church/Religious Support', 'NGO Support', 'Government Capitation',
+      'CDF Bursary', 'Rental Income', 'Interest Income', 'Sale of Assets',
+      'Farm/Agricultural Income', 'Other'
     ]
   },
   JSS: {
     label: 'Junior Secondary School',
     incomeCategories: [
-      'Donation',
-      'Government Capitation',
-      'CDF Bursary',
-      'NG-CDF Support',
-      'County Government Support',
-      'Fundraising (Harambee)',
-      'Alumni Contribution',
-      'NGO Support',
-      'Church/Religious Support',
-      'Rental Income',
-      'Interest Income',
-      'Sale of Assets',
-      'Farm/Agricultural Income',
-      'Other'
+      'Donation', 'Government Capitation', 'CDF Bursary', 'NG-CDF Support',
+      'County Government Support', 'Fundraising (Harambee)', 'Alumni Contribution',
+      'NGO Support', 'Church/Religious Support', 'Rental Income', 'Interest Income',
+      'Sale of Assets', 'Farm/Agricultural Income', 'Other'
     ]
   },
   SECONDARY: {
     label: 'Secondary School',
     incomeCategories: [
-      'Donation',
-      'Government Capitation',
-      'CDF Bursary',
-      'NG-CDF Support',
-      'County Bursary',
-      'Fundraising (Harambee)',
-      'Alumni Contribution',
-      'NGO Support',
-      'Church/Religious Support',
-      'Rental Income',
-      'Interest Income',
-      'Sale of Assets',
-      'Farm/Agricultural Income',
-      'Boarding Income',
-      'Other'
+      'Donation', 'Government Capitation', 'CDF Bursary', 'NG-CDF Support',
+      'County Bursary', 'Fundraising (Harambee)', 'Alumni Contribution',
+      'NGO Support', 'Church/Religious Support', 'Rental Income', 'Interest Income',
+      'Sale of Assets', 'Farm/Agricultural Income', 'Boarding Income', 'Other'
     ]
   },
   TVET: {
     label: 'TVET / Vocational College',
     incomeCategories: [
-      'Donation',
-      'Government Grant',
-      'HELB Support',
-      'Industry Partnership Income',
-      'Fundraising',
-      'Alumni Contribution',
-      'NGO Support',
-      'Production Unit Income',
-      'Rental Income',
-      'Interest Income',
-      'Sale of Assets',
-      'Short Course Fees',
-      'Other'
+      'Donation', 'Government Grant', 'HELB Support', 'Industry Partnership Income',
+      'Fundraising', 'Alumni Contribution', 'NGO Support', 'Production Unit Income',
+      'Rental Income', 'Interest Income', 'Sale of Assets', 'Short Course Fees', 'Other'
     ]
   },
-  SPECIAL_NEEDS: {
-    label: 'Special Needs School',
+  UNIVERSITY: {
+    label: 'University',
     incomeCategories: [
-      'Donation',
-      'Government Grant',
-      'NGO Support',
-      'Church/Religious Support',
-      'Foundation Grant',
-      'Parent Contribution',
-      'Fundraising',
-      'Assistive Devices Donation',
-      'Rental Income',
-      'Interest Income',
-      'Other'
-    ]
-  },
-  INTERNATIONAL: {
-    label: 'International School',
-    incomeCategories: [
-      'Donation',
-      'Grant',
-      'Endowment',
-      'Alumni Gift',
-      'Corporate Sponsorship',
-      'Foundation Grant',
-      'Fundraiser',
-      'Rental Income',
-      'Investment Income',
-      'Sale of Assets',
-      'Other'
-    ]
-  },
-  MIXED: {
-    label: 'Mixed (Primary + JSS + Secondary)',
-    incomeCategories: [
-      'Donation',
-      'Government Capitation',
-      'CDF Bursary',
-      'NG-CDF Support',
-      'County Support',
-      'Fundraising (Harambee)',
-      'Alumni Contribution',
-      'NGO Support',
-      'Church/Religious Support',
-      'Rental Income',
-      'Interest Income',
-      'Sale of Assets',
-      'Farm/Agricultural Income',
-      'Boarding Income',
-      'Other'
+      'Donation', 'Government Grant', 'HELB Support', 'Research Grant',
+      'Endowment Income', 'Alumni Contribution', 'Industry Partnership Income',
+      'Corporate Sponsorship', 'Foundation Grant', 'International Grant',
+      'Rental Income', 'Investment Income', 'Short Course Fees',
+      'Conference/Workshop Income', 'Sale of Assets', 'Other'
     ]
   }
 };
 
-// ============================================================================
-// COUNTRY PRESETS (currency, locale, phone rules)
-// ============================================================================
-const COUNTRY_PRESETS = {
-  KE: {
-    currency: 'KES',
-    locale: 'en-KE',
-    phoneLabel: 'Phone Number',
-    phonePlaceholder: '0712345678',
-    phonePattern: /^(?:\+?254|0)[17]\d{8}$/
-  },
-  UG: {
-    currency: 'UGX',
-    locale: 'en-UG',
-    phoneLabel: 'Mobile Money Number',
-    phonePlaceholder: '+256700000000',
-    phonePattern: /^(?:\+?256|0)7\d{8}$/
-  },
-  TZ: {
-    currency: 'TZS',
-    locale: 'en-TZ',
-    phoneLabel: 'Mobile Money Number',
-    phonePlaceholder: '+255700000000',
-    phonePattern: /^(?:\+?255|0)[67]\d{8}$/
-  },
-  NG: {
-    currency: 'NGN',
-    locale: 'en-NG',
-    phoneLabel: 'Phone Number',
-    phonePlaceholder: '+2348000000000',
-    phonePattern: /^(?:\+?234|0)[789]\d{9}$/
-  },
-  ZA: {
-    currency: 'ZAR',
-    locale: 'en-ZA',
-    phoneLabel: 'Phone Number',
-    phonePlaceholder: '+27821234567',
-    phonePattern: /^(?:\+?27|0)[678]\d{8}$/
-  },
-  US: {
-    currency: 'USD',
-    locale: 'en-US',
-    phoneLabel: 'Phone',
-    phonePlaceholder: '(555) 123-4567',
-    phonePattern: /^(?:\+?1)?[\s.-]?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}$/
-  },
-  GB: {
-    currency: 'GBP',
-    locale: 'en-GB',
-    phoneLabel: 'Phone',
-    phonePlaceholder: '07123 456789',
-    phonePattern: /^(?:\+?44|0)7\d{9}$/
-  },
-  DEFAULT: {
-    currency: 'KES',
-    locale: 'en-KE',
-    phoneLabel: 'Phone Number',
-    phonePlaceholder: '0712345678',
-    phonePattern: null
-  }
-};
-
-// ============================================================================
-// DEFAULT PAYMENT METHODS
-// ============================================================================
-const DEFAULT_PAYMENT_METHODS = [
-  { value: 'CASH',   label: '💵 Cash',          enabled: true },
-  { value: 'MPESA',  label: '📱 M-Pesa',         enabled: true },
-  { value: 'BANK',   label: '🏦 Bank Transfer',  enabled: true },
-  { value: 'CARD',   label: '💳 Card',           enabled: true },
-  { value: 'CHEQUE', label: '📄 Cheque',         enabled: true },
-  { value: 'OTHER',  label: '📦 Other',          enabled: true }
+const OTHER_INCOME_PAYMENT_METHODS = [
+  { value: 'CASH',   label: '💵 Cash' },
+  { value: 'MPESA',  label: '📱 M-Pesa' },
+  { value: 'BANK',   label: '🏦 Bank Transfer' },
+  { value: 'CARD',   label: '💳 Card' },
+  { value: 'CHEQUE', label: '📄 Cheque' }
 ];
 
-// ============================================================================
-// BUILD EFFECTIVE CONFIG (school + country + school category)
-// ============================================================================
-function buildConfig(school) {
-  const s = school || {};
+const OTHER_INCOME_METHOD_LABELS = {
+  CASH: 'Cash',
+  MPESA: 'M-Pesa',
+  BANK: 'Bank Transfer',
+  CARD: 'Card',
+  CHEQUE: 'Cheque'
+};
 
-  // Country preset
-  const countryKey = (s.country || 'KE').toUpperCase();
-  const countryPreset = COUNTRY_PRESETS[countryKey] || COUNTRY_PRESETS.DEFAULT;
+const OTHER_INCOME_KE_PHONE_PATTERN = /^(?:\+?254|0)[17]\d{8}$/;
 
-  // School category preset
-  const categoryKey = (s.schoolCategory || 'MIXED').toUpperCase();
-  const categoryPreset =
-    SCHOOL_CATEGORY_PRESETS[categoryKey] ||
-    SCHOOL_CATEGORY_PRESETS.MIXED;
+// Read school info from localStorage / context — adjust key to match your app
+function getOtherIncomeSchoolConfig(user) {
+  let school = {};
+  try {
+    const raw = localStorage.getItem('school');
+    if (raw) school = JSON.parse(raw);
+  } catch { /* ignore */ }
 
-  // Payment methods
-  const paymentMethods = (s.paymentMethods && s.paymentMethods.length > 0)
-    ? s.paymentMethods
-    : DEFAULT_PAYMENT_METHODS;
-
-  // Income categories (school override > category preset > generic fallback)
-  const incomeCategories =
-    (s.incomeCategories && s.incomeCategories.length > 0)
-      ? s.incomeCategories
-      : categoryPreset.incomeCategories;
-
-  // Method labels (short display names)
-  const methodLabels = {
-    CASH: 'Cash',
-    MPESA: countryKey === 'KE' ? 'M-Pesa' : 'Mobile Money',
-    BANK: 'Bank Transfer',
-    CARD: 'Card',
-    CHEQUE: countryKey === 'US' ? 'Check' : 'Cheque',
-    OTHER: 'Other',
-    ...(s.methodLabels || {})
-  };
+  const requestedCategory = (school.schoolCategory || user?.schoolCategory || 'PRIMARY').toUpperCase();
+  const categoryKey = OTHER_INCOME_SCHOOL_PRESETS[requestedCategory] ? requestedCategory : 'PRIMARY';
+  const categoryPreset = OTHER_INCOME_SCHOOL_PRESETS[categoryKey];
 
   return {
-    // School identity
-    schoolId: s.id || s.schoolId || null,
-    schoolName: s.name || s.schoolName || 'School',
+    schoolId: school.id || school.schoolId || user?.schoolId || null,
+    schoolName: school.name || school.schoolName || 'School',
     schoolCategory: categoryKey,
     schoolCategoryLabel: categoryPreset.label,
-
-    // Country / currency
-    country: countryKey,
-    currency: s.currency || countryPreset.currency,
-    locale: s.locale || countryPreset.locale,
-    phoneLabel: s.phoneLabel || countryPreset.phoneLabel,
-    phonePlaceholder: s.phonePlaceholder || countryPreset.phonePlaceholder,
-    phonePattern: s.phonePattern !== undefined ? s.phonePattern : countryPreset.phonePattern,
-
-    // Payment methods + toggles
-    paymentMethods,
-    enableMpesa:  s.enableMpesa  !== undefined ? s.enableMpesa  : paymentMethods.some(p => p.value === 'MPESA'),
-    enableBank:   s.enableBank   !== undefined ? s.enableBank   : paymentMethods.some(p => p.value === 'BANK'),
-    enableCard:   s.enableCard   !== undefined ? s.enableCard   : paymentMethods.some(p => p.value === 'CARD'),
-    enableCheque: s.enableCheque !== undefined ? s.enableCheque : paymentMethods.some(p => p.value === 'CHEQUE'),
-
-    // Categories + labels
-    incomeCategories,
-    methodLabels
+    currency: 'KES',
+    locale: 'en-KE',
+    phoneLabel: 'M-Pesa Phone Number',
+    phonePlaceholder: '0712345678',
+    phonePattern: OTHER_INCOME_KE_PHONE_PATTERN,
+    paymentMethods: OTHER_INCOME_PAYMENT_METHODS,
+    incomeCategories: categoryPreset.incomeCategories,
+    methodLabels: OTHER_INCOME_METHOD_LABELS
   };
 }
 
-// ============================================================================
-// OTHER INCOME MODULE
-// ============================================================================
-const OtherIncomeModule = ({
-  payments,
-  setPayments,
-  dateRange,
-  setDateRange,
-  user,
-  school
-}) => {
-  const cfg = useMemo(() => buildConfig(school), [school]);
+// ---------------------------------------------------------------------------
+// Reusable Other Income panel — renders INSIDE AccountingModule
+// when isOtherIncome === true
+// ---------------------------------------------------------------------------
+const OtherIncomePanel = ({ user, dateRange, setDateRange }) => {
+  const cfg = useMemo(() => getOtherIncomeSchoolConfig(user), [user]);
 
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [incomeList, setIncomeList] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [formErrors, setFormErrors] = useState({});
-  const [summary, setSummary] = useState({
-    totalIncome: 0,
-    byCategory: {},
-    byMethod: {}
-  });
+  const [summary, setSummary] = useState({ totalIncome: 0, byCategory: {}, byMethod: {} });
 
-  // ---- Permissions ----
-  const canAdd = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT', 'BURSAR'].includes(user?.role);
-  const canDelete = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
-  const canView = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT', 'DEPUTY_PRINCIPAL', 'BURSAR'].includes(user?.role);
+  const canAdd = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT', 'BURSAR', 'VICE_CHANCELLOR', 'REGISTRAR'].includes(user?.role);
+  const canDelete = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT', 'VICE_CHANCELLOR'].includes(user?.role);
 
-  // ---- Empty form ----
   const emptyForm = useMemo(() => ({
     amount: '',
-    paymentMethod: cfg.paymentMethods[0]?.value || 'CASH',
+    paymentMethod: 'CASH',
     transactionId: '',
     notes: '',
     date: new Date().toISOString().split('T')[0],
@@ -28387,45 +28175,30 @@ const OtherIncomeModule = ({
     cardLast4: '',
     cardApprovalCode: '',
     chequeNumber: '',
-    chequeBank: '',
-    currency: cfg.currency
+    chequeBank: ''
   }), [cfg]);
 
   const [incomeForm, setIncomeForm] = useState(emptyForm);
   useEffect(() => { setIncomeForm(emptyForm); }, [emptyForm]);
 
-  // ---- Currency formatter (school-aware) ----
-  const formatCurrency = (amount, currencyOverride) => {
+  const formatCurrency = (amount) => {
     try {
-      return new Intl.NumberFormat(cfg.locale, {
+      return new Intl.NumberFormat('en-KE', {
         style: 'currency',
-        currency: currencyOverride || cfg.currency,
+        currency: 'KES',
         minimumFractionDigits: 0,
         maximumFractionDigits: 2
       }).format(amount || 0);
     } catch {
-      return `${currencyOverride || cfg.currency} ${Number(amount || 0).toLocaleString()}`;
+      return `KES ${Number(amount || 0).toLocaleString()}`;
     }
   };
 
-  // ---- Filter payment methods by school config ----
-  const availablePaymentMethods = useMemo(() => {
-    return cfg.paymentMethods.filter(pm => {
-      if (pm.value === 'MPESA'  && !cfg.enableMpesa)  return false;
-      if (pm.value === 'BANK'   && !cfg.enableBank)   return false;
-      if (pm.value === 'CARD'   && !cfg.enableCard)   return false;
-      if (pm.value === 'CHEQUE' && !cfg.enableCheque) return false;
-      return true;
-    });
-  }, [cfg]);
-
-  // ---- Category options for searchable select ----
   const categoryOptions = useMemo(
     () => cfg.incomeCategories.map(c => ({ value: c, label: c })),
     [cfg.incomeCategories]
   );
 
-  // ---- InputField ----
   const InputField = ({
     label, type, value, onChange, placeholder,
     required, disabled, min, step, textarea, rows, maxLength, error
@@ -28439,14 +28212,8 @@ const OtherIncomeModule = ({
           <label className="block text-sm font-medium text-gray-700 mb-1">
             {label}{required && <span className="text-red-500 ml-1">*</span>}
           </label>
-          <textarea
-            rows={rows || 3}
-            value={value || ''}
-            onChange={onChange}
-            placeholder={placeholder}
-            className={cls}
-            disabled={disabled}
-          />
+          <textarea rows={rows || 3} value={value || ''} onChange={onChange}
+            placeholder={placeholder} className={cls} disabled={disabled} />
           {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
         </div>
       );
@@ -28456,28 +28223,16 @@ const OtherIncomeModule = ({
         <label className="block text-sm font-medium text-gray-700 mb-1">
           {label}{required && <span className="text-red-500 ml-1">*</span>}
         </label>
-        <input
-          type={type || 'text'}
+        <input type={type || 'text'}
           value={value !== undefined && value !== null ? value : ''}
-          onChange={onChange}
-          placeholder={placeholder}
-          className={cls}
-          disabled={disabled}
-          min={min}
-          step={step}
-          maxLength={maxLength}
-        />
+          onChange={onChange} placeholder={placeholder} className={cls}
+          disabled={disabled} min={min} step={step} maxLength={maxLength} />
         {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
       </div>
     );
   };
 
-  // ============================================================================
-  // LOAD OTHER INCOME
-  // Uses the same /payments endpoint, filtered by isOtherIncome=true
-  // ============================================================================
   const loadOtherIncome = async () => {
-    if (!canView) return;
     setLoading(true);
     try {
       const params = { isOtherIncome: true };
@@ -28486,22 +28241,19 @@ const OtherIncomeModule = ({
         params.startDate = dateRange.start;
         params.endDate = dateRange.end;
       }
-
       const res = await api.get('/payments', { params });
       const incomes = res.data.payments || res.data.data || [];
       setIncomeList(incomes);
 
-      const total = incomes.reduce((sum, inc) => sum + parseFloat(inc.amount || 0), 0);
+      const total = incomes.reduce((s, inc) => s + parseFloat(inc.amount || 0), 0);
       const byCategory = {};
       const byMethod = {};
-
       incomes.forEach(inc => {
         const cat = inc.incomeCategory || 'Other';
         const amt = parseFloat(inc.amount || 0);
         byCategory[cat] = (byCategory[cat] || 0) + amt;
         byMethod[inc.paymentMethod] = (byMethod[inc.paymentMethod] || 0) + amt;
       });
-
       setSummary({ totalIncome: total, byCategory, byMethod });
     } catch (error) {
       console.error('Error loading other income:', error);
@@ -28513,63 +28265,39 @@ const OtherIncomeModule = ({
   };
 
   useEffect(() => {
-    if (canView) loadOtherIncome();
+    loadOtherIncome();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateRange.start, dateRange.end, canView, cfg.schoolId]);
+  }, [dateRange.start, dateRange.end, cfg.schoolId]);
 
-  // ============================================================================
-  // VALIDATION
-  // ============================================================================
   const validate = () => {
     const errs = {};
     const amt = parseFloat(incomeForm.amount);
-    if (!incomeForm.amount || isNaN(amt) || amt <= 0) {
-      errs.amount = 'Enter a valid amount greater than 0';
-    }
+    if (!incomeForm.amount || isNaN(amt) || amt <= 0) errs.amount = 'Enter a valid amount greater than 0';
     if (!incomeForm.date) errs.date = 'Date is required';
     if (!incomeForm.incomeCategory) errs.incomeCategory = 'Category is required';
-    if (!incomeForm.paymentMethod) errs.paymentMethod = 'Payment method is required';
 
     if (incomeForm.paymentMethod === 'MPESA') {
-      if (!incomeForm.mpesaPhone) {
-        errs.mpesaPhone = 'Phone number is required';
-      } else if (cfg.phonePattern && !cfg.phonePattern.test(incomeForm.mpesaPhone.trim())) {
-        errs.mpesaPhone = 'Enter a valid phone number';
-      }
-      if (incomeForm.mpesaCode && incomeForm.mpesaCode.length < 4) {
-        errs.mpesaCode = 'Code looks too short';
-      }
+      if (!incomeForm.mpesaPhone) errs.mpesaPhone = 'Phone number is required';
+      else if (!OTHER_INCOME_KE_PHONE_PATTERN.test(incomeForm.mpesaPhone.trim()))
+        errs.mpesaPhone = 'Enter a valid Kenyan phone (e.g. 0712345678)';
+      if (incomeForm.mpesaCode && incomeForm.mpesaCode.length < 4)
+        errs.mpesaCode = 'M-Pesa code looks too short';
     }
-
-    if (incomeForm.paymentMethod === 'BANK') {
-      if (!incomeForm.bankReference) {
-        errs.bankReference = 'Bank reference is required';
-      }
-    }
-
-    if (incomeForm.paymentMethod === 'CARD') {
-      if (incomeForm.cardLast4 && !/^\d{4}$/.test(incomeForm.cardLast4)) {
-        errs.cardLast4 = 'Must be exactly 4 digits';
-      }
-    }
-
-    if (incomeForm.paymentMethod === 'CHEQUE') {
-      if (!incomeForm.chequeNumber) errs.chequeNumber = 'Cheque number required';
-    }
+    if (incomeForm.paymentMethod === 'BANK' && !incomeForm.bankReference)
+      errs.bankReference = 'Bank reference is required';
+    if (incomeForm.paymentMethod === 'CARD' && incomeForm.cardLast4 &&
+        !/^\d{4}$/.test(incomeForm.cardLast4))
+      errs.cardLast4 = 'Must be exactly 4 digits';
+    if (incomeForm.paymentMethod === 'CHEQUE' && !incomeForm.chequeNumber)
+      errs.chequeNumber = 'Cheque number required';
 
     setFormErrors(errs);
     return Object.keys(errs).length === 0;
   };
 
-  // ============================================================================
-  // SUBMIT
-  // ============================================================================
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!canAdd) {
-      alert('You do not have permission to record other income');
-      return;
-    }
+    if (!canAdd) { alert('You do not have permission to record other income'); return; }
     if (!validate()) return;
 
     setLoading(true);
@@ -28580,18 +28308,17 @@ const OtherIncomeModule = ({
         isOtherIncome: true,
         feeId: null,
         studentId: null,
-        currency: cfg.currency,
-        country: cfg.country,
+        currency: 'KES',
+        country: 'KE',
         schoolId: cfg.schoolId,
         schoolCategory: cfg.schoolCategory
       };
 
-      // Remove fields not relevant to the selected payment method
-      const method = paymentData.paymentMethod;
-      if (method !== 'MPESA')  { delete paymentData.mpesaCode; delete paymentData.mpesaPhone; }
-      if (method !== 'BANK')   { delete paymentData.bankReference; delete paymentData.bankMessage; }
-      if (method !== 'CARD')   { delete paymentData.cardLast4; delete paymentData.cardApprovalCode; }
-      if (method !== 'CHEQUE') { delete paymentData.chequeNumber; delete paymentData.chequeBank; }
+      const m = paymentData.paymentMethod;
+      if (m !== 'MPESA')  { delete paymentData.mpesaCode; delete paymentData.mpesaPhone; }
+      if (m !== 'BANK')   { delete paymentData.bankReference; delete paymentData.bankMessage; }
+      if (m !== 'CARD')   { delete paymentData.cardLast4; delete paymentData.cardApprovalCode; }
+      if (m !== 'CHEQUE') { delete paymentData.chequeNumber; delete paymentData.chequeBank; }
 
       await api.post('/payments', paymentData);
 
@@ -28608,16 +28335,9 @@ const OtherIncomeModule = ({
     }
   };
 
-  // ============================================================================
-  // DELETE
-  // ============================================================================
   const handleDelete = async (id) => {
-    if (!canDelete) {
-      alert('You do not have permission to delete income records');
-      return;
-    }
+    if (!canDelete) { alert('You do not have permission to delete income records'); return; }
     if (!window.confirm('Delete this income record? This cannot be undone.')) return;
-
     setLoading(true);
     try {
       await api.delete(`/payments/${id}`);
@@ -28631,9 +28351,6 @@ const OtherIncomeModule = ({
     }
   };
 
-  // ============================================================================
-  // FILTER + RESET
-  // ============================================================================
   const clearFilters = () => {
     setDateRange({ start: '', end: '' });
     setSearchTerm('');
@@ -28650,39 +28367,20 @@ const OtherIncomeModule = ({
     );
   }, [incomeList, searchTerm]);
 
-  // ============================================================================
-  // PERMISSION GATE
-  // ============================================================================
-  if (!canView) {
-    return (
-      <div className="bg-white p-8 rounded-xl shadow-sm text-center">
-        <i className="fas fa-lock text-5xl text-gray-400 mb-4"></i>
-        <p className="text-gray-500">You do not have permission to view other income.</p>
-      </div>
-    );
-  }
-
-  // ============================================================================
-  // RENDER
-  // ============================================================================
   return (
     <div className="space-y-6">
       {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
 
-      {/* Header */}
       <div className="flex flex-wrap justify-between items-center gap-3">
         <div>
           <h2 className="text-2xl font-bold">Other Income</h2>
           <p className="text-sm text-gray-500">
-            {cfg.schoolCategoryLabel} · Donations, grants, fundraising, and non-fee income · {cfg.currency}
+            {cfg.schoolCategoryLabel} · Donations, grants, harambee, and non-fee income · KES
           </p>
         </div>
         {canAdd && (
           <button
-            onClick={() => {
-              setShowForm(!showForm);
-              setFormErrors({});
-            }}
+            onClick={() => { setShowForm(!showForm); setFormErrors({}); }}
             className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center"
           >
             <i className={`fas ${showForm ? 'fa-times' : 'fa-plus-circle'} mr-2`}></i>
@@ -28691,22 +28389,13 @@ const OtherIncomeModule = ({
         )}
       </div>
 
-      {/* Date Filter */}
       <div className="bg-white p-4 rounded-xl shadow-sm">
         <div className="flex flex-wrap items-end gap-4">
           <div className="grid grid-cols-2 gap-4">
-            <InputField
-              label="Start Date"
-              type="date"
-              value={dateRange.start}
-              onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-            />
-            <InputField
-              label="End Date"
-              type="date"
-              value={dateRange.end}
-              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-            />
+            <InputField label="Start Date" type="date" value={dateRange.start}
+              onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })} />
+            <InputField label="End Date" type="date" value={dateRange.end}
+              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })} />
           </div>
           {(dateRange.start || dateRange.end || searchTerm) && (
             <button onClick={clearFilters} className="text-sm text-indigo-600 hover:underline mb-1">
@@ -28716,7 +28405,6 @@ const OtherIncomeModule = ({
         </div>
       </div>
 
-      {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl p-6 text-white">
           <h3 className="text-lg font-semibold mb-2">Total Other Income</h3>
@@ -28756,24 +28444,17 @@ const OtherIncomeModule = ({
         </div>
       </div>
 
-      {/* Form */}
       {showForm && canAdd && (
         <div className="bg-white p-6 rounded-xl shadow-sm border-2 border-green-100">
           <h3 className="text-lg font-semibold mb-4">Record Other Income</h3>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <InputField
-                label="Date"
-                type="date"
-                value={incomeForm.date}
+              <InputField label="Date" type="date" value={incomeForm.date}
                 onChange={(e) => setIncomeForm({ ...incomeForm, date: e.target.value })}
-                required
-                error={formErrors.date}
-              />
+                required error={formErrors.date} />
 
               <OtherIncomeSearchableSelect
-                label="Income Category"
-                required
+                label="Income Category" required
                 value={incomeForm.incomeCategory}
                 onChange={(e) => setIncomeForm({ ...incomeForm, incomeCategory: e.target.value })}
                 options={categoryOptions}
@@ -28781,150 +28462,87 @@ const OtherIncomeModule = ({
                 error={formErrors.incomeCategory}
               />
 
-              <InputField
-                label="Description"
-                value={incomeForm.description}
+              <InputField label="Description" value={incomeForm.description}
                 onChange={(e) => setIncomeForm({ ...incomeForm, description: e.target.value })}
-                placeholder="What is this for?"
-              />
+                placeholder="What is this for?" />
 
-              <InputField
-                label="Payer / Donor"
-                value={incomeForm.payer}
+              <InputField label="Payer / Donor" value={incomeForm.payer}
                 onChange={(e) => setIncomeForm({ ...incomeForm, payer: e.target.value })}
-                placeholder="Name of person or organization"
-              />
+                placeholder="Name of person or organization" />
 
-              <InputField
-                label={`Amount (${cfg.currency})`}
-                type="number"
+              <InputField label="Amount (KES)" type="number"
                 value={incomeForm.amount}
                 onChange={(e) => setIncomeForm({ ...incomeForm, amount: e.target.value })}
-                required
-                min="0"
-                step="0.01"
-                error={formErrors.amount}
-              />
+                required min="0" step="0.01" error={formErrors.amount} />
 
               <OtherIncomeSearchableSelect
-                label="Payment Method"
-                required
+                label="Payment Method" required
                 value={incomeForm.paymentMethod}
                 onChange={(e) => setIncomeForm({ ...incomeForm, paymentMethod: e.target.value })}
-                options={availablePaymentMethods}
+                options={cfg.paymentMethods}
                 placeholder="Select payment method"
-                error={formErrors.paymentMethod}
               />
             </div>
 
-            {/* MPESA */}
             {incomeForm.paymentMethod === 'MPESA' && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <InputField
-                  label="M-Pesa Code"
-                  value={incomeForm.mpesaCode}
+                <InputField label="M-Pesa Code" value={incomeForm.mpesaCode}
                   onChange={(e) => setIncomeForm({ ...incomeForm, mpesaCode: e.target.value.toUpperCase() })}
-                  placeholder="e.g., OK4321ABC"
-                  error={formErrors.mpesaCode}
-                />
-                <InputField
-                  label={cfg.phoneLabel}
-                  value={incomeForm.mpesaPhone}
+                  placeholder="e.g., OK4321ABC" error={formErrors.mpesaCode} />
+                <InputField label="M-Pesa Phone Number" value={incomeForm.mpesaPhone}
                   onChange={(e) => setIncomeForm({ ...incomeForm, mpesaPhone: e.target.value })}
-                  placeholder={cfg.phonePlaceholder}
-                  error={formErrors.mpesaPhone}
-                />
+                  placeholder="0712345678" error={formErrors.mpesaPhone} />
               </div>
             )}
 
-            {/* BANK */}
             {incomeForm.paymentMethod === 'BANK' && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <InputField
-                  label="Bank Reference"
-                  value={incomeForm.bankReference}
+                <InputField label="Bank Reference" value={incomeForm.bankReference}
                   onChange={(e) => setIncomeForm({ ...incomeForm, bankReference: e.target.value })}
-                  placeholder="Reference number"
-                  error={formErrors.bankReference}
-                />
-                <InputField
-                  label="Bank Message"
-                  value={incomeForm.bankMessage}
+                  placeholder="Reference number" error={formErrors.bankReference} />
+                <InputField label="Bank Message" value={incomeForm.bankMessage}
                   onChange={(e) => setIncomeForm({ ...incomeForm, bankMessage: e.target.value })}
-                  placeholder="Any bank message"
-                />
+                  placeholder="Any bank message" />
               </div>
             )}
 
-            {/* CARD */}
             {incomeForm.paymentMethod === 'CARD' && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <InputField
-                  label="Card Last 4"
-                  value={incomeForm.cardLast4}
+                <InputField label="Card Last 4" value={incomeForm.cardLast4}
                   onChange={(e) => setIncomeForm({ ...incomeForm, cardLast4: e.target.value.replace(/\D/g, '') })}
-                  placeholder="Last 4 digits"
-                  maxLength="4"
-                  error={formErrors.cardLast4}
-                />
-                <InputField
-                  label="Approval Code"
-                  value={incomeForm.cardApprovalCode}
+                  placeholder="Last 4 digits" maxLength="4" error={formErrors.cardLast4} />
+                <InputField label="Approval Code" value={incomeForm.cardApprovalCode}
                   onChange={(e) => setIncomeForm({ ...incomeForm, cardApprovalCode: e.target.value })}
-                  placeholder="Approval code"
-                />
+                  placeholder="Approval code" />
               </div>
             )}
 
-            {/* CHEQUE */}
             {incomeForm.paymentMethod === 'CHEQUE' && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <InputField
-                  label={cfg.country === 'US' ? 'Check Number' : 'Cheque Number'}
-                  value={incomeForm.chequeNumber}
+                <InputField label="Cheque Number" value={incomeForm.chequeNumber}
                   onChange={(e) => setIncomeForm({ ...incomeForm, chequeNumber: e.target.value })}
-                  placeholder={cfg.country === 'US' ? 'Check number' : 'Cheque number'}
-                  error={formErrors.chequeNumber}
-                />
-                <InputField
-                  label="Bank"
-                  value={incomeForm.chequeBank}
+                  placeholder="Cheque number" error={formErrors.chequeNumber} />
+                <InputField label="Bank" value={incomeForm.chequeBank}
                   onChange={(e) => setIncomeForm({ ...incomeForm, chequeBank: e.target.value })}
-                  placeholder="Bank name"
-                />
+                  placeholder="Bank name" />
               </div>
             )}
 
-            <InputField
-              label="Transaction ID (Optional)"
-              value={incomeForm.transactionId}
-              onChange={(e) => setIncomeForm({ ...incomeForm, transactionId: e.target.value })}
-            />
+            <InputField label="Transaction ID (Optional)" value={incomeForm.transactionId}
+              onChange={(e) => setIncomeForm({ ...incomeForm, transactionId: e.target.value })} />
 
-            <InputField
-              label="Notes"
-              value={incomeForm.notes}
+            <InputField label="Notes" value={incomeForm.notes}
               onChange={(e) => setIncomeForm({ ...incomeForm, notes: e.target.value })}
-              textarea
-              rows="2"
-            />
+              textarea rows="2" />
 
             <div className="flex gap-2">
-              <button
-                type="submit"
-                disabled={loading}
-                className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-60"
-              >
+              <button type="submit" disabled={loading}
+                className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-60">
                 {loading ? 'Saving...' : 'Record Income'}
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowForm(false);
-                  setFormErrors({});
-                }}
-                className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
-              >
+              <button type="button"
+                onClick={() => { setShowForm(false); setFormErrors({}); }}
+                className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
                 Cancel
               </button>
             </div>
@@ -28932,16 +28550,12 @@ const OtherIncomeModule = ({
         </div>
       )}
 
-      {/* List */}
       <div className="bg-white rounded-xl shadow-sm overflow-hidden">
         <div className="p-4 border-b">
-          <input
-            type="text"
+          <input type="text"
             placeholder="Search by category, description, payer, or method..."
             className="w-full px-3 py-2 border rounded-lg"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
+            value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
         </div>
 
         <div className="overflow-x-auto">
@@ -28972,9 +28586,7 @@ const OtherIncomeModule = ({
               ) : (
                 filteredIncomes.map(inc => (
                   <tr key={inc.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-2 text-sm">
-                      {new Date(inc.date).toLocaleDateString(cfg.locale)}
-                    </td>
+                    <td className="px-4 py-2 text-sm">{new Date(inc.date).toLocaleDateString('en-KE')}</td>
                     <td className="px-4 py-2">
                       <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
                         {inc.incomeCategory || 'Other'}
@@ -28982,9 +28594,7 @@ const OtherIncomeModule = ({
                     </td>
                     <td className="px-4 py-2 text-sm">{inc.description || '—'}</td>
                     <td className="px-4 py-2 text-sm">{inc.payer || '—'}</td>
-                    <td className="px-4 py-2 font-bold text-green-600">
-                      {formatCurrency(inc.amount, inc.currency)}
-                    </td>
+                    <td className="px-4 py-2 font-bold text-green-600">{formatCurrency(inc.amount)}</td>
                     <td className="px-4 py-2 text-sm">
                       {cfg.methodLabels[inc.paymentMethod] || inc.paymentMethod}
                     </td>
@@ -28993,11 +28603,8 @@ const OtherIncomeModule = ({
                     </td>
                     {canDelete && (
                       <td className="px-4 py-2">
-                        <button
-                          onClick={() => handleDelete(inc.id)}
-                          className="text-red-600 hover:text-red-900"
-                          title="Delete"
-                        >
+                        <button onClick={() => handleDelete(inc.id)}
+                          className="text-red-600 hover:text-red-900" title="Delete">
                           <i className="fas fa-trash"></i>
                         </button>
                       </td>
