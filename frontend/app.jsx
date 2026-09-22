@@ -11968,13 +11968,14 @@ const ExamModule = ({
 };
 
 // ============================================================================
-//  RESULTS MODULE — v5.2 (Fixed examTypeLabel)
+//  RESULTS MODULE — v6
 //
-//  · Session-aware reports + termly class matrix
-//  · Centered school name + logo on printouts
-//  · Clean white background design
+//  · Edit mode works properly
+//  · Trend arrows (▲ green / ▼ red) in Termly Matrix AND Student Report
+//  · Students ranked: Pos 1 first
 //  · Category-aware term options
-//  · Print-only captures the report — nothing else
+//  · Centered school name + logo on printouts
+//  · Clean white design
 // ============================================================================
 const ResultsModule = ({
   exams, setExams, results, students, subjects, classes, courses, programs,
@@ -11992,7 +11993,6 @@ const ResultsModule = ({
   const isPrimary      = schoolCategory === 'ECDE_PRIMARY_JSS';
   const isRegularSchool = !isUniversity && !isTVET;
 
-  // ✅ School identity — same robust approach as CardManagementModule
   const schoolName =
     currentSchool?.name?.trim() ||
     currentSchool?.schoolName?.trim() ||
@@ -12027,7 +12027,7 @@ const ResultsModule = ({
 
   const defaultTermValue = useMemo(() => (isUniversity ? 'Semester 1' : 'Term 1'), [isUniversity]);
 
-  // ✅ Exam type options + label helper (THE FIX)
+  // ✅ Exam type options + label helper
   const examTypeOptions = useMemo(() => ([
     { value: '', label: 'All Types' },
     { value: 'OPENER', label: 'Opener' },
@@ -12039,14 +12039,13 @@ const ResultsModule = ({
     { value: 'FINAL', label: 'Final Exam' }
   ]), []);
 
-  // ✅ THE FIX — this was missing
   const examTypeLabel = (type) => {
     const found = examTypeOptions.find(o => o.value === type);
     return found?.label || type || 'Other';
   };
 
   // ============================================================
-  // ROLE
+  // ROLES
   // ============================================================
   const isSuperAdmin      = user?.role === 'SUPER_ADMIN';
   const isSchoolAdmin     = user?.role === 'SCHOOL_ADMIN';
@@ -12077,6 +12076,7 @@ const ResultsModule = ({
   // ============================================================
   const [viewMode, setViewMode] = useState('marks'); // 'marks' | 'report' | 'term-matrix'
 
+  // Marks entry
   const [selectedExam, setSelectedExam]         = useState('');
   const [selectedClass, setSelectedClass]       = useState('');
   const [selectedCourse, setSelectedCourse]     = useState('');
@@ -12099,6 +12099,7 @@ const ResultsModule = ({
   const [messageTemplate, setMessageTemplate]                       = useState('');
   const [sendingMessages, setSendingMessages]                       = useState(false);
 
+  // Detailed report
   const [reportClassId, setReportClassId]               = useState('');
   const [reportStudentId, setReportStudentId]           = useState('');
   const [reportTermFilter, setReportTermFilter]         = useState('');
@@ -12107,6 +12108,7 @@ const ResultsModule = ({
   const [reportData, setReportData]                     = useState(null);
   const [loadingReport, setLoadingReport]               = useState(false);
 
+  // Term matrix
   const [termMatrixClassId, setTermMatrixClassId]     = useState('');
   const [termMatrixTerm, setTermMatrixTerm]           = useState(defaultTermValue);
   const [termMatrixExamType, setTermMatrixExamType]   = useState('');
@@ -12114,6 +12116,7 @@ const ResultsModule = ({
   const [termMatrixData, setTermMatrixData]           = useState(null);
   const [loadingTermMatrix, setLoadingTermMatrix]     = useState(false);
 
+  // Student/parent view
   const [myResults, setMyResults]               = useState([]);
   const [myStudentRecord, setMyStudentRecord]   = useState(null);
   const [loadingMyData, setLoadingMyData]       = useState(false);
@@ -12256,6 +12259,46 @@ const ResultsModule = ({
   };
 
   // ============================================================
+  // ✅ TREND ARROW HELPER
+  //   Compares the two most recent exam scores for a subject
+  //   Returns { direction, delta, label }
+  //   direction: 'up' | 'down' | 'flat' | null
+  // ============================================================
+  const computeTrend = (cellsArray) => {
+    if (!Array.isArray(cellsArray) || cellsArray.length < 2) {
+      return { direction: null, delta: 0 };
+    }
+    // cellsArray is already sorted chronologically (oldest → newest)
+    const first = cellsArray[0].marks;
+    const last = cellsArray[cellsArray.length - 1].marks;
+    if (typeof first !== 'number' || typeof last !== 'number') {
+      return { direction: null, delta: 0 };
+    }
+    const delta = last - first;
+    if (delta > 0) return { direction: 'up', delta };
+    if (delta < 0) return { direction: 'down', delta };
+    return { direction: 'flat', delta: 0 };
+  };
+
+  const TrendArrow = ({ direction, delta }) => {
+    if (!direction || direction === 'flat') {
+      return <span className="text-gray-300 text-xs">●</span>;
+    }
+    if (direction === 'up') {
+      return (
+        <span className="inline-flex items-center gap-1 text-emerald-600 font-bold text-xs" title={`Improved by ${delta} marks`}>
+          ▲ <span className="text-[10px] font-semibold">+{delta}</span>
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 text-red-600 font-bold text-xs" title={`Declined by ${Math.abs(delta)} marks`}>
+        ▼ <span className="text-[10px] font-semibold">{delta}</span>
+      </span>
+    );
+  };
+
+  // ============================================================
   // LOAD RESULTS
   // ============================================================
   const loadResultsWithAdmission = async (admNumber) => {
@@ -12316,6 +12359,7 @@ const ResultsModule = ({
 
   // ============================================================
   // DETAILED REPORT
+  // ✅ NEW: cells stored per exam-type so we can detect trends
   // ============================================================
   const buildDetailedReport = (studentResults) => {
     const filtered = studentResults.filter(r => {
@@ -12350,7 +12394,11 @@ const ResultsModule = ({
 
       if (!g.subjects.has(subjKey)) {
         g.subjects.set(subjKey, {
-          subjectName: subjKey, cells: {}, sumMarks: 0, count: 0
+          subjectName: subjKey,
+          entries: [],   // ✅ full chronological list for trend detection
+          cells: {},
+          sumMarks: 0,
+          count: 0
         });
       }
       const subj = g.subjects.get(subjKey);
@@ -12362,6 +12410,14 @@ const ResultsModule = ({
         subj.cells[typeKey] = {
           marks: m, grade: r.grade, points: r.points, examId: r.examId
         };
+        subj.entries.push({
+          type: typeKey,
+          marks: m,
+          grade: r.grade,
+          points: r.points,
+          examDate: r.examDate,
+          examName: r.examName
+        });
         subj.sumMarks += m;
         subj.count += 1;
       }
@@ -12372,7 +12428,22 @@ const ResultsModule = ({
       const subjectList = [];
       for (const subj of g.subjects.values()) {
         const avg = subj.count > 0 ? subj.sumMarks / subj.count : 0;
-        subjectList.push({ ...subj, avg });
+
+        // ✅ Sort entries chronologically for trend
+        const sortedEntries = [...subj.entries].sort((a, b) => {
+          const da = a.examDate ? new Date(a.examDate).getTime() : 0;
+          const db = b.examDate ? new Date(b.examDate).getTime() : 0;
+          return da - db;
+        });
+
+        const trend = computeTrend(sortedEntries);
+
+        subjectList.push({
+          ...subj,
+          avg,
+          sortedEntries,
+          trend
+        });
       }
 
       const validAvgs = subjectList.filter(s => s.count > 0).map(s => s.avg);
@@ -12444,6 +12515,7 @@ const ResultsModule = ({
 
   // ============================================================
   // TERMLY CLASS MATRIX
+  // ✅ NEW: adds per-subject trend + ranking by average
   // ============================================================
   const buildTermMatrix = async () => {
     if (!termMatrixClassId) { alert('Please select a class'); return; }
@@ -12476,8 +12548,15 @@ const ResultsModule = ({
         return;
       }
 
+      // ✅ Sort exams chronologically so trend arrows are meaningful
+      const sortedTermExams = [...termExams].sort((a, b) => {
+        const da = a.date ? new Date(a.date).getTime() : 0;
+        const db = b.date ? new Date(b.date).getTime() : 0;
+        return da - db;
+      });
+
       const allResults = [];
-      for (const exam of termExams) {
+      for (const exam of sortedTermExams) {
         try {
           const r = await api.get(`/results/exam/${exam.id}`);
           (r.data.results || []).forEach(row => allResults.push({ ...row, __exam: exam }));
@@ -12486,6 +12565,7 @@ const ResultsModule = ({
 
       const classObj = classes.find(c => c.id === termMatrixClassId);
 
+      // Group results by student → subject (chronological array)
       const byStudent = new Map();
       allResults.forEach(r => {
         if (!byStudent.has(r.studentId)) byStudent.set(r.studentId, new Map());
@@ -12494,22 +12574,51 @@ const ResultsModule = ({
         if (!subjKey) return;
         if (!subjMap.has(subjKey)) subjMap.set(subjKey, []);
         subjMap.get(subjKey).push({
-          marks: parseFloat(r.marks), grade: r.grade, points: r.points, isAbsent: r.isAbsent
+          marks: parseFloat(r.marks),
+          grade: r.grade,
+          points: r.points,
+          isAbsent: r.isAbsent,
+          examDate: r.__exam?.date
         });
       });
 
       const rows = studentList.map(st => {
         const subjMap = byStudent.get(st.id) || new Map();
+
         const cells = classSubjects.map(subj => {
-          const entries = (subjMap.get(subj.id) || []).filter(e => !isNaN(e.marks));
+          const rawEntries = subjMap.get(subj.id) || [];
+
+          // ✅ Sort entries chronologically
+          const entries = [...rawEntries]
+            .filter(e => !isNaN(e.marks))
+            .sort((a, b) => {
+              const da = a.examDate ? new Date(a.examDate).getTime() : 0;
+              const db = b.examDate ? new Date(b.examDate).getTime() : 0;
+              return da - db;
+            });
+
           if (entries.length === 0) {
-            return { subjectId: subj.id, subjectName: subj.name, marks: null, grade: '', points: 0 };
+            return {
+              subjectId: subj.id,
+              subjectName: subj.name,
+              marks: null,
+              grade: '',
+              points: 0,
+              trend: { direction: null, delta: 0 }
+            };
           }
+
           const avg = entries.reduce((s, e) => s + e.marks, 0) / entries.length;
           const gi = calculateGrade(avg, 100, schoolCategory);
+          const trend = computeTrend(entries);
+
           return {
-            subjectId: subj.id, subjectName: subj.name,
-            marks: Number(avg.toFixed(1)), grade: gi.grade, points: gi.points
+            subjectId: subj.id,
+            subjectName: subj.name,
+            marks: Number(avg.toFixed(1)),
+            grade: gi.grade,
+            points: gi.points,
+            trend
           };
         });
 
@@ -12526,11 +12635,16 @@ const ResultsModule = ({
           admissionNumber: st.admissionNumber,
           studentName: `${st.firstName} ${st.lastName}`,
           cells,
-          totalMarks, totalPoints, average, meanGrade,
-          scoredSubjects: validCells.length
+          totalMarks,
+          totalPoints,
+          average,
+          meanGrade,
+          scoredSubjects: validCells.length,
+          position: null
         };
       });
 
+      // ✅ Rank students — highest average = position 1
       const ranked = [...rows]
         .filter(r => r.scoredSubjects > 0)
         .sort((a, b) => b.average - a.average);
@@ -12539,6 +12653,16 @@ const ResultsModule = ({
         if (prev !== null && r.average < prev) rank = i + 1;
         prev = r.average;
         r.position = rank;
+      });
+
+      // ✅ Sort rows by position (Pos 1 first), then alphabetical for unranked
+      const sortedRows = [...rows].sort((a, b) => {
+        if (a.position == null && b.position == null) {
+          return a.studentName.localeCompare(b.studentName);
+        }
+        if (a.position == null) return 1;
+        if (b.position == null) return -1;
+        return a.position - b.position;
       });
 
       const validRows = rows.filter(r => r.scoredSubjects > 0);
@@ -12555,8 +12679,10 @@ const ResultsModule = ({
         examType: termMatrixExamType || 'All Exam Types',
         sessionName: termMatrixSession || '',
         subjects: classSubjects.map(s => ({ id: s.id, name: s.name })),
-        rows: rows.sort((a, b) => a.studentName.localeCompare(b.studentName)),
-        classAverage, passRate, passCount,
+        rows: sortedRows, // ✅ already sorted by position
+        classAverage,
+        passRate,
+        passCount,
         totalScored: validRows.length
       });
     } catch (err) {
@@ -13204,7 +13330,7 @@ const ResultsModule = ({
       </div>
 
       {/* ============================================================ */}
-      {/* DETAILED REPORT VIEW                                          */}
+      {/* DETAILED REPORT VIEW — with trend arrows                      */}
       {/* ============================================================ */}
       {viewMode === 'report' && canViewAllResults && (
         <>
@@ -13327,6 +13453,8 @@ const ResultsModule = ({
                             </th>
                           ))}
                           <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase border-r">Average</th>
+                          {/* ✅ NEW: Trend column */}
+                          <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Trend</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
@@ -13353,13 +13481,18 @@ const ResultsModule = ({
                               );
                             })}
                             <td className="px-4 py-3 text-center font-bold text-indigo-700 border-r">{s.avg.toFixed(1)}</td>
+                            {/* ✅ Trend cell */}
+                            <td className="px-4 py-3 text-center">
+                              <TrendArrow direction={s.trend?.direction} delta={s.trend?.delta || 0} />
+                            </td>
                           </tr>
                         ))}
                       </tbody>
                       <tfoot>
                         <tr className="bg-slate-100 border-t-2 border-slate-300">
                           <td colSpan={card.examTypeColumns.length + 1} className="px-4 py-3 font-bold text-right text-slate-700 border-r">Term Average</td>
-                          <td className="px-4 py-3 text-center font-bold text-indigo-700">{card.termAverage.toFixed(1)}</td>
+                          <td className="px-4 py-3 text-center font-bold text-indigo-700 border-r">{card.termAverage.toFixed(1)}</td>
+                          <td></td>
                         </tr>
                       </tfoot>
                     </table>
@@ -13369,15 +13502,9 @@ const ResultsModule = ({
 
               <div className="print-only pt-12 border-t border-slate-300">
                 <div className="grid grid-cols-3 gap-8 text-center text-xs text-slate-600">
-                  <div>
-                    <div className="border-t border-slate-400 mt-10 pt-2">Class Teacher</div>
-                  </div>
-                  <div>
-                    <div className="border-t border-slate-400 mt-10 pt-2">Head Teacher / Principal</div>
-                  </div>
-                  <div>
-                    <div className="border-t border-slate-400 mt-10 pt-2">School Stamp</div>
-                  </div>
+                  <div><div className="border-t border-slate-400 mt-10 pt-2">Class Teacher</div></div>
+                  <div><div className="border-t border-slate-400 mt-10 pt-2">Head Teacher / Principal</div></div>
+                  <div><div className="border-t border-slate-400 mt-10 pt-2">School Stamp</div></div>
                 </div>
                 <p className="text-center text-xs text-slate-400 mt-6">
                   Generated on {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}
@@ -13389,7 +13516,7 @@ const ResultsModule = ({
       )}
 
       {/* ============================================================ */}
-      {/* TERMLY CLASS MATRIX VIEW                                     */}
+      {/* TERMLY CLASS MATRIX VIEW — ranked + trend arrows             */}
       {/* ============================================================ */}
       {viewMode === 'term-matrix' && canViewAllResults && (
         <>
@@ -13398,7 +13525,7 @@ const ResultsModule = ({
               <i className="fas fa-th text-indigo-600"></i>Termly Class Matrix
             </h3>
             <p className="text-sm text-slate-500 mb-4">
-              Line up every student's subject scores for a whole term in one grid.
+              Ranked by average — Position 1 first. Trend arrows compare the first and last exam in this term.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               <SearchableSelect
@@ -13483,7 +13610,7 @@ const ResultsModule = ({
                 <table className="w-full border-collapse text-sm">
                   <thead>
                     <tr className="bg-slate-100 border-b-2 border-slate-300">
-                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r w-12">#</th>
+                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r w-16">Pos</th>
                       <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r whitespace-nowrap">Student</th>
                       <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r whitespace-nowrap">Adm</th>
                       {termMatrixData.subjects.map(subj => (
@@ -13493,21 +13620,40 @@ const ResultsModule = ({
                       ))}
                       <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Total</th>
                       <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Avg</th>
-                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Grade</th>
-                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Pos</th>
+                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Grade</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
+                    {/* ✅ Rows already sorted by position in buildTermMatrix */}
                     {termMatrixData.rows.map((r, i) => (
                       <tr key={r.studentId} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
-                        <td className="px-3 py-2 text-center text-slate-500 font-mono text-xs border-r">{i + 1}</td>
+                        <td className="px-3 py-2 text-center border-r">
+                          {r.position ? (
+                            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
+                              r.position === 1 ? 'bg-amber-100 text-amber-700 ring-2 ring-amber-300' :
+                              r.position === 2 ? 'bg-slate-200 text-slate-700' :
+                              r.position === 3 ? 'bg-orange-100 text-orange-700' :
+                              'bg-slate-100 text-slate-600'
+                            }`}>
+                              {r.position}
+                            </span>
+                          ) : (
+                            <span className="text-slate-300 text-xs">—</span>
+                          )}
+                        </td>
                         <td className="px-3 py-2 font-medium border-r whitespace-nowrap">{r.studentName}</td>
                         <td className="px-3 py-2 font-mono text-xs text-slate-600 border-r whitespace-nowrap">{r.admissionNumber}</td>
                         {r.cells.map((cell, ci) => (
                           <td key={ci} className="px-3 py-2 text-center border-r">
                             {cell.marks !== null ? (
                               <div className="flex flex-col items-center gap-0.5">
-                                <span className="font-bold text-slate-800">{cell.marks}</span>
+                                <div className="flex items-center gap-1">
+                                  <span className="font-bold text-slate-800">{cell.marks}</span>
+                                  {/* ✅ Trend arrow next to the mark */}
+                                  {cell.trend && cell.trend.direction && (
+                                    <TrendArrow direction={cell.trend.direction} delta={cell.trend.delta} />
+                                  )}
+                                </div>
                                 <span className={`text-[9px] px-1.5 py-0.5 rounded ${getGradeColor(cell.grade)}`}>
                                   {cell.grade || '—'}
                                 </span>
@@ -13523,22 +13669,10 @@ const ResultsModule = ({
                         <td className="px-3 py-2 text-center font-bold text-indigo-700 border-r bg-slate-50">
                           {r.average.toFixed(1)}
                         </td>
-                        <td className="px-3 py-2 text-center border-r bg-slate-50">
+                        <td className="px-3 py-2 text-center bg-slate-50">
                           <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getGradeColor(r.meanGrade)}`}>
                             {r.meanGrade}
                           </span>
-                        </td>
-                        <td className="px-3 py-2 text-center bg-slate-50">
-                          {r.position ? (
-                            <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
-                              r.position === 1 ? 'bg-amber-100 text-amber-700' :
-                              r.position === 2 ? 'bg-slate-200 text-slate-700' :
-                              r.position === 3 ? 'bg-orange-100 text-orange-700' :
-                              'bg-slate-100 text-slate-600'
-                            }`}>
-                              {r.position}
-                            </span>
-                          ) : '—'}
                         </td>
                       </tr>
                     ))}
@@ -13557,12 +13691,19 @@ const ResultsModule = ({
                       <td className="px-3 py-3 text-center font-bold text-slate-800 border-r border-slate-300 bg-slate-300">
                         {termMatrixData.classAverage.toFixed(1)}
                       </td>
-                      <td colSpan={2} className="px-3 py-3 text-center text-xs text-slate-600">
+                      <td className="px-3 py-3 text-center text-xs text-slate-600">
                         Pass: <strong>{termMatrixData.passRate.toFixed(0)}%</strong> ({termMatrixData.passCount}/{termMatrixData.totalScored})
                       </td>
                     </tr>
                   </tfoot>
                 </table>
+              </div>
+
+              {/* Legend */}
+              <div className="px-6 py-3 bg-slate-50 border-t flex flex-wrap items-center gap-4 text-xs text-slate-600">
+                <span className="flex items-center gap-1"><span className="text-emerald-600 font-bold">▲</span>Improved vs. first exam in this term</span>
+                <span className="flex items-center gap-1"><span className="text-red-600 font-bold">▼</span>Declined vs. first exam in this term</span>
+                <span className="flex items-center gap-1"><span className="text-gray-300 font-bold">●</span>No change</span>
               </div>
 
               <div className="print-only px-6 py-6 border-t border-slate-300">
