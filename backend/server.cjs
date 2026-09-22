@@ -22906,14 +22906,18 @@ app.post('/api/student-arrival', authenticate, async (req, res) => {
     
     const school = await School.findByPk(req.user.schoolId);
     
-    // Check if student exists
     const student = await Student.findOne({
-      where: { id: studentId, schoolId: req.user.schoolId },
+  where: { id: studentId, schoolId: req.user.schoolId },
+  include: [
+    {
+      model: Parent,
+      as: 'parents', // ✅ Specify the 'parents' alias
       include: [
-        { model: Parent, include: [{ model: User }] }
+        { model: User, as: 'User' } // ✅ Specify the 'User' alias
       ]
-    });
-    
+    }
+  ]
+});
     if (!student) {
       return res.status(404).json({ 
         success: false, 
@@ -23018,14 +23022,18 @@ app.post('/api/student-departure', authenticate, async (req, res) => {
     
     const school = await School.findByPk(req.user.schoolId);
     
-    // Check if student exists
-    const student = await Student.findOne({
-      where: { id: studentId, schoolId: req.user.schoolId },
+const student = await Student.findOne({
+  where: { id: studentId, schoolId: req.user.schoolId },
+  include: [
+    {
+      model: Parent,
+      as: 'parents', // ✅ Specify the 'parents' alias
       include: [
-        { model: Parent, include: [{ model: User }] }
+        { model: User, as: 'User' } // ✅ Specify the 'User' alias
       ]
-    });
-    
+    }
+  ]
+});
     if (!student) {
       return res.status(404).json({ 
         success: false, 
