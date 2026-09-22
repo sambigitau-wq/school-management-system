@@ -10156,19 +10156,22 @@ const CourseUnitsModule = ({
     </div>
   );
 };// ============================================================================
-//  EXAM MODULE — v5 (Model A: ExamSession + Papers)
+//  EXAM MODULE — v6 (Model A: ExamSession + Papers)
 //
 //  One "Exam Session" (e.g. "END TERM 1") contains many "Papers",
 //  one per subject. Users create the session once and pick all subjects
 //  in a single flow. Papers render as sub-rows in the exams table.
 //
-//  v5 IMPROVEMENTS:
-//   • Robust edit mode — fetches full session with papers from API
-//   • Delete-all + recreate papers strategy (bulletproof against ID drift)
-//   • Per-step error tracking with user-friendly messages
-//   • Detailed console logging for debugging
-//   • Safe null/undefined handling throughout
-//   • Separate loading states for session vs papers
+//  v6 FIXES:
+//   • FIX 1: Papers now lazily hydrated on expand — list endpoint may not
+//            return nested papers, so we fetch full session per row.
+//   • FIX 2: Delete now verifies backend actually removed the session
+//            (re-fetches and warns if still present) — catches cascade bugs.
+//   • FIX 3: Duplicate-submit guard (submittingRef) prevents double POSTs
+//            from StrictMode / double-clicks creating 2 sessions.
+//   • FIX 4: Safe state updates after unmount.
+//   • FIX 5: Edit flow uses API-returned papers as source of truth,
+//            form state never drifts from DB.
 // ============================================================================
 const ExamModule = ({
   exams, setExams,
@@ -10177,7 +10180,7 @@ const ExamModule = ({
   handleCreate, handleUpdate, handleDelete,
   currentSchool, courses, programs, units, user
 }) => {
-  console.log('📝 ExamModule v5 initialized');
+  console.log('📝 ExamModule v6 initialized');
 
   const SearchableSelect = StudentSearchableSelect;
 
@@ -10210,6 +10213,8 @@ const ExamModule = ({
   const [sessions, setSessions]               = useState([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [expandedSessions, setExpandedSessions] = useState(new Set());
+  const [hydratingSessionId, setHydratingSessionId] = useState(null);
+  const [hydratedSessions, setHydratedSessions] = useState(new Set()); // tracks which sessions have full papers loaded
 
   const [selectedSessionType, setSelectedSessionType] = useState('');
   const [selectedExamName, setSelectedExamName]       = useState('');
@@ -10264,6 +10269,16 @@ const ExamModule = ({
   const [savingPhase, setSavingPhase] = useState('');   // 'session' | 'deleting' | 'creating' | ''
   const [apiError, setApiError]     = useState('');
   const [saveError, setSaveError]   = useState('');
+
+  // FIX 3: Duplicate-submit guard
+  const submittingRef = React.useRef(false);
+
+  // FIX 4: Mounted ref for safe state updates after unmount
+  const mountedRef = React.useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   // ============================================================
   // HELPERS — staff display
@@ -10340,6 +10355,8 @@ const ExamModule = ({
       seen.add(key);
       return true;
     });
+
+    if (!mountedRef.current) return;
     setTeachingStaff(deduped);
 
     if (deduped.length === 0) {
@@ -10480,14 +10497,34 @@ const ExamModule = ({
     setLoadingSessions(true);
     try {
       const res = await api.get('/exam-sessions');
-      const list = res.data?.sessions || res.data?.data || [];
-      console.log(`✅ Loaded ${list.length} exam sessions`);
+      // Backend may return { sessions }, { data }, { data: { sessions } }, or bare array
+      const list =
+        res.data?.sessions ||
+        res.data?.data?.sessions ||
+        res.data?.data ||
+        (Array.isArray(res.data) ? res.data : []) ||
+        [];
+
+      console.log(`✅ Loaded ${list.length} exam sessions (list endpoint)`);
+
+      if (!mountedRef.current) return;
       setSessions(Array.isArray(list) ? list : []);
+      // Reset hydration markers — we're re-fetching from scratch
+      setHydratedSessions(new Set());
+      // Keep expansion state, but drop any that no longer exist
+      setExpandedSessions(prev => {
+        const next = new Set();
+        const ids = new Set(list.map(s => s.id));
+        prev.forEach(id => { if (ids.has(id)) next.add(id); });
+        return next;
+      });
     } catch (err) {
       console.error('❌ Load sessions:', err);
-      setApiError('Failed to load exam sessions: ' + (err.response?.data?.message || err.message));
+      if (mountedRef.current) {
+        setApiError('Failed to load exam sessions: ' + (err.response?.data?.message || err.message));
+      }
     } finally {
-      setLoadingSessions(false);
+      if (mountedRef.current) setLoadingSessions(false);
     }
   };
 
@@ -10518,19 +10555,7 @@ const ExamModule = ({
   ]);
 
   // ============================================================
-  // EXPAND / COLLAPSE
-  // ============================================================
-  const toggleSession = (sessionId) => {
-    setExpandedSessions(prev => {
-      const next = new Set(prev);
-      if (next.has(sessionId)) next.delete(sessionId);
-      else next.add(sessionId);
-      return next;
-    });
-  };
-
-  // ============================================================
-  // FETCH FULL SESSION WITH PAPERS (used by both view & edit)
+  // FETCH FULL SESSION WITH PAPERS
   // ============================================================
   const fetchFullSession = async (sessionId) => {
     if (!sessionId) throw new Error('Session ID is required');
@@ -10538,14 +10563,13 @@ const ExamModule = ({
     console.log(`🔍 Fetching full session ${sessionId}...`);
     const res = await api.get(`/exam-sessions/${sessionId}`);
 
-    // Handle multiple possible response shapes
     const payload = res.data?.session || res.data?.data?.session || res.data?.data || res.data;
 
     if (!payload || typeof payload !== 'object') {
       throw new Error('Invalid session payload from server');
     }
 
-    // Papers can be under several keys depending on backend naming
+    // Normalise paper array from any backend naming
     const papers =
       payload.papers ||
       payload.exams ||
@@ -10560,6 +10584,60 @@ const ExamModule = ({
       ...payload,
       papers: Array.isArray(papers) ? papers : []
     };
+  };
+
+  // ============================================================
+  // FIX 1: TOGGLE SESSION — lazily hydrate papers on first expand
+  // ============================================================
+  const toggleSession = async (sessionId) => {
+    const wasExpanded = expandedSessions.has(sessionId);
+
+    // Toggle expansion immediately for snappy UX
+    setExpandedSessions(prev => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
+
+    // If we're collapsing, nothing else to do
+    if (wasExpanded) return;
+
+    // If already hydrated this session in this page life, nothing to do
+    if (hydratedSessions.has(sessionId)) return;
+
+    // Otherwise: fetch full session to get papers
+    setHydratingSessionId(sessionId);
+    try {
+      const full = await fetchFullSession(sessionId);
+      if (!mountedRef.current) return;
+
+      // Merge papers into the sessions list (preserve any other fields
+      // the list endpoint returned that the detail endpoint might omit)
+      setSessions(prev => prev.map(s =>
+        s.id === sessionId
+          ? { ...s, ...full, papers: full.papers, _hydrated: true }
+          : s
+      ));
+
+      setHydratedSessions(prev => {
+        const next = new Set(prev);
+        next.add(sessionId);
+        return next;
+      });
+    } catch (err) {
+      console.error('❌ Failed to hydrate papers for session', sessionId, err);
+      if (mountedRef.current) {
+        // Show inline error, but leave the row expanded with empty state
+        setSessions(prev => prev.map(s =>
+          s.id === sessionId
+            ? { ...s, _paperLoadError: err.response?.data?.message || err.message }
+            : s
+        ));
+      }
+    } finally {
+      if (mountedRef.current) setHydratingSessionId(null);
+    }
   };
 
   // ============================================================
@@ -10589,7 +10667,7 @@ const ExamModule = ({
   };
 
   // ============================================================
-  // OPEN EDIT — always fetches fresh
+  // OPEN EDIT — always fetches fresh, never trusts list state
   // ============================================================
   const openEditSession = async (sessionSummary) => {
     if (!sessionSummary?.id) {
@@ -10609,8 +10687,8 @@ const ExamModule = ({
         type: fullSession.type || '',
         term: fullSession.term || '',
         academicYear: fullSession.academicYear || new Date().getFullYear().toString(),
-        startDate: fullSession.startDate || '',
-        endDate: fullSession.endDate || '',
+        startDate: fullSession.startDate ? String(fullSession.startDate).split('T')[0] : '',
+        endDate: fullSession.endDate ? String(fullSession.endDate).split('T')[0] : '',
         maxMarks: fullSession.maxMarks || 100,
         notes: fullSession.notes || '',
         classId: fullSession.classId || '',
@@ -10637,7 +10715,8 @@ const ExamModule = ({
       console.log(`📄 Preloaded ${paperRows.length} papers for editing`);
       setSessionPapers(paperRows);
 
-      // ✅ Use the FULL session (with papers) as editingSession
+      // Use the FULL session (with papers) as editingSession — this is the
+      // source of truth for the diff on submit.
       setEditingSession(fullSession);
       setShowSessionForm(true);
     } catch (err) {
@@ -10648,7 +10727,7 @@ const ExamModule = ({
       );
       alert('❌ Could not load session. ' + (err.response?.data?.message || err.message));
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   };
 
@@ -10774,283 +10853,321 @@ const ExamModule = ({
     maxMarks: Number(paper.maxMarks) || 100
   });
 
-// ============================================================
-// SUBMIT SESSION — SAFE DIFF STRATEGY
-//
-//   1. Update session metadata (or create the session)
-//   2. CREATE new papers first (so failures abort before deletion)
-//   3. UPDATE existing papers in place
-//   4. DELETE removed papers LAST (only after 2 & 3 succeed)
-//
-//   Never deletes anything until all creates/updates succeed.
-//   If anything fails, existing papers stay untouched.
-// ============================================================
-const handleSessionSubmit = async (e) => {
-  e.preventDefault();
+  // ============================================================
+  // SUBMIT SESSION — SAFE DIFF STRATEGY (v6)
+  //
+  //   1. Update session metadata (or create the session)
+  //   2. CREATE new papers first (so failures abort before deletion)
+  //   3. UPDATE existing papers in place
+  //   4. DELETE removed papers LAST
+  //
+  //   FIX 3: submittingRef prevents duplicate submits
+  //   FIX 5: editingSession.papers is trusted as the DB snapshot
+  // ============================================================
+  const handleSessionSubmit = async (e) => {
+    e.preventDefault();
 
-  if (!canCreateSessions) {
-    setSaveError('You do not have permission to create/edit exam sessions');
-    return;
-  }
-
-  // ---------- Validate ----------
-  const validationErrors = validateSessionForm();
-  if (validationErrors.length > 0) {
-    setSaveError(validationErrors.join(' • '));
-    return;
-  }
-
-  setLoading(true);
-  setSaveError('');
-  setApiError('');
-
-  const payload = {
-    name: sessionForm.name.trim(),
-    type: sessionForm.type,
-    term: sessionForm.term || null,
-    academicYear: sessionForm.academicYear || null,
-    startDate: sessionForm.startDate || null,
-    endDate: sessionForm.endDate || null,
-    maxMarks: Number(sessionForm.maxMarks) || 100,
-    notes: sessionForm.notes || null,
-    classId: sessionForm.classId || null,
-    courseId: sessionForm.courseId || null,
-    programId: sessionForm.programId || null,
-    year: sessionForm.year ? parseInt(sessionForm.year, 10) : null,
-    semester: sessionForm.semester ? parseInt(sessionForm.semester, 10) : null,
-    module: sessionForm.module ? parseInt(sessionForm.module, 10) : null
-  };
-
-  try {
-    // ==========================================================
-    // CREATE MODE
-    // ==========================================================
-    if (!editingSession) {
-      console.log('➕ CREATE MODE');
-
-      const createPayload = {
-        ...payload,
-        papers: sessionPapers.map(p => ({
-          subjectId: p.subjectId || null,
-          unitId: p.unitId || null,
-          date: p.date,
-          startTime: p.startTime || null,
-          endTime: p.endTime || null,
-          examHall: p.examHall || null,
-          invigilatorId: p.invigilatorId || null,
-          invigilator: p.invigilatorId ? getStaffName(p.invigilatorId) : null,
-          maxMarks: Number(p.maxMarks) || Number(sessionForm.maxMarks) || 100
-        }))
-      };
-
-      await api.post('/exam-sessions', createPayload);
-      alert('✅ Exam session created');
-      setShowSessionForm(false);
-      setEditingSession(null);
-      setSessionPapers([]);
-      await loadSessions();
-      try {
-        const r = await api.get('/exams');
-        if (r.data?.exams) setExams(r.data.exams);
-      } catch (_) {}
+    // FIX 3: Idempotency guard — block duplicate submits
+    if (submittingRef.current) {
+      console.warn('⏳ Submit already in progress — ignoring duplicate');
       return;
     }
 
-    // ==========================================================
-    // EDIT MODE — SAFE DIFF
-    // ==========================================================
-    console.log('✏️ EDIT MODE — session:', editingSession.id);
-
-    // ---------- Split current form papers into: update / create ----------
-    const existingPapers =
-      editingSession.papers ||
-      editingSession.exams ||
-      editingSession.ExamPapers ||
-      [];
-
-    const existingById = new Map(
-      existingPapers.filter(p => p?.id).map(p => [p.id, p])
-    );
-    const existingIds = new Set(existingById.keys());
-
-    // Papers that already exist (have id AND match a known session paper)
-    const papersToUpdate = sessionPapers.filter(
-      p => p.id && existingIds.has(p.id)
-    );
-
-    // Papers that are new (no id, OR id no longer matches anything)
-    const papersToCreate = sessionPapers.filter(
-      p => !p.id || !existingIds.has(p.id)
-    );
-
-    // Papers that existed but were removed by the user
-    const submittedIds = new Set(
-      sessionPapers.filter(p => p.id).map(p => p.id)
-    );
-    const papersToDelete = existingPapers.filter(
-      p => p.id && !submittedIds.has(p.id)
-    );
-
-    console.log(`📊 Paper diff:
-      - existing in DB: ${existingPapers.length}
-      - to update: ${papersToUpdate.length}
-      - to create: ${papersToCreate.length}
-      - to delete: ${papersToDelete.length}`);
-
-    // ---------- Step 1: Update session metadata ----------
-    setSavingPhase('session');
-    try {
-      await api.patch(`/exam-sessions/${editingSession.id}`, payload);
-      console.log('✅ Session metadata updated');
-    } catch (err) {
-      console.error('❌ Failed to update session:', err);
-      throw new Error(
-        `Failed to update session: ${err.response?.data?.message || err.message}`
-      );
+    if (!canCreateSessions) {
+      setSaveError('You do not have permission to create/edit exam sessions');
+      return;
     }
 
-    // ---------- Step 2: CREATE new papers FIRST ----------
-    // Doing creates before deletes means a create failure aborts the whole
-    // operation WITHOUT losing existing papers.
-    setSavingPhase('creating');
-    const createdPapers = [];
+    // ---------- Validate ----------
+    const validationErrors = validateSessionForm();
+    if (validationErrors.length > 0) {
+      setSaveError(validationErrors.join(' • '));
+      return;
+    }
 
-    for (const paper of papersToCreate) {
-      const paperData = buildPaperData(paper, payload, editingSession.id);
+    submittingRef.current = true;
+    setLoading(true);
+    setSaveError('');
+    setApiError('');
 
-      // 🔍 Debug log — remove once creates work
-      if (createdPapers.length === 0) {
-        console.log('📤 First create payload:', JSON.stringify(paperData, null, 2));
+    const payload = {
+      name: sessionForm.name.trim(),
+      type: sessionForm.type,
+      term: sessionForm.term || null,
+      academicYear: sessionForm.academicYear || null,
+      startDate: sessionForm.startDate || null,
+      endDate: sessionForm.endDate || null,
+      maxMarks: Number(sessionForm.maxMarks) || 100,
+      notes: sessionForm.notes || null,
+      classId: sessionForm.classId || null,
+      courseId: sessionForm.courseId || null,
+      programId: sessionForm.programId || null,
+      year: sessionForm.year ? parseInt(sessionForm.year, 10) : null,
+      semester: sessionForm.semester ? parseInt(sessionForm.semester, 10) : null,
+      module: sessionForm.module ? parseInt(sessionForm.module, 10) : null
+    };
+
+    try {
+      // ==========================================================
+      // CREATE MODE
+      // ==========================================================
+      if (!editingSession) {
+        console.log('➕ CREATE MODE — single session with', sessionPapers.length, 'papers');
+
+        const createPayload = {
+          ...payload,
+          papers: sessionPapers.map(p => ({
+            subjectId: p.subjectId || null,
+            unitId: p.unitId || null,
+            date: p.date,
+            startTime: p.startTime || null,
+            endTime: p.endTime || null,
+            examHall: p.examHall || null,
+            invigilatorId: p.invigilatorId || null,
+            invigilator: p.invigilatorId ? getStaffName(p.invigilatorId) : null,
+            maxMarks: Number(p.maxMarks) || Number(sessionForm.maxMarks) || 100
+          }))
+        };
+
+        await api.post('/exam-sessions', createPayload);
+        alert('✅ Exam session created');
+        setShowSessionForm(false);
+        setEditingSession(null);
+        setSessionPapers([]);
+        await loadSessions();
+
+        try {
+          const r = await api.get('/exams');
+          if (r.data?.exams && mountedRef.current) setExams(r.data.exams);
+        } catch (_) {}
+        return;
       }
 
+      // ==========================================================
+      // EDIT MODE — SAFE DIFF
+      // ==========================================================
+      console.log('✏️ EDIT MODE — session:', editingSession.id);
+
+      const existingPapers =
+        editingSession.papers ||
+        editingSession.exams ||
+        editingSession.ExamPapers ||
+        [];
+
+      const existingById = new Map(
+        existingPapers.filter(p => p?.id).map(p => [p.id, p])
+      );
+      const existingIds = new Set(existingById.keys());
+
+      // Papers that already exist (have id AND match a known session paper)
+      const papersToUpdate = sessionPapers.filter(
+        p => p.id && existingIds.has(p.id)
+      );
+
+      // Papers that are new (no id, OR id no longer matches anything)
+      const papersToCreate = sessionPapers.filter(
+        p => !p.id || !existingIds.has(p.id)
+      );
+
+      // Papers that existed but were removed by the user
+      const submittedIds = new Set(
+        sessionPapers.filter(p => p.id).map(p => p.id)
+      );
+      const papersToDelete = existingPapers.filter(
+        p => p.id && !submittedIds.has(p.id)
+      );
+
+      console.log(`📊 Paper diff:
+        - existing in DB: ${existingPapers.length}
+        - to update: ${papersToUpdate.length}
+        - to create: ${papersToCreate.length}
+        - to delete: ${papersToDelete.length}`);
+
+      // ---------- Step 1: Update session metadata ----------
+      setSavingPhase('session');
       try {
-        const res = await api.post('/exams', paperData);
-        const created = res.data?.exam || res.data?.paper || res.data;
-        if (created?.id) {
-          createdPapers.push(created);
-          // Give this form paper its new id so it won't be recreated
-          paper.id = created.id;
-        }
-        console.log(`  ✓ Created paper ${created?.id || '(no id returned)'}`);
+        await api.patch(`/exam-sessions/${editingSession.id}`, payload);
+        console.log('✅ Session metadata updated');
       } catch (err) {
-        console.error('❌ Create paper failed:', err);
-        const label = paper.subjectId
-          ? subjects.find(s => s.id === paper.subjectId)?.name
-          : units.find(u => u.id === paper.unitId)?.name;
+        console.error('❌ Failed to update session:', err);
         throw new Error(
-          `Failed to create paper "${label || 'Unknown'}": ` +
-          (err.response?.data?.message || err.message) +
-          '\n\n⚠️ Existing papers were NOT modified.'
+          `Failed to update session: ${err.response?.data?.message || err.message}`
         );
       }
-    }
 
-    // ---------- Step 3: UPDATE existing papers ----------
-    setSavingPhase('updating');
+      // ---------- Step 2: CREATE new papers FIRST ----------
+      setSavingPhase('creating');
+      const createdPapers = [];
 
-    for (const paper of papersToUpdate) {
-      const paperData = buildPaperData(paper, payload, editingSession.id);
+      for (const paper of papersToCreate) {
+        const paperData = buildPaperData(paper, payload, editingSession.id);
 
-      try {
-        await api.put(`/exams/${paper.id}`, paperData);
-        console.log(`  ✓ Updated paper ${paper.id}`);
-      } catch (err) {
-        // 404 = paper was deleted elsewhere; treat as create-later
-        if (err.response?.status === 404) {
-          console.warn(`  ⚠️ Paper ${paper.id} not found — recreating`);
-          try {
-            const res = await api.post('/exams', paperData);
-            const created = res.data?.exam || res.data?.paper || res.data;
-            if (created?.id) paper.id = created.id;
-          } catch (createErr) {
-            const label = paper.subjectId
-              ? subjects.find(s => s.id === paper.subjectId)?.name
-              : units.find(u => u.id === paper.unitId)?.name;
-            throw new Error(
-              `Failed to recreate paper "${label || 'Unknown'}": ` +
-              (createErr.response?.data?.message || createErr.message)
-            );
+        if (createdPapers.length === 0) {
+          console.log('📤 First create payload:', JSON.stringify(paperData, null, 2));
+        }
+
+        try {
+          const res = await api.post('/exams', paperData);
+          const created = res.data?.exam || res.data?.paper || res.data;
+          if (created?.id) {
+            createdPapers.push(created);
+            paper.id = created.id;
           }
-        } else {
-          console.error('❌ Update paper failed:', err);
+          console.log(`  ✓ Created paper ${created?.id || '(no id returned)'}`);
+        } catch (err) {
+          console.error('❌ Create paper failed:', err);
           const label = paper.subjectId
             ? subjects.find(s => s.id === paper.subjectId)?.name
             : units.find(u => u.id === paper.unitId)?.name;
           throw new Error(
-            `Failed to update paper "${label || 'Unknown'}": ` +
+            `Failed to create paper "${label || 'Unknown'}": ` +
             (err.response?.data?.message || err.message) +
-            '\n\n⚠️ No papers were deleted.'
+            '\n\n⚠️ Existing papers were NOT modified.'
           );
         }
       }
-    }
 
-    // ---------- Step 4: DELETE removed papers LAST ----------
-    // Only reached if every create and update succeeded.
-    setSavingPhase('deleting');
+      // ---------- Step 3: UPDATE existing papers ----------
+      setSavingPhase('updating');
 
-    for (const paper of papersToDelete) {
-      try {
-        await api.delete(`/exams/${paper.id}`);
-        console.log(`  ✓ Deleted paper ${paper.id}`);
-      } catch (err) {
-        // 404 = already gone; ignore
-        if (err.response?.status !== 404) {
-          console.warn(`  ⚠️ Could not delete paper ${paper.id}:`, err.message);
+      for (const paper of papersToUpdate) {
+        const paperData = buildPaperData(paper, payload, editingSession.id);
+
+        try {
+          await api.put(`/exams/${paper.id}`, paperData);
+          console.log(`  ✓ Updated paper ${paper.id}`);
+        } catch (err) {
+          if (err.response?.status === 404) {
+            console.warn(`  ⚠️ Paper ${paper.id} not found — recreating`);
+            try {
+              const res = await api.post('/exams', paperData);
+              const created = res.data?.exam || res.data?.paper || res.data;
+              if (created?.id) paper.id = created.id;
+            } catch (createErr) {
+              const label = paper.subjectId
+                ? subjects.find(s => s.id === paper.subjectId)?.name
+                : units.find(u => u.id === paper.unitId)?.name;
+              throw new Error(
+                `Failed to recreate paper "${label || 'Unknown'}": ` +
+                (createErr.response?.data?.message || createErr.message)
+              );
+            }
+          } else {
+            console.error('❌ Update paper failed:', err);
+            const label = paper.subjectId
+              ? subjects.find(s => s.id === paper.subjectId)?.name
+              : units.find(u => u.id === paper.unitId)?.name;
+            throw new Error(
+              `Failed to update paper "${label || 'Unknown'}": ` +
+              (err.response?.data?.message || err.message) +
+              '\n\n⚠️ No papers were deleted.'
+            );
+          }
         }
       }
+
+      // ---------- Step 4: DELETE removed papers LAST ----------
+      setSavingPhase('deleting');
+
+      for (const paper of papersToDelete) {
+        try {
+          await api.delete(`/exams/${paper.id}`);
+          console.log(`  ✓ Deleted paper ${paper.id}`);
+        } catch (err) {
+          if (err.response?.status !== 404) {
+            console.warn(`  ⚠️ Could not delete paper ${paper.id}:`, err.message);
+          }
+        }
+      }
+
+      // ==========================================================
+      // SUCCESS
+      // ==========================================================
+      console.log('✅ All changes saved successfully');
+      alert('✅ Exam session updated');
+      setShowSessionForm(false);
+      setEditingSession(null);
+      setSessionPapers([]);
+      setSavingPhase('');
+      await loadSessions();
+
+      try {
+        const r = await api.get('/exams');
+        if (r.data?.exams && mountedRef.current) setExams(r.data.exams);
+      } catch (_) {}
+
+    } catch (err) {
+      console.error('❌ Save session failed:', err);
+      if (mountedRef.current) setSaveError(err.message || 'Failed to save session');
+    } finally {
+      submittingRef.current = false;
+      if (mountedRef.current) {
+        setLoading(false);
+        setSavingPhase('');
+      }
     }
+  };
 
-    // ==========================================================
-    // SUCCESS
-    // ==========================================================
-    console.log('✅ All changes saved successfully');
-    alert('✅ Exam session updated');
-    setShowSessionForm(false);
-    setEditingSession(null);
-    setSessionPapers([]);
-    setSavingPhase('');
-    await loadSessions();
-
-    try {
-      const r = await api.get('/exams');
-      if (r.data?.exams) setExams(r.data.exams);
-    } catch (_) {}
-
-  } catch (err) {
-    console.error('❌ Save session failed:', err);
-    setSaveError(err.message || 'Failed to save session');
-  } finally {
-    setLoading(false);
-    setSavingPhase('');
-  }
-};
   // ============================================================
-  // DELETE SESSION
+  // FIX 2: DELETE SESSION — verifies backend actually removed it
   // ============================================================
   const handleDeleteSession = async (session) => {
     if (!canDeleteSessions) { alert('You do not have permission'); return; }
     if (!session?.id) { alert('❌ Invalid session'); return; }
 
-    const paperCount = session.papers?.length || 0;
+    // Prefer hydrated papers if available; otherwise warn with unknown count
+    const paperCount = session.papers?.length;
+    const paperMsg = typeof paperCount === 'number'
+      ? ` and all ${paperCount} paper(s)`
+      : ' and all its papers';
+
     if (!window.confirm(
-      `Delete exam session "${session.name}" and all ${paperCount} paper(s)?\n\nThis cannot be undone.`
+      `Delete exam session "${session.name}"${paperMsg}?\n\nThis cannot be undone.`
     )) return;
 
     setLoading(true);
     try {
       await api.delete(`/exam-sessions/${session.id}`);
+
+      // FIX 2: Verify the session is actually gone from the backend
+      // (catches soft-delete, missing cascade, wrong route, etc.)
+      let stillExists = false;
+      try {
+        const check = await api.get('/exam-sessions');
+        const list =
+          check.data?.sessions ||
+          check.data?.data?.sessions ||
+          check.data?.data ||
+          (Array.isArray(check.data) ? check.data : []) ||
+          [];
+        stillExists = Array.isArray(list) && list.some(s => s.id === session.id);
+      } catch (verifyErr) {
+        console.warn('⚠️ Could not verify deletion:', verifyErr.message);
+      }
+
       await loadSessions();
+
       try {
         const r = await api.get('/exams');
-        if (r.data?.exams) setExams(r.data.exams);
+        if (r.data?.exams && mountedRef.current) setExams(r.data.exams);
       } catch (_) {}
-      alert('✅ Session deleted');
+
+      if (stillExists) {
+        console.error('❌ Backend still returns the deleted session!');
+        alert(
+          '⚠️ The session was removed from this view, but the server still reports it as existing.\n\n' +
+          'This usually means the backend DELETE did not fully cascade to papers, ' +
+          'or a soft-delete filter is missing. Please check the backend logs and ' +
+          'the /exam-sessions endpoint.'
+        );
+      } else {
+        alert('✅ Session deleted');
+      }
     } catch (err) {
       console.error('❌ Delete session failed:', err);
       alert('❌ Failed to delete: ' + (err.response?.data?.message || err.message));
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   };
 
@@ -11128,13 +11245,16 @@ const handleSessionSubmit = async (e) => {
         };
       });
 
+      if (!mountedRef.current) return;
       setBulkResults(bulk);
       setShowBulkResultForm(true);
     } catch (err) {
       console.error('❌ loadStudentsForBulkResults:', err);
-      setApiError(err.response?.data?.message || err.message);
+      if (mountedRef.current) {
+        setApiError(err.response?.data?.message || err.message);
+      }
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   };
 
@@ -11217,7 +11337,7 @@ const handleSessionSubmit = async (e) => {
       if (errors.length > 0) msg += `\n❌ ${errors.length} errors:\n${errors.join('\n')}`;
       alert(msg);
 
-      if (savedCount > 0) {
+      if (savedCount > 0 && mountedRef.current) {
         setShowBulkResultForm(false);
         setBulkResults([]);
         setSelectedExamForResults(null);
@@ -11227,7 +11347,7 @@ const handleSessionSubmit = async (e) => {
     } catch (err) {
       alert('❌ ' + (err.response?.data?.message || err.message));
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   };
 
@@ -11288,12 +11408,14 @@ const handleSessionSubmit = async (e) => {
       else          await api.post('/results', data);
 
       alert('✅ Result saved');
-      setShowResultForm(false);
-      setResultForm({ studentId: '', examId: '', marks: '', isAbsent: false, remarks: '' });
+      if (mountedRef.current) {
+        setShowResultForm(false);
+        setResultForm({ studentId: '', examId: '', marks: '', isAbsent: false, remarks: '' });
+      }
     } catch (err) {
       alert('❌ ' + (err.response?.data?.message || err.message));
     } finally {
-      setSavingResults(false);
+      if (mountedRef.current) setSavingResults(false);
     }
   };
 
@@ -11662,14 +11784,23 @@ const handleSessionSubmit = async (e) => {
               </tr>
             ) : filteredSessions.map(session => {
               const isExpanded = expandedSessions.has(session.id);
+              const isHydrating = hydratingSessionId === session.id;
+              const isHydrated = hydratedSessions.has(session.id);
               const papers = session.papers || [];
+              const paperCountKnown = isHydrated || Array.isArray(session.papers);
+
               return (
                 <React.Fragment key={session.id}>
                   <tr className="hover:bg-gray-50">
                     <td className="px-4 py-3">
-                      <button onClick={() => toggleSession(session.id)}
-                        className="text-gray-500 hover:text-indigo-600">
-                        <i className={`fas fa-chevron-${isExpanded ? 'down' : 'right'}`}></i>
+                      <button
+                        onClick={() => toggleSession(session.id)}
+                        disabled={isHydrating}
+                        className="text-gray-500 hover:text-indigo-600 disabled:opacity-50"
+                      >
+                        {isHydrating
+                          ? <i className="fas fa-spinner fa-spin"></i>
+                          : <i className={`fas fa-chevron-${isExpanded ? 'down' : 'right'}`}></i>}
                       </button>
                     </td>
                     <td className="px-4 py-3 font-medium">{session.name}</td>
@@ -11685,9 +11816,15 @@ const handleSessionSubmit = async (e) => {
                         : getClassName(session.classId)}
                     </td>
                     <td className="px-4 py-3">
-                      <span className="px-2 py-1 bg-indigo-100 text-indigo-800 rounded-full text-xs font-medium">
-                        {papers.length} paper{papers.length === 1 ? '' : 's'}
-                      </span>
+                      {paperCountKnown ? (
+                        <span className="px-2 py-1 bg-indigo-100 text-indigo-800 rounded-full text-xs font-medium">
+                          {papers.length} paper{papers.length === 1 ? '' : 's'}
+                        </span>
+                      ) : (
+                        <span className="px-2 py-1 bg-gray-100 text-gray-500 rounded-full text-xs">
+                          Expand to load
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-1 rounded-full text-xs ${
@@ -11721,54 +11858,87 @@ const handleSessionSubmit = async (e) => {
                     </td>
                   </tr>
 
-                  {isExpanded && papers.map(paper => {
-                    const paperName = (isUniversity || isTVET)
-                      ? getUnitName(paper.unitId)
-                      : getSubjectName(paper.subjectId);
-                    return (
-                      <tr key={paper.id} className="bg-slate-50/40 border-l-4 border-indigo-300">
-                        <td></td>
-                        <td className="px-4 py-2 text-sm pl-10 text-gray-600">
-                          <i className="fas fa-file-alt mr-2 text-indigo-400"></i>
-                          {paperName}
-                        </td>
-                        <td className="px-4 py-2 text-sm text-gray-500">
-                          {paper.date ? new Date(paper.date).toLocaleDateString() : '—'}
-                        </td>
-                        <td className="px-4 py-2 text-sm text-gray-500">
-                          {paper.startTime && paper.endTime
-                            ? `${String(paper.startTime).substring(0,5)}-${String(paper.endTime).substring(0,5)}`
-                            : '—'}
-                        </td>
-                        <td className="px-4 py-2 text-sm text-gray-500">
-                          <i className="fas fa-map-marker-alt mr-1"></i>
-                          {paper.examHall || '—'}
-                        </td>
-                        <td className="px-4 py-2 text-sm text-gray-500">
-                          <i className="fas fa-user-tie mr-1"></i>
-                          {getStaffName(paper.invigilatorId)}
-                        </td>
-                        <td></td>
-                        <td className="px-4 py-2 text-right">
-                          <button
-                            onClick={() => {
-                              setResultForm({ ...resultForm, examId: paper.id });
-                              setShowResultForm(true);
-                            }}
-                            className="text-xs px-2 py-1 bg-green-50 text-green-700 rounded hover:bg-green-100 mr-1"
-                          >
-                            + Result
-                          </button>
-                          <button
-                            onClick={() => loadStudentsForBulkResults(paper.id)}
-                            className="text-xs px-2 py-1 bg-purple-50 text-purple-700 rounded hover:bg-purple-100"
-                          >
-                            Bulk
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {isExpanded && (
+                    <>
+                      {isHydrating && (
+                        <tr className="bg-slate-50/40 border-l-4 border-indigo-300">
+                          <td></td>
+                          <td colSpan={7} className="px-4 py-3 text-sm text-gray-500 italic">
+                            <i className="fas fa-spinner fa-spin mr-2"></i>
+                            Loading papers…
+                          </td>
+                        </tr>
+                      )}
+
+                      {!isHydrating && session._paperLoadError && (
+                        <tr className="bg-red-50/40 border-l-4 border-red-300">
+                          <td></td>
+                          <td colSpan={7} className="px-4 py-3 text-sm text-red-600">
+                            <i className="fas fa-exclamation-triangle mr-2"></i>
+                            Could not load papers: {session._paperLoadError}
+                          </td>
+                        </tr>
+                      )}
+
+                      {!isHydrating && !session._paperLoadError && papers.length === 0 && (
+                        <tr className="bg-slate-50/40 border-l-4 border-indigo-300">
+                          <td></td>
+                          <td colSpan={7} className="px-4 py-3 text-sm text-gray-400 italic">
+                            No papers attached to this session.
+                          </td>
+                        </tr>
+                      )}
+
+                      {!isHydrating && papers.map(paper => {
+                        const paperName = (isUniversity || isTVET)
+                          ? getUnitName(paper.unitId)
+                          : getSubjectName(paper.subjectId);
+                        return (
+                          <tr key={paper.id} className="bg-slate-50/40 border-l-4 border-indigo-300">
+                            <td></td>
+                            <td className="px-4 py-2 text-sm pl-10 text-gray-600">
+                              <i className="fas fa-file-alt mr-2 text-indigo-400"></i>
+                              {paperName}
+                            </td>
+                            <td className="px-4 py-2 text-sm text-gray-500">
+                              {paper.date ? new Date(paper.date).toLocaleDateString() : '—'}
+                            </td>
+                            <td className="px-4 py-2 text-sm text-gray-500">
+                              {paper.startTime && paper.endTime
+                                ? `${String(paper.startTime).substring(0,5)}-${String(paper.endTime).substring(0,5)}`
+                                : '—'}
+                            </td>
+                            <td className="px-4 py-2 text-sm text-gray-500">
+                              <i className="fas fa-map-marker-alt mr-1"></i>
+                              {paper.examHall || '—'}
+                            </td>
+                            <td className="px-4 py-2 text-sm text-gray-500">
+                              <i className="fas fa-user-tie mr-1"></i>
+                              {getStaffName(paper.invigilatorId)}
+                            </td>
+                            <td></td>
+                            <td className="px-4 py-2 text-right">
+                              <button
+                                onClick={() => {
+                                  setResultForm({ ...resultForm, examId: paper.id });
+                                  setShowResultForm(true);
+                                }}
+                                className="text-xs px-2 py-1 bg-green-50 text-green-700 rounded hover:bg-green-100 mr-1"
+                              >
+                                + Result
+                              </button>
+                              <button
+                                onClick={() => loadStudentsForBulkResults(paper.id)}
+                                className="text-xs px-2 py-1 bg-purple-50 text-purple-700 rounded hover:bg-purple-100"
+                              >
+                                Bulk
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </>
+                  )}
                 </React.Fragment>
               );
             })}
@@ -12358,14 +12528,12 @@ const handleSessionSubmit = async (e) => {
   );
 };
 // ============================================================================
-//  RESULTS MODULE — v6
+//  RESULTS MODULE — v10  (full rewrite from scratch)
 //
-//  · Edit mode works properly
-//  · Trend arrows (▲ green / ▼ red) in Termly Matrix AND Student Report
-//  · Students ranked: Pos 1 first
-//  · Category-aware term options
-//  · Centered school name + logo on printouts
-//  · Clean white design
+//  Works for:  ECDE_PRIMARY_JSS · SENIOR_SECONDARY · COLLEGE_TVET · UNIVERSITY
+//  Grading:    reads currentSchool.gradingConfig.scale first, then falls back
+//              to the built-in scale for the school category.
+//  Logo:       uses resolveLogoUrl() — handles base64, absolute, and relative.
 // ============================================================================
 const ResultsModule = ({
   exams, setExams, results, students, subjects, classes, courses, programs,
@@ -12376,224 +12544,120 @@ const ResultsModule = ({
   // ============================================================
   // SCHOOL TYPE
   // ============================================================
-  const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
-  const isUniversity   = schoolCategory === 'UNIVERSITY';
-  const isTVET         = schoolCategory === 'COLLEGE_TVET';
-  const isSecondary    = schoolCategory === 'SENIOR_SECONDARY';
-  const isPrimary      = schoolCategory === 'ECDE_PRIMARY_JSS';
-  const isRegularSchool = !isUniversity && !isTVET;
+  const schoolCategory   = currentSchool?.category || 'ECDE_PRIMARY_JSS';
+  const isUniversity     = schoolCategory === 'UNIVERSITY';
+  const isTVET           = schoolCategory === 'COLLEGE_TVET';
+  const isSecondary      = schoolCategory === 'SENIOR_SECONDARY';
+  const isPrimary        = schoolCategory === 'ECDE_PRIMARY_JSS';
+  const isRegularSchool  = !isUniversity && !isTVET;
 
   const schoolName =
     currentSchool?.name?.trim() ||
     currentSchool?.schoolName?.trim() ||
     currentSchool?.school?.name?.trim() ||
     'School Name';
-  const schoolLogo =
-    currentSchool?.contact?.logo ||
-    currentSchool?.branding?.logo ||
-    currentSchool?.logo ||
-    '';
+
+  // ✅ FIXED: always use resolveLogoUrl
+  const schoolLogo = useMemo(() => resolveLogoUrl(currentSchool), [currentSchool]);
+
   const schoolMotto =
     currentSchool?.motto ||
     currentSchool?.schoolMotto ||
     '';
 
-  // ✅ Category-aware term options
-  const termOptions = useMemo(() => {
-    if (isUniversity) {
-      return [
-        { value: '',           label: 'All Semesters' },
-        { value: 'Semester 1', label: 'Semester 1' },
-        { value: 'Semester 2', label: 'Semester 2' }
-      ];
+  // Column labels
+  const subjectColumnLabel =
+    isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject';
+  const groupColumnLabel =
+    isTVET ? 'Program' : isUniversity ? 'Course' : 'Class';
+
+  // ============================================================
+  // GRADING SYSTEM — settings first, then category defaults
+  // ============================================================
+  const customGradingScale = useMemo(() => {
+    const scale = currentSchool?.gradingConfig?.scale;
+    if (Array.isArray(scale) && scale.length > 0) return scale;
+    return null;
+  }, [currentSchool]);
+
+  const hasCustomGrading = customGradingScale !== null;
+
+  const calculateGrade = useCallback((marks, maxMarks = 100, examCategory = null) => {
+    if (marks === '' || marks === null || marks === undefined) {
+      return { grade: '', points: 0, remark: '' };
     }
-    return [
-      { value: '',       label: 'All Terms' },
-      { value: 'Term 1', label: 'Term 1' },
-      { value: 'Term 2', label: 'Term 2' },
-      { value: 'Term 3', label: 'Term 3' }
-    ];
-  }, [isUniversity]);
-
-  const defaultTermValue = useMemo(() => (isUniversity ? 'Semester 1' : 'Term 1'), [isUniversity]);
-
-  // ✅ Exam type options + label helper
-  const examTypeOptions = useMemo(() => ([
-    { value: '', label: 'All Types' },
-    { value: 'OPENER', label: 'Opener' },
-    { value: 'MIDTERM', label: 'Mid-Term' },
-    { value: 'ENDTERM', label: 'End Term' },
-    { value: 'CAT', label: 'CAT' },
-    { value: 'MOCK', label: 'Mock' },
-    { value: 'PRE_MOCK', label: 'Pre-Mock' },
-    { value: 'FINAL', label: 'Final Exam' }
-  ]), []);
-
-  const examTypeLabel = (type) => {
-    const found = examTypeOptions.find(o => o.value === type);
-    return found?.label || type || 'Other';
-  };
-
-  // ============================================================
-  // ROLES
-  // ============================================================
-  const isSuperAdmin      = user?.role === 'SUPER_ADMIN';
-  const isSchoolAdmin     = user?.role === 'SCHOOL_ADMIN';
-  const isPrincipal       = user?.role === 'PRINCIPAL';
-  const isDeputyPrincipal = user?.role === 'DEPUTY_PRINCIPAL';
-  const isSeniorTeacher   = user?.role === 'SENIOR_TEACHER';
-  const isClassTeacher    = user?.role === 'CLASS_TEACHER';
-  const isSubjectTeacher  = user?.role === 'SUBJECT_TEACHER';
-  const isLecturer        = ['LECTURER','SENIOR_LECTURER','PROFESSOR'].includes(user?.role);
-  const isInstructor      = ['INSTRUCTOR','TRAINER'].includes(user?.role);
-  const isDean            = user?.role === 'DEAN';
-  const isHOD             = user?.role === 'HOD';
-  const isStudent         = user?.role === 'STUDENT';
-  const isParent          = user?.role === 'PARENT';
-
-  const canAddResults     = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal ||
-                            isSeniorTeacher || isClassTeacher || isSubjectTeacher ||
-                            isLecturer || isInstructor || isDean || isHOD;
-  const canPublishResults = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || isDean;
-  const canSendMessages   = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal ||
-                            isSeniorTeacher || isClassTeacher || isDean || isHOD;
-  const canViewAllResults = canAddResults;
-
-  const SearchableSelect = StudentSearchableSelect;
-
-  // ============================================================
-  // STATE
-  // ============================================================
-  const [viewMode, setViewMode] = useState('marks'); // 'marks' | 'report' | 'term-matrix'
-
-  // Marks entry
-  const [selectedExam, setSelectedExam]         = useState('');
-  const [selectedClass, setSelectedClass]       = useState('');
-  const [selectedCourse, setSelectedCourse]     = useState('');
-  const [selectedProgram, setSelectedProgram]   = useState('');
-  const [selectedSubject, setSelectedSubject]   = useState('');
-  const [selectedUnit, setSelectedUnit]         = useState('');
-  const [selectedYear, setSelectedYear]         = useState('');
-  const [selectedSemester, setSelectedSemester] = useState('');
-  const [selectedModule, setSelectedModule]     = useState('');
-  const [resultEntries, setResultEntries]       = useState([]);
-  const [studentSearch, setStudentSearch]       = useState('');
-  const [filterGrade, setFilterGrade]           = useState('');
-  const [filteredUnits, setFilteredUnits]       = useState([]);
-  const [filteredSubjects, setFilteredSubjects] = useState([]);
-
-  const [selectedStudentsForMessage, setSelectedStudentsForMessage] = useState([]);
-  const [selectAllForMessage, setSelectAllForMessage]               = useState(false);
-  const [showMessageModal, setShowMessageModal]                     = useState(false);
-  const [messageType, setMessageType]                               = useState('SMS');
-  const [messageTemplate, setMessageTemplate]                       = useState('');
-  const [sendingMessages, setSendingMessages]                       = useState(false);
-
-  // Detailed report
-  const [reportClassId, setReportClassId]               = useState('');
-  const [reportStudentId, setReportStudentId]           = useState('');
-  const [reportTermFilter, setReportTermFilter]         = useState('');
-  const [reportYearFilter, setReportYearFilter]         = useState('');
-  const [reportExamTypeFilter, setReportExamTypeFilter] = useState('');
-  const [reportData, setReportData]                     = useState(null);
-  const [loadingReport, setLoadingReport]               = useState(false);
-
-  // Term matrix
-  const [termMatrixClassId, setTermMatrixClassId]     = useState('');
-  const [termMatrixTerm, setTermMatrixTerm]           = useState(defaultTermValue);
-  const [termMatrixExamType, setTermMatrixExamType]   = useState('');
-  const [termMatrixSession, setTermMatrixSession]     = useState('');
-  const [termMatrixData, setTermMatrixData]           = useState(null);
-  const [loadingTermMatrix, setLoadingTermMatrix]     = useState(false);
-
-  // Student/parent view
-  const [myResults, setMyResults]               = useState([]);
-  const [myStudentRecord, setMyStudentRecord]   = useState(null);
-  const [loadingMyData, setLoadingMyData]       = useState(false);
-  const [showAdmissionModal, setShowAdmissionModal] = useState(false);
-  const [admissionNumber, setAdmissionNumber]   = useState(propAdmissionNumber || '');
-  const [apiError, setApiError]                 = useState('');
-  const [myResultsSummary, setMyResultsSummary] = useState(null);
-
-  const [myChildren, setMyChildren]             = useState([]);
-  const [selectedChild, setSelectedChild]       = useState(null);
-  const [childResults, setChildResults]         = useState([]);
-  const [loadingChildren, setLoadingChildren]   = useState(false);
-
-  const hasLoadedStudentData  = useRef(false);
-  const hasLoadedChildrenData = useRef(false);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    setTermMatrixTerm(defaultTermValue);
-  }, [defaultTermValue]);
-
-  // ============================================================
-  // GRADE LOGIC
-  // ============================================================
-  const calculateGrade = (marks, maxMarks = 100, examCategory = null) => {
-    if (marks === '' || marks === null || marks === undefined) return { grade: '', points: 0 };
     const n = parseFloat(marks);
-    if (isNaN(n)) return { grade: '', points: 0 };
+    if (isNaN(n)) return { grade: '', points: 0, remark: '' };
+
     const pct = maxMarks > 0 ? (n / maxMarks) * 100 : 0;
+
+    // ✅ 1) School admin's custom grading system (Settings)
+    if (hasCustomGrading) {
+      const band = customGradingScale.find(b => pct >= b.min && pct <= b.max);
+      if (band) {
+        return {
+          grade: band.code || band.grade || '',
+          points: band.points ?? 0,
+          remark: band.label || band.remark || ''
+        };
+      }
+      // If custom scale doesn't cover this pct, fall through to category
+    }
+
+    // 2) Fallback: built-in scale per category
     const cat = examCategory || schoolCategory;
 
-    if (currentSchool?.gradingConfig?.scale?.length > 0) {
-      const band = currentSchool.gradingConfig.scale.find(b => pct >= b.min && pct <= b.max);
-      if (band) return { grade: band.code || band.grade || '', points: band.points || 0 };
-    }
-
     if (cat === 'UNIVERSITY') {
-      if (pct >= 70) return { grade: 'A', points: 5.0 };
-      if (pct >= 60) return { grade: 'B', points: 4.0 };
-      if (pct >= 50) return { grade: 'C', points: 3.0 };
-      if (pct >= 40) return { grade: 'D', points: 2.0 };
-      return { grade: 'E', points: 1.0 };
+      if (pct >= 70) return { grade: 'A', points: 5.0, remark: 'Excellent' };
+      if (pct >= 60) return { grade: 'B', points: 4.0, remark: 'Very Good' };
+      if (pct >= 50) return { grade: 'C', points: 3.0, remark: 'Good' };
+      if (pct >= 40) return { grade: 'D', points: 2.0, remark: 'Fair' };
+      return { grade: 'E', points: 1.0, remark: 'Poor' };
     }
     if (cat === 'COLLEGE_TVET') {
-      if (pct >= 80) return { grade: 'DISTINCTION', points: 5 };
-      if (pct >= 65) return { grade: 'CREDIT', points: 4 };
-      if (pct >= 50) return { grade: 'MERIT', points: 3 };
-      if (pct >= 40) return { grade: 'PASS', points: 2 };
-      return { grade: 'FAIL', points: 1 };
+      if (pct >= 80) return { grade: 'DISTINCTION', points: 5, remark: 'Distinction' };
+      if (pct >= 65) return { grade: 'CREDIT',      points: 4, remark: 'Credit' };
+      if (pct >= 50) return { grade: 'MERIT',       points: 3, remark: 'Merit' };
+      if (pct >= 40) return { grade: 'PASS',        points: 2, remark: 'Pass' };
+      return { grade: 'FAIL', points: 1, remark: 'Fail' };
     }
     if (cat === 'ECDE_PRIMARY_JSS') {
-      if (pct >= 80) return { grade: 'EE', points: 4 };
-      if (pct >= 65) return { grade: 'ME', points: 3 };
-      if (pct >= 50) return { grade: 'AE', points: 2 };
-      if (pct >= 30) return { grade: 'BE', points: 1 };
-      return { grade: 'NI', points: 0 };
+      if (pct >= 80) return { grade: 'EE', points: 4, remark: 'Exceeding Expectations' };
+      if (pct >= 65) return { grade: 'ME', points: 3, remark: 'Meeting Expectations' };
+      if (pct >= 50) return { grade: 'AE', points: 2, remark: 'Approaching Expectations' };
+      if (pct >= 30) return { grade: 'BE', points: 1, remark: 'Below Expectations' };
+      return { grade: 'NI', points: 0, remark: 'Needs Improvement' };
     }
-    if (pct >= 80) return { grade: 'A',  points: 12 };
-    if (pct >= 75) return { grade: 'A-', points: 11 };
-    if (pct >= 70) return { grade: 'B+', points: 10 };
-    if (pct >= 65) return { grade: 'B',  points: 9 };
-    if (pct >= 60) return { grade: 'B-', points: 8 };
-    if (pct >= 55) return { grade: 'C+', points: 7 };
-    if (pct >= 50) return { grade: 'C',  points: 6 };
-    if (pct >= 45) return { grade: 'C-', points: 5 };
-    if (pct >= 40) return { grade: 'D+', points: 4 };
-    if (pct >= 35) return { grade: 'D',  points: 3 };
-    if (pct >= 30) return { grade: 'D-', points: 2 };
-    return { grade: 'E', points: 1 };
-  };
+    // Senior Secondary (8-4-4)
+    if (pct >= 80) return { grade: 'A',  points: 12, remark: 'Excellent' };
+    if (pct >= 75) return { grade: 'A-', points: 11, remark: 'Very Good' };
+    if (pct >= 70) return { grade: 'B+', points: 10, remark: 'Good' };
+    if (pct >= 65) return { grade: 'B',  points: 9,  remark: 'Above Average' };
+    if (pct >= 60) return { grade: 'B-', points: 8,  remark: 'Average' };
+    if (pct >= 55) return { grade: 'C+', points: 7,  remark: 'Below Average' };
+    if (pct >= 50) return { grade: 'C',  points: 6,  remark: 'Fair' };
+    if (pct >= 45) return { grade: 'C-', points: 5,  remark: 'Below Expectations' };
+    if (pct >= 40) return { grade: 'D+', points: 4,  remark: 'Needs Improvement' };
+    if (pct >= 35) return { grade: 'D',  points: 3,  remark: 'Poor' };
+    if (pct >= 30) return { grade: 'D-', points: 2,  remark: 'Very Poor' };
+    return { grade: 'E', points: 1, remark: 'Needs Intervention' };
+  }, [hasCustomGrading, customGradingScale, schoolCategory]);
 
-  const getGradeColor = (grade) => {
-    if (!grade) return 'text-gray-400';
-    if (['DISTINCTION','EE','A','A-'].includes(grade)) return 'text-emerald-700 font-semibold';
-    if (['CREDIT','ME','B+','B','B-'].includes(grade))  return 'text-blue-700 font-semibold';
-    if (['MERIT','AE','C+','C','C-'].includes(grade))   return 'text-amber-700 font-semibold';
-    if (['PASS','BE','D+','D','D-'].includes(grade))    return 'text-orange-700 font-semibold';
-    if (['FAIL','NI','E'].includes(grade))              return 'text-red-700 font-semibold';
-    return 'text-gray-700 font-semibold';
-  };
-
-  const calculateMeanGrade = (rows) => {
-    const valid = (rows || []).filter(r =>
-      r.marks !== '' && r.marks !== null && r.marks !== undefined && !isNaN(parseFloat(r.marks))
+  const calculateMeanGradeFromCells = useCallback((cells) => {
+    const valid = (cells || []).filter(c =>
+      c && c.marks !== null && c.marks !== undefined && !isNaN(c.marks)
     );
     if (valid.length === 0) return 'N/A';
-    const avgPoints = valid.reduce((s, r) => s + (r.points || 0), 0) / valid.length;
+
+    // ✅ If custom scale, use average % and re-grade
+    if (hasCustomGrading) {
+      const avgPct = valid.reduce((s, c) => s + c.marks, 0) / valid.length;
+      const band = customGradingScale.find(b => avgPct >= b.min && avgPct <= b.max);
+      if (band) return band.code || band.grade || 'N/A';
+    }
+
+    // Fallback: use average points
+    const avgPoints = valid.reduce((s, c) => s + (c.points || 0), 0) / valid.length;
     const cat = schoolCategory;
 
     if (cat === 'UNIVERSITY') {
@@ -12629,9 +12693,223 @@ const ResultsModule = ({
     if (avgPoints >= 2.5)  return 'D';
     if (avgPoints >= 1.5)  return 'D-';
     return 'E';
+  }, [hasCustomGrading, customGradingScale, schoolCategory]);
+
+  // ============================================================
+  // GRADE STYLING (badges / pills) — matches existing modules
+  // ============================================================
+  const getGradePillClasses = useCallback((grade) => {
+    if (!grade) return 'bg-gray-100 text-gray-500';
+    const g = String(grade).toUpperCase();
+
+    // CBC
+    if (g === 'EE') return 'bg-emerald-100 text-emerald-800';
+    if (g === 'ME') return 'bg-blue-100 text-blue-800';
+    if (g === 'AE') return 'bg-amber-100 text-amber-800';
+    if (g === 'BE') return 'bg-orange-100 text-orange-800';
+    if (g === 'NI') return 'bg-red-100 text-red-800';
+
+    // TVET
+    if (g === 'DISTINCTION') return 'bg-emerald-100 text-emerald-800';
+    if (g === 'CREDIT')      return 'bg-blue-100 text-blue-800';
+    if (g === 'MERIT')       return 'bg-amber-100 text-amber-800';
+    if (g === 'PASS')        return 'bg-orange-100 text-orange-800';
+    if (g === 'FAIL')        return 'bg-red-100 text-red-800';
+
+    // 8-4-4 / University
+    if (['A', 'A-'].includes(g)) return 'bg-emerald-100 text-emerald-800';
+    if (['B+', 'B', 'B-'].includes(g)) return 'bg-blue-100 text-blue-800';
+    if (['C+', 'C', 'C-'].includes(g)) return 'bg-amber-100 text-amber-800';
+    if (['D+', 'D', 'D-'].includes(g)) return 'bg-orange-100 text-orange-800';
+    if (g === 'E') return 'bg-red-100 text-red-800';
+
+    return 'bg-gray-100 text-gray-700';
+  }, []);
+
+  const getGradeTextClasses = useCallback((grade) => {
+    if (!grade) return 'text-gray-400';
+    const g = String(grade).toUpperCase();
+    if (['DISTINCTION','EE','A','A-'].includes(g)) return 'text-emerald-700 font-semibold';
+    if (['CREDIT','ME','B+','B','B-'].includes(g))  return 'text-blue-700 font-semibold';
+    if (['MERIT','AE','C+','C','C-'].includes(g))   return 'text-amber-700 font-semibold';
+    if (['PASS','BE','D+','D','D-'].includes(g))    return 'text-orange-700 font-semibold';
+    if (['FAIL','NI','E'].includes(g))              return 'text-red-700 font-semibold';
+    return 'text-gray-700 font-semibold';
+  }, []);
+
+  // ============================================================
+  // MERIT TEXT
+  // ============================================================
+  const getMeritText = (avg) => {
+    if (avg >= 80) return 'Excellent performance — keep it up!';
+    if (avg >= 70) return 'Very good work';
+    if (avg >= 60) return 'Good progress';
+    if (avg >= 50) return 'Satisfactory — room for improvement';
+    if (avg >= 40) return 'Needs more effort';
+    if (avg > 0)   return 'Needs significant improvement';
+    return '';
   };
 
-  const getItemName = (result, exam) => {
+  // ============================================================
+  // TREND ARROW COMPONENT
+  // ============================================================
+  const TrendArrow = ({ direction, delta, compact = false }) => {
+    if (!direction || direction === 'flat') {
+      return <span className={`text-gray-300 ${compact ? 'text-[10px]' : 'text-xs'}`}>●</span>;
+    }
+    const isUp = direction === 'up';
+    return (
+      <span
+        className={`inline-flex items-center gap-0.5 font-bold ${
+          isUp ? 'text-emerald-600' : 'text-red-600'
+        } ${compact ? 'text-[10px]' : 'text-xs'}`}
+        title={isUp ? `Improved by ${delta}` : `Declined by ${Math.abs(delta)}`}
+      >
+        {isUp ? '▲' : '▼'}
+        <span className="font-semibold">{isUp ? `+${delta}` : delta}</span>
+      </span>
+    );
+  };
+
+  // ============================================================
+  // OPTIONS
+  // ============================================================
+  const termOptions = useMemo(() => {
+    if (isUniversity) {
+      return [
+        { value: '',           label: 'All Semesters' },
+        { value: 'Semester 1', label: 'Semester 1' },
+        { value: 'Semester 2', label: 'Semester 2' }
+      ];
+    }
+    return [
+      { value: '',       label: 'All Terms' },
+      { value: 'Term 1', label: 'Term 1' },
+      { value: 'Term 2', label: 'Term 2' },
+      { value: 'Term 3', label: 'Term 3' }
+    ];
+  }, [isUniversity]);
+
+  const defaultTermValue = useMemo(() => (isUniversity ? 'Semester 1' : 'Term 1'), [isUniversity]);
+
+  const examTypeOptions = useMemo(() => ([
+    { value: '',         label: 'All Types' },
+    { value: 'OPENER',   label: 'Opener' },
+    { value: 'MIDTERM',  label: 'Mid-Term' },
+    { value: 'ENDTERM',  label: 'End Term' },
+    { value: 'CAT',      label: 'CAT' },
+    { value: 'MOCK',     label: 'Mock' },
+    { value: 'PRE_MOCK', label: 'Pre-Mock' },
+    { value: 'FINAL',    label: 'Final Exam' }
+  ]), []);
+
+  const examTypeLabel = useCallback((type) => {
+    const found = examTypeOptions.find(o => o.value === type);
+    return found?.label || type || 'Other';
+  }, [examTypeOptions]);
+
+  // ============================================================
+  // ROLES
+  // ============================================================
+  const isSuperAdmin      = user?.role === 'SUPER_ADMIN';
+  const isSchoolAdmin     = user?.role === 'SCHOOL_ADMIN';
+  const isPrincipal       = user?.role === 'PRINCIPAL';
+  const isDeputyPrincipal = user?.role === 'DEPUTY_PRINCIPAL';
+  const isSeniorTeacher   = user?.role === 'SENIOR_TEACHER';
+  const isClassTeacher    = user?.role === 'CLASS_TEACHER';
+  const isSubjectTeacher  = user?.role === 'SUBJECT_TEACHER';
+  const isLecturer        = ['LECTURER','SENIOR_LECTURER','PROFESSOR'].includes(user?.role);
+  const isInstructor      = ['INSTRUCTOR','TRAINER'].includes(user?.role);
+  const isDean            = user?.role === 'DEAN';
+  const isHOD             = user?.role === 'HOD';
+  const isStudent         = user?.role === 'STUDENT';
+  const isParent          = user?.role === 'PARENT';
+
+  const canAddResults     = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal ||
+                            isSeniorTeacher || isClassTeacher || isSubjectTeacher ||
+                            isLecturer || isInstructor || isDean || isHOD;
+  const canPublishResults = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || isDean;
+  const canSendMessages   = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal ||
+                            isSeniorTeacher || isClassTeacher || isDean || isHOD;
+  const canViewAllResults = canAddResults;
+
+  const SearchableSelect = StudentSearchableSelect;
+
+  // ============================================================
+  // STATE
+  // ============================================================
+  const [viewMode, setViewMode] = useState('marks');
+
+  // Marks entry
+  const [selectedExam, setSelectedExam]         = useState('');
+  const [selectedClass, setSelectedClass]       = useState('');
+  const [selectedCourse, setSelectedCourse]     = useState('');
+  const [selectedProgram, setSelectedProgram]   = useState('');
+  const [selectedSubject, setSelectedSubject]   = useState('');
+  const [selectedUnit, setSelectedUnit]         = useState('');
+  const [selectedYear, setSelectedYear]         = useState('');
+  const [selectedSemester, setSelectedSemester] = useState('');
+  const [selectedModule, setSelectedModule]     = useState('');
+  const [resultEntries, setResultEntries]       = useState([]);
+  const [studentSearch, setStudentSearch]       = useState('');
+  const [filterGrade, setFilterGrade]           = useState('');
+  const [filteredUnits, setFilteredUnits]       = useState([]);
+  const [filteredSubjects, setFilteredSubjects] = useState([]);
+
+  const [selectedStudentsForMessage, setSelectedStudentsForMessage] = useState([]);
+  const [selectAllForMessage, setSelectAllForMessage]               = useState(false);
+  const [showMessageModal, setShowMessageModal]                     = useState(false);
+  const [messageType, setMessageType]                               = useState('SMS');
+  const [messageTemplate, setMessageTemplate]                       = useState('');
+  const [sendingMessages, setSendingMessages]                       = useState(false);
+
+  // Report
+  const [reportClassId, setReportClassId]               = useState('');
+  const [reportStudentId, setReportStudentId]           = useState('');
+  const [reportTermFilter, setReportTermFilter]         = useState('');
+  const [reportYearFilter, setReportYearFilter]         = useState('');
+  const [reportExamTypeFilter, setReportExamTypeFilter] = useState('');
+  const [reportData, setReportData]                     = useState(null);
+  const [loadingReport, setLoadingReport]               = useState(false);
+
+  // Term matrix
+  const [termMatrixClassId, setTermMatrixClassId]     = useState('');
+  const [termMatrixTerm, setTermMatrixTerm]           = useState(defaultTermValue);
+  const [termMatrixExamType, setTermMatrixExamType]   = useState('');
+  const [termMatrixSubjectId, setTermMatrixSubjectId] = useState('');
+  const [termMatrixStudentId, setTermMatrixStudentId] = useState('');
+  const [termMatrixView, setTermMatrixView]           = useState('subject');
+  const [showTrendArrows, setShowTrendArrows]         = useState(true);
+  const [showDeltaVsMean, setShowDeltaVsMean]         = useState(false);
+  const [termMatrixData, setTermMatrixData]           = useState(null);
+  const [loadingTermMatrix, setLoadingTermMatrix]     = useState(false);
+
+  // Student/parent
+  const [myResults, setMyResults]               = useState([]);
+  const [myStudentRecord, setMyStudentRecord]   = useState(null);
+  const [loadingMyData, setLoadingMyData]       = useState(false);
+  const [showAdmissionModal, setShowAdmissionModal] = useState(false);
+  const [admissionNumber, setAdmissionNumber]   = useState(propAdmissionNumber || '');
+  const [apiError, setApiError]                 = useState('');
+  const [myResultsSummary, setMyResultsSummary] = useState(null);
+
+  const [myChildren, setMyChildren]             = useState([]);
+  const [selectedChild, setSelectedChild]       = useState(null);
+  const [childResults, setChildResults]         = useState([]);
+  const [loadingChildren, setLoadingChildren]   = useState(false);
+
+  const hasLoadedStudentData  = useRef(false);
+  const hasLoadedChildrenData = useRef(false);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setTermMatrixTerm(defaultTermValue);
+  }, [defaultTermValue]);
+
+  // ============================================================
+  // HELPERS
+  // ============================================================
+  const getItemName = useCallback((result, exam) => {
     if (isTVET || isUniversity) {
       const uid = result?.unitId || exam?.unitId;
       if (uid) {
@@ -12646,47 +12924,61 @@ const ResultsModule = ({
       }
     }
     return exam?.name || 'Unknown';
-  };
+  }, [isTVET, isUniversity, units, subjects]);
 
-  // ============================================================
-  // ✅ TREND ARROW HELPER
-  //   Compares the two most recent exam scores for a subject
-  //   Returns { direction, delta, label }
-  //   direction: 'up' | 'down' | 'flat' | null
-  // ============================================================
-  const computeTrend = (cellsArray) => {
+  const computeTrend = useCallback((cellsArray) => {
     if (!Array.isArray(cellsArray) || cellsArray.length < 2) {
       return { direction: null, delta: 0 };
     }
-    // cellsArray is already sorted chronologically (oldest → newest)
-    const first = cellsArray[0].marks;
-    const last = cellsArray[cellsArray.length - 1].marks;
-    if (typeof first !== 'number' || typeof last !== 'number') {
-      return { direction: null, delta: 0 };
-    }
+    const first = cellsArray[0];
+    const last = cellsArray[cellsArray.length - 1];
+    if (first == null || last == null) return { direction: null, delta: 0 };
     const delta = last - first;
     if (delta > 0) return { direction: 'up', delta };
     if (delta < 0) return { direction: 'down', delta };
     return { direction: 'flat', delta: 0 };
+  }, []);
+
+  // ============================================================
+  // KNEC APTITUDE
+  // ============================================================
+  const KNEC_STREAMS = {
+    STEM: ['mathematics','maths','math','physics','chemistry','biology','science','computer','technical','metalwork','woodwork','drawing'],
+    LANGUAGES: ['english','kiswahili','literature','french','german','arabic','language'],
+    SOCIAL: ['history','geography','cre','ire','social','civics','government','religious'],
+    ARTS: ['art','music','drama','creative','theatre','design'],
+    BUSINESS: ['business','commerce','accounts','accounting','economics','entrepreneurship'],
+    APPLIED: ['agriculture','home science','nutrition','foods','clothing','technical drawing']
   };
 
-  const TrendArrow = ({ direction, delta }) => {
-    if (!direction || direction === 'flat') {
-      return <span className="text-gray-300 text-xs">●</span>;
+  const classifySubjectToStream = useCallback((name) => {
+    if (!name) return null;
+    const s = String(name).toLowerCase();
+    for (const [stream, keywords] of Object.entries(KNEC_STREAMS)) {
+      if (keywords.some(k => s.includes(k))) return stream;
     }
-    if (direction === 'up') {
-      return (
-        <span className="inline-flex items-center gap-1 text-emerald-600 font-bold text-xs" title={`Improved by ${delta} marks`}>
-          ▲ <span className="text-[10px] font-semibold">+{delta}</span>
-        </span>
-      );
-    }
-    return (
-      <span className="inline-flex items-center gap-1 text-red-600 font-bold text-xs" title={`Declined by ${Math.abs(delta)} marks`}>
-        ▼ <span className="text-[10px] font-semibold">{delta}</span>
-      </span>
-    );
-  };
+    return null;
+  }, []);
+
+  const computeKNEC = useCallback((studentResults) => {
+    const byStream = {};
+    studentResults.forEach(r => {
+      const stream = classifySubjectToStream(r.itemName || r.subjectName);
+      if (!stream) return;
+      const m = parseFloat(r.marks);
+      if (isNaN(m)) return;
+      if (!byStream[stream]) byStream[stream] = { sum: 0, count: 0 };
+      byStream[stream].sum += m;
+      byStream[stream].count += 1;
+    });
+    return Object.entries(byStream)
+      .map(([stream, t]) => ({
+        stream,
+        average: t.count > 0 ? t.sum / t.count : 0,
+        count: t.count
+      }))
+      .sort((a, b) => b.average - a.average);
+  }, [classifySubjectToStream]);
 
   // ============================================================
   // LOAD RESULTS
@@ -12698,7 +12990,7 @@ const ResultsModule = ({
     try {
       const res = await api.get(`/results/by-admission/${encodeURIComponent(admNumber)}`);
       const studentResults = res.data.results || [];
-      const studentInfo = res.data.student;
+      const studentInfo   = res.data.student;
 
       const enhancedResults = studentResults.map(result => {
         const exam = exams?.find(e => e.id === result.examId);
@@ -12706,11 +12998,12 @@ const ResultsModule = ({
         const gradeInfo = hasMarks
           ? calculateGrade(result.marks, exam?.maxMarks || result.maxMarks || 100,
                            exam?.schoolCategory || schoolCategory)
-          : { grade: '', points: 0 };
+          : { grade: '', points: 0, remark: '' };
         return {
           ...result,
           grade: gradeInfo.grade,
           points: gradeInfo.points,
+          remark: gradeInfo.remark,
           itemName: getItemName(result, exam),
           examName: result.examName || result.exam?.name || exam?.name || 'Unknown',
           examDate: result.examDate || result.exam?.date || exam?.date,
@@ -12743,15 +13036,15 @@ const ResultsModule = ({
       total: valid.length,
       average,
       totalPoints,
-      meanGrade: calculateMeanGrade(enhancedResults)
+      meanGrade: calculateMeanGradeFromCells(valid.map(v => ({ marks: v.marks, points: v.points }))),
+      meanPoints: valid.length > 0 ? (totalPoints / valid.length).toFixed(2) : '0.00'
     };
   };
 
   // ============================================================
-  // DETAILED REPORT
-  // ✅ NEW: cells stored per exam-type so we can detect trends
+  // DETAILED REPORT (Student Report Card)
   // ============================================================
-  const buildDetailedReport = (studentResults) => {
+  const buildDetailedReport = (studentResults, student) => {
     const filtered = studentResults.filter(r => {
       if (reportTermFilter && r.examTerm !== reportTermFilter) return false;
       if (reportYearFilter && r.academicYear !== reportYearFilter) return false;
@@ -12785,7 +13078,7 @@ const ResultsModule = ({
       if (!g.subjects.has(subjKey)) {
         g.subjects.set(subjKey, {
           subjectName: subjKey,
-          entries: [],   // ✅ full chronological list for trend detection
+          entries: [],
           cells: {},
           sumMarks: 0,
           count: 0
@@ -12801,12 +13094,8 @@ const ResultsModule = ({
           marks: m, grade: r.grade, points: r.points, examId: r.examId
         };
         subj.entries.push({
-          type: typeKey,
-          marks: m,
-          grade: r.grade,
-          points: r.points,
-          examDate: r.examDate,
-          examName: r.examName
+          type: typeKey, marks: m, grade: r.grade,
+          points: r.points, examDate: r.examDate, examName: r.examName
         });
         subj.sumMarks += m;
         subj.count += 1;
@@ -12818,22 +13107,13 @@ const ResultsModule = ({
       const subjectList = [];
       for (const subj of g.subjects.values()) {
         const avg = subj.count > 0 ? subj.sumMarks / subj.count : 0;
-
-        // ✅ Sort entries chronologically for trend
         const sortedEntries = [...subj.entries].sort((a, b) => {
           const da = a.examDate ? new Date(a.examDate).getTime() : 0;
           const db = b.examDate ? new Date(b.examDate).getTime() : 0;
           return da - db;
         });
-
-        const trend = computeTrend(sortedEntries);
-
-        subjectList.push({
-          ...subj,
-          avg,
-          sortedEntries,
-          trend
-        });
+        const trend = computeTrend(sortedEntries.map(e => e.marks));
+        subjectList.push({ ...subj, avg, sortedEntries, trend });
       }
 
       const validAvgs = subjectList.filter(s => s.count > 0).map(s => s.avg);
@@ -12846,7 +13126,7 @@ const ResultsModule = ({
         examTypeColumns: Array.from(g.examTypeColumns),
         subjects: subjectList.sort((a, b) => a.subjectName.localeCompare(b.subjectName)),
         termAverage,
-        termGrade: calculateMeanGrade(
+        termGrade: calculateMeanGradeFromCells(
           subjectList.flatMap(s => Object.values(s.cells).map(c => ({ marks: c.marks, points: c.points })))
         )
       });
@@ -12860,9 +13140,41 @@ const ResultsModule = ({
     });
 
     const allAvgs = termCards.flatMap(tc => tc.subjects.map(s => s.avg)).filter(v => v > 0);
-    const overallAverage = allAvgs.length > 0 ? allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length : 0;
+    const overallAverage = allAvgs.length > 0
+      ? allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length
+      : 0;
 
-    return { termCards, overallAverage };
+    const knec = computeKNEC(filtered);
+
+    // Position within class
+    let positionInfo = null;
+    if (student?.classId) {
+      const classmates = (students || []).filter(s => s.classId === student.classId);
+      const peerAverages = classmates.map(m => {
+        const rs = (results || []).filter(r => r.studentId === m.id);
+        const total = rs.reduce((sum, r) => sum + (parseFloat(r.marks) || 0), 0);
+        return { studentId: m.id, avg: rs.length > 0 ? total / rs.length : 0, count: rs.length };
+      }).filter(p => p.count > 0).sort((a, b) => b.avg - a.avg);
+
+      const idx = peerAverages.findIndex(p => p.studentId === student.id);
+      if (idx !== -1) positionInfo = { position: idx + 1, total: peerAverages.length };
+    }
+
+    const allValid = filtered.filter(r => !isNaN(parseFloat(r.marks)));
+    const totalPoints = allValid.reduce((s, r) => s + (r.points || 0), 0);
+    const meanPoints = allValid.length > 0 ? (totalPoints / allValid.length).toFixed(2) : '0.00';
+
+    return {
+      termCards,
+      overallAverage,
+      knec,
+      positionInfo,
+      reportCardCount: termCards.length,
+      totalSubjects: new Set(allValid.map(r => r.itemName)).size,
+      totalExamCount: allValid.length,
+      meanPoints,
+      merit: getMeritText(overallAverage)
+    };
   };
 
   const loadDetailedReport = async () => {
@@ -12893,7 +13205,7 @@ const ResultsModule = ({
       });
 
       const student = students.find(s => s.id === reportStudentId);
-      const built = buildDetailedReport(enriched);
+      const built = buildDetailedReport(enriched, student);
       setReportData({ student, ...built });
     } catch (err) {
       console.error('Failed to load report:', err);
@@ -12904,15 +13216,25 @@ const ResultsModule = ({
   };
 
   // ============================================================
-  // TERMLY CLASS MATRIX
-  // ✅ NEW: adds per-subject trend + ranking by average
+  // TERMLY MATRIX — 4 views
   // ============================================================
   const buildTermMatrix = async () => {
     if (!termMatrixClassId) { alert('Please select a class'); return; }
     if (!termMatrixTerm)    { alert('Please select a term'); return; }
 
+    if (termMatrixView === 'student' && !termMatrixStudentId) {
+      alert('Please select a student'); return;
+    }
+    if ((termMatrixView === 'subject' || termMatrixView === 'class') && !termMatrixSubjectId) {
+      alert('Please select a subject'); return;
+    }
+    if (termMatrixView === 'exam' && !termMatrixExamType) {
+      alert('Please select an exam type'); return;
+    }
+
     setLoadingTermMatrix(true);
     setTermMatrixData(null);
+
     try {
       const classSubjects = (subjects || []).filter(s => s.classId === termMatrixClassId);
       if (classSubjects.length === 0) { alert('No subjects for this class'); return; }
@@ -12929,24 +13251,24 @@ const ResultsModule = ({
       const termExams = (exams || []).filter(e => {
         if (e.classId !== termMatrixClassId) return false;
         if (String(e.term || '').toLowerCase() !== String(termMatrixTerm).toLowerCase()) return false;
+        if (termMatrixView === 'exam' && termMatrixExamType && e.type !== termMatrixExamType) return false;
         if (termMatrixExamType && e.type !== termMatrixExamType) return false;
-        if (termMatrixSession && e.name !== termMatrixSession) return false;
         return true;
       });
+
       if (termExams.length === 0) {
-        alert(`No exams found for ${termMatrixTerm}${termMatrixExamType ? ' · ' + termMatrixExamType : ''}`);
+        alert(`No exams found for ${termMatrixTerm}`);
         return;
       }
 
-      // ✅ Sort exams chronologically so trend arrows are meaningful
-      const sortedTermExams = [...termExams].sort((a, b) => {
+      const sortedExams = [...termExams].sort((a, b) => {
         const da = a.date ? new Date(a.date).getTime() : 0;
         const db = b.date ? new Date(b.date).getTime() : 0;
         return da - db;
       });
 
       const allResults = [];
-      for (const exam of sortedTermExams) {
+      for (const exam of sortedExams) {
         try {
           const r = await api.get(`/results/exam/${exam.id}`);
           (r.data.results || []).forEach(row => allResults.push({ ...row, __exam: exam }));
@@ -12954,127 +13276,242 @@ const ResultsModule = ({
       }
 
       const classObj = classes.find(c => c.id === termMatrixClassId);
+      const presentExamTypes = [...new Set(sortedExams.map(e => e.type).filter(Boolean))];
 
-      // Group results by student → subject (chronological array)
-      const byStudent = new Map();
-      allResults.forEach(r => {
-        if (!byStudent.has(r.studentId)) byStudent.set(r.studentId, new Map());
-        const subjMap = byStudent.get(r.studentId);
-        const subjKey = r.subjectId || r.unitId || r.__exam?.subjectId;
-        if (!subjKey) return;
-        if (!subjMap.has(subjKey)) subjMap.set(subjKey, []);
-        subjMap.get(subjKey).push({
-          marks: parseFloat(r.marks),
-          grade: r.grade,
-          points: r.points,
-          isAbsent: r.isAbsent,
-          examDate: r.__exam?.date
+      // ============================================================
+      // VIEW: BY STUDENT
+      // ============================================================
+      if (termMatrixView === 'student') {
+        const studentObj = studentList.find(s => s.id === termMatrixStudentId);
+        if (!studentObj) { alert('Student not found'); return; }
+
+        const studentResults = allResults.filter(r => r.studentId === studentObj.id);
+
+        const rows = classSubjects.map(subj => {
+          const subjResults = studentResults.filter(r => r.subjectId === subj.id);
+          const cells = {};
+          let sum = 0, count = 0;
+
+          presentExamTypes.forEach(type => {
+            const matches = subjResults.filter(r => r.__exam?.type === type);
+            if (matches.length === 0) { cells[type] = null; return; }
+            const avg = matches.reduce((s, r) => s + (parseFloat(r.marks) || 0), 0) / matches.length;
+            const gi = calculateGrade(avg, 100, schoolCategory);
+            cells[type] = { marks: Number(avg.toFixed(1)), grade: gi.grade, points: gi.points };
+            sum += avg; count += 1;
+          });
+
+          const average = count > 0 ? sum / count : 0;
+          const meanGrade = calculateMeanGradeFromCells(
+            Object.values(cells).filter(Boolean).map(c => ({ marks: c.marks, points: c.points }))
+          );
+          const trend = computeTrend(
+            presentExamTypes.map(t => cells[t]?.marks).filter(m => m != null)
+          );
+
+          return { subjectId: subj.id, subjectName: subj.name, cells, average, meanGrade, trend, hasData: count > 0 };
         });
-      });
 
-      const rows = studentList.map(st => {
-        const subjMap = byStudent.get(st.id) || new Map();
+        const columnMeans = {};
+        presentExamTypes.forEach(type => {
+          const colMarks = rows.map(r => r.cells[type]?.marks).filter(m => m != null && !isNaN(m));
+          columnMeans[type] = colMarks.length > 0 ? colMarks.reduce((a, b) => a + b, 0) / colMarks.length : 0;
+        });
 
-        const cells = classSubjects.map(subj => {
-          const rawEntries = subjMap.get(subj.id) || [];
+        const validRows = rows.filter(r => r.hasData);
+        const overallAvg = validRows.length > 0
+          ? validRows.reduce((s, r) => s + r.average, 0) / validRows.length
+          : 0;
 
-          // ✅ Sort entries chronologically
-          const entries = [...rawEntries]
-            .filter(e => !isNaN(e.marks))
-            .sort((a, b) => {
-              const da = a.examDate ? new Date(a.examDate).getTime() : 0;
-              const db = b.examDate ? new Date(b.examDate).getTime() : 0;
-              return da - db;
-            });
+        setTermMatrixData({
+          view: 'student',
+          className: classObj?.name || 'Class',
+          term: termMatrixTerm,
+          student: studentObj,
+          examTypes: presentExamTypes,
+          rows,
+          columnMeans,
+          overallAverage: overallAvg,
+          overallGrade: calculateMeanGradeFromCells(
+            validRows.flatMap(r => Object.values(r.cells).filter(Boolean).map(c => ({ marks: c.marks, points: c.points })))
+          )
+        });
+      }
 
-          if (entries.length === 0) {
-            return {
-              subjectId: subj.id,
-              subjectName: subj.name,
-              marks: null,
-              grade: '',
-              points: 0,
-              trend: { direction: null, delta: 0 }
-            };
-          }
+      // ============================================================
+      // VIEW: BY SUBJECT / BY CLASS
+      // ============================================================
+      else if (termMatrixView === 'subject' || termMatrixView === 'class') {
+        const subjectObj = classSubjects.find(s => s.id === termMatrixSubjectId);
+        if (!subjectObj) { alert('Subject not found'); return; }
 
-          const avg = entries.reduce((s, e) => s + e.marks, 0) / entries.length;
-          const gi = calculateGrade(avg, 100, schoolCategory);
-          const trend = computeTrend(entries);
+        const subjectExams = sortedExams.filter(e => e.subjectId === subjectObj.id || e.subjectId == null);
+        const usedExamTypes = [...new Set(subjectExams.map(e => e.type).filter(Boolean))];
+
+        const rows = studentList.map(st => {
+          const stResults = allResults.filter(r =>
+            r.studentId === st.id && r.subjectId === subjectObj.id
+          );
+
+          const cells = {};
+          let sum = 0, count = 0;
+
+          usedExamTypes.forEach(type => {
+            const matches = stResults.filter(r => r.__exam?.type === type);
+            if (matches.length === 0) { cells[type] = null; return; }
+            const avg = matches.reduce((s, r) => s + (parseFloat(r.marks) || 0), 0) / matches.length;
+            const gi = calculateGrade(avg, 100, schoolCategory);
+            cells[type] = { marks: Number(avg.toFixed(1)), grade: gi.grade, points: gi.points };
+            sum += avg; count += 1;
+          });
+
+          const average = count > 0 ? sum / count : 0;
+          const meanGrade = calculateMeanGradeFromCells(
+            Object.values(cells).filter(Boolean).map(c => ({ marks: c.marks, points: c.points }))
+          );
+          const trend = computeTrend(usedExamTypes.map(t => cells[t]?.marks).filter(m => m != null));
 
           return {
-            subjectId: subj.id,
-            subjectName: subj.name,
-            marks: Number(avg.toFixed(1)),
-            grade: gi.grade,
-            points: gi.points,
-            trend
+            studentId: st.id,
+            studentName: `${st.firstName} ${st.lastName}`,
+            admissionNumber: st.admissionNumber,
+            cells,
+            average,
+            meanGrade,
+            trend,
+            hasData: count > 0
           };
         });
 
-        const validCells = cells.filter(c => c.marks !== null);
-        const totalMarks = validCells.reduce((s, c) => s + c.marks, 0);
-        const totalPoints = validCells.reduce((s, c) => s + (c.points || 0), 0);
-        const average = validCells.length > 0 ? totalMarks / validCells.length : 0;
-        const meanGrade = calculateMeanGrade(
-          cells.map(c => ({ marks: c.marks, points: c.points }))
-        );
+        // Rank
+        const ranked = [...rows].filter(r => r.hasData).sort((a, b) => b.average - a.average);
+        let rank = 1, prev = null;
+        ranked.forEach((r, i) => {
+          if (prev !== null && r.average < prev) rank = i + 1;
+          prev = r.average;
+          r.position = rank;
+        });
 
-        return {
-          studentId: st.id,
-          admissionNumber: st.admissionNumber,
-          studentName: `${st.firstName} ${st.lastName}`,
-          cells,
-          totalMarks,
-          totalPoints,
-          average,
-          meanGrade,
-          scoredSubjects: validCells.length,
-          position: null
-        };
-      });
+        const sortedRows = [...rows].sort((a, b) => {
+          if (a.position == null && b.position == null) return a.studentName.localeCompare(b.studentName);
+          if (a.position == null) return 1;
+          if (b.position == null) return -1;
+          return a.position - b.position;
+        });
 
-      // ✅ Rank students — highest average = position 1
-      const ranked = [...rows]
-        .filter(r => r.scoredSubjects > 0)
-        .sort((a, b) => b.average - a.average);
-      let rank = 1, prev = null;
-      ranked.forEach((r, i) => {
-        if (prev !== null && r.average < prev) rank = i + 1;
-        prev = r.average;
-        r.position = rank;
-      });
+        const columnMeans = {};
+        usedExamTypes.forEach(type => {
+          const colMarks = rows.map(r => r.cells[type]?.marks).filter(m => m != null && !isNaN(m));
+          columnMeans[type] = colMarks.length > 0 ? colMarks.reduce((a, b) => a + b, 0) / colMarks.length : 0;
+        });
 
-      // ✅ Sort rows by position (Pos 1 first), then alphabetical for unranked
-      const sortedRows = [...rows].sort((a, b) => {
-        if (a.position == null && b.position == null) {
-          return a.studentName.localeCompare(b.studentName);
+        const validRows = rows.filter(r => r.hasData);
+        const classAverage = validRows.length > 0
+          ? validRows.reduce((s, r) => s + r.average, 0) / validRows.length
+          : 0;
+        const passCount = validRows.filter(r => r.average >= 50).length;
+        const passRate = validRows.length > 0 ? (passCount / validRows.length) * 100 : 0;
+
+        setTermMatrixData({
+          view: 'subject',
+          className: classObj?.name || 'Class',
+          subjectName: subjectObj.name,
+          term: termMatrixTerm,
+          examTypes: usedExamTypes,
+          rows: sortedRows,
+          columnMeans,
+          classAverage,
+          passRate,
+          passCount,
+          totalScored: validRows.length
+        });
+      }
+
+      // ============================================================
+      // VIEW: BY EXAM
+      // ============================================================
+      else if (termMatrixView === 'exam') {
+        const targetType = termMatrixExamType;
+        const examsOfType = sortedExams.filter(e => e.type === targetType);
+        if (examsOfType.length === 0) {
+          alert(`No ${examTypeLabel(targetType)} exams found`);
+          return;
         }
-        if (a.position == null) return 1;
-        if (b.position == null) return -1;
-        return a.position - b.position;
-      });
 
-      const validRows = rows.filter(r => r.scoredSubjects > 0);
-      const classAverage = validRows.length > 0
-        ? validRows.reduce((s, r) => s + r.average, 0) / validRows.length
-        : 0;
-      const passThreshold = 50;
-      const passCount = validRows.filter(r => r.average >= passThreshold).length;
-      const passRate = validRows.length > 0 ? (passCount / validRows.length) * 100 : 0;
+        const examIdsOfType = new Set(examsOfType.map(e => e.id));
 
-      setTermMatrixData({
-        className: classObj?.name || 'Class',
-        term: termMatrixTerm,
-        examType: termMatrixExamType || 'All Exam Types',
-        sessionName: termMatrixSession || '',
-        subjects: classSubjects.map(s => ({ id: s.id, name: s.name })),
-        rows: sortedRows, // ✅ already sorted by position
-        classAverage,
-        passRate,
-        passCount,
-        totalScored: validRows.length
-      });
+        const rows = studentList.map(st => {
+          const stResults = allResults.filter(r =>
+            r.studentId === st.id && examIdsOfType.has(r.examId)
+          );
+
+          const cells = {};
+          let sum = 0, count = 0;
+
+          classSubjects.forEach(subj => {
+            const matches = stResults.filter(r => r.subjectId === subj.id);
+            if (matches.length === 0) { cells[subj.id] = null; return; }
+            const avg = matches.reduce((s, r) => s + (parseFloat(r.marks) || 0), 0) / matches.length;
+            const gi = calculateGrade(avg, 100, schoolCategory);
+            cells[subj.id] = { marks: Number(avg.toFixed(1)), grade: gi.grade, points: gi.points };
+            sum += avg; count += 1;
+          });
+
+          const average = count > 0 ? sum / count : 0;
+          const meanGrade = calculateMeanGradeFromCells(
+            Object.values(cells).filter(Boolean).map(c => ({ marks: c.marks, points: c.points }))
+          );
+
+          return {
+            studentId: st.id,
+            studentName: `${st.firstName} ${st.lastName}`,
+            admissionNumber: st.admissionNumber,
+            cells,
+            average,
+            meanGrade,
+            hasData: count > 0
+          };
+        });
+
+        const ranked = [...rows].filter(r => r.hasData).sort((a, b) => b.average - a.average);
+        let rank = 1, prev = null;
+        ranked.forEach((r, i) => {
+          if (prev !== null && r.average < prev) rank = i + 1;
+          prev = r.average;
+          r.position = rank;
+        });
+
+        const sortedRows = [...rows].sort((a, b) => {
+          if (a.position == null && b.position == null) return a.studentName.localeCompare(b.studentName);
+          if (a.position == null) return 1;
+          if (b.position == null) return -1;
+          return a.position - b.position;
+        });
+
+        const columnMeans = {};
+        classSubjects.forEach(subj => {
+          const colMarks = rows.map(r => r.cells[subj.id]?.marks).filter(m => m != null && !isNaN(m));
+          columnMeans[subj.id] = colMarks.length > 0 ? colMarks.reduce((a, b) => a + b, 0) / colMarks.length : 0;
+        });
+
+        const validRows = rows.filter(r => r.hasData);
+        const classAverage = validRows.length > 0
+          ? validRows.reduce((s, r) => s + r.average, 0) / validRows.length
+          : 0;
+
+        setTermMatrixData({
+          view: 'exam',
+          className: classObj?.name || 'Class',
+          term: termMatrixTerm,
+          examType: targetType,
+          subjects: classSubjects.map(s => ({ id: s.id, name: s.name })),
+          rows: sortedRows,
+          columnMeans,
+          classAverage,
+          totalScored: validRows.length
+        });
+      }
+
     } catch (err) {
       console.error('Term matrix build error:', err);
       alert('Failed: ' + (err.response?.data?.message || err.message));
@@ -13084,7 +13521,7 @@ const ResultsModule = ({
   };
 
   // ============================================================
-  // STUDENT / PARENT LOADERS
+  // STUDENT/PARENT LOADERS
   // ============================================================
   useEffect(() => {
     if (!isStudent) return;
@@ -13169,7 +13606,7 @@ const ResultsModule = ({
   };
 
   // ============================================================
-  // FILTERS
+  // FILTERS & OPTIONS
   // ============================================================
   useEffect(() => {
     if (isUniversity && selectedCourse && units) {
@@ -13210,9 +13647,6 @@ const ResultsModule = ({
   }, [exams, selectedCourse, selectedProgram, selectedYear, selectedSemester,
       selectedModule, selectedUnit, selectedClass, selectedSubject, isUniversity, isTVET]);
 
-  // ============================================================
-  // OPTIONS
-  // ============================================================
   const getProgramOptions = () => (programs || []).map(p => ({ value: p.id, label: p.name, subLabel: p.code || '' }));
   const getCourseOptions  = () => (courses  || []).map(c => ({ value: c.id, label: c.name, subLabel: c.code || '' }));
   const getClassOptions   = () => (classes  || []).map(c => ({ value: c.id, label: c.name, subLabel: c.capacity ? `Cap: ${c.capacity}` : '' }));
@@ -13221,7 +13655,7 @@ const ResultsModule = ({
     value: u.id, label: u.name,
     subLabel: isUniversity ? `Sem: ${u.semester || 'N/A'}` : `Module: ${u.module || 'N/A'}`
   }));
-  const getExamOptions    = () => (filteredExams || []).map(e => ({
+  const getExamOptions = () => (filteredExams || []).map(e => ({
     value: e.id, label: e.name,
     subLabel: `${e.type || ''} • ${e.date ? new Date(e.date).toLocaleDateString() : ''}`
   }));
@@ -13229,8 +13663,18 @@ const ResultsModule = ({
     .filter(s => !reportClassId || s.classId === reportClassId)
     .map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}`, subLabel: s.admissionNumber }));
 
+  const getTermMatrixClassSubjects = () =>
+    (subjects || []).filter(s => s.classId === termMatrixClassId).map(s => ({
+      value: s.id, label: s.name, subLabel: s.code || ''
+    }));
+
+  const getTermMatrixStudents = () =>
+    (students || []).filter(s => s.classId === termMatrixClassId).map(s => ({
+      value: s.id, label: `${s.firstName} ${s.lastName}`, subLabel: s.admissionNumber
+    }));
+
   // ============================================================
-  // PRINT — stylesheet injected once
+  // PRINT STYLES
   // ============================================================
   useEffect(() => {
     const id = '__results_print_style__';
@@ -13244,7 +13688,7 @@ const ResultsModule = ({
         .results-print-area {
           position: absolute !important;
           left: 0; top: 0; width: 100% !important;
-          padding: 12mm !important; background: #fff !important;
+          padding: 10mm !important; background: #fff !important;
           box-shadow: none !important; border: none !important; border-radius: 0 !important;
         }
         .no-print, .no-print *, nav, aside, header, footer, button, input, select, textarea {
@@ -13253,10 +13697,16 @@ const ResultsModule = ({
         table { border-collapse: collapse !important; width: 100% !important; }
         thead { display: table-header-group !important; }
         tr { page-break-inside: avoid !important; }
-        th, td { border: 1px solid #cbd5e1 !important; padding: 6px 8px !important; font-size: 11px !important; color: #111 !important; background: #fff !important; }
+        th, td {
+          border: 1px solid #cbd5e1 !important;
+          padding: 6px 8px !important;
+          font-size: 11px !important;
+          color: #111 !important;
+          background: #fff !important;
+        }
         th { background: #f1f5f9 !important; font-weight: 700 !important; }
         .print-only { display: block !important; }
-        @page { size: A4 portrait; margin: 10mm; }
+        @page { size: A4 landscape; margin: 8mm; }
       }
       .print-only { display: none; }
     `;
@@ -13407,6 +13857,34 @@ const ResultsModule = ({
   const uniqueGrades = [...new Set(resultEntries.map(e => e.grade).filter(Boolean))];
 
   // ============================================================
+  // PRINTABLE HEADER COMPONENT (uses schoolLogo + schoolName + motto)
+  // ============================================================
+  const PrintHeader = ({ title, subtitle }) => (
+    <div className="text-center border-b-2 border-slate-300 pb-4 mb-4">
+      {schoolLogo && (
+        <img
+          src={schoolLogo}
+          alt=""
+          className="w-16 h-16 object-contain rounded-full mx-auto mb-2 border"
+          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+        />
+      )}
+      <h1 className="text-2xl font-black text-slate-800 uppercase tracking-wider">
+        {schoolName}
+      </h1>
+      {schoolMotto && (
+        <p className="text-xs italic text-slate-500 mt-1">"{schoolMotto}"</p>
+      )}
+      {title && (
+        <p className="text-sm font-bold text-slate-700 mt-2 uppercase tracking-wider">{title}</p>
+      )}
+      {subtitle && (
+        <p className="text-xs text-slate-500 mt-1">{subtitle}</p>
+      )}
+    </div>
+  );
+
+  // ============================================================
   // STUDENT VIEW
   // ============================================================
   if (isStudent) {
@@ -13455,18 +13933,7 @@ const ResultsModule = ({
 
         {myStudentRecord ? (
           <div id="student-results-print" className="space-y-6">
-            <div className="text-center border-b-2 border-slate-300 pb-4">
-              {schoolLogo && (
-                <img src={schoolLogo} alt="" className="w-16 h-16 object-cover rounded-full mx-auto mb-2 border" />
-              )}
-              <h1 className="text-2xl font-black text-slate-800 uppercase tracking-wider">
-                {schoolName}
-              </h1>
-              {schoolMotto && (
-                <p className="text-xs italic text-slate-500 mt-1">"{schoolMotto}"</p>
-              )}
-              <p className="text-xs uppercase tracking-widest text-slate-500 mt-2">Student Results Report</p>
-            </div>
+            <PrintHeader title="Student Results Report" />
 
             <div className="rounded-xl p-6 text-white bg-gradient-to-r from-indigo-600 to-blue-600">
               <div className="flex items-center gap-4">
@@ -13509,25 +13976,23 @@ const ResultsModule = ({
                 <table className="w-full">
                   <thead className="bg-slate-100">
                     <tr>
-                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Exam</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Date</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">
-                        {isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject'}
-                      </th>
-                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Marks</th>
-                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Grade</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase border-r">Exam</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase border-r">Date</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase border-r">{subjectColumnLabel}</th>
+                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase border-r">Marks</th>
+                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase border-r">Grade</th>
                       <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Points</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
                     {myResults.map((r, i) => (
-                      <tr key={i}>
-                        <td className="px-4 py-3 font-medium">{r.examName}</td>
-                        <td className="px-4 py-3 text-sm">{r.examDate ? new Date(r.examDate).toLocaleDateString() : '—'}</td>
-                        <td className="px-4 py-3">{r.itemName}</td>
-                        <td className="px-4 py-3 text-center font-bold">{r.marks ?? '—'}</td>
-                        <td className="px-4 py-3 text-center">
-                          <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradeColor(r.grade)}`}>
+                      <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
+                        <td className="px-4 py-3 font-medium border-r">{r.examName}</td>
+                        <td className="px-4 py-3 text-sm border-r">{r.examDate ? new Date(r.examDate).toLocaleDateString() : '—'}</td>
+                        <td className="px-4 py-3 border-r">{r.itemName}</td>
+                        <td className="px-4 py-3 text-center font-bold border-r">{r.marks ?? '—'}</td>
+                        <td className="px-4 py-3 text-center border-r">
+                          <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradePillClasses(r.grade)}`}>
                             {r.grade || '—'}
                           </span>
                         </td>
@@ -13603,18 +14068,7 @@ const ResultsModule = ({
 
             {selectedChild && myStudentRecord && (
               <div id="parent-results-print" className="space-y-6">
-                <div className="text-center border-b-2 border-slate-300 pb-4">
-                  {schoolLogo && (
-                    <img src={schoolLogo} alt="" className="w-16 h-16 object-cover rounded-full mx-auto mb-2 border" />
-                  )}
-                  <h1 className="text-2xl font-black text-slate-800 uppercase tracking-wider">
-                    {schoolName}
-                  </h1>
-                  {schoolMotto && (
-                    <p className="text-xs italic text-slate-500 mt-1">"{schoolMotto}"</p>
-                  )}
-                  <p className="text-xs uppercase tracking-widest text-slate-500 mt-2">Student Results Report</p>
-                </div>
+                <PrintHeader title="Student Results Report" />
 
                 <div className="rounded-xl p-6 text-white bg-gradient-to-r from-indigo-500 to-purple-600">
                   <h3 className="text-2xl font-bold">{myStudentRecord.firstName} {myStudentRecord.lastName}</h3>
@@ -13626,22 +14080,22 @@ const ResultsModule = ({
                     <table className="w-full">
                       <thead className="bg-slate-100">
                         <tr>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Exam</th>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Date</th>
-                          <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Subject</th>
-                          <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Marks</th>
+                          <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase border-r">Exam</th>
+                          <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase border-r">Date</th>
+                          <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase border-r">{subjectColumnLabel}</th>
+                          <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase border-r">Marks</th>
                           <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Grade</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
                         {childResults.map((r, i) => (
-                          <tr key={i}>
-                            <td className="px-4 py-3 font-medium">{r.examName}</td>
-                            <td className="px-4 py-3 text-sm">{r.examDate ? new Date(r.examDate).toLocaleDateString() : '—'}</td>
-                            <td className="px-4 py-3">{r.itemName}</td>
-                            <td className="px-4 py-3 text-center font-bold">{r.marks ?? '—'}</td>
+                          <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
+                            <td className="px-4 py-3 font-medium border-r">{r.examName}</td>
+                            <td className="px-4 py-3 text-sm border-r">{r.examDate ? new Date(r.examDate).toLocaleDateString() : '—'}</td>
+                            <td className="px-4 py-3 border-r">{r.itemName}</td>
+                            <td className="px-4 py-3 text-center font-bold border-r">{r.marks ?? '—'}</td>
                             <td className="px-4 py-3 text-center">
-                              <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradeColor(r.grade)}`}>
+                              <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradePillClasses(r.grade)}`}>
                                 {r.grade || '—'}
                               </span>
                             </td>
@@ -13692,7 +14146,10 @@ const ResultsModule = ({
             {isUniversity ? '📚 Course Results' : isTVET ? '🔧 Program Results'
               : isSecondary ? '📖 Secondary Results' : '🎯 Primary Results'}
           </h2>
-          <p className="text-sm text-slate-500">Marks entry, reports, and class performance analytics</p>
+          <p className="text-sm text-slate-500">
+            Marks entry, reports, and class performance analytics
+            {hasCustomGrading && <span className="ml-2 text-xs text-emerald-600">✓ Custom grading from Settings</span>}
+          </p>
         </div>
 
         {canViewAllResults && (
@@ -13720,7 +14177,7 @@ const ResultsModule = ({
       </div>
 
       {/* ============================================================ */}
-      {/* DETAILED REPORT VIEW — with trend arrows                      */}
+      {/* STUDENT REPORT                                               */}
       {/* ============================================================ */}
       {viewMode === 'report' && canViewAllResults && (
         <>
@@ -13772,17 +14229,9 @@ const ResultsModule = ({
 
           {reportData && (
             <div id="detailed-report-print" className="space-y-6">
-              <div className="text-center border-b-2 border-slate-300 pb-4">
-                {schoolLogo && (
-                  <img src={schoolLogo} alt="" className="w-16 h-16 object-cover rounded-full mx-auto mb-2 border" />
-                )}
-                <h1 className="text-2xl font-black text-slate-800 uppercase tracking-wider">
-                  {schoolName}
-                </h1>
-                {schoolMotto && <p className="text-xs italic text-slate-500 mt-1">"{schoolMotto}"</p>}
-                <p className="text-xs uppercase tracking-widest text-slate-500 mt-2">Student Report Card</p>
-              </div>
+              <PrintHeader title="Student Report Card" />
 
+              {/* Student banner */}
               <div className="bg-slate-800 text-white rounded-xl p-6">
                 <div className="flex flex-wrap justify-between items-start gap-4">
                   <div>
@@ -13792,16 +14241,92 @@ const ResultsModule = ({
                     </h3>
                     <p className="text-slate-300 font-mono mt-1">{reportData.student.admissionNumber}</p>
                     <p className="text-slate-400 text-sm mt-1">
-                      {classes.find(c => c.id === reportData.student.classId)?.name || 'No Class'}
+                      {classes.find(c => c.id === reportData.student.classId)?.name || '—'}
                     </p>
                   </div>
                   <div className="text-right">
                     <p className="text-xs uppercase tracking-widest text-slate-300">Overall Average</p>
                     <p className="text-5xl font-black">{reportData.overallAverage.toFixed(1)}%</p>
+                    {reportData.positionInfo && (
+                      <p className="text-sm text-slate-300 mt-2">
+                        <i className="fas fa-trophy text-amber-400 mr-1"></i>
+                        Position: <strong>{reportData.positionInfo.position}</strong> out of {reportData.positionInfo.total}
+                      </p>
+                    )}
+                    {reportData.merit && (
+                      <p className="text-xs text-emerald-300 mt-1">{reportData.merit}</p>
+                    )}
                   </div>
                 </div>
               </div>
 
+              {/* Summary cards */}
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <div className="bg-blue-50 p-4 rounded-xl text-center border border-blue-100">
+                  <p className="text-xs uppercase tracking-wider text-blue-700 font-bold">Report Cards</p>
+                  <p className="text-3xl font-black text-blue-700 mt-1">{reportData.reportCardCount}</p>
+                </div>
+                <div className="bg-emerald-50 p-4 rounded-xl text-center border border-emerald-100">
+                  <p className="text-xs uppercase tracking-wider text-emerald-700 font-bold">Subjects</p>
+                  <p className="text-3xl font-black text-emerald-700 mt-1">{reportData.totalSubjects}</p>
+                </div>
+                <div className="bg-purple-50 p-4 rounded-xl text-center border border-purple-100">
+                  <p className="text-xs uppercase tracking-wider text-purple-700 font-bold">Exams</p>
+                  <p className="text-3xl font-black text-purple-700 mt-1">{reportData.totalExamCount}</p>
+                </div>
+                <div className="bg-amber-50 p-4 rounded-xl text-center border border-amber-100">
+                  <p className="text-xs uppercase tracking-wider text-amber-700 font-bold">Average</p>
+                  <p className="text-3xl font-black text-amber-700 mt-1">{reportData.overallAverage.toFixed(1)}%</p>
+                </div>
+                <div className="bg-pink-50 p-4 rounded-xl text-center border border-pink-100">
+                  <p className="text-xs uppercase tracking-wider text-pink-700 font-bold">Mean Points</p>
+                  <p className="text-3xl font-black text-pink-700 mt-1">{reportData.meanPoints}</p>
+                </div>
+              </div>
+
+              {/* KNEC */}
+              {reportData.knec.length > 0 && (
+                <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+                  <div className="bg-gradient-to-r from-purple-500 to-indigo-500 px-6 py-3 text-white">
+                    <h3 className="font-bold text-lg flex items-center gap-2">
+                      <i className="fas fa-brain"></i>KNEC Aptitude Analysis
+                    </h3>
+                    <p className="text-xs text-purple-100 mt-1">
+                      Based on the student's average performance across subject streams
+                    </p>
+                  </div>
+                  <div className="p-6">
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                      {reportData.knec.map((s, i) => {
+                        const isTop = i < 2;
+                        return (
+                          <div key={s.stream} className={`p-3 rounded-lg border-2 text-center ${
+                            isTop ? 'border-purple-400 bg-purple-50' : 'border-gray-200 bg-gray-50'
+                          }`}>
+                            <p className="text-xs font-medium text-gray-600 uppercase">{s.stream}</p>
+                            <p className={`text-2xl font-bold mt-1 ${isTop ? 'text-purple-700' : 'text-gray-700'}`}>
+                              {s.average.toFixed(0)}%
+                            </p>
+                            <p className="text-[10px] text-gray-500 mt-1">{s.count} subject{s.count !== 1 ? 's' : ''}</p>
+                            {isTop && <p className="text-xs text-purple-600 mt-1 font-medium">⭐ Likely to thrive</p>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {reportData.knec.length >= 2 && (
+                      <div className="mt-4 p-3 bg-purple-50 rounded-lg">
+                        <p className="text-sm text-purple-800">
+                          <strong>Recommendation:</strong> This student shows strongest potential in{' '}
+                          <strong>{reportData.knec.slice(0, 2).map(s => s.stream).join(' and ')}</strong>.
+                          Consider encouraging further development in these areas.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Term cards */}
               {reportData.termCards.length === 0 ? (
                 <div className="bg-white p-12 rounded-xl shadow-sm text-center border">
                   <i className="fas fa-file-alt text-6xl text-gray-300 mb-4"></i>
@@ -13816,7 +14341,7 @@ const ResultsModule = ({
                           {card.term}{card.year && ` • ${card.year}`}
                         </h4>
                         <p className="text-xs text-slate-500">
-                          {card.subjects.length} subject{card.subjects.length !== 1 ? 's' : ''}
+                          {card.subjects.length} {subjectColumnLabel.toLowerCase()}{card.subjects.length !== 1 ? 's' : ''}
                         </p>
                       </div>
                       <div className="flex items-center gap-4">
@@ -13826,7 +14351,7 @@ const ResultsModule = ({
                         </div>
                         <div className="text-right">
                           <p className="text-xs text-slate-500">Mean Grade</p>
-                          <span className={`inline-block px-3 py-1 rounded-full text-sm font-bold ${getGradeColor(card.termGrade)}`}>
+                          <span className={`inline-block px-3 py-1 rounded-full text-sm font-bold ${getGradePillClasses(card.termGrade)}`}>
                             {card.termGrade}
                           </span>
                         </div>
@@ -13836,23 +14361,20 @@ const ResultsModule = ({
                     <table className="w-full border-collapse">
                       <thead>
                         <tr className="bg-slate-100 border-b">
-                          <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase border-r">Subject</th>
+                          <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase border-r">{subjectColumnLabel}</th>
                           {card.examTypeColumns.map(type => (
                             <th key={type} className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase border-r">
                               {examTypeLabel(type)}
                             </th>
                           ))}
                           <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase border-r">Average</th>
-                          {/* ✅ NEW: Trend column */}
                           <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Trend</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
                         {card.subjects.map((s, si) => (
                           <tr key={si} className={si % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
-                            <td className="px-4 py-3 font-medium text-slate-800 border-r">
-                              {s.subjectName}
-                            </td>
+                            <td className="px-4 py-3 font-medium text-slate-800 border-r">{s.subjectName}</td>
                             {card.examTypeColumns.map(type => {
                               const cell = s.cells[type];
                               return (
@@ -13860,7 +14382,7 @@ const ResultsModule = ({
                                   {cell ? (
                                     <div className="flex flex-col items-center gap-1">
                                       <span className="font-bold text-slate-800">{cell.marks}</span>
-                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${getGradeColor(cell.grade)}`}>
+                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${getGradePillClasses(cell.grade)}`}>
                                         {cell.grade || '—'}
                                       </span>
                                     </div>
@@ -13871,7 +14393,6 @@ const ResultsModule = ({
                               );
                             })}
                             <td className="px-4 py-3 text-center font-bold text-indigo-700 border-r">{s.avg.toFixed(1)}</td>
-                            {/* ✅ Trend cell */}
                             <td className="px-4 py-3 text-center">
                               <TrendArrow direction={s.trend?.direction} delta={s.trend?.delta || 0} />
                             </td>
@@ -13906,78 +14427,251 @@ const ResultsModule = ({
       )}
 
       {/* ============================================================ */}
-      {/* TERMLY CLASS MATRIX VIEW — ranked + trend arrows             */}
+      {/* TERMLY MATRIX                                                */}
       {/* ============================================================ */}
       {viewMode === 'term-matrix' && canViewAllResults && (
         <>
+          {/* Control panel */}
           <div className="bg-white p-6 rounded-xl shadow-sm border no-print">
-            <h3 className="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">
-              <i className="fas fa-th text-indigo-600"></i>Termly Class Matrix
+            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <i className="fas fa-th text-indigo-600"></i>Termly Matrix
             </h3>
-            <p className="text-sm text-slate-500 mb-4">
-              Ranked by average — Position 1 first. Trend arrows compare the first and last exam in this term.
-            </p>
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+
+            {/* View toggle */}
+            <div className="mb-4">
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">View</label>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { key: 'student', label: 'By Student',  desc: 'One student · all subjects', icon: 'fa-user' },
+                  { key: 'subject', label: 'By Subject',  desc: 'One subject · all students',  icon: 'fa-book' },
+                  { key: 'exam',    label: 'By Exam',     desc: 'One exam · all subjects',     icon: 'fa-file-alt' },
+                  { key: 'class',   label: 'By Class',    desc: 'One subject · all students + delta', icon: 'fa-users' }
+                ].map(v => (
+                  <button
+                    key={v.key}
+                    onClick={() => setTermMatrixView(v.key)}
+                    className={`px-4 py-2 rounded-lg border-2 text-left transition ${
+                      termMatrixView === v.key
+                        ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                        : 'border-gray-200 hover:border-indigo-300 text-gray-700'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 font-semibold text-sm">
+                      <i className={`fas ${v.icon}`}></i>{v.label}
+                    </div>
+                    <div className="text-[10px] text-gray-500 mt-0.5">{v.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Filters */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <SearchableSelect
-                label="Class"
+                label="Class *"
                 value={termMatrixClassId}
-                onChange={(e) => setTermMatrixClassId(e.target.value)}
+                onChange={(e) => {
+                  setTermMatrixClassId(e.target.value);
+                  setTermMatrixSubjectId('');
+                  setTermMatrixStudentId('');
+                }}
                 options={getClassOptions()}
                 placeholder="Select class..." />
               <SearchableSelect
-                label="Term"
+                label="Term *"
                 value={termMatrixTerm}
                 onChange={(e) => setTermMatrixTerm(e.target.value)}
                 options={termOptions.filter(t => t.value !== '')}
                 placeholder="Select term..." />
-              <SearchableSelect
-                label="Exam Type"
-                value={termMatrixExamType}
-                onChange={(e) => setTermMatrixExamType(e.target.value)}
-                options={examTypeOptions}
-                placeholder="All Exam Types" />
-              <SearchableSelect
-                label="Exam Name"
-                value={termMatrixSession}
-                onChange={(e) => setTermMatrixSession(e.target.value)}
-                options={[
-                  { value: '', label: 'Any Exam Name' },
-                  ...([...new Set((exams || [])
-                    .filter(e => e.classId === termMatrixClassId && String(e.term || '').toLowerCase() === String(termMatrixTerm).toLowerCase())
-                    .map(e => e.name))].map(n => ({ value: n, label: n })))
-                ]}
-                placeholder="Any Exam Name" />
-              <div className="flex items-end">
-                <button onClick={buildTermMatrix}
-                  disabled={!termMatrixClassId || !termMatrixTerm || loadingTermMatrix}
-                  className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium flex items-center justify-center gap-2">
-                  {loadingTermMatrix
-                    ? <><i className="fas fa-spinner fa-spin"></i>Building...</>
-                    : <><i className="fas fa-sync-alt"></i>Build Matrix</>}
-                </button>
-              </div>
+
+              {termMatrixView === 'student' && (
+                <SearchableSelect
+                  label="Student *"
+                  value={termMatrixStudentId}
+                  onChange={(e) => setTermMatrixStudentId(e.target.value)}
+                  options={getTermMatrixStudents()}
+                  placeholder="Select student..."
+                  disabled={!termMatrixClassId} />
+              )}
+
+              {(termMatrixView === 'subject' || termMatrixView === 'class') && (
+                <SearchableSelect
+                  label="Subject *"
+                  value={termMatrixSubjectId}
+                  onChange={(e) => setTermMatrixSubjectId(e.target.value)}
+                  options={getTermMatrixClassSubjects()}
+                  placeholder="Select subject..."
+                  disabled={!termMatrixClassId} />
+              )}
+
+              {termMatrixView === 'exam' && (
+                <SearchableSelect
+                  label="Exam Type *"
+                  value={termMatrixExamType}
+                  onChange={(e) => setTermMatrixExamType(e.target.value)}
+                  options={examTypeOptions.filter(t => t.value !== '')}
+                  placeholder="Select exam type..." />
+              )}
+            </div>
+
+            {/* Options */}
+            <div className="mt-4 flex flex-wrap items-center gap-6">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={showTrendArrows}
+                  onChange={(e) => setShowTrendArrows(e.target.checked)} />
+                <span>Show trend arrows</span>
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={showDeltaVsMean}
+                  onChange={(e) => setShowDeltaVsMean(e.target.checked)} />
+                <span>Show delta vs class mean</span>
+              </label>
+              <button onClick={buildTermMatrix}
+                disabled={!termMatrixClassId || !termMatrixTerm || loadingTermMatrix}
+                className="ml-auto bg-indigo-600 text-white px-5 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium flex items-center gap-2">
+                {loadingTermMatrix
+                  ? <><i className="fas fa-spinner fa-spin"></i>Building...</>
+                  : <><i className="fas fa-sync-alt"></i>Build Matrix</>}
+              </button>
             </div>
           </div>
 
-          {termMatrixData && (
+          {/* ============= VIEW: BY STUDENT ============= */}
+          {termMatrixData && termMatrixData.view === 'student' && (
             <div id="term-matrix-print" className="bg-white rounded-xl shadow-sm border overflow-hidden">
               <div className="bg-slate-800 text-white px-6 py-5">
                 <div className="text-center mb-4">
-                  <h1 className="text-2xl font-black uppercase tracking-wider">
-                    {schoolName}
-                  </h1>
-                  {schoolMotto && (
-                    <p className="text-slate-300 text-sm italic mt-1">"{schoolMotto}"</p>
+                  {schoolLogo && (
+                    <img src={schoolLogo} alt="" className="w-16 h-16 object-contain rounded-full mx-auto mb-2 border-2 border-white/20" />
                   )}
+                  <h1 className="text-2xl font-black uppercase tracking-wider">{schoolName}</h1>
+                  {schoolMotto && <p className="text-slate-300 text-sm italic mt-1">"{schoolMotto}"</p>}
                   <p className="text-slate-400 text-xs mt-2">
-                    {termMatrixData.term} • {termMatrixData.examType}
-                    {termMatrixData.sessionName && <> • {termMatrixData.sessionName}</>}
+                    {termMatrixData.term} · {termMatrixData.className}
+                  </p>
+                </div>
+                <div className="flex justify-between items-center flex-wrap gap-3 border-t border-slate-700 pt-4">
+                  <div>
+                    <p className="text-xs uppercase tracking-widest text-slate-300">Student</p>
+                    <h3 className="text-2xl font-bold">
+                      {termMatrixData.student.firstName} {termMatrixData.student.lastName}
+                    </h3>
+                    <p className="text-slate-300 text-sm font-mono">{termMatrixData.student.admissionNumber}</p>
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
+                      <p className="text-[10px] uppercase text-slate-300">Overall Avg</p>
+                      <p className="text-xl font-bold">{termMatrixData.overallAverage.toFixed(1)}%</p>
+                    </div>
+                    <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
+                      <p className="text-[10px] uppercase text-slate-300">Mean Grade</p>
+                      <p className="text-xl font-bold">{termMatrixData.overallGrade}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="bg-slate-100 border-b-2 border-slate-300">
+                      <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">{subjectColumnLabel}</th>
+                      {termMatrixData.examTypes.map(type => (
+                        <th key={type} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">
+                          {examTypeLabel(type)}
+                        </th>
+                      ))}
+                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Avg</th>
+                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Trend</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {termMatrixData.rows.map((r, ri) => (
+                      <tr key={r.subjectId} className={ri % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
+                        <td className="px-3 py-2 font-medium border-r">{r.subjectName}</td>
+                        {termMatrixData.examTypes.map(type => {
+                          const cell = r.cells[type];
+                          const colMean = termMatrixData.columnMeans[type];
+                          const delta = cell && colMean ? (cell.marks - colMean) : null;
+                          return (
+                            <td key={type} className="px-3 py-2 text-center border-r">
+                              {cell ? (
+                                <div className="flex flex-col items-center gap-0.5">
+                                  <div className="flex items-center gap-1">
+                                    <span className="font-bold text-slate-800">{cell.marks}</span>
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${getGradePillClasses(cell.grade)}`}>
+                                      {cell.grade}
+                                    </span>
+                                  </div>
+                                  {showDeltaVsMean && delta !== null && (
+                                    <span className={`text-[9px] ${delta >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                      {delta >= 0 ? `+${delta.toFixed(1)}` : delta.toFixed(1)} vs mean
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-slate-300">—</span>
+                              )}
+                            </td>
+                          );
+                        })}
+                        <td className="px-3 py-2 text-center font-bold text-indigo-700 border-r bg-slate-50">
+                          {r.hasData ? r.average.toFixed(1) : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-center bg-slate-50">
+                          {showTrendArrows && <TrendArrow direction={r.trend?.direction} delta={r.trend?.delta || 0} />}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-slate-200 border-t-2 border-slate-400">
+                      <td className="px-3 py-3 font-bold text-right text-slate-700 border-r">Class Mean:</td>
+                      {termMatrixData.examTypes.map(type => (
+                        <td key={type} className="px-3 py-3 text-center font-bold text-slate-700 border-r">
+                          {termMatrixData.columnMeans[type]?.toFixed(1) || '—'}
+                        </td>
+                      ))}
+                      <td className="px-3 py-3 text-center font-bold text-slate-800 border-r bg-slate-300">
+                        {termMatrixData.overallAverage.toFixed(1)}
+                      </td>
+                      <td className="px-3 py-3 bg-slate-300"></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              <div className="px-6 py-4 bg-slate-50 border-t flex justify-end no-print">
+                <button onClick={() => handlePrintArea('term-matrix-print')}
+                  className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
+                  <i className="fas fa-print"></i>Print Matrix
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ============= VIEW: BY SUBJECT ============= */}
+          {termMatrixData && termMatrixData.view === 'subject' && (
+            <div id="term-matrix-print" className="bg-white rounded-xl shadow-sm border overflow-hidden">
+              <div className="bg-slate-800 text-white px-6 py-5">
+                <div className="text-center mb-4">
+                  {schoolLogo && (
+                    <img src={schoolLogo} alt="" className="w-16 h-16 object-contain rounded-full mx-auto mb-2 border-2 border-white/20" />
+                  )}
+                  <h1 className="text-2xl font-black uppercase tracking-wider">{schoolName}</h1>
+                  {schoolMotto && <p className="text-slate-300 text-sm italic mt-1">"{schoolMotto}"</p>}
+                  <p className="text-slate-400 text-xs mt-2">
+                    {termMatrixData.className} · {termMatrixData.subjectName} · {termMatrixData.term}
                   </p>
                 </div>
                 <div className="flex justify-between items-start flex-wrap gap-3 border-t border-slate-700 pt-4">
                   <div>
-                    <p className="text-xs uppercase tracking-widest text-slate-300">Class</p>
-                    <h3 className="text-2xl font-bold">{termMatrixData.className}</h3>
+                    <p className="text-xs uppercase tracking-widest text-slate-300">Class Mean per Exam</p>
+                    <p className="text-sm font-mono mt-1">
+                      {termMatrixData.examTypes.map(t =>
+                        `${examTypeLabel(t)}: ${termMatrixData.columnMeans[t]?.toFixed(1) || '—'}`
+                      ).join(' · ')}
+                    </p>
                   </div>
                   <div className="flex gap-3">
                     <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
@@ -14001,20 +14695,18 @@ const ResultsModule = ({
                   <thead>
                     <tr className="bg-slate-100 border-b-2 border-slate-300">
                       <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r w-16">Pos</th>
-                      <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r whitespace-nowrap">Student</th>
-                      <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r whitespace-nowrap">Adm</th>
-                      {termMatrixData.subjects.map(subj => (
-                        <th key={subj.id} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r whitespace-nowrap">
-                          {subj.name}
+                      <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Student</th>
+                      <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Adm</th>
+                      {termMatrixData.examTypes.map(type => (
+                        <th key={type} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">
+                          {examTypeLabel(type)}
                         </th>
                       ))}
-                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Total</th>
                       <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Avg</th>
                       <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Grade</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {/* ✅ Rows already sorted by position in buildTermMatrix */}
                     {termMatrixData.rows.map((r, i) => (
                       <tr key={r.studentId} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
                         <td className="px-3 py-2 text-center border-r">
@@ -14028,39 +14720,42 @@ const ResultsModule = ({
                               {r.position}
                             </span>
                           ) : (
-                            <span className="text-slate-300 text-xs">—</span>
+                            <span className="text-slate-300">—</span>
                           )}
                         </td>
                         <td className="px-3 py-2 font-medium border-r whitespace-nowrap">{r.studentName}</td>
                         <td className="px-3 py-2 font-mono text-xs text-slate-600 border-r whitespace-nowrap">{r.admissionNumber}</td>
-                        {r.cells.map((cell, ci) => (
-                          <td key={ci} className="px-3 py-2 text-center border-r">
-                            {cell.marks !== null ? (
-                              <div className="flex flex-col items-center gap-0.5">
-                                <div className="flex items-center gap-1">
-                                  <span className="font-bold text-slate-800">{cell.marks}</span>
-                                  {/* ✅ Trend arrow next to the mark */}
-                                  {cell.trend && cell.trend.direction && (
-                                    <TrendArrow direction={cell.trend.direction} delta={cell.trend.delta} />
+                        {termMatrixData.examTypes.map(type => {
+                          const cell = r.cells[type];
+                          const colMean = termMatrixData.columnMeans[type];
+                          const delta = cell && colMean ? (cell.marks - colMean) : null;
+                          return (
+                            <td key={type} className="px-3 py-2 text-center border-r">
+                              {cell ? (
+                                <div className="flex flex-col items-center gap-0.5">
+                                  <div className="flex items-center gap-1">
+                                    <span className="font-bold text-slate-800">{cell.marks}</span>
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${getGradePillClasses(cell.grade)}`}>
+                                      {cell.grade}
+                                    </span>
+                                  </div>
+                                  {showDeltaVsMean && delta !== null && (
+                                    <span className={`text-[9px] ${delta >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                      {delta >= 0 ? `+${delta.toFixed(1)}` : delta.toFixed(1)} vs mean
+                                    </span>
                                   )}
                                 </div>
-                                <span className={`text-[9px] px-1.5 py-0.5 rounded ${getGradeColor(cell.grade)}`}>
-                                  {cell.grade || '—'}
-                                </span>
-                              </div>
-                            ) : (
-                              <span className="text-slate-300">—</span>
-                            )}
-                          </td>
-                        ))}
-                        <td className="px-3 py-2 text-center font-bold text-slate-800 border-r bg-slate-50">
-                          {r.totalMarks.toFixed(0)}
-                        </td>
+                              ) : (
+                                <span className="text-slate-300">—</span>
+                              )}
+                            </td>
+                          );
+                        })}
                         <td className="px-3 py-2 text-center font-bold text-indigo-700 border-r bg-slate-50">
-                          {r.average.toFixed(1)}
+                          {r.hasData ? r.average.toFixed(1) : '—'}
                         </td>
                         <td className="px-3 py-2 text-center bg-slate-50">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getGradeColor(r.meanGrade)}`}>
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getGradePillClasses(r.meanGrade)}`}>
                             {r.meanGrade}
                           </span>
                         </td>
@@ -14069,42 +14764,228 @@ const ResultsModule = ({
                   </tbody>
                   <tfoot>
                     <tr className="bg-slate-200 border-t-2 border-slate-400">
-                      <td colSpan={3} className="px-3 py-3 font-bold text-right text-slate-700 border-r border-slate-300">
-                        Class Statistics
-                      </td>
-                      <td colSpan={termMatrixData.subjects.length} className="px-3 py-3 text-center text-slate-700">
-                        <span className="text-xs">
-                          Total students: <strong>{termMatrixData.rows.length}</strong> • Scored: <strong>{termMatrixData.totalScored}</strong>
-                        </span>
-                      </td>
-                      <td className="px-3 py-3 text-center font-bold text-slate-700 border-r border-slate-300 bg-slate-300">—</td>
-                      <td className="px-3 py-3 text-center font-bold text-slate-800 border-r border-slate-300 bg-slate-300">
+                      <td colSpan={3} className="px-3 py-3 font-bold text-right text-slate-700 border-r">Class Mean:</td>
+                      {termMatrixData.examTypes.map(type => (
+                        <td key={type} className="px-3 py-3 text-center font-bold text-slate-700 border-r">
+                          {termMatrixData.columnMeans[type]?.toFixed(1) || '—'}
+                        </td>
+                      ))}
+                      <td className="px-3 py-3 text-center font-bold text-slate-800 border-r bg-slate-300">
                         {termMatrixData.classAverage.toFixed(1)}
                       </td>
-                      <td className="px-3 py-3 text-center text-xs text-slate-600">
-                        Pass: <strong>{termMatrixData.passRate.toFixed(0)}%</strong> ({termMatrixData.passCount}/{termMatrixData.totalScored})
-                      </td>
+                      <td className="px-3 py-3 bg-slate-300"></td>
                     </tr>
                   </tfoot>
                 </table>
               </div>
 
-              {/* Legend */}
-              <div className="px-6 py-3 bg-slate-50 border-t flex flex-wrap items-center gap-4 text-xs text-slate-600">
-                <span className="flex items-center gap-1"><span className="text-emerald-600 font-bold">▲</span>Improved vs. first exam in this term</span>
-                <span className="flex items-center gap-1"><span className="text-red-600 font-bold">▼</span>Declined vs. first exam in this term</span>
-                <span className="flex items-center gap-1"><span className="text-gray-300 font-bold">●</span>No change</span>
+              <div className="px-6 py-4 bg-slate-50 border-t flex justify-end no-print">
+                <button onClick={() => handlePrintArea('term-matrix-print')}
+                  className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
+                  <i className="fas fa-print"></i>Print Matrix
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ============= VIEW: BY EXAM ============= */}
+          {termMatrixData && termMatrixData.view === 'exam' && (
+            <div id="term-matrix-print" className="bg-white rounded-xl shadow-sm border overflow-hidden">
+              <div className="bg-slate-800 text-white px-6 py-5">
+                <div className="text-center mb-4">
+                  {schoolLogo && (
+                    <img src={schoolLogo} alt="" className="w-16 h-16 object-contain rounded-full mx-auto mb-2 border-2 border-white/20" />
+                  )}
+                  <h1 className="text-2xl font-black uppercase tracking-wider">{schoolName}</h1>
+                  {schoolMotto && <p className="text-slate-300 text-sm italic mt-1">"{schoolMotto}"</p>}
+                  <p className="text-slate-400 text-xs mt-2">
+                    {termMatrixData.className} · {examTypeLabel(termMatrixData.examType)} · {termMatrixData.term}
+                  </p>
+                </div>
+                <div className="flex justify-end">
+                  <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
+                    <p className="text-[10px] uppercase text-slate-300">Class Avg</p>
+                    <p className="text-xl font-bold">{termMatrixData.classAverage.toFixed(1)}%</p>
+                  </div>
+                </div>
               </div>
 
-              <div className="print-only px-6 py-6 border-t border-slate-300">
-                <div className="grid grid-cols-3 gap-8 text-center text-xs text-slate-600">
-                  <div><div className="border-t border-slate-400 mt-10 pt-2">Class Teacher</div></div>
-                  <div><div className="border-t border-slate-400 mt-10 pt-2">Head of Department</div></div>
-                  <div><div className="border-t border-slate-400 mt-10 pt-2">Principal</div></div>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="bg-slate-100 border-b-2 border-slate-300">
+                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r w-16">Pos</th>
+                      <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Student</th>
+                      <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Adm</th>
+                      {termMatrixData.subjects.map(subj => (
+                        <th key={subj.id} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r whitespace-nowrap">
+                          {subj.name}
+                        </th>
+                      ))}
+                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Avg</th>
+                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Grade</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {termMatrixData.rows.map((r, i) => (
+                      <tr key={r.studentId} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
+                        <td className="px-3 py-2 text-center border-r">
+                          {r.position ? (
+                            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
+                              r.position === 1 ? 'bg-amber-100 text-amber-700 ring-2 ring-amber-300' :
+                              r.position === 2 ? 'bg-slate-200 text-slate-700' :
+                              r.position === 3 ? 'bg-orange-100 text-orange-700' :
+                              'bg-slate-100 text-slate-600'
+                            }`}>
+                              {r.position}
+                            </span>
+                          ) : (
+                            <span className="text-slate-300">—</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 font-medium border-r whitespace-nowrap">{r.studentName}</td>
+                        <td className="px-3 py-2 font-mono text-xs text-slate-600 border-r whitespace-nowrap">{r.admissionNumber}</td>
+                        {termMatrixData.subjects.map(subj => {
+                          const cell = r.cells[subj.id];
+                          return (
+                            <td key={subj.id} className="px-3 py-2 text-center border-r">
+                              {cell ? (
+                                <div className="flex flex-col items-center gap-0.5">
+                                  <span className="font-bold text-slate-800">{cell.marks}</span>
+                                  <span className={`text-[9px] px-1.5 py-0.5 rounded ${getGradePillClasses(cell.grade)}`}>
+                                    {cell.grade}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-slate-300">—</span>
+                              )}
+                            </td>
+                          );
+                        })}
+                        <td className="px-3 py-2 text-center font-bold text-indigo-700 border-r bg-slate-50">
+                          {r.hasData ? r.average.toFixed(1) : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-center bg-slate-50">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getGradePillClasses(r.meanGrade)}`}>
+                            {r.meanGrade}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-slate-200 border-t-2 border-slate-400">
+                      <td colSpan={3} className="px-3 py-3 font-bold text-right text-slate-700 border-r">Class Mean:</td>
+                      {termMatrixData.subjects.map(subj => (
+                        <td key={subj.id} className="px-3 py-3 text-center font-bold text-slate-700 border-r">
+                          {termMatrixData.columnMeans[subj.id]?.toFixed(1) || '—'}
+                        </td>
+                      ))}
+                      <td className="px-3 py-3 text-center font-bold text-slate-800 border-r bg-slate-300">
+                        {termMatrixData.classAverage.toFixed(1)}
+                      </td>
+                      <td className="px-3 py-3 bg-slate-300"></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              <div className="px-6 py-4 bg-slate-50 border-t flex justify-end no-print">
+                <button onClick={() => handlePrintArea('term-matrix-print')}
+                  className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
+                  <i className="fas fa-print"></i>Print Matrix
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ============= VIEW: BY CLASS (same as Subject but with delta always on) ============= */}
+          {termMatrixData && termMatrixData.view === 'class' && (
+            <div id="term-matrix-print" className="bg-white rounded-xl shadow-sm border overflow-hidden">
+              <div className="bg-slate-800 text-white px-6 py-5">
+                <div className="text-center mb-4">
+                  {schoolLogo && (
+                    <img src={schoolLogo} alt="" className="w-16 h-16 object-contain rounded-full mx-auto mb-2 border-2 border-white/20" />
+                  )}
+                  <h1 className="text-2xl font-black uppercase tracking-wider">{schoolName}</h1>
+                  {schoolMotto && <p className="text-slate-300 text-sm italic mt-1">"{schoolMotto}"</p>}
+                  <p className="text-slate-400 text-xs mt-2">
+                    {termMatrixData.className} · {termMatrixData.subjectName} · {termMatrixData.term}
+                  </p>
                 </div>
-                <p className="text-center text-xs text-slate-400 mt-6">
-                  Generated on {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}
-                </p>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="bg-slate-100 border-b-2 border-slate-300">
+                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r w-16">Pos</th>
+                      <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Student</th>
+                      {termMatrixData.examTypes.map(type => (
+                        <th key={type} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">
+                          {examTypeLabel(type)}
+                        </th>
+                      ))}
+                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Avg</th>
+                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Grade</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {termMatrixData.rows.map((r, i) => (
+                      <tr key={r.studentId} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
+                        <td className="px-3 py-2 text-center border-r">
+                          {r.position ? (
+                            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
+                              r.position === 1 ? 'bg-amber-100 text-amber-700 ring-2 ring-amber-300' :
+                              r.position === 2 ? 'bg-slate-200 text-slate-700' :
+                              r.position === 3 ? 'bg-orange-100 text-orange-700' :
+                              'bg-slate-100 text-slate-600'
+                            }`}>
+                              {r.position}
+                            </span>
+                          ) : (
+                            <span className="text-slate-300">—</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 font-medium border-r whitespace-nowrap">{r.studentName}</td>
+                        {termMatrixData.examTypes.map(type => {
+                          const cell = r.cells[type];
+                          const colMean = termMatrixData.columnMeans[type];
+                          const delta = cell && colMean ? (cell.marks - colMean) : null;
+                          return (
+                            <td key={type} className="px-3 py-2 text-center border-r">
+                              {cell ? (
+                                <div className="flex flex-col items-center gap-0.5">
+                                  <div className="flex items-center gap-1">
+                                    <span className="font-bold text-slate-800">{cell.marks}</span>
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${getGradePillClasses(cell.grade)}`}>
+                                      {cell.grade}
+                                    </span>
+                                  </div>
+                                  {delta !== null && (
+                                    <span className={`text-[9px] ${delta >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                      {delta >= 0 ? `+${delta.toFixed(1)}` : delta.toFixed(1)} vs mean
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-slate-300">—</span>
+                              )}
+                            </td>
+                          );
+                        })}
+                        <td className="px-3 py-2 text-center font-bold text-indigo-700 border-r bg-slate-50">
+                          {r.hasData ? r.average.toFixed(1) : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-center bg-slate-50">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getGradePillClasses(r.meanGrade)}`}>
+                            {r.meanGrade}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
 
               <div className="px-6 py-4 bg-slate-50 border-t flex justify-end no-print">
@@ -14119,7 +15000,7 @@ const ResultsModule = ({
       )}
 
       {/* ============================================================ */}
-      {/* MARKS ENTRY VIEW                                              */}
+      {/* MARKS ENTRY                                                  */}
       {/* ============================================================ */}
       {viewMode === 'marks' && canViewAllResults && (
         <>
@@ -14164,7 +15045,7 @@ const ResultsModule = ({
                   disabled={!selectedClass} />
               </>)}
               {(isUniversity || isTVET) && (
-                <SearchableSelect label={isTVET ? "Module" : "Unit"} value={selectedUnit}
+                <SearchableSelect label={isTVET ? 'Module' : 'Unit'} value={selectedUnit}
                   onChange={(e) => setSelectedUnit(e.target.value)}
                   options={getUnitOptions()}
                   placeholder={`Search ${isTVET ? 'module' : 'unit'}...`} />
@@ -14193,7 +15074,7 @@ const ResultsModule = ({
                     </label>
                   )}
                   <span className="text-sm text-slate-600">
-                    Selected: <strong>{selectedStudentsForMessage.length}</strong> • Total: <strong>{resultEntries.length}</strong>
+                    Selected: <strong>{selectedStudentsForMessage.length}</strong> · Total: <strong>{resultEntries.length}</strong>
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -14217,9 +15098,7 @@ const ResultsModule = ({
                       {canSendMessages && <th className="px-4 py-3 w-10 border-r"></th>}
                       <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Admission</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Student</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">
-                        {isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject'}
-                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">{subjectColumnLabel}</th>
                       <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">Marks</th>
                       <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">Grade</th>
                       <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">Points</th>
@@ -14255,7 +15134,7 @@ const ResultsModule = ({
                             disabled={entry.isAbsent || !canAddResults} />
                         </td>
                         <td className="px-4 py-3 text-center border-r">
-                          <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradeColor(entry.grade)}`}>
+                          <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradePillClasses(entry.grade)}`}>
                             {entry.grade || '—'}
                           </span>
                         </td>
