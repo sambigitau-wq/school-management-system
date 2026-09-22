@@ -457,6 +457,64 @@ const GRADING_SYSTEMS = {
     }
   }
 };
+// ============================================================
+//  GRADING CONFIG — get / update custom grading system
+// ============================================================
+
+// Default KNEC-based grading systems (fallback)
+const DEFAULT_GRADING_CONFIGS = {
+  CBC: {
+    name: 'Kenya CBC',
+    type: 'CBC',
+    scale: [
+      { min: 80, max: 100, grade: 'EE', label: 'Exceeding Expectations', points: 4 },
+      { min: 65, max: 79,  grade: 'ME', label: 'Meeting Expectations',   points: 3 },
+      { min: 50, max: 64,  grade: 'AE', label: 'Approaching Expectations', points: 2 },
+      { min: 30, max: 49,  grade: 'BE', label: 'Below Expectations',     points: 1 },
+      { min: 0,  max: 29,  grade: 'NI', label: 'Needs Improvement',      points: 0 }
+    ]
+  },
+  '844': {
+    name: 'KCSE (Form 1–4)',
+    type: '844',
+    scale: [
+      { min: 80, max: 100, grade: 'A',  label: 'A',  points: 12 },
+      { min: 75, max: 79,  grade: 'A-', label: 'A-', points: 11 },
+      { min: 70, max: 74,  grade: 'B+', label: 'B+', points: 10 },
+      { min: 65, max: 69,  grade: 'B',  label: 'B',  points: 9 },
+      { min: 60, max: 64,  grade: 'B-', label: 'B-', points: 8 },
+      { min: 55, max: 59,  grade: 'C+', label: 'C+', points: 7 },
+      { min: 50, max: 54,  grade: 'C',  label: 'C',  points: 6 },
+      { min: 45, max: 49,  grade: 'C-', label: 'C-', points: 5 },
+      { min: 40, max: 44,  grade: 'D+', label: 'D+', points: 4 },
+      { min: 35, max: 39,  grade: 'D',  label: 'D',  points: 3 },
+      { min: 30, max: 34,  grade: 'D-', label: 'D-', points: 2 },
+      { min: 0,  max: 29,  grade: 'E',  label: 'E',  points: 1 }
+    ]
+  },
+  TVET: {
+    name: 'TVET',
+    type: 'TVET',
+    scale: [
+      { min: 80, max: 100, grade: 'DISTINCTION', label: 'Distinction', points: 5 },
+      { min: 65, max: 79,  grade: 'CREDIT',      label: 'Credit',      points: 4 },
+      { min: 50, max: 64,  grade: 'MERIT',       label: 'Merit',       points: 3 },
+      { min: 40, max: 49,  grade: 'PASS',        label: 'Pass',        points: 2 },
+      { min: 0,  max: 39,  grade: 'FAIL',        label: 'Fail',        points: 1 }
+    ]
+  },
+  UNIVERSITY: {
+    name: 'University',
+    type: 'UNI',
+    scale: [
+      { min: 70, max: 100, grade: 'A', label: 'A', points: 5.0 },
+      { min: 60, max: 69,  grade: 'B', label: 'B', points: 4.0 },
+      { min: 50, max: 59,  grade: 'C', label: 'C', points: 3.0 },
+      { min: 40, max: 49,  grade: 'D', label: 'D', points: 2.0 },
+      { min: 0,  max: 39,  grade: 'E', label: 'E', points: 1.0 }
+    ]
+  }
+};
 // ==================== PERMISSION DEFINITIONS (Master List) ====================
 const MASTER_PERMISSIONS = [
   // ==================== EXISTING PERMISSIONS ====================
@@ -1079,7 +1137,6 @@ const User = sequelize.define('User', {
   lastLogin: DataTypes.DATE,
   resetToken: { type: DataTypes.STRING, allowNull: true }
 });
-
 const School = sequelize.define('School', {
   id: { 
     type: DataTypes.UUID, 
@@ -1109,6 +1166,27 @@ const School = sequelize.define('School', {
     type: DataTypes.ENUM('CBC', '844', 'TVET', 'UNIVERSITY', 'IB', 'IGCSE', 'USA'),
     allowNull: false,
     defaultValue: 'CBC'
+  },
+  
+  // ==================== CUSTOM GRADING CONFIG ====================
+  // When set, this OVERRIDES the default grading system for the
+  // entire school. Used by the Results module for computing grades.
+  //
+  // Shape:
+  // {
+  //   name: "St. Mary's Custom CBC",
+  //   type: "CBC" | "844" | "TVET" | "UNI" | "CUSTOM",
+  //   scale: [
+  //     { min: 80, max: 100, grade: "EE", label: "Exceeding Expectations", points: 4, color: "green" },
+  //     { min: 65, max: 79,  grade: "ME", label: "Meeting Expectations",   points: 3, color: "blue"  },
+  //     ...
+  //   ],
+  //   updatedAt: "2026-01-15T10:30:00.000Z"
+  // }
+  gradingConfig: {
+    type: DataTypes.JSONB,
+    allowNull: true,
+    defaultValue: null
   },
   
   // ==================== ATTENDANCE SETTINGS ====================
@@ -1499,47 +1577,49 @@ const School = sequelize.define('School', {
       apiVersion: '1.0.0'
     }
   },
+  
   // ==================== SUBSCRIPTION ====================
-trialEndsAt: {
-  type: DataTypes.DATE,
-  allowNull: true
-},
-subscriptionEndsAt: {
-  type: DataTypes.DATE,
-  allowNull: true
-},
-subscriptionStatus: {
-  type: DataTypes.STRING(20),
-  allowNull: false,
-  defaultValue: 'TRIAL'
-},
-subscriptionPlan: {
-  type: DataTypes.STRING(20),
-  allowNull: false,
-  defaultValue: 'FREE'
-},
-maxStudents: {
-  type: DataTypes.INTEGER,
-  allowNull: false,
-  defaultValue: 100
-},
-maxStaff: {
-  type: DataTypes.INTEGER,
-  allowNull: false,
-  defaultValue: 20
-},
-lastPaymentAt: {
-  type: DataTypes.DATE,
-  allowNull: true
-},
-lastPaymentAmount: {
-  type: DataTypes.DECIMAL(10, 2),
-  allowNull: true
-},
-billingNotes: {
-  type: DataTypes.TEXT,
-  allowNull: true
-},
+  trialEndsAt: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  subscriptionEndsAt: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  subscriptionStatus: {
+    type: DataTypes.STRING(20),
+    allowNull: false,
+    defaultValue: 'TRIAL'
+  },
+  subscriptionPlan: {
+    type: DataTypes.STRING(20),
+    allowNull: false,
+    defaultValue: 'FREE'
+  },
+  maxStudents: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 100
+  },
+  maxStaff: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 20
+  },
+  lastPaymentAt: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  lastPaymentAmount: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: true
+  },
+  billingNotes: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+  
   // ==================== AUDIT & METADATA ====================
   createdBy: { 
     type: DataTypes.UUID, 
@@ -18582,25 +18662,25 @@ app.post('/api/schools/upload-logo', authenticate, upload.single('logo'), async 
 
 app.post('/api/students/upload-photo', authenticate, upload.single('photo'), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ success: false, message: 'No file uploaded' });
-    }
+    if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
 
-    // Build a FULL URL that the frontend can render directly
+    // Full URL to the file
     const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
     const host  = req.headers['x-forwarded-host'] || req.get('host');
     const base  = `${proto}://${host}`;
-
     const photoUrl = `${base}/uploads/${req.file.filename}`;
 
-    console.log('✅ Student photo uploaded:', photoUrl);
+    // ALSO return base64 so frontend can store it in the DB if needed
+    const fileData = fs.readFileSync(req.file.path);
+    const base64 = `data:${req.file.mimetype};base64,${fileData.toString('base64')}`;
 
-    res.json({ success: true, photoUrl });
+    res.json({ success: true, photoUrl, base64 });
   } catch (error) {
     console.error('❌ Upload photo error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
+
 app.use('/uploads', (req, res, next) => {
   const filePath = path.join(uploadDir, req.url);
 
@@ -27685,6 +27765,191 @@ app.post('/api/upload/homework', authenticate, homeworkUpload.single('file'), as
   }
 });
 
+// ---------- GET the school's grading config ----------
+app.get('/api/schools/:id/grading-config', authenticate, async (req, res) => {
+  try {
+    const school = await School.findByPk(req.params.id, {
+      attributes: ['id', 'name', 'category', 'gradingSystem', 'gradingConfig']
+    });
+    if (!school) return res.status(404).json({ success: false, message: 'School not found' });
+
+    if (req.user.role !== 'SUPER_ADMIN' && req.user.schoolId !== school.id) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    // If the school has a custom config, return it.
+    // Otherwise return the default for the category.
+    const fallbackKey = {
+      ECDE_PRIMARY_JSS: 'CBC',
+      SENIOR_SECONDARY: '844',
+      COLLEGE_TVET: 'TVET',
+      UNIVERSITY: 'UNIVERSITY'
+    }[school.category] || 'CBC';
+
+    const config = school.gradingConfig || DEFAULT_GRADING_CONFIGS[fallbackKey];
+
+    res.json({
+      success: true,
+      schoolId: school.id,
+      category: school.category,
+      isCustom: !!school.gradingConfig,
+      config,
+      defaults: DEFAULT_GRADING_CONFIGS
+    });
+  } catch (err) {
+    console.error('❌ Get grading config error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ---------- UPDATE the school's grading config ----------
+app.put('/api/schools/:id/grading-config', authenticate, async (req, res) => {
+  try {
+    const canEdit = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL'].includes(req.user.role);
+    if (!canEdit) return res.status(403).json({ success: false, message: 'Access denied' });
+
+    const school = await School.findByPk(req.params.id);
+    if (!school) return res.status(404).json({ success: false, message: 'School not found' });
+    if (req.user.role !== 'SUPER_ADMIN' && req.user.schoolId !== school.id) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    const { name, type, scale } = req.body;
+
+    // Validate
+    if (!Array.isArray(scale) || scale.length === 0) {
+      return res.status(400).json({ success: false, message: 'scale must be a non-empty array' });
+    }
+    for (const row of scale) {
+      if (typeof row.min !== 'number' || typeof row.max !== 'number' || !row.grade) {
+        return res.status(400).json({
+          success: false,
+          message: 'Each scale row requires numeric min, numeric max, and a grade'
+        });
+      }
+      if (row.min > row.max) {
+        return res.status(400).json({ success: false, message: `min (${row.min}) > max (${row.max}) for ${row.grade}` });
+      }
+    }
+
+    const config = {
+      name: name || `${school.name} Grading`,
+      type: type || school.gradingSystem || 'CBC',
+      scale,
+      updatedAt: new Date().toISOString()
+    };
+
+    await school.update({ gradingConfig: config });
+
+    await createAuditLog(req, 'UPDATE', 'SCHOOL_GRADING', school.id, null, config);
+
+    res.json({ success: true, config });
+  } catch (err) {
+    console.error('❌ Update grading config error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ---------- RESET to default grading ----------
+app.delete('/api/schools/:id/grading-config', authenticate, async (req, res) => {
+  try {
+    const canEdit = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL'].includes(req.user.role);
+    if (!canEdit) return res.status(403).json({ success: false, message: 'Access denied' });
+
+    const school = await School.findByPk(req.params.id);
+    if (!school) return res.status(404).json({ success: false, message: 'School not found' });
+    if (req.user.role !== 'SUPER_ADMIN' && req.user.schoolId !== school.id) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    await school.update({ gradingConfig: null });
+    res.json({ success: true, message: 'Reverted to default grading' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+// ============================================================
+//  POSITIONS — compute and return rankings for a given exam
+//  Used by the frontend to show: "Position 3 of 45 in class"
+// ============================================================
+app.get('/api/exams/:id/positions', authenticate, async (req, res) => {
+  try {
+    const examId = req.params.id;
+
+    // ---- 1. Verify the exam (allow SUPER_ADMIN through) ----
+    const examWhere = { id: examId };
+    if (req.user.role !== 'SUPER_ADMIN') {
+      examWhere.schoolId = req.user.schoolId;
+    }
+
+    const exam = await Exam.findOne({
+      where: examWhere,
+      attributes: ['id', 'name', 'maxMarks']
+    });
+
+    if (!exam) {
+      return res.status(404).json({ success: false, message: 'Exam not found' });
+    }
+
+    // ---- 2. Sanity for maxMarks (avoid divide-by-zero) ----
+    const maxMarks = Number(exam.maxMarks) > 0 ? Number(exam.maxMarks) : 100;
+
+    // ---- 3. Fetch all results for this exam ----
+    const results = await Result.findAll({
+      where: { examId },
+      attributes: ['id', 'studentId', 'marks', 'isAbsent']
+    });
+
+    // ---- 4. Filter + sort by percentage (drop absent/blank) ----
+    const ranked = results
+      .filter(r => {
+        if (r.isAbsent) return false;
+        if (r.marks === null || r.marks === undefined || r.marks === '') return false;
+        return !isNaN(parseFloat(r.marks));
+      })
+      .map(r => {
+        const marks = parseFloat(r.marks);
+        return {
+          studentId: r.studentId,
+          marks,
+          percentage: (marks / maxMarks) * 100
+        };
+      })
+      .sort((a, b) => b.percentage - a.percentage);
+
+    // ---- 5. Assign ranks with tie handling ----
+    const positions = {};
+    let rank = 1;
+    let prevPct = null;
+
+    ranked.forEach((r, idx) => {
+      if (prevPct !== null && r.percentage < prevPct) {
+        rank = idx + 1;
+      }
+      positions[r.studentId] = {
+        rank,
+        total: ranked.length,
+        percentage: Number(r.percentage.toFixed(2)),  // round for UI
+        marks: r.marks
+      };
+      prevPct = r.percentage;
+    });
+
+    res.json({
+      success: true,
+      examId,
+      examName: exam.name,
+      maxMarks,
+      totalRanked: ranked.length,
+      totalResults: results.length,
+      positions
+    });
+  } catch (err) {
+    console.error('❌ Get positions error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // ============================================================
 // ==================== GRADE HELPER FUNCTION ====================
 // ============================================================
@@ -27954,6 +28219,24 @@ try {
       console.error('⚠️  Homework migration failed:', err.message);
     }
 
+
+    // ============================================================
+//  3F. School — custom grading config
+// ============================================================
+try {
+  if (await tableExists('Schools')) {
+    if (!(await columnExists('Schools', 'gradingConfig'))) {
+      await queryInterface.addColumn('Schools', 'gradingConfig', {
+        type: DataTypes.JSONB,
+        allowNull: true,
+        defaultValue: null
+      });
+      console.log('✅ Migration: added Schools.gradingConfig');
+    }
+  }
+} catch (err) {
+  console.error('⚠️  gradingConfig migration failed:', err.message);
+}
     // ============================================================
     //  4. Startup summary
     // ============================================================
