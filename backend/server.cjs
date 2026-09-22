@@ -1855,17 +1855,10 @@ const Subject = sequelize.define('Subject', {
   passMarks: { type: DataTypes.INTEGER, defaultValue: 50 }
 });
 
-// Update your Exam model definition in the backend
 const Exam = sequelize.define('Exam', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
   name: { type: DataTypes.STRING, allowNull: false },
-  type: {
-    type: DataTypes.ENUM(
-      'OPENER', 'MIDTERM', 'ENDTERM', 'CAT', 'MOCK', 'PRE_MOCK',
-      'PRACTICAL', 'PROJECT', 'MAIN_EXAM', 'SUPPLEMENTARY', 'SPECIAL',
-      'QUIZ', 'ASSIGNMENT', 'FINAL', 'LAB', 'PRESENTATION', 'THESIS', 'DEFENSE'
-    )
-  },
+  type: { /* ... */ },
   schoolId: { type: DataTypes.UUID, allowNull: false },
   classId: { type: DataTypes.UUID, allowNull: true },
   subjectId: { type: DataTypes.UUID, allowNull: true },
@@ -1887,9 +1880,10 @@ const Exam = sequelize.define('Exam', {
   isPublished: { type: DataTypes.BOOLEAN, defaultValue: false },
   examHall: { type: DataTypes.STRING, allowNull: true },
   invigilator: { type: DataTypes.STRING, allowNull: true },
-  invigilatorId: { type: DataTypes.UUID, allowNull: true } // ADD THIS FIELD
-});
+  invigilatorId: { type: DataTypes.UUID, allowNull: true },
 
+  sessionId: { type: DataTypes.UUID, allowNull: true }
+});
 // ============================================================
 //  EXAM SESSIONS — logical grouping of exam papers
 //  One session = one exam event (e.g. "END TERM 1")
@@ -11370,7 +11364,7 @@ app.post('/api/exams', authenticate, async (req, res) => {
       date, startTime, endTime, maxMarks, weightage,
       courseId, facultyId, departmentId, unitId, year, semester,
       programId, module,
-      examHall, invigilator, invigilatorId, schoolId
+      examHall, invigilator, invigilatorId, schoolId, sessionId    
     } = req.body;
 
     // Get the school to determine category
@@ -11430,6 +11424,7 @@ app.post('/api/exams', authenticate, async (req, res) => {
       examHall: examHall || null,
       invigilator: invigilator || null,
       invigilatorId: invigilatorId || null,
+      sessionId: sessionId || null, 
       schoolId: req.user.schoolId || schoolId,
       isPublished: false,
       resultsPublished: false,
@@ -11511,7 +11506,8 @@ app.put('/api/exams/:id', authenticate, async (req, res) => {
       examHall, invigilator, invigilatorId,
       courseId, facultyId, departmentId, unitId,
       year, semester, programId, module,
-      classId, subjectId
+      classId, subjectId,
+      sessionId            
     } = req.body;
 
     // Build update object — only fields present in payload
@@ -20134,6 +20130,7 @@ app.put('/api/course-units/:id', authenticate, requireSchoolAdmin, async (req, r
     if (updates.name !== undefined) updateData.name = updates.name.trim();
     if (updates.code !== undefined) updateData.code = updates.code?.trim() || null;
     if (updates.description !== undefined) updateData.description = updates.description?.trim() || null;
+     if (sessionId !== undefined) updateData.sessionId = sessionId; 
     if (updates.courseId !== undefined) {
       // Verify course exists if changing
       const course = await Course.findOne({
@@ -28605,11 +28602,6 @@ app.patch('/api/exam-sessions/:id', authenticate, async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
-// ============================================================
-//  DELETE /api/exam-sessions/:id
-//  Deletes the session AND all its papers, plus any results.
-// ============================================================
 app.delete('/api/exam-sessions/:id', authenticate, async (req, res) => {
   const transaction = await sequelize.transaction();
   try {
@@ -28617,33 +28609,47 @@ app.delete('/api/exam-sessions/:id', authenticate, async (req, res) => {
       include: [{ model: Exam, as: 'papers' }],
       transaction
     });
+
     if (!session) {
       await transaction.rollback();
       return res.status(404).json({ success: false, message: 'Session not found' });
     }
-    if (!['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL'].includes(req.user.role)) {
-      await transaction.rollback();
-      return res.status(403).json({ success: false, message: 'Only admins can delete sessions' });
+
+    // Papers directly linked via sessionId
+    let paperIds = (session.papers || []).map(p => p.id);
+
+    // Fallback: legacy papers created before sessionId was persisted
+    if (paperIds.length === 0) {
+      const legacy = await Exam.findAll({
+        where: {
+          schoolId: session.schoolId,
+          name: session.name,
+          type: session.type,
+          term: session.term || null,
+          academicYear: session.academicYear || null
+        },
+        attributes: ['id'],
+        transaction
+      });
+      paperIds = legacy.map(p => p.id);
+      console.log(`🔎 Legacy fallback found ${paperIds.length} orphan papers for session "${session.name}"`);
     }
 
-    const paperIds = (session.papers || []).map(p => p.id);
-
-    // Delete results
     if (paperIds.length > 0) {
       await Result.destroy({ where: { examId: paperIds }, transaction });
+      await Exam.destroy({ where: { id: paperIds }, transaction });
     }
 
-    // Delete papers
-    await Exam.destroy({ where: { sessionId: session.id }, transaction });
-
-    // Delete session
     await session.destroy({ transaction });
-
     await transaction.commit();
 
-    res.json({ success: true, message: `Deleted session and ${paperIds.length} paper(s)` });
+    res.json({
+      success: true,
+      message: `Deleted session and ${paperIds.length} paper(s)`
+    });
   } catch (err) {
     await transaction.rollback();
+    console.error('❌ Delete session error:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -28934,15 +28940,25 @@ try {
 } catch (err) {
   console.error('⚠️  gradingConfig migration failed:', err.message);
 }
-// Create ExamSessions table if missing
+// Add sessionId column to Exams table (no FK constraint — safer)
 try {
-  if (!(await tableExists('ExamSessions'))) {
-    await ExamSession.sync();
-    console.log('✅ Migration: created ExamSessions table');
+  if (await tableExists('Exams')) {
+    if (!(await columnExists('Exams', 'sessionId'))) {
+      await queryInterface.addColumn('Exams', 'sessionId', {
+        type: DataTypes.UUID,
+        allowNull: true
+        // ❌ REMOVE the references/onUpdate/onDelete block
+      });
+      console.log('✅ Migration: added Exams.sessionId');
+    } else {
+      console.log('ℹ️  Exams.sessionId already exists');
+    }
   }
 } catch (err) {
-  console.error('⚠️  ExamSessions migration failed:', err.message);
+  console.error('❌ Exams.sessionId migration FAILED:', err.message);
+  console.error(err.stack);
 }
+
 
 // Add sessionId column to Exams table
 try {
