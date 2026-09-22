@@ -5573,6 +5573,8 @@ app.post('/api/auth/login', async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 });
+
+
 app.get('/api/auth/me', authenticate, async (req, res) => {
   try {
     const user = await User.findByPk(req.user.id, {
@@ -5580,82 +5582,37 @@ app.get('/api/auth/me', authenticate, async (req, res) => {
     });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
-    // ✅ Load the dynamic role if assigned
-    let roleObject = null;
-    let permissions = [];
-    let effectiveRole = user.role; // fallback: legacy ENUM
+    // ... existing roleObject / permissions / schoolFeatures logic ...
 
-    if (user.roleId) {
-      roleObject = await Role.findByPk(user.roleId, {
-        attributes: ['id', 'name', 'permissions', 'isSystemRole']
-      });
-      if (roleObject) {
-        permissions = roleObject.permissions || [];
-        // ✅ Use the dynamic role's NAME as the effective role when it maps to a known ENUM
-        const normalized = String(roleObject.name).toUpperCase().replace(/[\s-]+/g, '_');
-        const knownEnums = [
-          'SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL',
-          'SENIOR_TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER', 'TEACHER',
-          'LECTURER', 'SENIOR_LECTURER', 'PROFESSOR', 'DEAN', 'HOD',
-          'INSTRUCTOR', 'TRAINER', 'WORKSHOP_SUPERVISOR',
-          'ACCOUNTANT', 'LIBRARIAN', 'NURSE', 'MATRON', 'TRANSPORT_MANAGER',
-          'HR_MANAGER', 'HR', 'PARENT', 'STUDENT'
-        ];
-        if (knownEnums.includes(normalized)) {
-          effectiveRole = normalized;
-        } else {
-          // Fallback aliases
-          const aliasMap = {
-            'FINANCE_OFFICER': 'ACCOUNTANT',
-            'BURSAR': 'ACCOUNTANT',
-            'HEAD_OF_DEPARTMENT': 'HOD',
-            'HEAD_TEACHER': 'PRINCIPAL'
-          };
-          effectiveRole = aliasMap[normalized] || effectiveRole;
-        }
-      }
-    }
-
-    // Fallback to default ENUM permissions if none came from the role
-    if (permissions.length === 0 && effectiveRole) {
-      permissions = getPermissionsForRole(effectiveRole);
-    }
-
-    // ============================================================
-    // ✅ NEW — fetch the school's enabled features
-    // ============================================================
-    // SUPER_ADMIN has no schoolId, so schoolFeatures stays null
-    // (the frontend treats null as "no feature gating").
-    let schoolFeatures = null;
+    // ✅ NEW: load the full school record
+    let school = null;
     if (user.schoolId) {
-      try {
-        const schoolRow = await School.findByPk(user.schoolId, {
-          attributes: ['id', 'features']
-        });
-        if (schoolRow) {
-          schoolFeatures = Array.isArray(schoolRow.features) ? schoolRow.features : [];
-        } else {
-          schoolFeatures = [];
-        }
-      } catch (featureErr) {
-        console.warn('Could not fetch school features:', featureErr.message);
-        schoolFeatures = [];
-      }
+      school = await School.findByPk(user.schoolId, {
+        attributes: [
+          'id', 'name', 'code', 'category', 'motto', 'established',
+          'registrationNumber', 'gradingSystem', 'gradingConfig',
+          'contact', 'branding', 'settings',
+          'features', 'subscription',
+          'subscriptionStatus', 'subscriptionPlan',
+          'trialEndsAt', 'subscriptionEndsAt',
+          'startTime', 'endTime', 'lateThreshold', 'earlyDepartureThreshold'
+        ]
+      });
     }
 
     res.json({
       success: true,
       user: {
         ...user.toJSON(),
-        role: effectiveRole,       // ✅ override with effective role
+        role: effectiveRole,
         roleObject,
         permissions,
-        schoolFeatures             // ✅ NEW — array of feature keys, or null for super admin
-      }
+        schoolFeatures
+      },
+      school   // ✅ return the school here too
     });
   } catch (error) {
-    console.error('Get user error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    // ...
   }
 });
 
