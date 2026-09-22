@@ -2051,7 +2051,16 @@ const Payment = sequelize.define('Payment', {
 
   // ---- Fee Transfer tracking ----
   isTransfer: { type: DataTypes.BOOLEAN, defaultValue: false },
-  transferId: { type: DataTypes.UUID, allowNull: true }
+  transferId: { type: DataTypes.UUID, allowNull: true },
+
+  // ---- Balance Brought Forward ----
+  // Captures any unpaid balance carried over from a previous term or school.
+  // Added to the student's outstanding balance during payment processing.
+  balanceBroughtForward: { 
+    type: DataTypes.DECIMAL(10, 2), 
+    defaultValue: 0,
+    allowNull: false
+  }
 });
 // ==================== FEE TRANSFER MODEL ====================
 const FeeTransfer = sequelize.define('FeeTransfer', {
@@ -10254,7 +10263,8 @@ app.get('/api/parents/me/children/:admissionNumber/fees', authenticate, async (r
     const totalFees = fees.reduce((s, f) => s + parseFloat(f.amount || 0), 0);
     const totalPaid = payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
     const totalDiscounts = payments.reduce((s, p) => s + parseFloat(p.discountAmount || 0), 0);
-    const balance = totalFees - totalDiscounts - totalPaid;
+   const totalBF = payments.reduce((s, p) => s + parseFloat(p.balanceBroughtForward || 0), 0);
+const balance = (totalFees + totalBF) - totalDiscounts - totalPaid;
 
     res.json({
       success: true,
@@ -14667,8 +14677,7 @@ app.get('/api/students/:studentId/fee-summary', authenticate, async (req, res) =
     });
   }
 });
-
-// ==================== PAYMENT ROUTE (HARDENED) ====================
+// ==================== PAYMENT ROUTE (HARDENED + B/F) ====================
 app.post('/api/payments', authenticate, async (req, res) => {
   try {
     const {
@@ -14676,7 +14685,8 @@ app.post('/api/payments', authenticate, async (req, res) => {
       mpesaCode, mpesaPhone, bankReference, bankMessage,
       cardLast4, cardApprovalCode, chequeNumber, chequeBank,
       isOtherIncome, incomeCategory, description, payer,
-      studentName, admissionNumber, courseName, className, feeName, discountAmount
+      studentName, admissionNumber, courseName, className, feeName, discountAmount,
+      balanceBroughtForward // ✅ NEW: Accept B/F from frontend
     } = req.body;
 
     // ────────────────────────────────────────────────────────────
@@ -14698,7 +14708,6 @@ app.post('/api/payments', authenticate, async (req, res) => {
 
     // ────────────────────────────────────────────────────────────
     //  ✅ GUARD 2 — Fee payments MUST have a feeId
-    //  (The specific fix for the "General Payments" bug)
     // ────────────────────────────────────────────────────────────
     if (!isOtherIncome && !feeId) {
       return res.status(400).json({
@@ -14724,8 +14733,7 @@ app.post('/api/payments', authenticate, async (req, res) => {
     }
 
     // ────────────────────────────────────────────────────────────
-    //  ✅ GUARD 4 — Verify the fee exists, belongs to this school,
-    //              and (best-effort) matches the student's scope
+    //  ✅ GUARD 4 — Verify the fee exists, belongs to this school
     // ────────────────────────────────────────────────────────────
     let verifiedFee = null;
     if (!isOtherIncome && feeId) {
@@ -14741,9 +14749,6 @@ app.post('/api/payments', authenticate, async (req, res) => {
         });
       }
 
-      // Best-effort scope match — logs a warning but doesn't block.
-      // Some schools legitimately have generic fees that apply to all
-      // students of a school, so we don't want to over-restrict here.
       if (studentId) {
         const student = await Student.findOne({
           where: { id: studentId, schoolId: req.user.schoolId }
@@ -14758,9 +14763,7 @@ app.post('/api/payments', authenticate, async (req, res) => {
 
           if (!scoped) {
             console.warn(
-              `⚠️ Fee ${verifiedFee.id} (${verifiedFee.name}) may not apply to student ${student.id}. ` +
-              `Fee scope: class=${verifiedFee.classId} course=${verifiedFee.courseId} program=${verifiedFee.programId}. ` +
-              `Student scope: class=${student.classId} course=${student.courseId} program=${student.programId}.`
+              `⚠️ Fee ${verifiedFee.id} (${verifiedFee.name}) may not apply to student ${student.id}.`
             );
           }
         }
@@ -14777,7 +14780,7 @@ app.post('/api/payments', authenticate, async (req, res) => {
     // ────────────────────────────────────────────────────────────
     const payment = await Payment.create({
       studentId: isOtherIncome ? null : studentId,
-      feeId: isOtherIncome ? null : feeId,         // ✅ only null for other income
+      feeId: isOtherIncome ? null : feeId,
       amount,
       paymentMethod: paymentMethod || 'CASH',
       transactionId: transactionId || null,
@@ -14806,8 +14809,11 @@ app.post('/api/payments', authenticate, async (req, res) => {
       admissionNumber: admissionNumber || null,
       courseName: courseName || null,
       className: className || null,
-      feeName: verifiedFee?.name || feeName || null,   // ✅ use the real fee name
-      discountAmount: parseFloat(discountAmount) || 0
+      feeName: verifiedFee?.name || feeName || null,
+      discountAmount: parseFloat(discountAmount) || 0,
+
+      // ✅ NEW: Save B/F to the database
+      balanceBroughtForward: parseFloat(balanceBroughtForward) || 0
     });
 
     // ────────────────────────────────────────────────────────────
@@ -14835,7 +14841,8 @@ app.post('/api/payments', authenticate, async (req, res) => {
         studentId,
         feeId,
         isOtherIncome: !!isOtherIncome,
-        receiptNo
+        receiptNo,
+        balanceBroughtForward: parseFloat(balanceBroughtForward) || 0
       });
     } catch (logErr) {
       console.warn('Audit log failed (non-critical):', logErr.message);
@@ -14868,7 +14875,6 @@ app.post('/api/payments', authenticate, async (req, res) => {
   } catch (error) {
     console.error('❌ Record payment error:', error);
 
-    // Handle the DB CHECK constraint we're about to add
     if (error.name === 'SequelizeDatabaseError' &&
         /payment_needs_fee_or_other_income/.test(error.message)) {
       return res.status(400).json({
@@ -15134,11 +15140,27 @@ app.get('/api/students/:studentId/fee-statement', authenticate, async (req, res)
       include: [{ model: Fee }],
       order: [['createdAt', 'DESC']]
     });
+// ==================== BALANCE CALCULATION (WITH B/F) ====================
 
-    const totalFees = fees.reduce((sum, fee) => sum + parseFloat(fee.amount || 0), 0);
-   const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+// 1. Sum all fees the student is liable for
+const totalFees = fees.reduce((sum, fee) => sum + parseFloat(fee.amount || 0), 0);
+
+// 2. Sum all payments made by the student
+const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+
+// 3. Sum all discounts applied to the student
 const totalDiscounts = payments.reduce((sum, p) => sum + parseFloat(p.discountAmount || 0), 0);
-const balance = totalFees - totalDiscounts - totalPaid;
+
+// 4. ✅ NEW: Sum every Balance Brought Forward entry recorded for this student
+const totalBalanceBroughtForward = payments.reduce(
+  (sum, p) => sum + parseFloat(p.balanceBroughtForward || 0), 0
+);
+
+// 5. ✅ UPDATED: Add B/F to the total owed before subtracting payments
+const balance = (totalFees + totalBalanceBroughtForward) - totalDiscounts - totalPaid;
+
+// 6. Optional: Prevent negative balance display
+const displayBalance = Math.max(0, balance);
     res.json({
       success: true,
       statement: {
