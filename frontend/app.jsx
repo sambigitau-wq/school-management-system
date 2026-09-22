@@ -5303,7 +5303,7 @@ const StudentModule = ({
 
   const SUBJECT_LABEL = isUniversity ? 'Unit' : isTVET ? 'Module' : 'Subject';
   const GROUP_LABEL = isUniversity ? 'Course' : isTVET ? 'Program' : 'Class';
-  const TERM_LABEL = isUniversity ? 'Semester' : isTVET ? 'Module' : 'Term';
+const TERM_LABEL = isUniversity ? 'Semester' : 'Term';
 
   // ✅ REAL SCHOOL NAME — never invent one
   const schoolName =
@@ -6011,11 +6011,15 @@ const StudentModule = ({
       if (isUniversity) {
         if (fee.semester) return `Semester ${fee.semester}`;
         if (fee.term && /semester/i.test(String(fee.term))) return fee.term;
+         if (fee.term && /^sem\s*\d/i.test(String(fee.term))) return fee.term;   // "Sem 1"
+    if (fee.term && /^\d+$/.test(String(fee.term).trim())) {
+      return `Semester ${String(fee.term).trim()}`;    
         return 'General Payments';
       }
       if (isTVET) {
         if (fee.module) return `Module ${fee.module}`;
         if (fee.term && /module/i.test(String(fee.term))) return fee.term;
+         if (fee.term && /term\s*\d/i.test(String(fee.term))) return fee.term;
         return 'General Payments';
       }
       if (fee.term && /term\s*\d/i.test(String(fee.term))) return fee.term;
@@ -7787,7 +7791,14 @@ const StudentModule = ({
                     <p className="text-gray-500">No fee records found for this student.</p>
                   </div>
                 ) : (
-                  invoiceData.termStatements.map((term, ti) => (
+             invoiceData.termStatements
+  .filter(term => {
+    // Hide the "General Payments" bucket if it has no content at all.
+    // Regular terms are always shown, even if they have zero fees.
+    if (!term.isGeneral) return true;
+    return (term.fees?.length || 0) > 0 || (term.cashOnly?.length || 0) > 0;
+  })
+  .map((term, ti) => (
                     <div key={ti} className="border-2 rounded-lg overflow-hidden">
                       <div className={`px-4 py-3 flex justify-between items-center ${term.isPaid ? 'bg-green-500' : 'bg-indigo-600'} text-white`}>
                         <h3 className="font-bold text-lg">{term.term}</h3>
@@ -26785,6 +26796,18 @@ const AccountingModule = ({
   // ========================================================================
   const handleIncomeSubmit = async (e) => {
     e.preventDefault();
+
+      // ✅ ADD THIS BLOCK
+  if (incomeType === 'fee') {
+    if (!incomeForm.studentId) {
+      alert('Please select a student before recording a payment');
+      return;
+    }
+    if (!incomeForm.feeId) {
+      alert('Please select a fee. If this is not a fee payment, switch to "Other Income".');
+      return;
+    }
+  }
     if (!canAddIncome) { alert('You do not have permission to record income'); return; }
 
     if (incomeType === 'fee' && !incomeForm.studentId) { alert('Please select a student'); return; }
