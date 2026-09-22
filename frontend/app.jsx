@@ -14,7 +14,18 @@ const api = axios.create({
   baseURL: 'https://school-management-system-hna5.onrender.com/api',
   headers: { 'Content-Type': 'application/json' }
 });
+const API_ORIGIN = 'https://school-management-system-hna5.onrender.com';
 
+const resolveLogoUrl = (school) => {
+  const raw = school?.contact?.logo || '';
+  if (!raw) return '';
+  if (raw.startsWith('data:')) return raw;                  // base64
+  if (/^https?:\/\//i.test(raw)) return raw;                // already full
+  return `${API_ORIGIN}${raw.startsWith('/') ? '' : '/'}${raw}`;
+};
+
+// Usage:
+<img src={resolveLogoUrl(currentSchool)} />
 // ✅ Global 402 handler — subscription expired / blocked
 api.interceptors.response.use(
   (response) => response,
