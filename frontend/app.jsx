@@ -10664,136 +10664,174 @@ const ExamModule = ({
       !((p.subjectId && p.subjectId === key) || (p.unitId && p.unitId === key))
     ));
   };
+// ============================================================
+// SUBMIT SESSION (FIXED)
+// ============================================================
+const handleSessionSubmit = async (e) => {
+  e.preventDefault();
+  if (!canCreateSessions) { alert('You do not have permission'); return; }
 
-  // ============================================================
-  // SUBMIT SESSION
-  // ============================================================
-  const handleSessionSubmit = async (e) => {
-    e.preventDefault();
-    if (!canCreateSessions) { alert('You do not have permission'); return; }
+  if (!sessionForm.name?.trim()) { alert('Exam name is required'); return; }
+  if (!sessionForm.type) { alert('Exam type is required'); return; }
 
-    if (!sessionForm.name?.trim()) { alert('Exam name is required'); return; }
-    if (!sessionForm.type) { alert('Exam type is required'); return; }
+  if (isRegularSchool && !sessionForm.classId) { alert('Class is required'); return; }
+  if (isUniversity && !sessionForm.courseId)   { alert('Course is required'); return; }
+  if (isTVET && !sessionForm.programId)        { alert('Program is required'); return; }
 
-    if (isRegularSchool && !sessionForm.classId) { alert('Class is required'); return; }
-    if (isUniversity && !sessionForm.courseId)   { alert('Course is required'); return; }
-    if (isTVET && !sessionForm.programId)        { alert('Program is required'); return; }
+  if (sessionPapers.length === 0) {
+    alert('Please select at least one subject/unit to add as a paper');
+    return;
+  }
 
-    if (sessionPapers.length === 0) {
-      alert('Please select at least one subject/unit to add as a paper');
-      return;
-    }
+  for (const paper of sessionPapers) {
+    const label = paper.subjectId
+      ? subjects.find(s => s.id === paper.subjectId)?.name
+      : units.find(u => u.id === paper.unitId)?.name;
+    if (!paper.date) { alert(`Paper "${label}": date is required`); return; }
+  }
 
-    for (const paper of sessionPapers) {
-      const label = paper.subjectId
-        ? subjects.find(s => s.id === paper.subjectId)?.name
-        : units.find(u => u.id === paper.unitId)?.name;
-      if (!paper.date) { alert(`Paper "${label}": date is required`); return; }
-    }
+  setLoading(true);
+  setApiError('');
+  try {
+    const payload = {
+      name: sessionForm.name.trim(),
+      type: sessionForm.type,
+      term: sessionForm.term || null,
+      academicYear: sessionForm.academicYear || null,
+      startDate: sessionForm.startDate || null,
+      endDate: sessionForm.endDate || null,
+      maxMarks: Number(sessionForm.maxMarks) || 100,
+      notes: sessionForm.notes || null,
+      classId: sessionForm.classId || null,
+      courseId: sessionForm.courseId || null,
+      programId: sessionForm.programId || null,
+      year: sessionForm.year ? parseInt(sessionForm.year, 10) : null,
+      semester: sessionForm.semester ? parseInt(sessionForm.semester, 10) : null,
+      module: sessionForm.module ? parseInt(sessionForm.module, 10) : null,
+      papers: sessionPapers.map(p => ({
+        subjectId: p.subjectId || null,
+        unitId: p.unitId || null,
+        date: p.date,
+        startTime: p.startTime || null,
+        endTime: p.endTime || null,
+        examHall: p.examHall || null,
+        invigilatorId: p.invigilatorId || null,
+        invigilator: p.invigilatorId ? getStaffName(p.invigilatorId) : null,
+        maxMarks: Number(p.maxMarks) || Number(sessionForm.maxMarks) || 100
+      }))
+    };
 
-    setLoading(true);
-    setApiError('');
-    try {
-      const payload = {
-        name: sessionForm.name.trim(),
-        type: sessionForm.type,
-        term: sessionForm.term || null,
-        academicYear: sessionForm.academicYear || null,
-        startDate: sessionForm.startDate || null,
-        endDate: sessionForm.endDate || null,
-        maxMarks: Number(sessionForm.maxMarks) || 100,
-        notes: sessionForm.notes || null,
-        classId: sessionForm.classId || null,
-        courseId: sessionForm.courseId || null,
-        programId: sessionForm.programId || null,
-        year: sessionForm.year ? parseInt(sessionForm.year, 10) : null,
-        semester: sessionForm.semester ? parseInt(sessionForm.semester, 10) : null,
-        module: sessionForm.module ? parseInt(sessionForm.module, 10) : null,
-        papers: sessionPapers.map(p => ({
-          subjectId: p.subjectId || null,
-          unitId: p.unitId || null,
-          date: p.date,
-          startTime: p.startTime || null,
-          endTime: p.endTime || null,
-          examHall: p.examHall || null,
-          invigilatorId: p.invigilatorId || null,
-          invigilator: p.invigilatorId ? getStaffName(p.invigilatorId) : null,
-          maxMarks: Number(p.maxMarks) || Number(sessionForm.maxMarks) || 100
-        }))
-      };
+    if (editingSession) {
+      // ============================================================
+      // FIXED: EDIT MODE - Update session and sync papers properly
+      // ============================================================
+      
+      // Step 1: Update the session metadata
+      const sessionRes = await api.patch(`/exam-sessions/${editingSession.id}`, {
+        name: payload.name,
+        type: payload.type,
+        term: payload.term,
+        academicYear: payload.academicYear,
+        startDate: payload.startDate,
+        endDate: payload.endDate,
+        maxMarks: payload.maxMarks,
+        notes: payload.notes,
+        classId: payload.classId,
+        courseId: payload.courseId,
+        programId: payload.programId,
+        year: payload.year,
+        semester: payload.semester,
+        module: payload.module
+      });
 
-      if (editingSession) {
-        // Editing: for now, only metadata is updated via PATCH.
-        // Papers are managed separately (see below).
-        await api.patch(`/exam-sessions/${editingSession.id}`, {
+      // Step 2: Get existing papers from the editing session
+      const existingPapers = editingSession.papers || [];
+      
+      // Step 3: Create maps for easier lookup
+      const existingPaperMap = new Map(existingPapers.map(p => [p.id, p]));
+      const submittedPaperIds = new Set(sessionPapers.filter(p => p.id).map(p => p.id));
+      
+      // Step 4: Handle deletions - papers that were removed
+      const papersToDelete = existingPapers.filter(p => !submittedPaperIds.has(p.id));
+      for (const paper of papersToDelete) {
+        try {
+          await api.delete(`/exams/${paper.id}`);
+          console.log(`Deleted paper ${paper.id}`);
+        } catch (err) {
+          console.warn(`Failed to delete paper ${paper.id}:`, err);
+        }
+      }
+      
+      // Step 5: Handle updates and creates
+      for (const paper of sessionPapers) {
+        // Build the paper data for API
+        const paperData = {
+          sessionId: editingSession.id,
           name: payload.name,
           type: payload.type,
           term: payload.term,
           academicYear: payload.academicYear,
-          startDate: payload.startDate,
-          endDate: payload.endDate,
-          maxMarks: payload.maxMarks,
-          notes: payload.notes
-        });
-
-        // Sync papers: for each existing paper in the form, PUT the exam row.
-        // For new papers, POST them with sessionId set.
-        for (const paper of sessionPapers) {
-          const data = {
-            sessionId: editingSession.id,
-            name: payload.name,
-            type: payload.type,
-            term: payload.term,
-            academicYear: payload.academicYear,
-            classId: payload.classId,
-            courseId: payload.courseId,
-            programId: payload.programId,
-            year: payload.year,
-            semester: payload.semester,
-            module: payload.module,
-            subjectId: paper.subjectId || null,
-            unitId: paper.unitId || null,
-            date: paper.date,
-            startTime: paper.startTime || null,
-            endTime: paper.endTime || null,
-            examHall: paper.examHall || null,
-            invigilatorId: paper.invigilatorId || null,
-            invigilator: paper.invigilatorId ? getStaffName(paper.invigilatorId) : null,
-            maxMarks: Number(paper.maxMarks) || 100
-          };
-          if (paper.id) await api.put(`/exams/${paper.id}`, data);
-          else         await api.post('/exams', data);
+          classId: payload.classId,
+          courseId: payload.courseId,
+          programId: payload.programId,
+          year: payload.year,
+          semester: payload.semester,
+          module: payload.module,
+          subjectId: paper.subjectId || null,
+          unitId: paper.unitId || null,
+          date: paper.date,
+          startTime: paper.startTime || null,
+          endTime: paper.endTime || null,
+          examHall: paper.examHall || null,
+          invigilatorId: paper.invigilatorId || null,
+          invigilator: paper.invigilatorId ? getStaffName(paper.invigilatorId) : null,
+          maxMarks: Number(paper.maxMarks) || 100
+        };
+        
+        if (paper.id && existingPaperMap.has(paper.id)) {
+          // UPDATE existing paper
+          try {
+            await api.put(`/exams/${paper.id}`, paperData);
+            console.log(`Updated paper ${paper.id}`);
+          } catch (err) {
+            console.error(`Failed to update paper ${paper.id}:`, err);
+            throw err;
+          }
+        } else {
+          // CREATE new paper
+          try {
+            const createRes = await api.post('/exams', paperData);
+            console.log(`Created new paper:`, createRes.data);
+          } catch (err) {
+            console.error(`Failed to create paper:`, err);
+            throw err;
+          }
         }
-
-        // Delete papers that were removed from the form
-        const keptIds = new Set(sessionPapers.filter(p => p.id).map(p => p.id));
-        const removed = (editingSession.papers || []).filter(p => !keptIds.has(p.id));
-        for (const r of removed) {
-          try { await api.delete(`/exams/${r.id}`); } catch (_) {}
-        }
-      } else {
-        await api.post('/exam-sessions', payload);
       }
-
-      alert(editingSession ? '✅ Exam session updated' : '✅ Exam session created');
-      setShowSessionForm(false);
-      setEditingSession(null);
-      setSessionPapers([]);
-      await loadSessions();
-
-      // Refresh legacy exams list too, so other modules (Results) stay in sync
-      try {
-        const r = await api.get('/exams');
-        if (r.data.exams) setExams(r.data.exams);
-      } catch (_) {}
-    } catch (err) {
-      console.error('❌ Save session:', err);
-      setApiError(err.response?.data?.message || err.message);
-    } finally {
-      setLoading(false);
+      
+    } else {
+      // CREATE MODE - unchanged
+      await api.post('/exam-sessions', payload);
     }
-  };
 
+    alert(editingSession ? '✅ Exam session updated' : '✅ Exam session created');
+    setShowSessionForm(false);
+    setEditingSession(null);
+    setSessionPapers([]);
+    await loadSessions();
+
+    // Refresh legacy exams list too
+    try {
+      const r = await api.get('/exams');
+      if (r.data.exams) setExams(r.data.exams);
+    } catch (_) {}
+  } catch (err) {
+    console.error('❌ Save session:', err);
+    setApiError(err.response?.data?.message || err.message);
+  } finally {
+    setLoading(false);
+  }
+};
   // ============================================================
   // DELETE SESSION
   // ============================================================
