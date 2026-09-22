@@ -5561,18 +5561,65 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-
 app.get('/api/auth/me', authenticate, async (req, res) => {
   try {
+    // ────────────────────────────────────────────────────────────
+    // 1. Load the user (exclude password)
+    // ────────────────────────────────────────────────────────────
     const user = await User.findByPk(req.user.id, {
       attributes: { exclude: ['password'] }
     });
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
 
-    // ... existing roleObject / permissions / schoolFeatures logic ...
+    // ────────────────────────────────────────────────────────────
+    // 2. Load the dynamic role (if any) and derive the effective role
+    // ────────────────────────────────────────────────────────────
+    let roleObject = null;
+    let permissions = [];
+    let effectiveRole = user.role;
 
-    // ✅ NEW: load the full school record
+    if (user.roleId) {
+      roleObject = await Role.findByPk(user.roleId, {
+        attributes: ['id', 'name', 'permissions', 'isSystemRole']
+      });
+      if (roleObject) {
+        permissions = roleObject.permissions || [];
+
+        const normalized = String(roleObject.name).toUpperCase().replace(/[\s-]+/g, '_');
+        const knownEnums = [
+          'SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL',
+          'SENIOR_TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER', 'TEACHER',
+          'LECTURER', 'SENIOR_LECTURER', 'PROFESSOR', 'DEAN', 'HOD',
+          'INSTRUCTOR', 'TRAINER', 'WORKSHOP_SUPERVISOR',
+          'ACCOUNTANT', 'LIBRARIAN', 'NURSE', 'MATRON', 'TRANSPORT_MANAGER',
+          'HR_MANAGER', 'HR', 'PARENT', 'STUDENT'
+        ];
+        if (knownEnums.includes(normalized)) {
+          effectiveRole = normalized;
+        } else {
+          const aliasMap = {
+            'FINANCE_OFFICER': 'ACCOUNTANT',
+            'BURSAR': 'ACCOUNTANT',
+            'HEAD_OF_DEPARTMENT': 'HOD',
+            'HEAD_TEACHER': 'PRINCIPAL'
+          };
+          effectiveRole = aliasMap[normalized] || effectiveRole;
+        }
+      }
+    }
+
+    if (permissions.length === 0 && effectiveRole) {
+      permissions = getPermissionsForRole(effectiveRole);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // 3. Load the school + features
+    // ────────────────────────────────────────────────────────────
     let school = null;
+    let schoolFeatures = null;
+
     if (user.schoolId) {
       school = await School.findByPk(user.schoolId, {
         attributes: [
@@ -5585,8 +5632,17 @@ app.get('/api/auth/me', authenticate, async (req, res) => {
           'startTime', 'endTime', 'lateThreshold', 'earlyDepartureThreshold'
         ]
       });
+
+      if (school) {
+        schoolFeatures = Array.isArray(school.features) ? school.features : [];
+      } else {
+        schoolFeatures = [];
+      }
     }
 
+    // ────────────────────────────────────────────────────────────
+    // 4. Respond
+    // ────────────────────────────────────────────────────────────
     res.json({
       success: true,
       user: {
@@ -5596,13 +5652,13 @@ app.get('/api/auth/me', authenticate, async (req, res) => {
         permissions,
         schoolFeatures
       },
-      school   // ✅ return the school here too
+      school
     });
   } catch (error) {
-    // ...
+    console.error('Get user error:', error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
-
 app.post('/api/auth/change-password', [
   authenticate,
   body('currentPassword').notEmpty(),
