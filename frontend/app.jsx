@@ -16024,7 +16024,7 @@ const TimetableModule = ({
     }
 
     const schoolName = currentSchool?.name || 'School Timetable';
-    const schoolLogo = currentSchool?.contact?.logo || currentSchool?.branding?.logo || currentSchool?.logo || '';
+       const schoolLogo = resolveLogoUrl(currentSchool);
 
     const headerHtml = `
       <div class="print-header">
@@ -61642,7 +61642,8 @@ const CardManagementModule = ({
     const cardNumber = cardData.cardNumber || 'N/A';
     const validUntil = cardData.validUntil || 'N/A';
     const schoolName = cardData.schoolName || currentSchool?.name || 'School Name';
-    const schoolLogo = cardData.schoolLogo || currentSchool?.contact?.logo || '';
+       const schoolLogo = resolveLogoUrl(currentSchool);
+
     const primaryColor = cardTemplate.primaryColor || '#4f46e5';
     const textColor = cardTemplate.textColor || '#ffffff';
     const status = cardData.status || 'ACTIVE';
