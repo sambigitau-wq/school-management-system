@@ -28523,11 +28523,6 @@ app.post('/api/exam-sessions', authenticate, async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 });
-
-// ============================================================
-//  GET /api/exam-sessions
-//  List all sessions for the current school, with paper counts.
-// ============================================================
 app.get('/api/exam-sessions', authenticate, async (req, res) => {
   try {
     const where = {};
@@ -28536,14 +28531,11 @@ app.get('/api/exam-sessions', authenticate, async (req, res) => {
     } else if (req.query.schoolId) {
       where.schoolId = req.query.schoolId;
     }
+    if (req.query.classId) where.classId = req.query.classId;
 
     const sessions = await ExamSession.findAll({
-      where,
-      include: [{
-        model: Exam,
-        as: 'papers',
-        attributes: ['id', 'subjectId', 'unitId', 'date', 'startTime', 'endTime', 'examHall', 'invigilatorId', 'isPublished']
-      }],
+      where,                                         // ← use the built object
+      include: [{ model: Exam, as: 'papers' }],
       order: [['createdAt', 'DESC']]
     });
 
@@ -28553,7 +28545,6 @@ app.get('/api/exam-sessions', authenticate, async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
 // ============================================================
 //  GET /api/exam-sessions/:id
 // ============================================================

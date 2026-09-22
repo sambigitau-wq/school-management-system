@@ -10155,23 +10155,17 @@ const CourseUnitsModule = ({
       )}
     </div>
   );
-};// ============================================================================
-//  EXAM MODULE — v6 (Model A: ExamSession + Papers)
+};
+// ============================================================================
+//  EXAM MODULE — v12 (Model A: ExamSession + Papers)
 //
-//  One "Exam Session" (e.g. "END TERM 1") contains many "Papers",
-//  one per subject. Users create the session once and pick all subjects
-//  in a single flow. Papers render as sub-rows in the exams table.
-//
-//  v6 FIXES:
-//   • FIX 1: Papers now lazily hydrated on expand — list endpoint may not
-//            return nested papers, so we fetch full session per row.
-//   • FIX 2: Delete now verifies backend actually removed the session
-//            (re-fetches and warns if still present) — catches cascade bugs.
-//   • FIX 3: Duplicate-submit guard (submittingRef) prevents double POSTs
-//            from StrictMode / double-clicks creating 2 sessions.
-//   • FIX 4: Safe state updates after unmount.
-//   • FIX 5: Edit flow uses API-returned papers as source of truth,
-//            form state never drifts from DB.
+//  v12 CHANGES:
+//   • Backend now returns papers inline in GET /exam-sessions
+//   • Removed lazy hydration — papers render directly from list payload
+//   • Paper counts render immediately (no "Expand to load" placeholder)
+//   • No extra GET /exam-sessions/:id on row expand
+//   • Print logo enlarged (72px → 120px) in Timetable & Mark Sheet headers
+//   • Kept: safe edit diff, delete verification, duplicate-submit guard
 // ============================================================================
 const ExamModule = ({
   exams, setExams,
@@ -10180,7 +10174,7 @@ const ExamModule = ({
   handleCreate, handleUpdate, handleDelete,
   currentSchool, courses, programs, units, user
 }) => {
-  console.log('📝 ExamModule v6 initialized');
+  console.log('📝 ExamModule v12 initialized');
 
   const SearchableSelect = StudentSearchableSelect;
 
@@ -10213,8 +10207,6 @@ const ExamModule = ({
   const [sessions, setSessions]               = useState([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [expandedSessions, setExpandedSessions] = useState(new Set());
-  const [hydratingSessionId, setHydratingSessionId] = useState(null);
-  const [hydratedSessions, setHydratedSessions] = useState(new Set()); // tracks which sessions have full papers loaded
 
   const [selectedSessionType, setSelectedSessionType] = useState('');
   const [selectedExamName, setSelectedExamName]       = useState('');
@@ -10264,16 +10256,13 @@ const ExamModule = ({
   const [selectedStudentsForMessage, setSelectedStudentsForMessage] = useState([]);
   const [selectAllForMessage, setSelectAllForMessage] = useState(false);
 
-  // Loading / error state — separated for clearer UX
   const [loading, setLoading]       = useState(false);
-  const [savingPhase, setSavingPhase] = useState('');   // 'session' | 'deleting' | 'creating' | ''
+  const [savingPhase, setSavingPhase] = useState('');
   const [apiError, setApiError]     = useState('');
   const [saveError, setSaveError]   = useState('');
 
-  // FIX 3: Duplicate-submit guard
   const submittingRef = React.useRef(false);
 
-  // FIX 4: Mounted ref for safe state updates after unmount
   const mountedRef = React.useRef(true);
   useEffect(() => {
     mountedRef.current = true;
@@ -10465,7 +10454,6 @@ const ExamModule = ({
       if (pct >= 30) return { grade: 'Below Expectations', points: 1, remark: 'Below Expectations' };
       return { grade: 'Needs Improvement', points: 0, remark: 'Needs Improvement' };
     }
-    // Senior Secondary (8-4-4)
     if (pct >= 80) return { grade: 'A', points: 12, remark: 'Excellent' };
     if (pct >= 75) return { grade: 'A-', points: 11, remark: 'Very Good' };
     if (pct >= 70) return { grade: 'B+', points: 10, remark: 'Good' };
@@ -10491,13 +10479,12 @@ const ExamModule = ({
   };
 
   // ============================================================
-  // LOAD SESSIONS
+  // LOAD SESSIONS — backend returns papers inline
   // ============================================================
   const loadSessions = async () => {
     setLoadingSessions(true);
     try {
       const res = await api.get('/exam-sessions');
-      // Backend may return { sessions }, { data }, { data: { sessions } }, or bare array
       const list =
         res.data?.sessions ||
         res.data?.data?.sessions ||
@@ -10505,13 +10492,10 @@ const ExamModule = ({
         (Array.isArray(res.data) ? res.data : []) ||
         [];
 
-      console.log(`✅ Loaded ${list.length} exam sessions (list endpoint)`);
+      console.log(`✅ Loaded ${list.length} exam sessions (papers inline)`);
 
       if (!mountedRef.current) return;
       setSessions(Array.isArray(list) ? list : []);
-      // Reset hydration markers — we're re-fetching from scratch
-      setHydratedSessions(new Set());
-      // Keep expansion state, but drop any that no longer exist
       setExpandedSessions(prev => {
         const next = new Set();
         const ids = new Set(list.map(s => s.id));
@@ -10555,7 +10539,19 @@ const ExamModule = ({
   ]);
 
   // ============================================================
-  // FETCH FULL SESSION WITH PAPERS
+  // EXPAND / COLLAPSE — synchronous
+  // ============================================================
+  const toggleSession = (sessionId) => {
+    setExpandedSessions(prev => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
+  };
+
+  // ============================================================
+  // FETCH FULL SESSION (used by edit only)
   // ============================================================
   const fetchFullSession = async (sessionId) => {
     if (!sessionId) throw new Error('Session ID is required');
@@ -10569,7 +10565,6 @@ const ExamModule = ({
       throw new Error('Invalid session payload from server');
     }
 
-    // Normalise paper array from any backend naming
     const papers =
       payload.papers ||
       payload.exams ||
@@ -10584,60 +10579,6 @@ const ExamModule = ({
       ...payload,
       papers: Array.isArray(papers) ? papers : []
     };
-  };
-
-  // ============================================================
-  // FIX 1: TOGGLE SESSION — lazily hydrate papers on first expand
-  // ============================================================
-  const toggleSession = async (sessionId) => {
-    const wasExpanded = expandedSessions.has(sessionId);
-
-    // Toggle expansion immediately for snappy UX
-    setExpandedSessions(prev => {
-      const next = new Set(prev);
-      if (next.has(sessionId)) next.delete(sessionId);
-      else next.add(sessionId);
-      return next;
-    });
-
-    // If we're collapsing, nothing else to do
-    if (wasExpanded) return;
-
-    // If already hydrated this session in this page life, nothing to do
-    if (hydratedSessions.has(sessionId)) return;
-
-    // Otherwise: fetch full session to get papers
-    setHydratingSessionId(sessionId);
-    try {
-      const full = await fetchFullSession(sessionId);
-      if (!mountedRef.current) return;
-
-      // Merge papers into the sessions list (preserve any other fields
-      // the list endpoint returned that the detail endpoint might omit)
-      setSessions(prev => prev.map(s =>
-        s.id === sessionId
-          ? { ...s, ...full, papers: full.papers, _hydrated: true }
-          : s
-      ));
-
-      setHydratedSessions(prev => {
-        const next = new Set(prev);
-        next.add(sessionId);
-        return next;
-      });
-    } catch (err) {
-      console.error('❌ Failed to hydrate papers for session', sessionId, err);
-      if (mountedRef.current) {
-        // Show inline error, but leave the row expanded with empty state
-        setSessions(prev => prev.map(s =>
-          s.id === sessionId
-            ? { ...s, _paperLoadError: err.response?.data?.message || err.message }
-            : s
-        ));
-      }
-    } finally {
-      if (mountedRef.current) setHydratingSessionId(null);
-    }
   };
 
   // ============================================================
@@ -10667,7 +10608,7 @@ const ExamModule = ({
   };
 
   // ============================================================
-  // OPEN EDIT — always fetches fresh, never trusts list state
+  // OPEN EDIT
   // ============================================================
   const openEditSession = async (sessionSummary) => {
     if (!sessionSummary?.id) {
@@ -10715,8 +10656,6 @@ const ExamModule = ({
       console.log(`📄 Preloaded ${paperRows.length} papers for editing`);
       setSessionPapers(paperRows);
 
-      // Use the FULL session (with papers) as editingSession — this is the
-      // source of truth for the diff on submit.
       setEditingSession(fullSession);
       setShowSessionForm(true);
     } catch (err) {
@@ -10854,20 +10793,11 @@ const ExamModule = ({
   });
 
   // ============================================================
-  // SUBMIT SESSION — SAFE DIFF STRATEGY (v6)
-  //
-  //   1. Update session metadata (or create the session)
-  //   2. CREATE new papers first (so failures abort before deletion)
-  //   3. UPDATE existing papers in place
-  //   4. DELETE removed papers LAST
-  //
-  //   FIX 3: submittingRef prevents duplicate submits
-  //   FIX 5: editingSession.papers is trusted as the DB snapshot
+  // SUBMIT SESSION — SAFE DIFF STRATEGY
   // ============================================================
   const handleSessionSubmit = async (e) => {
     e.preventDefault();
 
-    // FIX 3: Idempotency guard — block duplicate submits
     if (submittingRef.current) {
       console.warn('⏳ Submit already in progress — ignoring duplicate');
       return;
@@ -10878,7 +10808,6 @@ const ExamModule = ({
       return;
     }
 
-    // ---------- Validate ----------
     const validationErrors = validateSessionForm();
     if (validationErrors.length > 0) {
       setSaveError(validationErrors.join(' • '));
@@ -10908,9 +10837,6 @@ const ExamModule = ({
     };
 
     try {
-      // ==========================================================
-      // CREATE MODE
-      // ==========================================================
       if (!editingSession) {
         console.log('➕ CREATE MODE — single session with', sessionPapers.length, 'papers');
 
@@ -10943,9 +10869,6 @@ const ExamModule = ({
         return;
       }
 
-      // ==========================================================
-      // EDIT MODE — SAFE DIFF
-      // ==========================================================
       console.log('✏️ EDIT MODE — session:', editingSession.id);
 
       const existingPapers =
@@ -10959,17 +10882,12 @@ const ExamModule = ({
       );
       const existingIds = new Set(existingById.keys());
 
-      // Papers that already exist (have id AND match a known session paper)
       const papersToUpdate = sessionPapers.filter(
         p => p.id && existingIds.has(p.id)
       );
-
-      // Papers that are new (no id, OR id no longer matches anything)
       const papersToCreate = sessionPapers.filter(
         p => !p.id || !existingIds.has(p.id)
       );
-
-      // Papers that existed but were removed by the user
       const submittedIds = new Set(
         sessionPapers.filter(p => p.id).map(p => p.id)
       );
@@ -10977,35 +10895,20 @@ const ExamModule = ({
         p => p.id && !submittedIds.has(p.id)
       );
 
-      console.log(`📊 Paper diff:
-        - existing in DB: ${existingPapers.length}
-        - to update: ${papersToUpdate.length}
-        - to create: ${papersToCreate.length}
-        - to delete: ${papersToDelete.length}`);
+      console.log(`📊 Paper diff: update=${papersToUpdate.length}, create=${papersToCreate.length}, delete=${papersToDelete.length}`);
 
-      // ---------- Step 1: Update session metadata ----------
       setSavingPhase('session');
       try {
         await api.patch(`/exam-sessions/${editingSession.id}`, payload);
         console.log('✅ Session metadata updated');
       } catch (err) {
-        console.error('❌ Failed to update session:', err);
-        throw new Error(
-          `Failed to update session: ${err.response?.data?.message || err.message}`
-        );
+        throw new Error(`Failed to update session: ${err.response?.data?.message || err.message}`);
       }
 
-      // ---------- Step 2: CREATE new papers FIRST ----------
       setSavingPhase('creating');
       const createdPapers = [];
-
       for (const paper of papersToCreate) {
         const paperData = buildPaperData(paper, payload, editingSession.id);
-
-        if (createdPapers.length === 0) {
-          console.log('📤 First create payload:', JSON.stringify(paperData, null, 2));
-        }
-
         try {
           const res = await api.post('/exams', paperData);
           const created = res.data?.exam || res.data?.paper || res.data;
@@ -11013,9 +10916,8 @@ const ExamModule = ({
             createdPapers.push(created);
             paper.id = created.id;
           }
-          console.log(`  ✓ Created paper ${created?.id || '(no id returned)'}`);
+          console.log(`  ✓ Created paper ${created?.id || '(no id)'}`);
         } catch (err) {
-          console.error('❌ Create paper failed:', err);
           const label = paper.subjectId
             ? subjects.find(s => s.id === paper.subjectId)?.name
             : units.find(u => u.id === paper.unitId)?.name;
@@ -11027,12 +10929,9 @@ const ExamModule = ({
         }
       }
 
-      // ---------- Step 3: UPDATE existing papers ----------
       setSavingPhase('updating');
-
       for (const paper of papersToUpdate) {
         const paperData = buildPaperData(paper, payload, editingSession.id);
-
         try {
           await api.put(`/exams/${paper.id}`, paperData);
           console.log(`  ✓ Updated paper ${paper.id}`);
@@ -11053,7 +10952,6 @@ const ExamModule = ({
               );
             }
           } else {
-            console.error('❌ Update paper failed:', err);
             const label = paper.subjectId
               ? subjects.find(s => s.id === paper.subjectId)?.name
               : units.find(u => u.id === paper.unitId)?.name;
@@ -11066,9 +10964,7 @@ const ExamModule = ({
         }
       }
 
-      // ---------- Step 4: DELETE removed papers LAST ----------
       setSavingPhase('deleting');
-
       for (const paper of papersToDelete) {
         try {
           await api.delete(`/exams/${paper.id}`);
@@ -11080,9 +10976,6 @@ const ExamModule = ({
         }
       }
 
-      // ==========================================================
-      // SUCCESS
-      // ==========================================================
       console.log('✅ All changes saved successfully');
       alert('✅ Exam session updated');
       setShowSessionForm(false);
@@ -11109,13 +11002,12 @@ const ExamModule = ({
   };
 
   // ============================================================
-  // FIX 2: DELETE SESSION — verifies backend actually removed it
+  // DELETE SESSION — verifies backend actually removed it
   // ============================================================
   const handleDeleteSession = async (session) => {
     if (!canDeleteSessions) { alert('You do not have permission'); return; }
     if (!session?.id) { alert('❌ Invalid session'); return; }
 
-    // Prefer hydrated papers if available; otherwise warn with unknown count
     const paperCount = session.papers?.length;
     const paperMsg = typeof paperCount === 'number'
       ? ` and all ${paperCount} paper(s)`
@@ -11129,8 +11021,6 @@ const ExamModule = ({
     try {
       await api.delete(`/exam-sessions/${session.id}`);
 
-      // FIX 2: Verify the session is actually gone from the backend
-      // (catches soft-delete, missing cascade, wrong route, etc.)
       let stillExists = false;
       try {
         const check = await api.get('/exam-sessions');
@@ -11153,12 +11043,10 @@ const ExamModule = ({
       } catch (_) {}
 
       if (stillExists) {
-        console.error('❌ Backend still returns the deleted session!');
         alert(
-          '⚠️ The session was removed from this view, but the server still reports it as existing.\n\n' +
+          '⚠️ The session was removed from this view, but the server still reports it.\n\n' +
           'This usually means the backend DELETE did not fully cascade to papers, ' +
-          'or a soft-delete filter is missing. Please check the backend logs and ' +
-          'the /exam-sessions endpoint.'
+          'or a soft-delete filter is missing.'
         );
       } else {
         alert('✅ Session deleted');
@@ -11420,7 +11308,7 @@ const ExamModule = ({
   };
 
   // ============================================================
-  // PRINT EXAMS
+  // PRINT EXAMS — logo enlarged to 120px
   // ============================================================
   const handlePrintExams = () => {
     if (filteredSessions.length === 0) { alert('No sessions to print'); return; }
@@ -11488,11 +11376,11 @@ const ExamModule = ({
       <style>
         @page { size: A4 portrait; margin: 12mm; }
         body { font-family: 'Segoe UI', Arial, sans-serif; color: #1f2937; padding: 12px; }
-        .print-header { display: flex; align-items: center; gap: 16px; border-bottom: 3px double #4f46e5; padding-bottom: 12px; margin-bottom: 20px; }
-        .print-logo { width: 72px; height: 72px; object-fit: contain; border-radius: 8px; border: 1px solid #e5e7eb; padding: 4px; }
+        .print-header { display: flex; align-items: center; gap: 20px; border-bottom: 3px double #4f46e5; padding-bottom: 14px; margin-bottom: 20px; }
+        .print-logo { width: 120px; height: 120px; object-fit: contain; border-radius: 12px; border: 2px solid #e5e7eb; padding: 6px; background: #fff; }
         .print-title-block { flex: 1; text-align: center; }
-        .print-school-name { font-size: 22px; font-weight: 800; color: #4f46e5; text-transform: uppercase; margin: 0 0 4px 0; }
-        .print-doc-title { font-size: 15px; font-weight: 600; margin: 0; }
+        .print-school-name { font-size: 26px; font-weight: 800; color: #4f46e5; text-transform: uppercase; margin: 0 0 6px 0; letter-spacing: 1px; }
+        .print-doc-title { font-size: 17px; font-weight: 600; margin: 0; color: #1f2937; }
         .session-block { margin-bottom: 24px; page-break-inside: avoid; }
         .session-header { display: flex; justify-content: space-between; background: #eef2ff; padding: 10px 14px; border-radius: 6px 6px 0 0; border: 1px solid #c7d2fe; }
         .session-header h3 { margin: 0 0 4px 0; color: #4338ca; }
@@ -11524,7 +11412,7 @@ const ExamModule = ({
   };
 
   // ============================================================
-  // PRINT RESULTS
+  // PRINT RESULTS — logo enlarged to 120px
   // ============================================================
   const handlePrintResults = () => {
     if (!selectedExamForResults) return;
@@ -11559,11 +11447,11 @@ const ExamModule = ({
       <style>
         @page { size: A4 portrait; margin: 12mm; }
         body { font-family: 'Segoe UI', Arial, sans-serif; padding: 12px; }
-        .print-header { display: flex; align-items: center; gap: 16px; border-bottom: 3px double #4f46e5; padding-bottom: 12px; margin-bottom: 12px; }
-        .print-logo { width: 72px; height: 72px; object-fit: contain; border-radius: 8px; border: 1px solid #e5e7eb; padding: 4px; }
+        .print-header { display: flex; align-items: center; gap: 20px; border-bottom: 3px double #4f46e5; padding-bottom: 14px; margin-bottom: 14px; }
+        .print-logo { width: 120px; height: 120px; object-fit: contain; border-radius: 12px; border: 2px solid #e5e7eb; padding: 6px; background: #fff; }
         .print-title-block { flex: 1; text-align: center; }
-        .print-school-name { font-size: 22px; font-weight: 800; color: #4f46e5; margin: 0 0 4px 0; }
-        .print-doc-title { font-size: 15px; font-weight: 600; margin: 0; }
+        .print-school-name { font-size: 26px; font-weight: 800; color: #4f46e5; margin: 0 0 6px 0; text-transform: uppercase; letter-spacing: 1px; }
+        .print-doc-title { font-size: 17px; font-weight: 600; margin: 0; color: #1f2937; }
         table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 8px; }
         th { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; padding: 6px 8px; text-align: left; font-size: 10px; text-transform: uppercase; }
         td { border: 1px solid #e5e7eb; padding: 6px 8px; }
@@ -11784,23 +11672,15 @@ const ExamModule = ({
               </tr>
             ) : filteredSessions.map(session => {
               const isExpanded = expandedSessions.has(session.id);
-              const isHydrating = hydratingSessionId === session.id;
-              const isHydrated = hydratedSessions.has(session.id);
               const papers = session.papers || [];
-              const paperCountKnown = isHydrated || Array.isArray(session.papers);
 
               return (
                 <React.Fragment key={session.id}>
                   <tr className="hover:bg-gray-50">
                     <td className="px-4 py-3">
-                      <button
-                        onClick={() => toggleSession(session.id)}
-                        disabled={isHydrating}
-                        className="text-gray-500 hover:text-indigo-600 disabled:opacity-50"
-                      >
-                        {isHydrating
-                          ? <i className="fas fa-spinner fa-spin"></i>
-                          : <i className={`fas fa-chevron-${isExpanded ? 'down' : 'right'}`}></i>}
+                      <button onClick={() => toggleSession(session.id)}
+                        className="text-gray-500 hover:text-indigo-600">
+                        <i className={`fas fa-chevron-${isExpanded ? 'down' : 'right'}`}></i>
                       </button>
                     </td>
                     <td className="px-4 py-3 font-medium">{session.name}</td>
@@ -11816,15 +11696,9 @@ const ExamModule = ({
                         : getClassName(session.classId)}
                     </td>
                     <td className="px-4 py-3">
-                      {paperCountKnown ? (
-                        <span className="px-2 py-1 bg-indigo-100 text-indigo-800 rounded-full text-xs font-medium">
-                          {papers.length} paper{papers.length === 1 ? '' : 's'}
-                        </span>
-                      ) : (
-                        <span className="px-2 py-1 bg-gray-100 text-gray-500 rounded-full text-xs">
-                          Expand to load
-                        </span>
-                      )}
+                      <span className="px-2 py-1 bg-indigo-100 text-indigo-800 rounded-full text-xs font-medium">
+                        {papers.length} paper{papers.length === 1 ? '' : 's'}
+                      </span>
                     </td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-1 rounded-full text-xs ${
@@ -11859,37 +11733,15 @@ const ExamModule = ({
                   </tr>
 
                   {isExpanded && (
-                    <>
-                      {isHydrating && (
-                        <tr className="bg-slate-50/40 border-l-4 border-indigo-300">
-                          <td></td>
-                          <td colSpan={7} className="px-4 py-3 text-sm text-gray-500 italic">
-                            <i className="fas fa-spinner fa-spin mr-2"></i>
-                            Loading papers…
-                          </td>
-                        </tr>
-                      )}
-
-                      {!isHydrating && session._paperLoadError && (
-                        <tr className="bg-red-50/40 border-l-4 border-red-300">
-                          <td></td>
-                          <td colSpan={7} className="px-4 py-3 text-sm text-red-600">
-                            <i className="fas fa-exclamation-triangle mr-2"></i>
-                            Could not load papers: {session._paperLoadError}
-                          </td>
-                        </tr>
-                      )}
-
-                      {!isHydrating && !session._paperLoadError && papers.length === 0 && (
-                        <tr className="bg-slate-50/40 border-l-4 border-indigo-300">
-                          <td></td>
-                          <td colSpan={7} className="px-4 py-3 text-sm text-gray-400 italic">
-                            No papers attached to this session.
-                          </td>
-                        </tr>
-                      )}
-
-                      {!isHydrating && papers.map(paper => {
+                    papers.length === 0 ? (
+                      <tr className="bg-slate-50/40 border-l-4 border-indigo-300">
+                        <td></td>
+                        <td colSpan={7} className="px-4 py-3 text-sm text-gray-400 italic">
+                          No papers attached to this session.
+                        </td>
+                      </tr>
+                    ) : (
+                      papers.map(paper => {
                         const paperName = (isUniversity || isTVET)
                           ? getUnitName(paper.unitId)
                           : getSubjectName(paper.subjectId);
@@ -11936,8 +11788,8 @@ const ExamModule = ({
                             </td>
                           </tr>
                         );
-                      })}
-                    </>
+                      })
+                    )
                   )}
                 </React.Fragment>
               );
@@ -11946,9 +11798,7 @@ const ExamModule = ({
         </table>
       </div>
 
-      {/* ============================================================ */}
       {/* SESSION FORM MODAL */}
-      {/* ============================================================ */}
       {showSessionForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-5xl w-full max-h-[92vh] overflow-auto">
@@ -11978,7 +11828,6 @@ const ExamModule = ({
                 </div>
               )}
 
-              {/* Session-level fields */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium mb-1">Exam Name *</label>
@@ -12072,7 +11921,6 @@ const ExamModule = ({
                 </div>
               </div>
 
-              {/* Scope */}
               {isRegularSchool && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <SearchableSelect
@@ -12528,16 +12376,24 @@ const ExamModule = ({
   );
 };
 // ============================================================================
-//  RESULTS MODULE — v10  (full rewrite from scratch)
+//  RESULTS MODULE — v12
 //
-//  Works for:  ECDE_PRIMARY_JSS · SENIOR_SECONDARY · COLLEGE_TVET · UNIVERSITY
-//  Grading:    reads currentSchool.gradingConfig.scale first, then falls back
-//              to the built-in scale for the school category.
-//  Logo:       uses resolveLogoUrl() — handles base64, absolute, and relative.
+//  v12 CHANGE (over v11):
+//   • Exam dropdown now groups papers under their parent session so you
+//     no longer see "END TERM 1" repeated for each paper.
+//   • Selecting a session loads ALL its papers for bulk marks entry.
+//
+//  Preserved from v11:
+//   • Aptitude (KNEC) below term cards
+//   • Removed Report Cards / Subjects / Exams stat cards
+//   • Kept Average + Mean Points stat cards
+//   • Trend arrows: green ▲ / red ▼ / grey ●
+//   • PrintHeader logo enlarged
 // ============================================================================
 const ResultsModule = ({
   exams, setExams, results, students, subjects, classes, courses, programs,
   currentSchool, parents, units, user,
+  admissionSessionId, // optional, if parent passes preselected session
   admissionNumber: propAdmissionNumber
 }) => {
 
@@ -12557,7 +12413,6 @@ const ResultsModule = ({
     currentSchool?.school?.name?.trim() ||
     'School Name';
 
-  // ✅ FIXED: always use resolveLogoUrl
   const schoolLogo = useMemo(() => resolveLogoUrl(currentSchool), [currentSchool]);
 
   const schoolMotto =
@@ -12565,14 +12420,11 @@ const ResultsModule = ({
     currentSchool?.schoolMotto ||
     '';
 
-  // Column labels
   const subjectColumnLabel =
     isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject';
-  const groupColumnLabel =
-    isTVET ? 'Program' : isUniversity ? 'Course' : 'Class';
 
   // ============================================================
-  // GRADING SYSTEM — settings first, then category defaults
+  // GRADING SYSTEM
   // ============================================================
   const customGradingScale = useMemo(() => {
     const scale = currentSchool?.gradingConfig?.scale;
@@ -12591,7 +12443,6 @@ const ResultsModule = ({
 
     const pct = maxMarks > 0 ? (n / maxMarks) * 100 : 0;
 
-    // ✅ 1) School admin's custom grading system (Settings)
     if (hasCustomGrading) {
       const band = customGradingScale.find(b => pct >= b.min && pct <= b.max);
       if (band) {
@@ -12601,10 +12452,8 @@ const ResultsModule = ({
           remark: band.label || band.remark || ''
         };
       }
-      // If custom scale doesn't cover this pct, fall through to category
     }
 
-    // 2) Fallback: built-in scale per category
     const cat = examCategory || schoolCategory;
 
     if (cat === 'UNIVERSITY') {
@@ -12628,7 +12477,6 @@ const ResultsModule = ({
       if (pct >= 30) return { grade: 'BE', points: 1, remark: 'Below Expectations' };
       return { grade: 'NI', points: 0, remark: 'Needs Improvement' };
     }
-    // Senior Secondary (8-4-4)
     if (pct >= 80) return { grade: 'A',  points: 12, remark: 'Excellent' };
     if (pct >= 75) return { grade: 'A-', points: 11, remark: 'Very Good' };
     if (pct >= 70) return { grade: 'B+', points: 10, remark: 'Good' };
@@ -12649,14 +12497,12 @@ const ResultsModule = ({
     );
     if (valid.length === 0) return 'N/A';
 
-    // ✅ If custom scale, use average % and re-grade
     if (hasCustomGrading) {
       const avgPct = valid.reduce((s, c) => s + c.marks, 0) / valid.length;
       const band = customGradingScale.find(b => avgPct >= b.min && avgPct <= b.max);
       if (band) return band.code || band.grade || 'N/A';
     }
 
-    // Fallback: use average points
     const avgPoints = valid.reduce((s, c) => s + (c.points || 0), 0) / valid.length;
     const cat = schoolCategory;
 
@@ -12695,28 +12541,22 @@ const ResultsModule = ({
     return 'E';
   }, [hasCustomGrading, customGradingScale, schoolCategory]);
 
-  // ============================================================
-  // GRADE STYLING (badges / pills) — matches existing modules
-  // ============================================================
   const getGradePillClasses = useCallback((grade) => {
     if (!grade) return 'bg-gray-100 text-gray-500';
     const g = String(grade).toUpperCase();
 
-    // CBC
     if (g === 'EE') return 'bg-emerald-100 text-emerald-800';
     if (g === 'ME') return 'bg-blue-100 text-blue-800';
     if (g === 'AE') return 'bg-amber-100 text-amber-800';
     if (g === 'BE') return 'bg-orange-100 text-orange-800';
     if (g === 'NI') return 'bg-red-100 text-red-800';
 
-    // TVET
     if (g === 'DISTINCTION') return 'bg-emerald-100 text-emerald-800';
     if (g === 'CREDIT')      return 'bg-blue-100 text-blue-800';
     if (g === 'MERIT')       return 'bg-amber-100 text-amber-800';
     if (g === 'PASS')        return 'bg-orange-100 text-orange-800';
     if (g === 'FAIL')        return 'bg-red-100 text-red-800';
 
-    // 8-4-4 / University
     if (['A', 'A-'].includes(g)) return 'bg-emerald-100 text-emerald-800';
     if (['B+', 'B', 'B-'].includes(g)) return 'bg-blue-100 text-blue-800';
     if (['C+', 'C', 'C-'].includes(g)) return 'bg-amber-100 text-amber-800';
@@ -12726,20 +12566,6 @@ const ResultsModule = ({
     return 'bg-gray-100 text-gray-700';
   }, []);
 
-  const getGradeTextClasses = useCallback((grade) => {
-    if (!grade) return 'text-gray-400';
-    const g = String(grade).toUpperCase();
-    if (['DISTINCTION','EE','A','A-'].includes(g)) return 'text-emerald-700 font-semibold';
-    if (['CREDIT','ME','B+','B','B-'].includes(g))  return 'text-blue-700 font-semibold';
-    if (['MERIT','AE','C+','C','C-'].includes(g))   return 'text-amber-700 font-semibold';
-    if (['PASS','BE','D+','D','D-'].includes(g))    return 'text-orange-700 font-semibold';
-    if (['FAIL','NI','E'].includes(g))              return 'text-red-700 font-semibold';
-    return 'text-gray-700 font-semibold';
-  }, []);
-
-  // ============================================================
-  // MERIT TEXT
-  // ============================================================
   const getMeritText = (avg) => {
     if (avg >= 80) return 'Excellent performance — keep it up!';
     if (avg >= 70) return 'Very good work';
@@ -12751,18 +12577,22 @@ const ResultsModule = ({
   };
 
   // ============================================================
-  // TREND ARROW COMPONENT
+  // TREND ARROW — clear colours
   // ============================================================
   const TrendArrow = ({ direction, delta, compact = false }) => {
     if (!direction || direction === 'flat') {
-      return <span className={`text-gray-300 ${compact ? 'text-[10px]' : 'text-xs'}`}>●</span>;
+      return (
+        <span className={`text-gray-400 ${compact ? 'text-[11px]' : 'text-xs'}`}>
+          ● <span className="text-gray-400 font-medium">0</span>
+        </span>
+      );
     }
     const isUp = direction === 'up';
     return (
       <span
         className={`inline-flex items-center gap-0.5 font-bold ${
           isUp ? 'text-emerald-600' : 'text-red-600'
-        } ${compact ? 'text-[10px]' : 'text-xs'}`}
+        } ${compact ? 'text-[11px]' : 'text-xs'}`}
         title={isUp ? `Improved by ${delta}` : `Declined by ${Math.abs(delta)}`}
       >
         {isUp ? '▲' : '▼'}
@@ -12840,8 +12670,7 @@ const ResultsModule = ({
   // ============================================================
   const [viewMode, setViewMode] = useState('marks');
 
-  // Marks entry
-  const [selectedExam, setSelectedExam]         = useState('');
+  const [selectedSession, setSelectedSession]   = useState(admissionSessionId || '');
   const [selectedClass, setSelectedClass]       = useState('');
   const [selectedCourse, setSelectedCourse]     = useState('');
   const [selectedProgram, setSelectedProgram]   = useState('');
@@ -12855,6 +12684,9 @@ const ResultsModule = ({
   const [filterGrade, setFilterGrade]           = useState('');
   const [filteredUnits, setFilteredUnits]       = useState([]);
   const [filteredSubjects, setFilteredSubjects] = useState([]);
+  // Session list with papers, for the grouped dropdown
+  const [examSessions, setExamSessions]         = useState([]);
+  const [loadingSessions, setLoadingSessions]   = useState(false);
 
   const [selectedStudentsForMessage, setSelectedStudentsForMessage] = useState([]);
   const [selectAllForMessage, setSelectAllForMessage]               = useState(false);
@@ -12863,7 +12695,6 @@ const ResultsModule = ({
   const [messageTemplate, setMessageTemplate]                       = useState('');
   const [sendingMessages, setSendingMessages]                       = useState(false);
 
-  // Report
   const [reportClassId, setReportClassId]               = useState('');
   const [reportStudentId, setReportStudentId]           = useState('');
   const [reportTermFilter, setReportTermFilter]         = useState('');
@@ -12872,7 +12703,6 @@ const ResultsModule = ({
   const [reportData, setReportData]                     = useState(null);
   const [loadingReport, setLoadingReport]               = useState(false);
 
-  // Term matrix
   const [termMatrixClassId, setTermMatrixClassId]     = useState('');
   const [termMatrixTerm, setTermMatrixTerm]           = useState(defaultTermValue);
   const [termMatrixExamType, setTermMatrixExamType]   = useState('');
@@ -12884,7 +12714,6 @@ const ResultsModule = ({
   const [termMatrixData, setTermMatrixData]           = useState(null);
   const [loadingTermMatrix, setLoadingTermMatrix]     = useState(false);
 
-  // Student/parent
   const [myResults, setMyResults]               = useState([]);
   const [myStudentRecord, setMyStudentRecord]   = useState(null);
   const [loadingMyData, setLoadingMyData]       = useState(false);
@@ -12905,6 +12734,40 @@ const ResultsModule = ({
   useEffect(() => {
     setTermMatrixTerm(defaultTermValue);
   }, [defaultTermValue]);
+
+  // ============================================================
+  // LOAD EXAM SESSIONS (with papers) — for the grouped dropdown
+  // ============================================================
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoadingSessions(true);
+      try {
+        const res = await api.get('/exam-sessions');
+        // Backend returns { success: true, sessions: [...] } with papers inline
+        const list = res.data?.sessions || res.data?.data?.sessions || res.data?.data || [];
+        if (!cancelled) {
+          const cleaned = (Array.isArray(list) ? list : []).map(s => ({
+            ...s,
+            papers: Array.isArray(s.papers)
+              ? s.papers
+              : Array.isArray(s.exams)
+                ? s.exams
+                : Array.isArray(s.ExamPapers)
+                  ? s.ExamPapers
+                  : []
+          }));
+          setExamSessions(cleaned);
+        }
+      } catch (err) {
+        console.warn('Could not load exam sessions (Results dropdown):', err.message);
+      } finally {
+        if (!cancelled) setLoadingSessions(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [currentSchool?.id]);
 
   // ============================================================
   // HELPERS
@@ -13042,7 +12905,7 @@ const ResultsModule = ({
   };
 
   // ============================================================
-  // DETAILED REPORT (Student Report Card)
+  // DETAILED REPORT
   // ============================================================
   const buildDetailedReport = (studentResults, student) => {
     const filtered = studentResults.filter(r => {
@@ -13146,7 +13009,6 @@ const ResultsModule = ({
 
     const knec = computeKNEC(filtered);
 
-    // Position within class
     let positionInfo = null;
     if (student?.classId) {
       const classmates = (students || []).filter(s => s.classId === student.classId);
@@ -13169,9 +13031,6 @@ const ResultsModule = ({
       overallAverage,
       knec,
       positionInfo,
-      reportCardCount: termCards.length,
-      totalSubjects: new Set(allValid.map(r => r.itemName)).size,
-      totalExamCount: allValid.length,
       meanPoints,
       merit: getMeritText(overallAverage)
     };
@@ -13216,7 +13075,7 @@ const ResultsModule = ({
   };
 
   // ============================================================
-  // TERMLY MATRIX — 4 views
+  // TERMLY MATRIX
   // ============================================================
   const buildTermMatrix = async () => {
     if (!termMatrixClassId) { alert('Please select a class'); return; }
@@ -13278,9 +13137,6 @@ const ResultsModule = ({
       const classObj = classes.find(c => c.id === termMatrixClassId);
       const presentExamTypes = [...new Set(sortedExams.map(e => e.type).filter(Boolean))];
 
-      // ============================================================
-      // VIEW: BY STUDENT
-      // ============================================================
       if (termMatrixView === 'student') {
         const studentObj = studentList.find(s => s.id === termMatrixStudentId);
         if (!studentObj) { alert('Student not found'); return; }
@@ -13338,9 +13194,6 @@ const ResultsModule = ({
         });
       }
 
-      // ============================================================
-      // VIEW: BY SUBJECT / BY CLASS
-      // ============================================================
       else if (termMatrixView === 'subject' || termMatrixView === 'class') {
         const subjectObj = classSubjects.find(s => s.id === termMatrixSubjectId);
         if (!subjectObj) { alert('Subject not found'); return; }
@@ -13383,7 +13236,6 @@ const ResultsModule = ({
           };
         });
 
-        // Rank
         const ranked = [...rows].filter(r => r.hasData).sort((a, b) => b.average - a.average);
         let rank = 1, prev = null;
         ranked.forEach((r, i) => {
@@ -13427,9 +13279,6 @@ const ResultsModule = ({
         });
       }
 
-      // ============================================================
-      // VIEW: BY EXAM
-      // ============================================================
       else if (termMatrixView === 'exam') {
         const targetType = termMatrixExamType;
         const examsOfType = sortedExams.filter(e => e.type === targetType);
@@ -13627,26 +13476,9 @@ const ResultsModule = ({
     }
   }, [selectedClass, subjects, isRegularSchool]);
 
-  const filteredExams = useMemo(() => {
-    let filtered = exams || [];
-    if (isUniversity) {
-      if (selectedCourse)   filtered = filtered.filter(e => e.courseId === selectedCourse);
-      if (selectedYear)     filtered = filtered.filter(e => e.year === parseInt(selectedYear));
-      if (selectedSemester) filtered = filtered.filter(e => e.semester === parseInt(selectedSemester));
-      if (selectedUnit)     filtered = filtered.filter(e => e.unitId === selectedUnit);
-    } else if (isTVET) {
-      if (selectedProgram) filtered = filtered.filter(e => e.programId === selectedProgram);
-      if (selectedYear)    filtered = filtered.filter(e => e.year === parseInt(selectedYear));
-      if (selectedModule)  filtered = filtered.filter(e => e.module === parseInt(selectedModule));
-      if (selectedUnit)    filtered = filtered.filter(e => e.unitId === selectedUnit);
-    } else {
-      if (selectedClass)   filtered = filtered.filter(e => e.classId === selectedClass);
-      if (selectedSubject) filtered = filtered.filter(e => e.subjectId === selectedSubject);
-    }
-    return filtered;
-  }, [exams, selectedCourse, selectedProgram, selectedYear, selectedSemester,
-      selectedModule, selectedUnit, selectedClass, selectedSubject, isUniversity, isTVET]);
-
+  // ============================================================
+  // SESSION-GROUPED DROPDOWN OPTIONS
+  // ============================================================
   const getProgramOptions = () => (programs || []).map(p => ({ value: p.id, label: p.name, subLabel: p.code || '' }));
   const getCourseOptions  = () => (courses  || []).map(c => ({ value: c.id, label: c.name, subLabel: c.code || '' }));
   const getClassOptions   = () => (classes  || []).map(c => ({ value: c.id, label: c.name, subLabel: c.capacity ? `Cap: ${c.capacity}` : '' }));
@@ -13655,10 +13487,34 @@ const ResultsModule = ({
     value: u.id, label: u.name,
     subLabel: isUniversity ? `Sem: ${u.semester || 'N/A'}` : `Module: ${u.module || 'N/A'}`
   }));
-  const getExamOptions = () => (filteredExams || []).map(e => ({
-    value: e.id, label: e.name,
-    subLabel: `${e.type || ''} • ${e.date ? new Date(e.date).toLocaleDateString() : ''}`
-  }));
+
+  // 🔑 The session-grouped options used by the Exam <SearchableSelect>
+  const getExamOptions = () => {
+    const opts = [];
+    (examSessions || []).forEach(session => {
+      const papers = session.papers || [];
+      if (papers.length === 0) return;
+
+      const dateStr = session.startDate
+        ? new Date(session.startDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+        : '';
+      const subLabel = [
+        session.type || '',
+        session.term || '',
+        `${papers.length} paper${papers.length === 1 ? '' : 's'}`,
+        dateStr
+      ].filter(Boolean).join(' • ');
+
+      opts.push({
+        value: session.id,                      // session id, not exam id
+        label: session.name || 'Untitled Session',
+        subLabel,
+        isSession: true                         // marker to distinguish from legacy paper rows
+      });
+    });
+    return opts;
+  };
+
   const getReportStudentOptions = () => (students || [])
     .filter(s => !reportClassId || s.classId === reportClassId)
     .map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}`, subLabel: s.admissionNumber }));
@@ -13728,53 +13584,71 @@ const ResultsModule = ({
   };
 
   // ============================================================
-  // MARKS ENTRY
+  // MARKS ENTRY — now driven by SESSION
   // ============================================================
   const loadExamResults = async () => {
-    if (!selectedExam) { alert('Please select an exam'); return; }
+    if (!selectedSession) { alert('Please select an exam session'); return; }
     setLoading(true); setApiError('');
-    try {
-      const exam = exams.find(e => e.id === selectedExam);
-      if (!exam) { alert('Exam not found'); return; }
 
+    try {
+      // Find the session with papers
+      const session = (examSessions || []).find(s => s.id === selectedSession);
+      if (!session) { alert('Session not found'); return; }
+
+      const papers = session.papers || [];
+      if (papers.length === 0) { alert('This session has no papers'); return; }
+
+      // Collect students once — use first paper's classId (all papers share class)
+      const firstPaper = papers[0];
       let studentList = [];
       const params = {};
-      if (isUniversity && exam.courseId) { params.courseId = exam.courseId; if (exam.year) params.year = exam.year; }
-      else if (isTVET && exam.programId) { params.programId = exam.programId; if (exam.module) params.module = exam.module; if (exam.year) params.year = exam.year; }
-      else if (exam.classId) { params.classId = exam.classId; }
+      if (isUniversity && session.courseId) { params.courseId = session.courseId; if (session.year) params.year = session.year; }
+      else if (isTVET && session.programId) { params.programId = session.programId; if (session.module) params.module = session.module; if (session.year) params.year = session.year; }
+      else if (session.classId || firstPaper.classId) { params.classId = session.classId || firstPaper.classId; }
 
       const res = await api.get('/students', { params });
       studentList = res.data.students || [];
 
-      if (studentList.length === 0) { alert('No students found for this exam'); return; }
+      if (studentList.length === 0) { alert('No students found for this session'); return; }
 
-      let existingResults = [];
-      try {
-        const r = await api.get(`/results/exam/${selectedExam}`);
-        existingResults = r.data.results || [];
-      } catch (_) {}
+      // For each paper, fetch existing results
+      const existingByPaper = {};
+      for (const paper of papers) {
+        try {
+          const r = await api.get(`/results/exam/${paper.id}`);
+          existingByPaper[paper.id] = r.data.results || [];
+        } catch (_) {
+          existingByPaper[paper.id] = [];
+        }
+      }
 
-      const itemName = getItemName({}, exam);
+      // Build one row per student × paper
+      const entries = [];
+      for (const student of studentList) {
+        for (const paper of papers) {
+          const existing = existingByPaper[paper.id].find(r => r.studentId === student.id);
+          const hasMarks = existing?.marks !== undefined && existing?.marks !== null && existing?.marks !== '';
+          const marks = hasMarks ? existing.marks : '';
+          const gradeInfo = hasMarks
+            ? calculateGrade(marks, paper.maxMarks || 100, schoolCategory)
+            : { grade: '', points: 0 };
 
-      const entries = studentList.map(student => {
-        const existing = existingResults.find(r => r.studentId === student.id);
-        const hasMarks = existing?.marks !== undefined && existing?.marks !== null && existing?.marks !== '';
-        const marks = hasMarks ? existing.marks : '';
-        const gradeInfo = hasMarks
-          ? calculateGrade(marks, exam.maxMarks || 100, exam.schoolCategory || schoolCategory)
-          : { grade: '', points: 0 };
-        return {
-          studentId: student.id,
-          studentName: `${student.firstName} ${student.lastName}`,
-          admissionNumber: student.admissionNumber,
-          unitName: itemName,
-          marks,
-          grade: gradeInfo.grade,
-          points: gradeInfo.points,
-          isAbsent: existing?.isAbsent || false,
-          resultId: existing?.id
-        };
-      });
+          entries.push({
+            studentId: student.id,
+            studentName: `${student.firstName} ${student.lastName}`,
+            admissionNumber: student.admissionNumber,
+            examId: paper.id,                    // 🔑 the paper's exam id
+            sessionId: session.id,
+            sessionName: session.name,
+            unitName: getItemName({}, paper) || paper.name || 'Paper',
+            marks,
+            grade: gradeInfo.grade,
+            points: gradeInfo.points,
+            isAbsent: existing?.isAbsent || false,
+            resultId: existing?.id
+          });
+        }
+      }
       setResultEntries(entries);
     } catch (error) {
       setApiError('Failed to load results: ' + (error.response?.data?.message || error.message));
@@ -13790,31 +13664,43 @@ const ResultsModule = ({
     setLoading(true);
     let saved = 0, errors = 0;
     try {
-      const exam = exams.find(e => e.id === selectedExam);
-      if (!exam) { alert('Exam not found'); return; }
+      // Look up paper by exam id for maxMarks / subjectId / unitId
+      const paperById = {};
+      (examSessions || []).forEach(s => (s.papers || []).forEach(p => { paperById[p.id] = p; }));
 
-      let existingByStudentId = {};
-      try {
-        const r = await api.get(`/results/exam/${selectedExam}`);
-        (r.data?.results || []).forEach(x => { existingByStudentId[x.studentId] = x; });
-      } catch (_) {}
+      // Cache existing per exam
+      const existingByExam = {};
+      const uniqueExamIds = [...new Set(toSave.map(e => e.examId))];
+      for (const examId of uniqueExamIds) {
+        try {
+          const r = await api.get(`/results/exam/${examId}`);
+          existingByExam[examId] = {};
+          (r.data?.results || []).forEach(x => { existingByExam[examId][x.studentId] = x; });
+        } catch (_) {
+          existingByExam[examId] = {};
+        }
+      }
 
       for (const entry of toSave) {
         const marks = entry.isAbsent ? 0 : parseFloat(entry.marks) || 0;
         const student = students.find(s => s.id === entry.studentId);
-        if (!student) { errors++; continue; }
+        const paper = paperById[entry.examId];
+        if (!student || !paper) { errors++; continue; }
 
-        const { grade, points } = calculateGrade(marks, exam.maxMarks || 100, exam.schoolCategory || schoolCategory);
+        const { grade, points } = calculateGrade(marks, paper.maxMarks || 100, schoolCategory);
         const data = {
-          studentId: student.id, examId: selectedExam,
+          studentId: student.id, examId: entry.examId,
           marks, grade, points,
           isAbsent: entry.isAbsent,
           remarks: entry.isAbsent ? 'Absent' : ''
         };
-        if (isUniversity || isTVET) data.unitId = exam.unitId;
-        else data.subjectId = exam.subjectId;
+        if (isUniversity || isTVET) data.unitId = paper.unitId;
+        else data.subjectId = paper.subjectId;
 
-        const existing = entry.resultId ? { id: entry.resultId } : existingByStudentId[student.id];
+        const existing = entry.resultId
+          ? { id: entry.resultId }
+          : existingByExam[entry.examId]?.[student.id];
+
         try {
           if (existing?.id) await api.put(`/results/${existing.id}`, data);
           else await api.post('/results', data);
@@ -13831,15 +13717,21 @@ const ResultsModule = ({
     }
   };
 
-  const handleMarkChange = (studentId, value) => {
-    setResultEntries(prev => prev.map(e => e.studentId === studentId ? { ...e, marks: value } : e));
+  const handleMarkChange = (studentId, examId, value) => {
+    setResultEntries(prev => prev.map(e =>
+      (e.studentId === studentId && e.examId === examId) ? { ...e, marks: value } : e
+    ));
   };
-  const handleAbsentChange = (studentId, checked) => {
-    setResultEntries(prev => prev.map(e => e.studentId === studentId ? { ...e, isAbsent: checked, marks: checked ? 0 : e.marks } : e));
+  const handleAbsentChange = (studentId, examId, checked) => {
+    setResultEntries(prev => prev.map(e =>
+      (e.studentId === studentId && e.examId === examId)
+        ? { ...e, isAbsent: checked, marks: checked ? 0 : e.marks }
+        : e
+    ));
   };
   const handleSelectAllForMessage = (checked) => {
     setSelectAllForMessage(checked);
-    setSelectedStudentsForMessage(checked ? filteredResultEntries.map(s => s.studentId) : []);
+    setSelectedStudentsForMessage(checked ? [...new Set(filteredResultEntries.map(s => s.studentId))] : []);
   };
   const handleSelectForMessage = (studentId, checked) => {
     setSelectedStudentsForMessage(prev => checked ? [...prev, studentId] : prev.filter(id => id !== studentId));
@@ -13857,7 +13749,7 @@ const ResultsModule = ({
   const uniqueGrades = [...new Set(resultEntries.map(e => e.grade).filter(Boolean))];
 
   // ============================================================
-  // PRINTABLE HEADER COMPONENT (uses schoolLogo + schoolName + motto)
+  // PRINT HEADER — logo enlarged
   // ============================================================
   const PrintHeader = ({ title, subtitle }) => (
     <div className="text-center border-b-2 border-slate-300 pb-4 mb-4">
@@ -13865,18 +13757,18 @@ const ResultsModule = ({
         <img
           src={schoolLogo}
           alt=""
-          className="w-16 h-16 object-contain rounded-full mx-auto mb-2 border"
+          className="w-32 h-32 object-contain rounded-full mx-auto mb-3 border-2 border-slate-200"
           onError={(e) => { e.currentTarget.style.display = 'none'; }}
         />
       )}
-      <h1 className="text-2xl font-black text-slate-800 uppercase tracking-wider">
+      <h1 className="text-3xl font-black text-slate-800 uppercase tracking-wider">
         {schoolName}
       </h1>
       {schoolMotto && (
-        <p className="text-xs italic text-slate-500 mt-1">"{schoolMotto}"</p>
+        <p className="text-sm italic text-slate-500 mt-1">"{schoolMotto}"</p>
       )}
       {title && (
-        <p className="text-sm font-bold text-slate-700 mt-2 uppercase tracking-wider">{title}</p>
+        <p className="text-base font-bold text-slate-700 mt-2 uppercase tracking-wider">{title}</p>
       )}
       {subtitle && (
         <p className="text-xs text-slate-500 mt-1">{subtitle}</p>
@@ -14130,7 +14022,7 @@ const ResultsModule = ({
   // ============================================================
   return (
     <div className="space-y-6">
-      {(loading || loadingReport || loadingTermMatrix) && (
+      {(loading || loadingReport || loadingTermMatrix || loadingSessions) && (
         <div className="h-1 bg-indigo-600 animate-pulse fixed top-0 left-0 w-full z-50 no-print" />
       )}
       {apiError && (
@@ -14260,20 +14152,8 @@ const ResultsModule = ({
                 </div>
               </div>
 
-              {/* Summary cards */}
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                <div className="bg-blue-50 p-4 rounded-xl text-center border border-blue-100">
-                  <p className="text-xs uppercase tracking-wider text-blue-700 font-bold">Report Cards</p>
-                  <p className="text-3xl font-black text-blue-700 mt-1">{reportData.reportCardCount}</p>
-                </div>
-                <div className="bg-emerald-50 p-4 rounded-xl text-center border border-emerald-100">
-                  <p className="text-xs uppercase tracking-wider text-emerald-700 font-bold">Subjects</p>
-                  <p className="text-3xl font-black text-emerald-700 mt-1">{reportData.totalSubjects}</p>
-                </div>
-                <div className="bg-purple-50 p-4 rounded-xl text-center border border-purple-100">
-                  <p className="text-xs uppercase tracking-wider text-purple-700 font-bold">Exams</p>
-                  <p className="text-3xl font-black text-purple-700 mt-1">{reportData.totalExamCount}</p>
-                </div>
+              {/* Summary cards — only Average + Mean Points */}
+              <div className="grid grid-cols-2 gap-3">
                 <div className="bg-amber-50 p-4 rounded-xl text-center border border-amber-100">
                   <p className="text-xs uppercase tracking-wider text-amber-700 font-bold">Average</p>
                   <p className="text-3xl font-black text-amber-700 mt-1">{reportData.overallAverage.toFixed(1)}%</p>
@@ -14283,48 +14163,6 @@ const ResultsModule = ({
                   <p className="text-3xl font-black text-pink-700 mt-1">{reportData.meanPoints}</p>
                 </div>
               </div>
-
-              {/* KNEC */}
-              {reportData.knec.length > 0 && (
-                <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-                  <div className="bg-gradient-to-r from-purple-500 to-indigo-500 px-6 py-3 text-white">
-                    <h3 className="font-bold text-lg flex items-center gap-2">
-                      <i className="fas fa-brain"></i>KNEC Aptitude Analysis
-                    </h3>
-                    <p className="text-xs text-purple-100 mt-1">
-                      Based on the student's average performance across subject streams
-                    </p>
-                  </div>
-                  <div className="p-6">
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                      {reportData.knec.map((s, i) => {
-                        const isTop = i < 2;
-                        return (
-                          <div key={s.stream} className={`p-3 rounded-lg border-2 text-center ${
-                            isTop ? 'border-purple-400 bg-purple-50' : 'border-gray-200 bg-gray-50'
-                          }`}>
-                            <p className="text-xs font-medium text-gray-600 uppercase">{s.stream}</p>
-                            <p className={`text-2xl font-bold mt-1 ${isTop ? 'text-purple-700' : 'text-gray-700'}`}>
-                              {s.average.toFixed(0)}%
-                            </p>
-                            <p className="text-[10px] text-gray-500 mt-1">{s.count} subject{s.count !== 1 ? 's' : ''}</p>
-                            {isTop && <p className="text-xs text-purple-600 mt-1 font-medium">⭐ Likely to thrive</p>}
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {reportData.knec.length >= 2 && (
-                      <div className="mt-4 p-3 bg-purple-50 rounded-lg">
-                        <p className="text-sm text-purple-800">
-                          <strong>Recommendation:</strong> This student shows strongest potential in{' '}
-                          <strong>{reportData.knec.slice(0, 2).map(s => s.stream).join(' and ')}</strong>.
-                          Consider encouraging further development in these areas.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
 
               {/* Term cards */}
               {reportData.termCards.length === 0 ? (
@@ -14411,6 +14249,48 @@ const ResultsModule = ({
                 ))
               )}
 
+              {/* KNEC — below term cards */}
+              {reportData.knec.length > 0 && (
+                <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+                  <div className="bg-gradient-to-r from-purple-500 to-indigo-500 px-6 py-3 text-white">
+                    <h3 className="font-bold text-lg flex items-center gap-2">
+                      <i className="fas fa-brain"></i>KNEC Aptitude Analysis
+                    </h3>
+                    <p className="text-xs text-purple-100 mt-1">
+                      Based on the student's average performance across subject streams
+                    </p>
+                  </div>
+                  <div className="p-6">
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                      {reportData.knec.map((s, i) => {
+                        const isTop = i < 2;
+                        return (
+                          <div key={s.stream} className={`p-3 rounded-lg border-2 text-center ${
+                            isTop ? 'border-purple-400 bg-purple-50' : 'border-gray-200 bg-gray-50'
+                          }`}>
+                            <p className="text-xs font-medium text-gray-600 uppercase">{s.stream}</p>
+                            <p className={`text-2xl font-bold mt-1 ${isTop ? 'text-purple-700' : 'text-gray-700'}`}>
+                              {s.average.toFixed(0)}%
+                            </p>
+                            <p className="text-[10px] text-gray-500 mt-1">{s.count} subject{s.count !== 1 ? 's' : ''}</p>
+                            {isTop && <p className="text-xs text-purple-600 mt-1 font-medium">⭐ Likely to thrive</p>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {reportData.knec.length >= 2 && (
+                      <div className="mt-4 p-3 bg-purple-50 rounded-lg">
+                        <p className="text-sm text-purple-800">
+                          <strong>Recommendation:</strong> This student shows strongest potential in{' '}
+                          <strong>{reportData.knec.slice(0, 2).map(s => s.stream).join(' and ')}</strong>.
+                          Consider encouraging further development in these areas.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="print-only pt-12 border-t border-slate-300">
                 <div className="grid grid-cols-3 gap-8 text-center text-xs text-slate-600">
                   <div><div className="border-t border-slate-400 mt-10 pt-2">Class Teacher</div></div>
@@ -14431,13 +14311,11 @@ const ResultsModule = ({
       {/* ============================================================ */}
       {viewMode === 'term-matrix' && canViewAllResults && (
         <>
-          {/* Control panel */}
           <div className="bg-white p-6 rounded-xl shadow-sm border no-print">
             <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
               <i className="fas fa-th text-indigo-600"></i>Termly Matrix
             </h3>
 
-            {/* View toggle */}
             <div className="mb-4">
               <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">View</label>
               <div className="flex flex-wrap gap-2">
@@ -14465,7 +14343,6 @@ const ResultsModule = ({
               </div>
             </div>
 
-            {/* Filters */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <SearchableSelect
                 label="Class *"
@@ -14514,7 +14391,6 @@ const ResultsModule = ({
               )}
             </div>
 
-            {/* Options */}
             <div className="mt-4 flex flex-wrap items-center gap-6">
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={showTrendArrows}
@@ -14542,7 +14418,7 @@ const ResultsModule = ({
               <div className="bg-slate-800 text-white px-6 py-5">
                 <div className="text-center mb-4">
                   {schoolLogo && (
-                    <img src={schoolLogo} alt="" className="w-16 h-16 object-contain rounded-full mx-auto mb-2 border-2 border-white/20" />
+                    <img src={schoolLogo} alt="" className="w-24 h-24 object-contain rounded-full mx-auto mb-2 border-2 border-white/20" />
                   )}
                   <h1 className="text-2xl font-black uppercase tracking-wider">{schoolName}</h1>
                   {schoolMotto && <p className="text-slate-300 text-sm italic mt-1">"{schoolMotto}"</p>}
@@ -14656,7 +14532,7 @@ const ResultsModule = ({
               <div className="bg-slate-800 text-white px-6 py-5">
                 <div className="text-center mb-4">
                   {schoolLogo && (
-                    <img src={schoolLogo} alt="" className="w-16 h-16 object-contain rounded-full mx-auto mb-2 border-2 border-white/20" />
+                    <img src={schoolLogo} alt="" className="w-24 h-24 object-contain rounded-full mx-auto mb-2 border-2 border-white/20" />
                   )}
                   <h1 className="text-2xl font-black uppercase tracking-wider">{schoolName}</h1>
                   {schoolMotto && <p className="text-slate-300 text-sm italic mt-1">"{schoolMotto}"</p>}
@@ -14794,7 +14670,7 @@ const ResultsModule = ({
               <div className="bg-slate-800 text-white px-6 py-5">
                 <div className="text-center mb-4">
                   {schoolLogo && (
-                    <img src={schoolLogo} alt="" className="w-16 h-16 object-contain rounded-full mx-auto mb-2 border-2 border-white/20" />
+                    <img src={schoolLogo} alt="" className="w-24 h-24 object-contain rounded-full mx-auto mb-2 border-2 border-white/20" />
                   )}
                   <h1 className="text-2xl font-black uppercase tracking-wider">{schoolName}</h1>
                   {schoolMotto && <p className="text-slate-300 text-sm italic mt-1">"{schoolMotto}"</p>}
@@ -14899,13 +14775,13 @@ const ResultsModule = ({
             </div>
           )}
 
-          {/* ============= VIEW: BY CLASS (same as Subject but with delta always on) ============= */}
+          {/* ============= VIEW: BY CLASS ============= */}
           {termMatrixData && termMatrixData.view === 'class' && (
             <div id="term-matrix-print" className="bg-white rounded-xl shadow-sm border overflow-hidden">
               <div className="bg-slate-800 text-white px-6 py-5">
                 <div className="text-center mb-4">
                   {schoolLogo && (
-                    <img src={schoolLogo} alt="" className="w-16 h-16 object-contain rounded-full mx-auto mb-2 border-2 border-white/20" />
+                    <img src={schoolLogo} alt="" className="w-24 h-24 object-contain rounded-full mx-auto mb-2 border-2 border-white/20" />
                   )}
                   <h1 className="text-2xl font-black uppercase tracking-wider">{schoolName}</h1>
                   {schoolMotto && <p className="text-slate-300 text-sm italic mt-1">"{schoolMotto}"</p>}
@@ -15050,11 +14926,15 @@ const ResultsModule = ({
                   options={getUnitOptions()}
                   placeholder={`Search ${isTVET ? 'module' : 'unit'}...`} />
               )}
-              <SearchableSelect label="Exam" value={selectedExam}
-                onChange={(e) => setSelectedExam(e.target.value)}
-                options={getExamOptions()} placeholder="Search exam..." />
+
+              {/* 🔑 Session-grouped exam dropdown */}
+              <SearchableSelect label="Exam Session" value={selectedSession}
+                onChange={(e) => setSelectedSession(e.target.value)}
+                options={getExamOptions()}
+                placeholder={loadingSessions ? 'Loading sessions...' : 'Search session...'} />
+
               <div className="flex items-end">
-                <button onClick={loadExamResults} disabled={!selectedExam || loading}
+                <button onClick={loadExamResults} disabled={!selectedSession || loading}
                   className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium">
                   {loading ? 'Loading...' : 'Load Results'}
                 </button>
@@ -15074,7 +14954,7 @@ const ResultsModule = ({
                     </label>
                   )}
                   <span className="text-sm text-slate-600">
-                    Selected: <strong>{selectedStudentsForMessage.length}</strong> · Total: <strong>{resultEntries.length}</strong>
+                    Selected: <strong>{selectedStudentsForMessage.length}</strong> · Rows: <strong>{resultEntries.length}</strong>
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -15107,7 +14987,7 @@ const ResultsModule = ({
                   </thead>
                   <tbody className="divide-y">
                     {filteredResultEntries.map((entry, idx) => (
-                      <tr key={entry.studentId} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
+                      <tr key={`${entry.studentId}-${entry.examId}`} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
                         {canSendMessages && (
                           <td className="px-4 py-3 text-center border-r">
                             <input type="checkbox"
@@ -15120,13 +15000,17 @@ const ResultsModule = ({
                         <td className="px-4 py-3 border-r">{entry.unitName}</td>
                         <td className="px-4 py-3 text-center border-r">
                           <input type="number" value={entry.marks}
-                            onChange={(e) => handleMarkChange(entry.studentId, e.target.value)}
+                            onChange={(e) => handleMarkChange(entry.studentId, entry.examId, e.target.value)}
                             onBlur={(e) => {
                               if (e.target.value !== '') {
-                                const exam = exams.find(x => x.id === selectedExam);
-                                const gi = calculateGrade(e.target.value, exam?.maxMarks || 100, exam?.schoolCategory || schoolCategory);
+                                const paper = resultEntries.find(x =>
+                                  x.studentId === entry.studentId && x.examId === entry.examId
+                                );
+                                const gi = calculateGrade(e.target.value, 100, schoolCategory);
                                 setResultEntries(prev => prev.map(x =>
-                                  x.studentId === entry.studentId ? { ...x, grade: gi.grade, points: gi.points } : x
+                                  (x.studentId === entry.studentId && x.examId === entry.examId)
+                                    ? { ...x, grade: gi.grade, points: gi.points }
+                                    : x
                                 ));
                               }
                             }}
@@ -15142,7 +15026,7 @@ const ResultsModule = ({
                         {canAddResults && (
                           <td className="px-4 py-3 text-center">
                             <input type="checkbox" checked={entry.isAbsent}
-                              onChange={(e) => handleAbsentChange(entry.studentId, e.target.checked)} />
+                              onChange={(e) => handleAbsentChange(entry.studentId, entry.examId, e.target.checked)} />
                           </td>
                         )}
                       </tr>
@@ -15161,11 +15045,13 @@ const ResultsModule = ({
                   )}
                   {canPublishResults && (
                     <button onClick={async () => {
-                      if (!selectedExam) return;
+                      if (!selectedSession) return;
                       try {
-                        const exam = exams.find(e => e.id === selectedExam);
-                        await api.put(`/exams/${selectedExam}`, { ...exam, isPublished: true, resultsPublished: true, publishedAt: new Date().toISOString() });
-                        setExams(prev => prev.map(e => e.id === selectedExam ? { ...e, isPublished: true, resultsPublished: true, publishedAt: new Date().toISOString() } : e));
+                        const session = examSessions.find(s => s.id === selectedSession);
+                        if (!session) return;
+                        for (const paper of (session.papers || [])) {
+                          await api.put(`/exams/${paper.id}`, { ...paper, isPublished: true, resultsPublished: true, publishedAt: new Date().toISOString() });
+                        }
                         alert('✅ Results published!');
                       } catch (err) { alert('❌ Failed'); }
                     }}
@@ -15212,29 +15098,28 @@ const ResultsModule = ({
                 <button onClick={async () => {
                   setSendingMessages(true);
                   try {
-                    const exam = exams.find(e => e.id === selectedExam);
                     for (const sid of selectedStudentsForMessage) {
-                      const student = resultEntries.find(e => e.studentId === sid);
-                      if (!student) continue;
+                      const rowsForStudent = resultEntries.filter(e => e.studentId === sid);
+                      if (rowsForStudent.length === 0) continue;
+                      const first = rowsForStudent[0];
                       try {
                         const res = await api.get(`/parents?studentId=${sid}`);
                         const studentParents = res.data.parents || [];
                         for (const parent of studentParents) {
-                          const itemName = getItemName({}, exam);
                           const msg = (messageTemplate || `Dear Parent, {student_name} (Adm {admission}) scored {marks} ({grade}) in {subject} for {exam_name}.`)
-                            .replace(/{student_name}/g, student.studentName)
-                            .replace(/{admission}/g, student.admissionNumber)
-                            .replace(/{exam_name}/g, exam.name)
-                            .replace(/{subject}/g, itemName)
-                            .replace(/{marks}/g, student.marks)
-                            .replace(/{grade}/g, student.grade)
+                            .replace(/{student_name}/g, first.studentName)
+                            .replace(/{admission}/g, first.admissionNumber)
+                            .replace(/{exam_name}/g, first.sessionName || '')
+                            .replace(/{subject}/g, first.unitName || '')
+                            .replace(/{marks}/g, first.marks || '')
+                            .replace(/{grade}/g, first.grade || '')
                             .replace(/{school_name}/g, schoolName);
                           if ((messageType === 'SMS' || messageType === 'BOTH') && parent.User?.phone) {
                             await api.post('/messages', { type: 'SMS', content: msg, recipientType: 'PARENT',
                               recipients: [{ type: 'user', id: parent.userId }], sendNow: true, schoolId: currentSchool?.id });
                           }
                           if ((messageType === 'EMAIL' || messageType === 'BOTH') && parent.User?.email) {
-                            await api.post('/messages', { type: 'EMAIL', subject: `Results ${student.studentName}`,
+                            await api.post('/messages', { type: 'EMAIL', subject: `Results ${first.studentName}`,
                               content: msg, recipientType: 'PARENT', recipients: [{ type: 'user', id: parent.userId }],
                               sendNow: true, schoolId: currentSchool?.id });
                           }
