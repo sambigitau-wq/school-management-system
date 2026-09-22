@@ -5156,7 +5156,7 @@ const StudentSelect = ({ label, value, onChange, options = [] }) => (
 );
 
 // ============================================================
-//  STUDENT MODULE
+//  STUDENT MODULE — Enhanced v2
 // ============================================================
 const StudentModule = ({
   students = [],
@@ -5171,6 +5171,7 @@ const StudentModule = ({
   setParents,
   fees = [],
   payments = [],
+  discounts = [],
   form,
   setForm,
   onSubmit,
@@ -5184,7 +5185,7 @@ const StudentModule = ({
   setAttendance,
   user
 }) => {
-  // ---- Aliases for the module-scope sub-components ----
+  // ---- Aliases for module-scope sub-components ----
   const SearchableSelect = StudentSearchableSelect;
   const TextInput = StudentTextInput;
   const SelectField = StudentSelect;
@@ -5215,6 +5216,12 @@ const StudentModule = ({
     if (!iso) return '—';
     const d = new Date(iso);
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-KE', {
+      style: 'currency', currency: 'KES', minimumFractionDigits: 0
+    }).format(amount || 0);
   };
 
   const buildAdmissionNumber = (year, seq, prefix = ADM_PREFIX) => {
@@ -5275,8 +5282,6 @@ const StudentModule = ({
 
   // ==================================================================
   //  SENIOR SECONDARY — Form vs Grade detection
-  //  "Form 1".."Form 4"      → traditional grading (A, B+, B, ...)
-  //  "Grade 10".."Grade 12"  → CBC grading (EE, ME, AE, BE, NI)
   // ==================================================================
   const isCBCSeniorLevel = (levelName) => {
     if (!levelName) return false;
@@ -5315,7 +5320,8 @@ const StudentModule = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [classFilter, setClassFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [viewMode, setViewMode] = useState('grid');
+  // ✅ DEFAULT TO TABLE VIEW
+  const [viewMode, setViewMode] = useState('table');
 
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
@@ -5326,12 +5332,22 @@ const StudentModule = ({
   const [studentAttendance, setStudentAttendance] = useState([]);
   const [activeDetailTab, setActiveDetailTab] = useState('overview');
 
+  // ✅ INVOICE STATE
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [invoiceData, setInvoiceData] = useState(null);
+  const [loadingInvoice, setLoadingInvoice] = useState(false);
+
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showAddParentModal, setShowAddParentModal] = useState(false);
   const [selectedStudentForParent, setSelectedStudentForParent] = useState(null);
 
   const [autoAdm, setAutoAdm] = useState(true);
   const [admPreview, setAdmPreview] = useState('');
+
+  // ✅ Photo state
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState('');
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   // ✅ Password visibility toggles
   const [showStudentPassword, setShowStudentPassword] = useState(false);
@@ -5375,9 +5391,9 @@ const StudentModule = ({
       currentYear: 1, currentSemester: 1, currentModule: '',
       boardingStatus: 'DAY',
       transportRouteId: '',
+      passportPhoto: '',   // ✅ NEW
       medicalInfo: { bloodGroup: '', allergies: '', disabilities: '' },
 
-      // ✅ STUDENT LOGIN — RESTORED
       studentLogin: {
         createAccount: false,
         email: '',
@@ -5494,7 +5510,7 @@ const StudentModule = ({
   const moduleLevelOptions = ['Module 1', 'Module 2', 'Module 3', 'Module 4'];
 
   // ==================================================================
-  //  GRADE HELPERS — Empty marks never fabricate a grade
+  //  GRADE HELPERS
   // ==================================================================
   const getGrade = (marks, levelHint = null) => {
     if (marks === null || marks === undefined || marks === '') return { grade: '', points: 0 };
@@ -5542,21 +5558,18 @@ const StudentModule = ({
   const getGradeColor = (grade) => {
     if (!grade || grade === '') return 'bg-gray-100 text-gray-500';
 
-    // TVET
     if (grade === 'DISTINCTION') return 'bg-green-100 text-green-800';
     if (grade === 'CREDIT') return 'bg-blue-100 text-blue-800';
     if (grade === 'MERIT') return 'bg-yellow-100 text-yellow-800';
     if (grade === 'PASS') return 'bg-orange-100 text-orange-800';
     if (grade === 'FAIL') return 'bg-red-100 text-red-800';
 
-    // CBC
     if (grade === 'Exceeding Expectations') return 'bg-green-100 text-green-800';
     if (grade === 'Meeting Expectations') return 'bg-blue-100 text-blue-800';
     if (grade === 'Approaching Expectations') return 'bg-yellow-100 text-yellow-800';
     if (grade === 'Below Expectations') return 'bg-orange-100 text-orange-800';
     if (grade === 'Needs Improvement') return 'bg-red-100 text-red-800';
 
-    // Letters
     if (['A', 'A-'].includes(grade)) return 'bg-green-100 text-green-800';
     if (['B+', 'B', 'B-'].includes(grade)) return 'bg-blue-100 text-blue-800';
     if (['C+', 'C', 'C-'].includes(grade)) return 'bg-yellow-100 text-yellow-800';
@@ -5564,6 +5577,51 @@ const StudentModule = ({
     if (grade === 'E') return 'bg-red-100 text-red-800';
 
     return 'bg-gray-100 text-gray-800';
+  };
+
+  // ==================================================================
+  //  PHOTO HANDLING
+  // ==================================================================
+  const handlePhotoSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate size (5 MB max)
+    if (file.size > 5 * 1024 * 1024) {
+      setSubmitError('Photo must be less than 5 MB');
+      return;
+    }
+
+    // Validate type
+    if (!/^image\/(jpeg|jpg|png|gif|webp)$/i.test(file.type)) {
+      setSubmitError('Only JPG, PNG, GIF, or WEBP images are allowed');
+      return;
+    }
+
+    setPhotoFile(file);
+    const reader = new FileReader();
+    reader.onloadend = () => setPhotoPreview(reader.result);
+    reader.readAsDataURL(file);
+  };
+
+  const uploadStudentPhoto = async () => {
+    if (!photoFile) return formState.passportPhoto || null;
+
+    setUploadingPhoto(true);
+    try {
+      const fd = new FormData();
+      fd.append('photo', photoFile);
+      const res = await api.post('/students/upload-photo', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      return res.data?.photoUrl || null;
+    } catch (err) {
+      console.error('Photo upload failed:', err);
+      // Fallback: keep the base64 preview in the DB if the endpoint is missing
+      return photoPreview || null;
+    } finally {
+      setUploadingPhoto(false);
+    }
   };
 
   // ==================================================================
@@ -5578,7 +5636,6 @@ const StudentModule = ({
     uuidFields.forEach(f => { if (prepared[f] === '') prepared[f] = null; });
     numericFields.forEach(f => { prepared[f] = toNumberOrNull(prepared[f]); });
 
-    // ✅ Student login block
     if (prepared.studentLogin && typeof prepared.studentLogin === 'object') {
       const sl = { ...prepared.studentLogin };
       if (!sl.createAccount) {
@@ -5592,7 +5649,6 @@ const StudentModule = ({
       }
     }
 
-    // Parent block
     if (prepared.parent && typeof prepared.parent === 'object') {
       const parent = { ...prepared.parent };
       parent.monthlyIncome = toNumberOrNull(parent.monthlyIncome);
@@ -5671,6 +5727,8 @@ const StudentModule = ({
     setFormState(emptyForm());
     setAutoAdm(true);
     setSubmitError('');
+    setPhotoFile(null);
+    setPhotoPreview('');
     setShowStudentPassword(false);
     setShowParentPassword(false);
     setShowForm(true);
@@ -5683,6 +5741,8 @@ const StudentModule = ({
     setEditingId(student.id);
     setAutoAdm(false);
     setSubmitError('');
+    setPhotoFile(null);
+    setPhotoPreview(student.passportPhoto || '');
     setShowStudentPassword(false);
     setShowParentPassword(false);
     setFormState({
@@ -5709,6 +5769,7 @@ const StudentModule = ({
       currentModule: student.currentModule || '',
       boardingStatus: student.boardingStatus || 'DAY',
       transportRouteId: student.transportRouteId || '',
+      passportPhoto: student.passportPhoto || '',
       medicalInfo: student.medicalInfo || { bloodGroup: '', allergies: '', disabilities: '' },
       studentLogin: { createAccount: false, email: '', password: '' },
       parent: {
@@ -5731,6 +5792,8 @@ const StudentModule = ({
     setEditingId(null);
     setAutoAdm(true);
     setSubmitError('');
+    setPhotoFile(null);
+    setPhotoPreview('');
     setShowStudentPassword(false);
     setShowParentPassword(false);
     setFormState(emptyForm());
@@ -5754,11 +5817,8 @@ const StudentModule = ({
     if (isTVET && !f.programId) { setSubmitError('Please select a program.'); return; }
     if (!isUniversity && !isTVET && !f.classId) { setSubmitError('Please select a class.'); return; }
 
-    // ✅ Validate student login block if enabled
     if (f.studentLogin?.createAccount) {
-      if (!f.studentLogin.email?.trim()) {
-        setSubmitError('Student login email is required.'); return;
-      }
+      if (!f.studentLogin.email?.trim()) { setSubmitError('Student login email is required.'); return; }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.studentLogin.email.trim())) {
         setSubmitError('Student login email is not valid.'); return;
       }
@@ -5785,7 +5845,11 @@ const StudentModule = ({
 
     setLoading(true);
     try {
-      const payload = prepareFormData(f);
+      // 1. Upload photo if selected
+      const photoUrl = await uploadStudentPhoto();
+
+      // 2. Prepare payload
+      const payload = prepareFormData({ ...f, passportPhoto: photoUrl || f.passportPhoto || null });
 
       if (typeof onSubmit === 'function') {
         await onSubmit(e, payload);
@@ -5818,7 +5882,11 @@ const StudentModule = ({
     setSubmitError('');
     setLoading(true);
     try {
-      const payload = prepareFormData(formState);
+      const photoUrl = await uploadStudentPhoto();
+      const payload = prepareFormData({
+        ...formState,
+        passportPhoto: photoUrl || formState.passportPhoto || null
+      });
       if (typeof handleUpdate === 'function') {
         await handleUpdate('/students', editingId, payload, setStudents, students);
       } else {
@@ -5883,6 +5951,159 @@ const StudentModule = ({
     } finally {
       setLoading(false);
     }
+  };
+
+  // ==================================================================
+  //  INVOICE — Fee statement with terms, payments, carry-forward
+  // ==================================================================
+  const openInvoice = async (student) => {
+    if (!student) return;
+    setSelectedStudent(student);
+    setShowInvoiceModal(true);
+    setLoadingInvoice(true);
+    setInvoiceData(null);
+
+    try {
+      // 1. Fetch the student's full statement from the backend
+      let stmt = null;
+      try {
+        const r = await api.get(`/students/${student.id}/fee-statement`);
+        stmt = r.data?.statement;
+      } catch (err) {
+        console.warn('fee-statement endpoint failed, computing locally');
+      }
+
+      // 2. If the backend didn't provide a statement, build it from local props
+      if (!stmt) {
+        stmt = buildLocalStatement(student);
+      }
+
+      setInvoiceData(stmt);
+    } catch (err) {
+      console.error('openInvoice error:', err);
+      setErrorMessage('Failed to load invoice');
+    } finally {
+      setLoadingInvoice(false);
+    }
+  };
+
+  // Fallback invoice builder — uses props only (works even if API is offline)
+  const buildLocalStatement = (student) => {
+    // Find fees that apply to this student
+    const applicable = (fees || []).filter(f => {
+      if (isUniversity) return String(f.courseId) === String(student.courseId);
+      if (isTVET)       return String(f.programId) === String(student.programId);
+      return String(f.classId) === String(student.classId);
+    });
+
+    // Group fees by term/semester/module
+    const groups = {};
+    applicable.forEach(fee => {
+      const key = isUniversity
+        ? (fee.term || fee.semester ? `Semester ${fee.semester || fee.term}` : 'Unspecified')
+        : isTVET
+        ? (fee.module ? `Module ${fee.module}` : fee.term || 'Unspecified')
+        : (fee.term || 'Unspecified');
+
+      if (!groups[key]) {
+        groups[key] = { term: key, fees: [], total: 0, paid: 0, discount: 0 };
+      }
+
+      const amount = parseFloat(fee.amount) || 0;
+
+      // Resolve discount for this fee
+      let discount = 0;
+      const studentDiscounts = (discounts || []).filter(d =>
+        String(d.studentId) === String(student.id) &&
+        (d.isActive !== false && d.isActive !== 0 && d.isActive !== 'false')
+      );
+      if (studentDiscounts.length > 0) {
+        // Sum all applicable discounts (feeId match OR student-wide feeId=null)
+        let totalDisc = 0;
+        studentDiscounts.forEach(d => {
+          if (d.feeId == null || String(d.feeId) === String(fee.id)) {
+            const v = parseFloat(d.value) || 0;
+            const t = String(d.type || '').toUpperCase();
+            if (t === 'PERCENT' || t === 'PERCENTAGE') totalDisc += amount * (v / 100);
+            else totalDisc += v;
+          }
+        });
+        discount = Math.min(totalDisc, amount);
+      } else {
+        // Fallback to fee-level default
+        if (parseFloat(fee.discountPercent) > 0) discount = amount * (parseFloat(fee.discountPercent) / 100);
+        else if (parseFloat(fee.discountAmount) > 0) discount = parseFloat(fee.discountAmount);
+      }
+
+      const paid = (payments || [])
+        .filter(p => String(p.studentId) === String(student.id) && String(p.feeId) === String(fee.id))
+        .reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+
+      groups[key].fees.push({ ...fee, discount, paid, net: Math.max(0, amount - discount) });
+      groups[key].total += amount;
+      groups[key].discount += discount;
+      groups[key].paid += paid;
+    });
+
+    // Sort groups chronologically (Term 1, Term 2, Term 3, ...)
+    const sortedGroups = Object.values(groups).sort((a, b) => {
+      const na = parseInt(String(a.term).replace(/\D/g, '')) || 0;
+      const nb = parseInt(String(b.term).replace(/\D/g, '')) || 0;
+      return na - nb;
+    });
+
+    // Compute carry-forward
+    let carryForward = 0;
+    const termStatements = sortedGroups.map(g => {
+      const net = Math.max(0, g.total - g.discount);
+      const billed = net + carryForward;         // what's payable this term
+      const paidThisTerm = g.paid;
+      const newBalance = billed - paidThisTerm;
+      const nextCarry = newBalance > 0 ? newBalance : 0; // only carry forward positive balances
+
+      const row = {
+        term: g.term,
+        fees: g.fees,
+        grossBilled: g.total,
+        discount: g.discount,
+        netBilled: net,
+        broughtForward: carryForward,
+        billedThisTerm: billed,
+        paidThisTerm,
+        balanceCarriedForward: nextCarry,
+        isPaid: newBalance <= 0
+      };
+
+      carryForward = nextCarry;
+      return row;
+    });
+
+    const totals = {
+      grossBilled: termStatements.reduce((s, t) => s + t.grossBilled, 0),
+      discount:    termStatements.reduce((s, t) => s + t.discount, 0),
+      netBilled:   termStatements.reduce((s, t) => s + t.netBilled, 0),
+      paid:        termStatements.reduce((s, t) => s + t.paidThisTerm, 0),
+      outstanding: carryForward
+    };
+
+    return {
+      student: {
+        id: student.id,
+        firstName: student.firstName,
+        lastName: student.lastName,
+        admissionNumber: student.admissionNumber,
+        courseName: courses.find(c => c.id === student.courseId)?.name,
+        programName: programs.find(p => p.id === student.programId)?.name,
+        className: classes.find(c => c.id === student.classId)?.name
+      },
+      termStatements,
+      totals,
+      school: {
+        name: currentSchool?.name,
+        motto: currentSchool?.motto,
+        contact: currentSchool?.contact
+      }
+    };
   };
 
   // ==================================================================
@@ -5967,6 +6188,14 @@ const StudentModule = ({
         if (setParents) setParents(pr.data.parents || []);
       } catch {}
 
+      // Refresh the details modal if open
+      if (showDetailsModal && selectedStudent) {
+        try {
+          const g = await api.get(`/parents?studentId=${selectedStudent.id}`);
+          setStudentParents(g.data.parents || []);
+        } catch {}
+      }
+
       setShowAddParentModal(false);
       setSuccessMessage('✅ Guardian added successfully');
       setTimeout(() => setSuccessMessage(''), 4000);
@@ -5975,6 +6204,16 @@ const StudentModule = ({
     } finally {
       setLoading(false);
     }
+  };
+
+  // ==================================================================
+  //  RESOLVE CLASS NAME HELPER
+  // ==================================================================
+  const getStudentClassLabel = (student) => {
+    if (!student) return '—';
+    if (isUniversity) return courses.find(c => c.id === student.courseId)?.name || 'No Course';
+    if (isTVET) return programs.find(p => p.id === student.programId)?.name || 'No Program';
+    return classes.find(c => c.id === student.classId)?.name || 'No Class';
   };
 
   // ==================================================================
@@ -6013,6 +6252,103 @@ const StudentModule = ({
   };
 
   // ==================================================================
+  //  GROUP RESULTS BY EXAM FOR COMPREHENSIVE REPORT
+  // ==================================================================
+  const groupedResults = useMemo(() => {
+    if (!studentResults || studentResults.length === 0) return [];
+
+    // Group by exam (Term/Period)
+    const map = new Map();
+    studentResults.forEach(r => {
+      const exam = exams.find(e => e.id === r.examId);
+      const examKey = exam?.id || r.examId || 'unknown';
+      const examLabel = exam?.name || 'Unspecified Exam';
+      const examTerm = exam?.term || 'Unspecified';
+      const examDate = exam?.date;
+
+      if (!map.has(examKey)) {
+        map.set(examKey, {
+          examId: examKey,
+          examName: examLabel,
+          term: examTerm,
+          date: examDate,
+          subjects: [],
+          totalMarks: 0,
+          totalPoints: 0,
+          count: 0
+        });
+      }
+      const group = map.get(examKey);
+
+      const itemName = isUniversity || isTVET
+        ? (units.find(u => u.id === r.unitId)?.name || '—')
+        : (subjects.find(s => s.id === r.subjectId)?.name || '—');
+
+      const marks = parseFloat(r.marks) || 0;
+      const levelHint = studentDetails?.classId
+        ? classes.find(c => c.id === studentDetails.classId)?.name
+        : null;
+      const calc = getGrade(marks, levelHint);
+
+      group.subjects.push({
+        id: r.id,
+        subjectName: itemName,
+        marks,
+        grade: r.grade || calc.grade,
+        points: r.points ?? calc.points,
+        remarks: r.remarks,
+        isAbsent: r.isAbsent
+      });
+      group.totalMarks += marks;
+      group.totalPoints += (r.points ?? calc.points) || 0;
+      group.count += 1;
+    });
+
+    return Array.from(map.values()).map(g => {
+      const avg = g.count > 0 ? g.totalMarks / g.count : 0;
+      return {
+        ...g,
+        average: avg,
+        meanGrade: getGrade(avg, studentDetails?.classId
+          ? classes.find(c => c.id === studentDetails.classId)?.name : null
+        ).grade
+      };
+    });
+  }, [studentResults, exams, subjects, units, studentDetails, classes, isUniversity, isTVET]);
+
+  // ==================================================================
+  //  GROUP ATTENDANCE BY MONTH FOR CLARITY
+  // ==================================================================
+  const attendanceSummary = useMemo(() => {
+    if (!studentAttendance || studentAttendance.length === 0) {
+      return { byStatus: {}, byMonth: [], total: 0, presentPct: 0 };
+    }
+
+    const byStatus = { PRESENT: 0, ABSENT: 0, LATE: 0, PERMISSION: 0, SICK: 0, FIELD_TRIP: 0, EXCUSED: 0 };
+    const byMonth = {};
+
+    studentAttendance.forEach(a => {
+      const s = (a.status || 'PRESENT').toUpperCase();
+      if (byStatus[s] !== undefined) byStatus[s] += 1;
+
+      const monthKey = a.date ? String(a.date).slice(0, 7) : 'Unknown';
+      if (!byMonth[monthKey]) byMonth[monthKey] = { month: monthKey, present: 0, absent: 0, late: 0, other: 0, total: 0 };
+      byMonth[monthKey].total += 1;
+      if (s === 'PRESENT') byMonth[monthKey].present += 1;
+      else if (s === 'ABSENT') byMonth[monthKey].absent += 1;
+      else if (s === 'LATE') byMonth[monthKey].late += 1;
+      else byMonth[monthKey].other += 1;
+    });
+
+    const total = studentAttendance.length;
+    const presentPct = total > 0 ? ((byStatus.PRESENT / total) * 100).toFixed(1) : 0;
+
+    const monthRows = Object.values(byMonth).sort((a, b) => a.month.localeCompare(b.month));
+
+    return { byStatus, byMonth: monthRows, total, presentPct };
+  }, [studentAttendance]);
+
+  // ==================================================================
   //  RENDER — student role view
   // ==================================================================
   if (isStudent) {
@@ -6048,21 +6384,23 @@ const StudentModule = ({
             <div className="bg-white rounded-xl shadow-sm overflow-hidden">
               <div className="bg-gradient-to-r from-indigo-500 to-purple-600 p-6 text-white">
                 <div className="flex items-center space-x-4">
-                  <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center">
-                    <span className="text-3xl font-bold text-indigo-600">
-                      {myStudentRecord.firstName?.[0]}{myStudentRecord.lastName?.[0]}
-                    </span>
-                  </div>
+                  {myStudentRecord.passportPhoto ? (
+                    <img
+                      src={myStudentRecord.passportPhoto}
+                      alt={`${myStudentRecord.firstName} ${myStudentRecord.lastName}`}
+                      className="w-20 h-20 rounded-full object-cover border-4 border-white shadow-lg"
+                    />
+                  ) : (
+                    <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center border-4 border-white">
+                      <span className="text-3xl font-bold text-indigo-600">
+                        {myStudentRecord.firstName?.[0]}{myStudentRecord.lastName?.[0]}
+                      </span>
+                    </div>
+                  )}
                   <div>
                     <h3 className="text-2xl font-bold">{myStudentRecord.firstName} {myStudentRecord.lastName}</h3>
                     <p className="text-indigo-100">Admission: {myStudentRecord.admissionNumber || '—'}</p>
-                    <p className="text-indigo-200 text-sm mt-1">
-                      {isUniversity
-                        ? (courses.find(c => c.id === myStudentRecord.courseId)?.name || 'No Course')
-                        : isTVET
-                        ? (programs.find(p => p.id === myStudentRecord.programId)?.name || 'No Program')
-                        : (classes.find(c => c.id === myStudentRecord.classId)?.name || 'No Class')}
-                    </p>
+                    <p className="text-indigo-200 text-sm mt-1">{getStudentClassLabel(myStudentRecord)}</p>
                   </div>
                 </div>
               </div>
@@ -6137,10 +6475,11 @@ const StudentModule = ({
                   className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 flex items-center gap-2">
             <i className="fas fa-filter" />Filters
           </button>
+          {/* ✅ View mode toggle — defaults to table but kept switchable */}
           <button onClick={() => setViewMode(v => v === 'grid' ? 'table' : 'grid')}
                   className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 flex items-center gap-2">
             <i className={`fas fa-${viewMode === 'grid' ? 'table' : 'th-large'}`} />
-            {viewMode === 'grid' ? 'Table' : 'Grid'}
+            {viewMode === 'grid' ? 'Table View' : 'Grid View'}
           </button>
           {canAdd && (
             <button onClick={openAdd}
@@ -6162,42 +6501,27 @@ const StudentModule = ({
               placeholder="Name, admission no, email…"
             />
             {!isUniversity && !isTVET && (
-              <SearchableSelect
-                label="Class"
-                value={classFilter}
+              <SearchableSelect label="Class" value={classFilter}
                 onChange={(e) => setClassFilter(e.target.value)}
-                options={classFilterOptions}
-                placeholder="All classes"
-              />
+                options={classFilterOptions} placeholder="All classes" />
             )}
             {isUniversity && (
-              <SearchableSelect
-                label="Course"
-                value={classFilter}
+              <SearchableSelect label="Course" value={classFilter}
                 onChange={(e) => setClassFilter(e.target.value)}
-                options={courseOptions}
-                placeholder="All courses"
-              />
+                options={courseOptions} placeholder="All courses" />
             )}
             {isTVET && (
-              <SearchableSelect
-                label="Program"
-                value={classFilter}
+              <SearchableSelect label="Program" value={classFilter}
                 onChange={(e) => setClassFilter(e.target.value)}
-                options={programOptions}
-                placeholder="All programs"
-              />
+                options={programOptions} placeholder="All programs" />
             )}
-            <SelectField
-              label="Status"
-              value={statusFilter}
+            <SelectField label="Status" value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               options={[
                 { value: 'all', label: 'All Students' },
                 { value: 'active', label: 'Active Only' },
                 { value: 'inactive', label: 'Inactive Only' }
-              ]}
-            />
+              ]} />
           </div>
           <div className="mt-4 flex justify-between items-center">
             <span className="text-sm text-gray-500">
@@ -6213,7 +6537,7 @@ const StudentModule = ({
         </div>
       )}
 
-      {/* Form (Add or Edit) */}
+      {/* ==================== FORM ==================== */}
       {showForm && (canAdd || canEdit) && (
         <div id="student-form" className="bg-white p-6 rounded-xl shadow-sm border-2 border-indigo-100">
           <div className="flex justify-between items-center mb-4">
@@ -6233,88 +6557,96 @@ const StudentModule = ({
           )}
 
           <form onSubmit={editingId ? handleUpdateSubmit : handleCreate} className="space-y-4">
-            {/* Admission number + Auto/Manual */}
+            {/* Photo upload */}
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h4 className="font-medium text-indigo-600 mb-3">Student Photo</h4>
+              <div className="flex items-center gap-4">
+                <div className="w-24 h-24 rounded-full bg-white border-2 border-gray-200 flex items-center justify-center overflow-hidden">
+                  {photoPreview ? (
+                    <img src={photoPreview} alt="Preview" className="w-full h-full object-cover" />
+                  ) : (
+                    <i className="fas fa-user text-3xl text-gray-300" />
+                  )}
+                </div>
+                <div>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    id="student-photo-input"
+                    className="hidden"
+                    onChange={handlePhotoSelect}
+                  />
+                  <label
+                    htmlFor="student-photo-input"
+                    className="cursor-pointer bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 inline-flex items-center gap-2"
+                  >
+                    <i className="fas fa-camera" />Choose Photo
+                  </label>
+                  {photoPreview && (
+                    <button
+                      type="button"
+                      onClick={() => { setPhotoFile(null); setPhotoPreview(''); }}
+                      className="ml-2 text-red-600 hover:text-red-800 text-sm"
+                    >
+                      Remove
+                    </button>
+                  )}
+                  <p className="text-xs text-gray-500 mt-2">JPG, PNG, GIF, or WEBP. Max 5 MB.</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Admission number */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="block text-sm font-medium text-gray-700">
-                    Admission Number
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700">Admission Number</label>
                   {!editingId && (
                     <div className="flex items-center bg-gray-100 rounded-lg p-0.5 text-xs">
-                      <button
-                        type="button"
+                      <button type="button"
                         onClick={() => { setAutoAdm(true); fetchNextAdmissionNumber(); }}
-                        className={`px-3 py-1 rounded-md transition-colors ${
-                          autoAdm ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'
-                        }`}
-                      >
+                        className={`px-3 py-1 rounded-md transition-colors ${autoAdm ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
                         <i className="fas fa-magic mr-1" />Auto
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAutoAdm(false);
-                          setFormState({ ...formState, admissionNumber: '' });
-                        }}
-                        className={`px-3 py-1 rounded-md transition-colors ${
-                          !autoAdm ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'
-                        }`}
-                      >
+                      <button type="button"
+                        onClick={() => { setAutoAdm(false); setFormState({ ...formState, admissionNumber: '' }); }}
+                        className={`px-3 py-1 rounded-md transition-colors ${!autoAdm ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
                         <i className="fas fa-keyboard mr-1" />Manual
                       </button>
                     </div>
                   )}
                 </div>
-
                 <div className="flex gap-2">
-                  <input
-                    type="text"
+                  <input type="text"
                     value={formState.admissionNumber || ''}
                     onChange={(e) => {
                       if (autoAdm) setAutoAdm(false);
                       setFormState({ ...formState, admissionNumber: e.target.value });
                     }}
-                    placeholder={
-                      autoAdm && !editingId
-                        ? (admPreview || 'Auto-generated on save')
-                        : 'e.g., 123 or ADM/2026/0001'
-                    }
-                    className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
-                  />
+                    placeholder={autoAdm && !editingId ? (admPreview || 'Auto-generated on save') : 'e.g., 123 or ADM/2026/0001'}
+                    className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white" />
                   {!editingId && autoAdm && (
-                    <button
-                      type="button"
-                      onClick={() => fetchNextAdmissionNumber()}
+                    <button type="button" onClick={() => fetchNextAdmissionNumber()}
                       disabled={loadingAdm}
-                      className="px-3 py-2 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 border border-indigo-200 disabled:opacity-50"
-                      title="Regenerate auto number"
-                    >
+                      className="px-3 py-2 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 border border-indigo-200 disabled:opacity-50">
                       {loadingAdm ? <i className="fas fa-spinner fa-spin" /> : <i className="fas fa-sync-alt" />}
                     </button>
                   )}
                 </div>
-
                 <p className="text-xs text-gray-500 mt-1">
-                  {editingId ? (
-                    <>Update this only if the school uses its own numbering scheme.</>
-                  ) : autoAdm ? (
-                    <>Auto-generated for {CURRENT_YEAR} — or just start typing to enter your own.</>
-                  ) : (
-                    <>Manual entry — must be unique for this school. Leave blank to auto-generate instead.</>
-                  )}
+                  {editingId ? <>Update this only if the school uses its own numbering scheme.</> :
+                   autoAdm ? <>Auto-generated for {CURRENT_YEAR} — or just start typing to enter your own.</> :
+                   <>Manual entry — must be unique for this school.</>}
                 </p>
               </div>
 
-              <SelectField
-                label="Status"
+              <SelectField label="Status"
                 value={formState.isActive ? 'active' : 'inactive'}
                 onChange={(e) => setFormState({ ...formState, isActive: e.target.value === 'active' })}
                 options={[
                   { value: 'active', label: 'Active' },
                   { value: 'inactive', label: 'Inactive' }
-                ]}
-              />
+                ]} />
             </div>
 
             {/* Personal */}
@@ -6354,22 +6686,45 @@ const StudentModule = ({
               <h4 className="font-medium text-indigo-600 mb-3">Academic Information</h4>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {isUniversity && (<>
-                  <SearchableSelect label="Faculty" value={formState.facultyId} onChange={(e) => setFormState({ ...formState, facultyId: e.target.value, departmentId: '', courseId: '' })} options={facultyOptions} placeholder="Search faculty…" required />
-                  <SearchableSelect label="Department" value={formState.departmentId} onChange={(e) => setFormState({ ...formState, departmentId: e.target.value, courseId: '' })} options={departmentOptions.filter(d => !formState.facultyId || d.value === formState.departmentId || departments.find(x => x.id === d.value)?.facultyId === formState.facultyId)} placeholder="Search department…" required disabled={!formState.facultyId} />
-                  <SearchableSelect label="Course *" value={formState.courseId} onChange={(e) => setFormState({ ...formState, courseId: e.target.value })} options={courseOptions} placeholder="Search course…" required disabled={!formState.departmentId} />
-                  <TextInput label="Year of Study" type="number" min="1" max="6" value={formState.currentYear} onChange={(e) => setFormState({ ...formState, currentYear: parseInt(e.target.value, 10) || 1 })} />
-                  <TextInput label="Semester" type="number" min="1" max="3" value={formState.currentSemester} onChange={(e) => setFormState({ ...formState, currentSemester: parseInt(e.target.value, 10) || 1 })} />
+                  <SearchableSelect label="Faculty" value={formState.facultyId}
+                    onChange={(e) => setFormState({ ...formState, facultyId: e.target.value, departmentId: '', courseId: '' })}
+                    options={facultyOptions} placeholder="Search faculty…" required />
+                  <SearchableSelect label="Department" value={formState.departmentId}
+                    onChange={(e) => setFormState({ ...formState, departmentId: e.target.value, courseId: '' })}
+                    options={departmentOptions.filter(d => !formState.facultyId || d.value === formState.departmentId || departments.find(x => x.id === d.value)?.facultyId === formState.facultyId)}
+                    placeholder="Search department…" required disabled={!formState.facultyId} />
+                  <SearchableSelect label="Course *" value={formState.courseId}
+                    onChange={(e) => setFormState({ ...formState, courseId: e.target.value })}
+                    options={courseOptions} placeholder="Search course…" required disabled={!formState.departmentId} />
+                  <TextInput label="Year of Study" type="number" min="1" max="6"
+                    value={formState.currentYear}
+                    onChange={(e) => setFormState({ ...formState, currentYear: parseInt(e.target.value, 10) || 1 })} />
+                  <TextInput label="Semester" type="number" min="1" max="3"
+                    value={formState.currentSemester}
+                    onChange={(e) => setFormState({ ...formState, currentSemester: parseInt(e.target.value, 10) || 1 })} />
                 </>)}
                 {isTVET && (<>
-                  <SearchableSelect label="Department" value={formState.departmentId} onChange={(e) => setFormState({ ...formState, departmentId: e.target.value, programId: '' })} options={departmentOptions} placeholder="Search department…" required />
-                  <SearchableSelect label="Program *" value={formState.programId} onChange={(e) => setFormState({ ...formState, programId: e.target.value })} options={programOptions} placeholder="Search program…" required disabled={!formState.departmentId} />
-                  <SelectField label="Module Level *" value={formState.currentModule} onChange={(e) => setFormState({ ...formState, currentModule: e.target.value })} options={moduleLevelOptions} />
+                  <SearchableSelect label="Department" value={formState.departmentId}
+                    onChange={(e) => setFormState({ ...formState, departmentId: e.target.value, programId: '' })}
+                    options={departmentOptions} placeholder="Search department…" required />
+                  <SearchableSelect label="Program *" value={formState.programId}
+                    onChange={(e) => setFormState({ ...formState, programId: e.target.value })}
+                    options={programOptions} placeholder="Search program…" required disabled={!formState.departmentId} />
+                  <SelectField label="Module Level *" value={formState.currentModule}
+                    onChange={(e) => setFormState({ ...formState, currentModule: e.target.value })}
+                    options={moduleLevelOptions} />
                 </>)}
                 {!isUniversity && !isTVET && (
-                  <SearchableSelect label="Class *" value={formState.classId} onChange={(e) => setFormState({ ...formState, classId: e.target.value })} options={classOptions} placeholder="Search class…" required />
+                  <SearchableSelect label="Class *" value={formState.classId}
+                    onChange={(e) => setFormState({ ...formState, classId: e.target.value })}
+                    options={classOptions} placeholder="Search class…" required />
                 )}
-                <SelectField label="Boarding Status" value={formState.boardingStatus} onChange={(e) => setFormState({ ...formState, boardingStatus: e.target.value })} options={boardingOptions} />
-                <SearchableSelect label="Transport Route" value={formState.transportRouteId} onChange={(e) => setFormState({ ...formState, transportRouteId: e.target.value || null })} options={routeOptions} placeholder="Search route…" />
+                <SelectField label="Boarding Status" value={formState.boardingStatus}
+                  onChange={(e) => setFormState({ ...formState, boardingStatus: e.target.value })}
+                  options={boardingOptions} />
+                <SearchableSelect label="Transport Route" value={formState.transportRouteId}
+                  onChange={(e) => setFormState({ ...formState, transportRouteId: e.target.value || null })}
+                  options={routeOptions} placeholder="Search route…" />
               </div>
             </div>
 
@@ -6377,24 +6732,24 @@ const StudentModule = ({
             <div className="bg-gray-50 p-4 rounded-lg">
               <h4 className="font-medium text-indigo-600 mb-3">Medical Information</h4>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <SelectField label="Blood Group" value={formState.medicalInfo?.bloodGroup || ''} onChange={(e) => setFormState({ ...formState, medicalInfo: { ...formState.medicalInfo, bloodGroup: e.target.value } })} options={bloodGroupOptions} />
-                <TextInput label="Allergies" value={formState.medicalInfo?.allergies || ''} onChange={(e) => setFormState({ ...formState, medicalInfo: { ...formState.medicalInfo, allergies: e.target.value } })} />
-                <TextInput label="Disabilities" value={formState.medicalInfo?.disabilities || ''} onChange={(e) => setFormState({ ...formState, medicalInfo: { ...formState.medicalInfo, disabilities: e.target.value } })} />
+                <SelectField label="Blood Group" value={formState.medicalInfo?.bloodGroup || ''}
+                  onChange={(e) => setFormState({ ...formState, medicalInfo: { ...formState.medicalInfo, bloodGroup: e.target.value } })}
+                  options={bloodGroupOptions} />
+                <TextInput label="Allergies" value={formState.medicalInfo?.allergies || ''}
+                  onChange={(e) => setFormState({ ...formState, medicalInfo: { ...formState.medicalInfo, allergies: e.target.value } })} />
+                <TextInput label="Disabilities" value={formState.medicalInfo?.disabilities || ''}
+                  onChange={(e) => setFormState({ ...formState, medicalInfo: { ...formState.medicalInfo, disabilities: e.target.value } })} />
               </div>
             </div>
 
-            {/* ✅ STUDENT LOGIN — RESTORED */}
+            {/* Student login */}
             {!editingId && (
               <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
                 <h4 className="font-medium text-blue-700 mb-3 flex items-center gap-2">
-                  <i className="fas fa-user-shield" />
-                  Student Portal Access
+                  <i className="fas fa-user-shield" />Student Portal Access
                 </h4>
-
                 <label className="flex items-start cursor-pointer">
-                  <input
-                    type="checkbox"
-                    className="mt-1 mr-2"
+                  <input type="checkbox" className="mt-1 mr-2"
                     checked={!!formState.studentLogin?.createAccount}
                     onChange={(e) => {
                       const checked = e.target.checked;
@@ -6407,8 +6762,7 @@ const StudentModule = ({
                         }
                       });
                       if (!checked) setShowStudentPassword(false);
-                    }}
-                  />
+                    }} />
                   <span className="text-sm">
                     <span className="font-medium">Create student login account</span>
                     <span className="block text-xs text-gray-500 mt-0.5">
@@ -6416,50 +6770,29 @@ const StudentModule = ({
                     </span>
                   </span>
                 </label>
-
                 {formState.studentLogin?.createAccount && (
                   <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <TextInput
-                      label="Student Login Email *"
-                      type="email"
+                    <TextInput label="Student Login Email *" type="email"
                       value={formState.studentLogin?.email || ''}
-                      onChange={(e) => setFormState({
-                        ...formState,
-                        studentLogin: { ...formState.studentLogin, email: e.target.value }
-                      })}
-                      placeholder="student@example.com"
-                      required
-                    />
-
-                    {/* ✅ Password with eye toggle */}
+                      onChange={(e) => setFormState({ ...formState, studentLogin: { ...formState.studentLogin, email: e.target.value } })}
+                      placeholder="student@example.com" required />
                     <div className="relative">
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         Student Login Password <span className="text-red-500">*</span>
                       </label>
                       <div className="relative">
-                        <input
-                          type={showStudentPassword ? 'text' : 'password'}
+                        <input type={showStudentPassword ? 'text' : 'password'}
                           value={formState.studentLogin?.password || ''}
-                          onChange={(e) => setFormState({
-                            ...formState,
-                            studentLogin: { ...formState.studentLogin, password: e.target.value }
-                          })}
+                          onChange={(e) => setFormState({ ...formState, studentLogin: { ...formState.studentLogin, password: e.target.value } })}
                           placeholder="Minimum 6 characters"
                           className="w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
-                          required
-                        />
-                        <button
-                          type="button"
+                          required />
+                        <button type="button"
                           onClick={() => setShowStudentPassword(v => !v)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
-                          title={showStudentPassword ? 'Hide password' : 'Show password'}
-                        >
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700">
                           <i className={`fas fa-${showStudentPassword ? 'eye-slash' : 'eye'}`} />
                         </button>
                       </div>
-                      <p className="text-xs text-gray-500 mt-1">
-                        At least 6 characters. The student will use this with the email above to log in.
-                      </p>
                     </div>
                   </div>
                 )}
@@ -6494,14 +6827,10 @@ const StudentModule = ({
                 )}
 
                 {formState.parent?.useExisting ? (
-                  <SearchableSelect
-                    label="Select Existing Parent/Guardian *"
+                  <SearchableSelect label="Select Existing Parent/Guardian *"
                     value={formState.parent?.existingUserId || ''}
                     onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, existingUserId: e.target.value } })}
-                    options={parentUserOptions}
-                    placeholder="Search by name or email…"
-                    required
-                  />
+                    options={parentUserOptions} placeholder="Search by name or email…" required />
                 ) : (
                   <div className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -6535,11 +6864,7 @@ const StudentModule = ({
                           const checked = e.target.checked;
                           setFormState({
                             ...formState,
-                            parent: {
-                              ...formState.parent,
-                              grantPortalAccess: checked,
-                              password: checked ? (formState.parent?.password || '') : ''
-                            }
+                            parent: { ...formState.parent, grantPortalAccess: checked, password: checked ? (formState.parent?.password || '') : '' }
                           });
                           if (!checked) setShowParentPassword(false);
                         }} />
@@ -6552,26 +6877,20 @@ const StudentModule = ({
                     </label>
 
                     {formState.parent?.grantPortalAccess && (
-                      /* ✅ Parent password with eye toggle */
                       <div className="relative max-w-md">
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           Portal Password <span className="text-red-500">*</span>
                         </label>
                         <div className="relative">
-                          <input
-                            type={showParentPassword ? 'text' : 'password'}
+                          <input type={showParentPassword ? 'text' : 'password'}
                             value={formState.parent?.password || ''}
                             onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, password: e.target.value } })}
                             placeholder="Minimum 6 characters"
                             className="w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
-                            required
-                          />
-                          <button
-                            type="button"
+                            required />
+                          <button type="button"
                             onClick={() => setShowParentPassword(v => !v)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
-                            title={showParentPassword ? 'Hide password' : 'Show password'}
-                          >
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700">
                             <i className={`fas fa-${showParentPassword ? 'eye-slash' : 'eye'}`} />
                           </button>
                         </div>
@@ -6583,17 +6902,14 @@ const StudentModule = ({
             )}
 
             <div className="flex gap-3 pt-2 border-t">
-              <button
-                type="submit"
-                disabled={loading}
-                className="flex-1 bg-indigo-600 text-white py-2.5 px-4 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {loading
-                  ? <><i className="fas fa-spinner fa-spin" />Saving…</>
+              <button type="submit" disabled={loading || uploadingPhoto}
+                className="flex-1 bg-indigo-600 text-white py-2.5 px-4 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                {loading || uploadingPhoto
+                  ? <><i className="fas fa-spinner fa-spin" />{uploadingPhoto ? 'Uploading photo…' : 'Saving…'}</>
                   : <><i className={`fas fa-${editingId ? 'save' : 'plus-circle'}`} />{editingId ? 'Update Student' : 'Register Student'}</>}
               </button>
               <button type="button" onClick={closeForm} disabled={loading}
-                      className="bg-gray-500 text-white py-2.5 px-6 rounded-lg hover:bg-gray-600">
+                className="bg-gray-500 text-white py-2.5 px-6 rounded-lg hover:bg-gray-600">
                 Cancel
               </button>
             </div>
@@ -6601,7 +6917,7 @@ const StudentModule = ({
         </div>
       )}
 
-      {/* List */}
+      {/* ==================== LIST ==================== */}
       {viewMode === 'grid' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredStudents.length === 0 ? (
@@ -6614,66 +6930,58 @@ const StudentModule = ({
                   : 'Click "Add Student" to get started'}
               </p>
             </div>
-          ) : filteredStudents.map(student => {
-            const studentClass = classes.find(c => c.id === student.classId);
-            const studentCourse = courses.find(c => c.id === student.courseId);
-            const studentProgram = programs.find(p => p.id === student.programId);
-            return (
-              <div key={student.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow bg-white">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center space-x-3 min-w-0">
+          ) : filteredStudents.map(student => (
+            <div key={student.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow bg-white">
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex items-center space-x-3 min-w-0">
+                  {student.passportPhoto ? (
+                    <img src={student.passportPhoto}
+                      alt={`${student.firstName} ${student.lastName}`}
+                      className="w-12 h-12 rounded-full object-cover flex-shrink-0" />
+                  ) : (
                     <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0">
                       <span className="text-indigo-600 font-bold text-lg">
                         {student.firstName?.[0]}{student.lastName?.[0]}
                       </span>
                     </div>
-                    <div className="min-w-0">
-                      <h3 className="font-semibold truncate">{student.firstName} {student.lastName}</h3>
-                      <p className="text-sm text-gray-600 truncate">{student.admissionNumber || '—'}</p>
-                    </div>
-                  </div>
-                  <div className="flex space-x-1 flex-shrink-0">
-                    <button onClick={() => loadStudentDetails(student)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="View">
-                      <i className="fas fa-eye" />
-                    </button>
-                    {canEdit && (
-                      <button onClick={() => openEdit(student)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg" title="Edit">
-                        <i className="fas fa-edit" />
-                      </button>
-                    )}
-                    {canDelete && (
-                      <button onClick={() => { setSelectedStudent(student); setShowDeleteConfirm(true); }} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Delete">
-                        <i className="fas fa-trash" />
-                      </button>
-                    )}
+                  )}
+                  <div className="min-w-0">
+                    <h3 className="font-semibold truncate">{student.firstName} {student.lastName}</h3>
+                    <p className="text-sm text-gray-600 truncate">{student.admissionNumber || '—'}</p>
                   </div>
                 </div>
-                <div className="space-y-1 text-sm">
-                  <p className="text-gray-600">
-                    <i className="fas fa-graduation-cap w-5 text-gray-400" />
-                    {isUniversity ? (studentCourse?.name || 'No Course')
-                      : isTVET ? (studentProgram?.name || 'No Program')
-                      : (studentClass?.name || 'No Class')}
-                  </p>
-                  {student.email && <p className="text-gray-600"><i className="fas fa-envelope w-5 text-gray-400" />{student.email}</p>}
-                  {student.phone && <p className="text-gray-600"><i className="fas fa-phone w-5 text-gray-400" />{student.phone}</p>}
-                  <p className="text-gray-600"><i className="fas fa-calendar w-5 text-gray-400" />DOB: {formatDate(student.dateOfBirth)}</p>
-                </div>
-                <div className="mt-3 pt-3 border-t flex justify-between items-center">
-                  <span className={`px-2 py-1 rounded-full text-xs ${student.isActive !== false ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                    {student.isActive !== false ? 'Active' : 'Inactive'}
-                  </span>
+                <div className="flex space-x-1 flex-shrink-0">
+                  <button onClick={() => loadStudentDetails(student)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="View"><i className="fas fa-eye" /></button>
+                  <button onClick={() => openInvoice(student)} className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg" title="Invoice"><i className="fas fa-file-invoice-dollar" /></button>
+                  {canEdit && (<button onClick={() => openEdit(student)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg" title="Edit"><i className="fas fa-edit" /></button>)}
+                  {canDelete && (<button onClick={() => { setSelectedStudent(student); setShowDeleteConfirm(true); }} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Delete"><i className="fas fa-trash" /></button>)}
                 </div>
               </div>
-            );
-          })}
+              <div className="space-y-1 text-sm">
+                <p className="text-gray-600">
+                  <i className="fas fa-graduation-cap w-5 text-gray-400" />
+                  {getStudentClassLabel(student)}
+                </p>
+                {student.email && <p className="text-gray-600"><i className="fas fa-envelope w-5 text-gray-400" />{student.email}</p>}
+                {student.phone && <p className="text-gray-600"><i className="fas fa-phone w-5 text-gray-400" />{student.phone}</p>}
+                <p className="text-gray-600"><i className="fas fa-calendar w-5 text-gray-400" />DOB: {formatDate(student.dateOfBirth)}</p>
+              </div>
+              <div className="mt-3 pt-3 border-t flex justify-between items-center">
+                <span className={`px-2 py-1 rounded-full text-xs ${student.isActive !== false ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                  {student.isActive !== false ? 'Active' : 'Inactive'}
+                </span>
+              </div>
+            </div>
+          ))}
         </div>
       ) : (
+        /* ==================== TABLE VIEW (default) ==================== */
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Photo</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Admission</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
@@ -6688,259 +6996,603 @@ const StudentModule = ({
               </thead>
               <tbody className="divide-y">
                 {filteredStudents.length === 0 ? (
-                  <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-500">No students found</td></tr>
-                ) : filteredStudents.map(student => {
-                  const studentClass = classes.find(c => c.id === student.classId);
-                  const studentCourse = courses.find(c => c.id === student.courseId);
-                  const studentProgram = programs.find(p => p.id === student.programId);
-                  return (
-                    <tr key={student.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-mono text-sm">{student.admissionNumber || '—'}</td>
-                      <td className="px-4 py-3 font-medium">{student.firstName} {student.lastName}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{student.email || '—'}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{student.phone || '—'}</td>
-                      <td className="px-4 py-3">
-                        {isUniversity ? (studentCourse?.name || 'N/A')
-                          : isTVET ? (studentProgram?.name || 'N/A')
-                          : (studentClass?.name || 'N/A')}
-                      </td>
-                      <td className="px-4 py-3 text-sm">{formatDate(student.dateOfBirth)}</td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-1 rounded-full text-xs ${student.isActive !== false ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                          {student.isActive !== false ? 'Active' : 'Inactive'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right space-x-1">
-                        <button onClick={() => loadStudentDetails(student)} className="text-blue-600 hover:text-blue-800 p-1" title="View">
-                          <i className="fas fa-eye" />
-                        </button>
-                        {canEdit && (
-                          <button onClick={() => openEdit(student)} className="text-indigo-600 hover:text-indigo-800 p-1" title="Edit">
-                            <i className="fas fa-edit" />
-                          </button>
-                        )}
-                        {canDelete && (
-                          <button onClick={() => { setSelectedStudent(student); setShowDeleteConfirm(true); }} className="text-red-600 hover:text-red-800 p-1" title="Delete">
-                            <i className="fas fa-trash" />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                  <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-500">No students found</td></tr>
+                ) : filteredStudents.map(student => (
+                  <tr key={student.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3">
+                      {student.passportPhoto ? (
+                        <img src={student.passportPhoto} alt=""
+                          className="w-10 h-10 rounded-full object-cover" />
+                      ) : (
+                        <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
+                          <span className="text-indigo-600 font-bold text-sm">
+                            {student.firstName?.[0]}{student.lastName?.[0]}
+                          </span>
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-sm">{student.admissionNumber || '—'}</td>
+                    <td className="px-4 py-3 font-medium">{student.firstName} {student.lastName}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{student.email || '—'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{student.phone || '—'}</td>
+                    <td className="px-4 py-3">{getStudentClassLabel(student)}</td>
+                    <td className="px-4 py-3 text-sm">{formatDate(student.dateOfBirth)}</td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-1 rounded-full text-xs ${student.isActive !== false ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                        {student.isActive !== false ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right space-x-1">
+                      <button onClick={() => loadStudentDetails(student)} className="text-blue-600 hover:text-blue-800 p-1" title="View Details"><i className="fas fa-eye" /></button>
+                      <button onClick={() => openInvoice(student)} className="text-purple-600 hover:text-purple-800 p-1" title="Fee Invoice"><i className="fas fa-file-invoice-dollar" /></button>
+                      {canEdit && (<button onClick={() => openEdit(student)} className="text-indigo-600 hover:text-indigo-800 p-1" title="Edit"><i className="fas fa-edit" /></button>)}
+                      {canDelete && (<button onClick={() => { setSelectedStudent(student); setShowDeleteConfirm(true); }} className="text-red-600 hover:text-red-800 p-1" title="Delete"><i className="fas fa-trash" /></button>)}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {/* Details modal */}
+      {/* ==================== DETAILS MODAL ==================== */}
       {showDetailsModal && selectedStudent && studentDetails && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl p-6 max-h-[90vh] overflow-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-2xl font-bold">Student Details</h2>
-              <button onClick={() => setShowDetailsModal(false)} className="text-gray-500 hover:text-gray-700">
-                <i className="fas fa-times" />
-              </button>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl max-h-[92vh] overflow-auto">
+            {/* Header with photo */}
+            <div className="sticky top-0 bg-white z-10 border-b">
+              <div className="flex justify-between items-center px-6 py-4">
+                <h2 className="text-2xl font-bold text-gray-800">Student Details</h2>
+                <button onClick={() => setShowDetailsModal(false)} className="text-gray-500 hover:text-gray-700 p-2">
+                  <i className="fas fa-times text-xl" />
+                </button>
+              </div>
             </div>
 
-            <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-lg mb-6">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div><p className="text-sm text-gray-600">Name</p><p className="text-xl font-bold">{studentDetails.firstName} {studentDetails.lastName}</p></div>
-                <div><p className="text-sm text-gray-600">Admission</p><p className="text-xl font-bold">{studentDetails.admissionNumber || '—'}</p></div>
-                <div><p className="text-sm text-gray-600">DOB</p><p className="text-xl font-bold">{formatDate(studentDetails.dateOfBirth)}</p></div>
-                <div>
-                  <p className="text-sm text-gray-600">Status</p>
-                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${studentDetails.isActive !== false ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                    {studentDetails.isActive !== false ? 'Active' : 'Inactive'}
-                  </span>
+            {/* ---- IDENTITY CARD ---- */}
+            <div className="bg-gradient-to-r from-indigo-500 to-purple-600 p-6 text-white">
+              <div className="flex items-center gap-6">
+                {studentDetails.passportPhoto ? (
+                  <img
+                    src={studentDetails.passportPhoto}
+                    alt={`${studentDetails.firstName} ${studentDetails.lastName}`}
+                    className="w-32 h-32 rounded-xl object-cover border-4 border-white shadow-lg flex-shrink-0"
+                  />
+                ) : (
+                  <div className="w-32 h-32 bg-white rounded-xl flex items-center justify-center border-4 border-white shadow-lg flex-shrink-0">
+                    <span className="text-5xl font-bold text-indigo-600">
+                      {studentDetails.firstName?.[0]}{studentDetails.lastName?.[0]}
+                    </span>
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-3xl font-bold truncate">
+                    {studentDetails.firstName} {studentDetails.middleName ? `${studentDetails.middleName} ` : ''}{studentDetails.lastName}
+                  </h3>
+                  <p className="text-indigo-100 text-lg font-mono mt-1">{studentDetails.admissionNumber || '—'}</p>
+                  <p className="text-indigo-200 mt-1">
+                    <i className="fas fa-graduation-cap mr-2" />
+                    {getStudentClassLabel(studentDetails)}
+                  </p>
+                  <div className="flex flex-wrap gap-3 mt-3 text-sm">
+                    <span className={`px-3 py-1 rounded-full ${studentDetails.isActive !== false ? 'bg-green-500 bg-opacity-30 text-white' : 'bg-red-500 bg-opacity-30 text-white'}`}>
+                      {studentDetails.isActive !== false ? '● Active' : '● Inactive'}
+                    </span>
+                    {studentDetails.gender && (
+                      <span className="px-3 py-1 rounded-full bg-white bg-opacity-20 text-white">
+                        {studentDetails.gender}
+                      </span>
+                    )}
+                    {studentDetails.boardingStatus && (
+                      <span className="px-3 py-1 rounded-full bg-white bg-opacity-20 text-white">
+                        {studentDetails.boardingStatus}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex-shrink-0">
+                  <button onClick={() => { setShowDetailsModal(false); openInvoice(selectedStudent); }}
+                    className="bg-white text-indigo-600 px-4 py-2 rounded-lg hover:bg-indigo-50 flex items-center gap-2 font-medium">
+                    <i className="fas fa-file-invoice-dollar" />View Invoice
+                  </button>
                 </div>
               </div>
             </div>
 
-            <div className="border-b mb-6 flex gap-4 overflow-x-auto">
+            {/* ---- TABS ---- */}
+            <div className="border-b px-6 flex gap-4 overflow-x-auto bg-white sticky top-16 z-10">
               {[
-                { id: 'overview', label: 'Overview' },
-                { id: 'academic', label: `Academic (${studentResults.length})` },
-                { id: 'fees', label: `Fees (${studentPayments.length})` },
-                { id: 'parents', label: `Parents (${studentParents.length})` },
-                { id: 'attendance', label: `Attendance (${studentAttendance.length})` }
+                { id: 'overview', label: 'Overview', icon: 'user' },
+                { id: 'academic', label: `Academic Report (${studentResults.length})`, icon: 'graduation-cap' },
+                { id: 'fees', label: `Fees (${studentPayments.length})`, icon: 'money-bill-wave' },
+                { id: 'parents', label: `Guardians (${studentParents.length})`, icon: 'users' },
+                { id: 'attendance', label: `Attendance (${studentAttendance.length})`, icon: 'calendar-check' }
               ].map(tab => (
                 <button key={tab.id} onClick={() => setActiveDetailTab(tab.id)}
-                  className={`px-4 py-2 font-medium whitespace-nowrap ${
-                    activeDetailTab === tab.id ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
+                  className={`px-4 py-3 font-medium whitespace-nowrap border-b-2 transition-colors flex items-center gap-2 ${
+                    activeDetailTab === tab.id ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'
                   }`}>
+                  <i className={`fas fa-${tab.icon}`} />
                   {tab.label}
                 </button>
               ))}
             </div>
 
-            {activeDetailTab === 'overview' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <h3 className="font-semibold mb-2">Personal</h3>
-                  <p><span className="text-gray-500">Gender:</span> {studentDetails.gender}</p>
-                  <p><span className="text-gray-500">Nationality:</span> {studentDetails.nationality || '—'}</p>
-                  <p><span className="text-gray-500">Religion:</span> {studentDetails.religion || '—'}</p>
-                  <p><span className="text-gray-500">Email:</span> {studentDetails.email || '—'}</p>
-                  <p><span className="text-gray-500">Phone:</span> {studentDetails.phone || '—'}</p>
-                </div>
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <h3 className="font-semibold mb-2">Academic</h3>
-                  <p><span className="text-gray-500">Class:</span> {classes.find(c => c.id === studentDetails.classId)?.name || '—'}</p>
-                  <p><span className="text-gray-500">Course:</span> {courses.find(c => c.id === studentDetails.courseId)?.name || '—'}</p>
-                  <p><span className="text-gray-500">Program:</span> {programs.find(p => p.id === studentDetails.programId)?.name || '—'}</p>
-                  <p><span className="text-gray-500">Boarding:</span> {studentDetails.boardingStatus || '—'}</p>
-                </div>
-              </div>
-            )}
-
-            {activeDetailTab === 'academic' && (
-              studentResults.length === 0 ? (
-                <p className="text-center py-8 text-gray-500">No academic records.</p>
-              ) : (
-                <table className="w-full">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 py-2 text-left">Exam</th>
-                      <th className="px-4 py-2 text-left">Subject / Unit</th>
-                      <th className="px-4 py-2 text-left">Marks</th>
-                      <th className="px-4 py-2 text-left">Grade</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {studentResults.map(r => {
-                      const exam = exams.find(e => e.id === r.examId);
-                      const item = isUniversity || isTVET
-                        ? (units.find(u => u.id === r.unitId)?.name || '—')
-                        : (subjects.find(s => s.id === r.subjectId)?.name || '—');
-                      const levelHint = classes.find(c => c.id === studentDetails.classId)?.name || null;
-                      const g = getGrade(r.marks, levelHint);
-                      return (
-                        <tr key={r.id}>
-                          <td className="px-4 py-2">{exam?.name || '—'}</td>
-                          <td className="px-4 py-2">{item}</td>
-                          <td className="px-4 py-2 font-bold">{r.marks ?? '—'}</td>
-                          <td className="px-4 py-2">
-                            <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(r.grade || g.grade)}`}>
-                              {r.marks === '' || r.marks === null ? '—' : (r.grade || g.grade)}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )
-            )}
-
-            {activeDetailTab === 'fees' && (
-              studentPayments.length === 0 ? (
-                <p className="text-center py-8 text-gray-500">No payment records.</p>
-              ) : (
-                <table className="w-full">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 py-2 text-left">Date</th>
-                      <th className="px-4 py-2 text-left">Receipt</th>
-                      <th className="px-4 py-2 text-left">Amount</th>
-                      <th className="px-4 py-2 text-left">Method</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {studentPayments.map(p => (
-                      <tr key={p.id}>
-                        <td className="px-4 py-2">{formatDate(p.date)}</td>
-                        <td className="px-4 py-2 font-mono">{p.receiptNo || '—'}</td>
-                        <td className="px-4 py-2 font-bold text-green-600">{Number(p.amount || 0).toLocaleString()}</td>
-                        <td className="px-4 py-2">{p.paymentMethod || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )
-            )}
-
-            {activeDetailTab === 'parents' && (
-              <div>
-                {studentParents.length === 0 ? (
-                  <div className="text-center py-8">
-                    <p className="text-gray-500 mb-3">No parent/guardian linked.</p>
-                    {canEdit && (
-                      <button onClick={() => { setShowDetailsModal(false); handleAddParentClick(selectedStudent); }}
-                              className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
-                        Add Guardian
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {studentParents.map(p => {
-                      const u = p.User || {};
-                      const name = `${u.firstName || p.firstName || ''} ${u.lastName || p.lastName || ''}`.trim() || 'Guardian';
-                      return (
-                        <div key={p.id} className="border rounded-lg p-4">
-                          <h4 className="font-semibold">{name}</h4>
-                          <p className="text-sm text-gray-600">{p.relationship}</p>
-                          <p className="text-sm"><i className="fas fa-envelope mr-2 text-gray-400" />{u.email || p.email || '—'}</p>
-                          <p className="text-sm"><i className="fas fa-phone mr-2 text-gray-400" />{u.phone || p.phone || '—'}</p>
-                          <div className="mt-2 flex gap-1 flex-wrap">
-                            {p.isPrimary && <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs">Primary</span>}
-                            {p.emergencyContact && <span className="px-2 py-0.5 bg-red-100 text-red-800 rounded-full text-xs">Emergency</span>}
-                          </div>
+            <div className="p-6">
+              {/* ==================== OVERVIEW ==================== */}
+              {activeDetailTab === 'overview' && (
+                <div className="space-y-6">
+                  {/* Personal Information — Document style */}
+                  <div className="bg-white border rounded-lg overflow-hidden">
+                    <div className="bg-gray-50 px-4 py-2 border-b">
+                      <h3 className="font-semibold text-gray-700"><i className="fas fa-user mr-2 text-indigo-600" />Personal Information</h3>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 divide-y md:divide-y-0 md:divide-x">
+                      {[
+                        ['First Name', studentDetails.firstName],
+                        ['Middle Name', studentDetails.middleName || '—'],
+                        ['Last Name', studentDetails.lastName],
+                        ['Gender', studentDetails.gender || '—'],
+                        ['Date of Birth', formatDate(studentDetails.dateOfBirth)],
+                        ['Nationality', studentDetails.nationality || '—'],
+                        ['Religion', studentDetails.religion || '—'],
+                        ['ID Type', studentDetails.idType?.replace(/_/g, ' ') || '—'],
+                        ['ID Number', studentDetails.idNumber || '—'],
+                        ['Email', studentDetails.email || '—'],
+                        ['Phone', studentDetails.phone || '—'],
+                        ['Address', studentDetails.address || '—']
+                      ].map(([label, value], i) => (
+                        <div key={i} className="px-4 py-3">
+                          <p className="text-xs text-gray-500 uppercase tracking-wide">{label}</p>
+                          <p className="font-medium text-gray-800 mt-0.5 break-words">{value}</p>
                         </div>
-                      );
-                    })}
+                      ))}
+                    </div>
                   </div>
-                )}
-                {canEdit && studentParents.length > 0 && (
-                  <div className="mt-4 flex justify-end">
-                    <button onClick={() => { setShowDetailsModal(false); handleAddParentClick(selectedStudent); }}
-                            className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
-                      <i className="fas fa-plus mr-2" />Add Another
-                    </button>
+
+                  {/* Academic — Document style */}
+                  <div className="bg-white border rounded-lg overflow-hidden">
+                    <div className="bg-gray-50 px-4 py-2 border-b">
+                      <h3 className="font-semibold text-gray-700"><i className="fas fa-graduation-cap mr-2 text-indigo-600" />Academic Information</h3>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 divide-y md:divide-y-0 md:divide-x">
+                      {[
+                        [isUniversity ? 'Course' : isTVET ? 'Program' : 'Class', getStudentClassLabel(studentDetails)],
+                        ...(isUniversity ? [
+                          ['Faculty', faculties.find(f => f.id === studentDetails.facultyId)?.name || '—'],
+                          ['Department', departments.find(d => d.id === studentDetails.departmentId)?.name || '—'],
+                          ['Year of Study', studentDetails.currentYear ? `Year ${studentDetails.currentYear}` : '—'],
+                          ['Semester', studentDetails.currentSemester ? `Semester ${studentDetails.currentSemester}` : '—']
+                        ] : []),
+                        ...(isTVET ? [
+                          ['Department', departments.find(d => d.id === studentDetails.departmentId)?.name || '—'],
+                          ['Module', studentDetails.currentModule || '—']
+                        ] : []),
+                        ['Boarding Status', studentDetails.boardingStatus || '—'],
+                        ['Transport Route', routes.find(r => r.id === studentDetails.transportRouteId)?.name || '—'],
+                        ['Enrollment Date', formatDate(studentDetails.enrollmentDate)],
+                        ['Admission Date', formatDate(studentDetails.admissionDate)]
+                      ].map(([label, value], i) => (
+                        <div key={i} className="px-4 py-3">
+                          <p className="text-xs text-gray-500 uppercase tracking-wide">{label}</p>
+                          <p className="font-medium text-gray-800 mt-0.5 break-words">{value}</p>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                )}
-              </div>
-            )}
 
-            {activeDetailTab === 'attendance' && (
-              studentAttendance.length === 0 ? (
-                <p className="text-center py-8 text-gray-500">No attendance records.</p>
-              ) : (
-                <table className="w-full">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 py-2 text-left">Date</th>
-                      <th className="px-4 py-2 text-left">Status</th>
-                      <th className="px-4 py-2 text-left">Time In</th>
-                      <th className="px-4 py-2 text-left">Time Out</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {studentAttendance.map(a => (
-                      <tr key={a.id}>
-                        <td className="px-4 py-2">{formatDate(a.date)}</td>
-                        <td className="px-4 py-2">{a.status || '—'}</td>
-                        <td className="px-4 py-2">{(a.timeIn || '').substring(0, 5) || '—'}</td>
-                        <td className="px-4 py-2">{(a.timeOut || '').substring(0, 5) || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )
-            )}
+                  {/* Medical */}
+                  <div className="bg-white border rounded-lg overflow-hidden">
+                    <div className="bg-gray-50 px-4 py-2 border-b">
+                      <h3 className="font-semibold text-gray-700"><i className="fas fa-heartbeat mr-2 text-red-500" />Medical Information</h3>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x">
+                      {[
+                        ['Blood Group', studentDetails.medicalInfo?.bloodGroup || '—'],
+                        ['Allergies', studentDetails.medicalInfo?.allergies || '—'],
+                        ['Disabilities', studentDetails.medicalInfo?.disabilities || '—']
+                      ].map(([label, value], i) => (
+                        <div key={i} className="px-4 py-3">
+                          <p className="text-xs text-gray-500 uppercase tracking-wide">{label}</p>
+                          <p className="font-medium text-gray-800 mt-0.5 break-words">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
 
-            <div className="flex justify-end gap-2 mt-6 pt-4 border-t">
+                  {/* Quick stats */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-blue-50 p-4 rounded-lg text-center">
+                      <p className="text-3xl font-bold text-blue-600">{studentResults.length}</p>
+                      <p className="text-sm text-gray-600 mt-1">Exam Results</p>
+                    </div>
+                    <div className="bg-green-50 p-4 rounded-lg text-center">
+                      <p className="text-3xl font-bold text-green-600">{studentAttendance.length}</p>
+                      <p className="text-sm text-gray-600 mt-1">Attendance Days</p>
+                    </div>
+                    <div className="bg-yellow-50 p-4 rounded-lg text-center">
+                      <p className="text-3xl font-bold text-yellow-600">{studentPayments.length}</p>
+                      <p className="text-sm text-gray-600 mt-1">Payments</p>
+                    </div>
+                    <div className="bg-purple-50 p-4 rounded-lg text-center">
+                      <p className="text-3xl font-bold text-purple-600">{studentParents.length}</p>
+                      <p className="text-sm text-gray-600 mt-1">Guardians</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ==================== ACADEMIC REPORT (term-by-term) ==================== */}
+              {activeDetailTab === 'academic' && (
+                <div>
+                  {groupedResults.length === 0 ? (
+                    <div className="text-center py-12">
+                      <i className="fas fa-file-alt text-5xl text-gray-300 mb-4"></i>
+                      <p className="text-gray-500">No academic records found.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {/* Overall summary */}
+                      <div className="grid grid-cols-3 gap-4">
+                        <div className="bg-indigo-50 p-4 rounded-lg text-center">
+                          <p className="text-sm text-gray-600">Total Exams</p>
+                          <p className="text-3xl font-bold text-indigo-600">{groupedResults.length}</p>
+                        </div>
+                        <div className="bg-blue-50 p-4 rounded-lg text-center">
+                          <p className="text-sm text-gray-600">Total Subjects</p>
+                          <p className="text-3xl font-bold text-blue-600">{studentResults.length}</p>
+                        </div>
+                        <div className="bg-green-50 p-4 rounded-lg text-center">
+                          <p className="text-sm text-gray-600">Overall Average</p>
+                          <p className="text-3xl font-bold text-green-600">
+                            {groupedResults.length > 0
+                              ? (groupedResults.reduce((s, g) => s + g.average, 0) / groupedResults.length).toFixed(1)
+                              : 0}%
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Term-by-term report cards */}
+                      {groupedResults.map((group, gi) => (
+                        <div key={gi} className="bg-white border rounded-lg overflow-hidden">
+                          <div className="bg-gradient-to-r from-indigo-500 to-purple-500 px-4 py-3 text-white flex justify-between items-center">
+                            <div>
+                              <h3 className="font-bold text-lg">{group.examName}</h3>
+                              <p className="text-sm text-indigo-100">
+                                {group.term !== 'Unspecified' ? `${group.term} • ` : ''}
+                                {group.date ? formatDate(group.date) : 'Date N/A'}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-sm text-indigo-100">Mean Grade</p>
+                              <span className={`inline-block px-3 py-1 rounded-full text-sm font-bold ${getGradeColor(group.meanGrade)}`}>
+                                {group.meanGrade || '—'}
+                              </span>
+                            </div>
+                          </div>
+                          <table className="w-full">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Subject / Unit</th>
+                                <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Marks</th>
+                                <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Grade</th>
+                                <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Points</th>
+                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Remarks</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y">
+                              {group.subjects.map((s, si) => (
+                                <tr key={si} className="hover:bg-gray-50">
+                                  <td className="px-4 py-2 font-medium">{s.subjectName}</td>
+                                  <td className="px-4 py-2 text-center">
+                                    {s.isAbsent ? <span className="text-red-500 font-medium">ABSENT</span> : (s.marks || '—')}
+                                  </td>
+                                  <td className="px-4 py-2 text-center">
+                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getGradeColor(s.grade)}`}>
+                                      {s.grade || '—'}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-2 text-center font-mono text-sm">{s.points ?? '—'}</td>
+                                  <td className="px-4 py-2 text-sm text-gray-600">{s.remarks || '—'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot className="bg-gray-50 font-semibold">
+                              <tr>
+                                <td className="px-4 py-2">Totals</td>
+                                <td className="px-4 py-2 text-center">{group.totalMarks.toFixed(1)}</td>
+                                <td className="px-4 py-2 text-center">
+                                  <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(group.meanGrade)}`}>
+                                    {group.meanGrade || '—'}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-2 text-center">{group.totalPoints}</td>
+                                <td className="px-4 py-2 text-sm text-gray-500">
+                                  Average: {group.average.toFixed(2)}%
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ==================== FEES TAB ==================== */}
+              {activeDetailTab === 'fees' && (
+                <div className="space-y-4">
+                  {/* Summary */}
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="bg-green-50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-600">Total Paid</p>
+                      <p className="text-2xl font-bold text-green-600">
+                        {formatCurrency(studentPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0))}
+                      </p>
+                    </div>
+                    <div className="bg-blue-50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-600">Payment Count</p>
+                      <p className="text-2xl font-bold text-blue-600">{studentPayments.length}</p>
+                    </div>
+                    <div className="bg-purple-50 p-4 rounded-lg flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-gray-600">Full Statement</p>
+                        <p className="text-xs text-gray-500 mt-1">Term-by-term breakdown</p>
+                      </div>
+                      <button onClick={() => { setShowDetailsModal(false); openInvoice(selectedStudent); }}
+                        className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 text-sm">
+                        <i className="fas fa-file-invoice-dollar mr-1" />View
+                      </button>
+                    </div>
+                  </div>
+
+                  {studentPayments.length === 0 ? (
+                    <div className="text-center py-12">
+                      <i className="fas fa-receipt text-5xl text-gray-300 mb-4"></i>
+                      <p className="text-gray-500">No payment records found.</p>
+                    </div>
+                  ) : (
+                    <div className="bg-white border rounded-lg overflow-hidden">
+                      <table className="w-full">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Receipt No</th>
+                            <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Method</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Reference</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {studentPayments.map(p => (
+                            <tr key={p.id} className="hover:bg-gray-50">
+                              <td className="px-4 py-2">{formatDate(p.date)}</td>
+                              <td className="px-4 py-2 font-mono text-sm">{p.receiptNo || '—'}</td>
+                              <td className="px-4 py-2 text-right font-bold text-green-600">
+                                {formatCurrency(p.amount)}
+                              </td>
+                              <td className="px-4 py-2">
+                                <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
+                                  {p.paymentMethod || '—'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2 text-sm text-gray-500">
+                                {p.transactionId || p.mpesaCode || p.reference || '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ==================== PARENTS / GUARDIANS ==================== */}
+              {activeDetailTab === 'parents' && (
+                <div>
+                  {studentParents.length === 0 ? (
+                    <div className="text-center py-12">
+                      <i className="fas fa-users text-5xl text-gray-300 mb-4"></i>
+                      <p className="text-gray-500 mb-4">No guardians linked yet.</p>
+                      {canEdit && (
+                        <button onClick={() => { setShowDetailsModal(false); handleAddParentClick(selectedStudent); }}
+                          className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700">
+                          <i className="fas fa-plus mr-2" />Add First Guardian
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {studentParents.map(p => {
+                          const u = p.User || {};
+                          const name = `${u.firstName || p.firstName || ''} ${u.lastName || p.lastName || ''}`.trim() || 'Guardian';
+                          const initials = name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+                          return (
+                            <div key={p.id} className="bg-white border rounded-lg overflow-hidden">
+                              <div className="bg-gray-50 px-4 py-2 border-b flex justify-between items-center">
+                                <span className={`text-xs px-2 py-1 rounded-full ${p.isPrimary ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
+                                  {p.isPrimary ? '★ Primary' : 'Guardian'}
+                                </span>
+                                {p.emergencyContact && (
+                                  <span className="text-xs px-2 py-1 rounded-full bg-red-100 text-red-800">
+                                    🚨 Emergency
+                                  </span>
+                                )}
+                              </div>
+                              <div className="p-4 flex gap-4">
+                                <div className="w-16 h-16 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                                  <span className="text-xl font-bold text-indigo-600">{initials}</span>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <h4 className="font-bold text-lg truncate">{name}</h4>
+                                  <p className="text-sm text-indigo-600 font-medium">{p.relationship}</p>
+                                  <div className="mt-2 space-y-1 text-sm">
+                                    <p className="truncate"><i className="fas fa-envelope w-4 text-gray-400" /> {u.email || p.email || '—'}</p>
+                                    <p><i className="fas fa-phone w-4 text-gray-400" /> {u.phone || p.phone || '—'}</p>
+                                    {p.occupation && <p className="truncate"><i className="fas fa-briefcase w-4 text-gray-400" /> {p.occupation}</p>}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {canEdit && (
+                        <div className="mt-6 flex justify-center">
+                          <button onClick={() => { setShowDetailsModal(false); handleAddParentClick(selectedStudent); }}
+                            className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700">
+                            <i className="fas fa-plus mr-2" />Add Another Guardian
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* ==================== ATTENDANCE (clear visual) ==================== */}
+              {activeDetailTab === 'attendance' && (
+                <div className="space-y-4">
+                  {studentAttendance.length === 0 ? (
+                    <div className="text-center py-12">
+                      <i className="fas fa-calendar-times text-5xl text-gray-300 mb-4"></i>
+                      <p className="text-gray-500">No attendance records found.</p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Big summary cards */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="bg-white p-4 rounded-lg border-l-4 border-green-500 shadow-sm">
+                          <p className="text-xs text-gray-500 uppercase tracking-wide">Present</p>
+                          <p className="text-3xl font-bold text-green-600">{attendanceSummary.byStatus.PRESENT || 0}</p>
+                        </div>
+                        <div className="bg-white p-4 rounded-lg border-l-4 border-red-500 shadow-sm">
+                          <p className="text-xs text-gray-500 uppercase tracking-wide">Absent</p>
+                          <p className="text-3xl font-bold text-red-600">{attendanceSummary.byStatus.ABSENT || 0}</p>
+                        </div>
+                        <div className="bg-white p-4 rounded-lg border-l-4 border-yellow-500 shadow-sm">
+                          <p className="text-xs text-gray-500 uppercase tracking-wide">Late</p>
+                          <p className="text-3xl font-bold text-yellow-600">{attendanceSummary.byStatus.LATE || 0}</p>
+                        </div>
+                        <div className="bg-white p-4 rounded-lg border-l-4 border-indigo-500 shadow-sm">
+                          <p className="text-xs text-gray-500 uppercase tracking-wide">Attendance Rate</p>
+                          <p className="text-3xl font-bold text-indigo-600">{attendanceSummary.presentPct}%</p>
+                        </div>
+                      </div>
+
+                      {/* Progress bar */}
+                      <div className="bg-white p-4 rounded-lg border">
+                        <div className="flex justify-between text-sm mb-2">
+                          <span className="font-medium text-gray-700">Attendance Overview</span>
+                          <span className="text-gray-500">
+                            {attendanceSummary.byStatus.PRESENT || 0} / {attendanceSummary.total} days present
+                          </span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-3 flex overflow-hidden">
+                          <div className="bg-green-500 h-full" style={{ width: `${(attendanceSummary.byStatus.PRESENT / attendanceSummary.total) * 100 || 0}%` }} title="Present"></div>
+                          <div className="bg-red-500 h-full" style={{ width: `${(attendanceSummary.byStatus.ABSENT / attendanceSummary.total) * 100 || 0}%` }} title="Absent"></div>
+                          <div className="bg-yellow-500 h-full" style={{ width: `${(attendanceSummary.byStatus.LATE / attendanceSummary.total) * 100 || 0}%` }} title="Late"></div>
+                          <div className="bg-blue-500 h-full" style={{ width: `${((attendanceSummary.byStatus.PERMISSION || 0) / attendanceSummary.total) * 100 || 0}%` }} title="Permission"></div>
+                        </div>
+                      </div>
+
+                      {/* Monthly breakdown */}
+                      {attendanceSummary.byMonth.length > 0 && (
+                        <div className="bg-white border rounded-lg overflow-hidden">
+                          <div className="bg-gray-50 px-4 py-2 border-b">
+                            <h3 className="font-semibold text-gray-700"><i className="fas fa-calendar-alt mr-2 text-indigo-600" />Monthly Breakdown</h3>
+                          </div>
+                          <table className="w-full">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Month</th>
+                                <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Present</th>
+                                <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Absent</th>
+                                <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Late</th>
+                                <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Other</th>
+                                <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y">
+                              {attendanceSummary.byMonth.map((m, i) => (
+                                <tr key={i} className="hover:bg-gray-50">
+                                  <td className="px-4 py-2 font-medium">
+                                    {new Date(`${m.month}-01`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}
+                                  </td>
+                                  <td className="px-4 py-2 text-center text-green-600 font-semibold">{m.present}</td>
+                                  <td className="px-4 py-2 text-center text-red-600 font-semibold">{m.absent}</td>
+                                  <td className="px-4 py-2 text-center text-yellow-600 font-semibold">{m.late}</td>
+                                  <td className="px-4 py-2 text-center text-blue-600 font-semibold">{m.other}</td>
+                                  <td className="px-4 py-2 text-center font-semibold">{m.total}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      {/* Recent records */}
+                      <div className="bg-white border rounded-lg overflow-hidden">
+                        <div className="bg-gray-50 px-4 py-2 border-b">
+                          <h3 className="font-semibold text-gray-700"><i className="fas fa-list mr-2 text-indigo-600" />Recent Records</h3>
+                        </div>
+                        <table className="w-full">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time In</th>
+                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time Out</th>
+                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Remarks</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {studentAttendance.slice(0, 20).map(a => {
+                              const statusColors = {
+                                PRESENT: 'bg-green-100 text-green-800',
+                                ABSENT: 'bg-red-100 text-red-800',
+                                LATE: 'bg-yellow-100 text-yellow-800',
+                                PERMISSION: 'bg-blue-100 text-blue-800',
+                                SICK: 'bg-orange-100 text-orange-800',
+                                FIELD_TRIP: 'bg-purple-100 text-purple-800'
+                              };
+                              return (
+                                <tr key={a.id} className="hover:bg-gray-50">
+                                  <td className="px-4 py-2">{formatDate(a.date)}</td>
+                                  <td className="px-4 py-2">
+                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[a.status] || 'bg-gray-100 text-gray-800'}`}>
+                                      {a.status}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-2 text-sm">{(a.timeIn || '').substring(0, 5) || '—'}</td>
+                                  <td className="px-4 py-2 text-sm">{(a.timeOut || '').substring(0, 5) || '—'}</td>
+                                  <td className="px-4 py-2 text-sm text-gray-600">{a.remarks || '—'}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-end gap-2 px-6 py-4 border-t bg-gray-50 sticky bottom-0">
               {canEdit && (
                 <button onClick={() => { setShowDetailsModal(false); openEdit(selectedStudent); }}
-                        className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
-                  <i className="fas fa-edit mr-2" />Edit
+                  className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
+                  <i className="fas fa-edit mr-2" />Edit Student
                 </button>
               )}
               <button onClick={() => setShowDetailsModal(false)}
-                      className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600">
+                className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
                 Close
               </button>
             </div>
@@ -6948,7 +7600,225 @@ const StudentModule = ({
         </div>
       )}
 
-      {/* Add Parent modal */}
+      {/* ==================== INVOICE MODAL ==================== */}
+      {showInvoiceModal && selectedStudent && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-auto">
+            <div className="sticky top-0 bg-white z-10 border-b px-6 py-4 flex justify-between items-center">
+              <h2 className="text-2xl font-bold text-gray-800">
+                <i className="fas fa-file-invoice-dollar text-purple-600 mr-2" />
+                Fee Invoice
+              </h2>
+              <div className="flex gap-2">
+                <button onClick={() => window.print()}
+                  className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
+                  <i className="fas fa-print mr-2" />Print
+                </button>
+                <button onClick={() => setShowInvoiceModal(false)}
+                  className="text-gray-500 hover:text-gray-700 p-2">
+                  <i className="fas fa-times text-xl" />
+                </button>
+              </div>
+            </div>
+
+            {loadingInvoice ? (
+              <div className="p-12 text-center">
+                <i className="fas fa-spinner fa-spin text-4xl text-indigo-600 mb-4"></i>
+                <p className="text-gray-500">Loading invoice…</p>
+              </div>
+            ) : invoiceData ? (
+              <div className="p-6 space-y-6">
+                {/* School header */}
+                <div className="border-b pb-4">
+                  <h3 className="text-2xl font-bold text-indigo-700">
+                    {currentSchool?.name || 'School'}
+                  </h3>
+                  {currentSchool?.motto && <p className="text-sm italic text-gray-600 mt-1">"{currentSchool.motto}"</p>}
+                  <p className="text-sm text-gray-500 mt-2">
+                    {currentSchool?.contact?.address && <span>{currentSchool.contact.address} • </span>}
+                    {currentSchool?.contact?.phone && <span>{currentSchool.contact.phone} • </span>}
+                    {currentSchool?.contact?.email && <span>{currentSchool.contact.email}</span>}
+                  </p>
+                </div>
+
+                {/* Student info */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide">Student</p>
+                    <p className="font-bold text-lg">{invoiceData.student.firstName} {invoiceData.student.lastName}</p>
+                    <p className="text-sm text-gray-600 font-mono">{invoiceData.student.admissionNumber}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-gray-500 uppercase tracking-wide">Class / Program</p>
+                    <p className="font-medium">
+                      {invoiceData.student.courseName ||
+                       invoiceData.student.programName ||
+                       invoiceData.student.className || '—'}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-2">Generated: {new Date().toLocaleDateString()}</p>
+                  </div>
+                </div>
+
+                {/* Term-by-term statement */}
+                <div className="space-y-4">
+                  {invoiceData.termStatements && invoiceData.termStatements.length > 0 ? (
+                    invoiceData.termStatements.map((term, ti) => (
+                      <div key={ti} className="border rounded-lg overflow-hidden">
+                        <div className="bg-gradient-to-r from-indigo-500 to-purple-500 px-4 py-2 text-white flex justify-between items-center">
+                          <h4 className="font-bold text-lg">{term.term}</h4>
+                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                            term.isPaid ? 'bg-green-400 bg-opacity-40 text-white' : 'bg-red-400 bg-opacity-40 text-white'
+                          }`}>
+                            {term.isPaid ? '✓ Fully Paid' : 'Balance Due'}
+                          </span>
+                        </div>
+                        <table className="w-full">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Fee Item</th>
+                              <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                              <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Discount</th>
+                              <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Net</th>
+                              <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Paid</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {term.fees.map((fee, fi) => (
+                              <tr key={fi}>
+                                <td className="px-4 py-2">{fee.name}</td>
+                                <td className="px-4 py-2 text-right">{formatCurrency(fee.amount)}</td>
+                                <td className="px-4 py-2 text-right text-purple-600">
+                                  {fee.discount > 0 ? `-${formatCurrency(fee.discount)}` : '—'}
+                                </td>
+                                <td className="px-4 py-2 text-right font-medium">{formatCurrency(fee.net)}</td>
+                                <td className="px-4 py-2 text-right text-green-600">{formatCurrency(fee.paid)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot className="bg-gray-50 font-semibold">
+                            <tr>
+                              <td className="px-4 py-2">Subtotal</td>
+                              <td className="px-4 py-2 text-right">{formatCurrency(term.grossBilled)}</td>
+                              <td className="px-4 py-2 text-right text-purple-600">
+                                {term.discount > 0 ? `-${formatCurrency(term.discount)}` : '—'}
+                              </td>
+                              <td className="px-4 py-2 text-right">{formatCurrency(term.netBilled)}</td>
+                              <td className="px-4 py-2 text-right text-green-600">{formatCurrency(term.paidThisTerm)}</td>
+                            </tr>
+                            {term.broughtForward > 0 && (
+                              <tr className="text-orange-700">
+                                <td colSpan={3} className="px-4 py-1 text-right text-sm">Balance Brought Forward:</td>
+                                <td colSpan={2} className="px-4 py-1 text-right text-sm font-bold">
+                                  {formatCurrency(term.broughtForward)}
+                                </td>
+                              </tr>
+                            )}
+                            <tr className="bg-indigo-50">
+                              <td colSpan={3} className="px-4 py-2 text-right">Total Billed This Term:</td>
+                              <td colSpan={2} className="px-4 py-2 text-right">{formatCurrency(term.billedThisTerm)}</td>
+                            </tr>
+                            <tr className="bg-green-50">
+                              <td colSpan={3} className="px-4 py-2 text-right">Paid This Term:</td>
+                              <td colSpan={2} className="px-4 py-2 text-right text-green-700">-{formatCurrency(term.paidThisTerm)}</td>
+                            </tr>
+                            <tr className={term.balanceCarriedForward > 0 ? 'bg-red-50' : 'bg-green-100'}>
+                              <td colSpan={3} className="px-4 py-2 text-right font-bold">
+                                {term.balanceCarriedForward > 0 ? 'Balance Carried Forward:' : 'Cleared'}
+                              </td>
+                              <td colSpan={2} className={`px-4 py-2 text-right font-bold ${term.balanceCarriedForward > 0 ? 'text-red-700' : 'text-green-700'}`}>
+                                {formatCurrency(term.balanceCarriedForward)}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-8 bg-gray-50 rounded-lg">
+                      <i className="fas fa-inbox text-4xl text-gray-300 mb-3"></i>
+                      <p className="text-gray-500">No fee records found for this student.</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Grand totals */}
+                {invoiceData.totals && (
+                  <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-lg border-2 border-indigo-200">
+                    <h4 className="font-bold text-lg mb-4 text-gray-800">Overall Summary</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="text-center">
+                        <p className="text-xs text-gray-500 uppercase">Gross Billed</p>
+                        <p className="text-xl font-bold">{formatCurrency(invoiceData.totals.grossBilled)}</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs text-gray-500 uppercase">Discounts</p>
+                        <p className="text-xl font-bold text-purple-600">
+                          {formatCurrency(invoiceData.totals.discount)}
+                        </p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs text-gray-500 uppercase">Total Paid</p>
+                        <p className="text-xl font-bold text-green-600">
+                          {formatCurrency(invoiceData.totals.paid)}
+                        </p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs text-gray-500 uppercase">Outstanding</p>
+                        <p className={`text-xl font-bold ${invoiceData.totals.outstanding > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                          {formatCurrency(invoiceData.totals.outstanding)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Payment history (all payments flat) */}
+                {studentPayments && studentPayments.length > 0 && (
+                  <div className="border rounded-lg overflow-hidden">
+                    <div className="bg-gray-50 px-4 py-2 border-b">
+                      <h4 className="font-semibold text-gray-700"><i className="fas fa-receipt mr-2 text-green-600" />Payment History</h4>
+                    </div>
+                    <table className="w-full">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Receipt</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Method</th>
+                          <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {studentPayments.map(p => (
+                          <tr key={p.id}>
+                            <td className="px-4 py-2">{formatDate(p.date)}</td>
+                            <td className="px-4 py-2 font-mono text-sm">{p.receiptNo || '—'}</td>
+                            <td className="px-4 py-2">{p.paymentMethod || '—'}</td>
+                            <td className="px-4 py-2 text-right font-semibold text-green-600">{formatCurrency(p.amount)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="bg-gray-50 font-bold">
+                        <tr>
+                          <td colSpan={3} className="px-4 py-2 text-right">Total Paid:</td>
+                          <td className="px-4 py-2 text-right text-green-700">
+                            {formatCurrency(studentPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0))}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="p-12 text-center">
+                <p className="text-gray-500">Unable to load invoice.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ==================== ADD PARENT MODAL ==================== */}
       {showAddParentModal && selectedStudentForParent && canEdit && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
@@ -6973,17 +7843,13 @@ const StudentModule = ({
             )}
 
             {!createNewParent ? (
-              <SearchableSelect
-                label="Select Existing Parent/Guardian *"
+              <SearchableSelect label="Select Existing Parent/Guardian *"
                 value={selectedExistingParent?.userId || ''}
                 onChange={(e) => {
                   const p = parentUserOptions.find(x => x.value === e.target.value);
                   setSelectedExistingParent(p || null);
                 }}
-                options={parentUserOptions}
-                placeholder="Search…"
-                required
-              />
+                options={parentUserOptions} placeholder="Search…" required />
             ) : (
               <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -6997,15 +7863,11 @@ const StudentModule = ({
                   <SelectField label="Relationship *" value={parentForm.relationship} onChange={(e) => setParentForm({ ...parentForm, relationship: e.target.value })} options={relationshipOptions} />
                   <div className="flex items-center gap-4 pt-5">
                     <label className="flex items-center text-sm">
-                      <input type="checkbox" className="mr-2"
-                             checked={parentForm.isPrimary}
-                             onChange={(e) => setParentForm({ ...parentForm, isPrimary: e.target.checked })} />
+                      <input type="checkbox" className="mr-2" checked={parentForm.isPrimary} onChange={(e) => setParentForm({ ...parentForm, isPrimary: e.target.checked })} />
                       Primary
                     </label>
                     <label className="flex items-center text-sm">
-                      <input type="checkbox" className="mr-2"
-                             checked={parentForm.emergencyContact}
-                             onChange={(e) => setParentForm({ ...parentForm, emergencyContact: e.target.checked })} />
+                      <input type="checkbox" className="mr-2" checked={parentForm.emergencyContact} onChange={(e) => setParentForm({ ...parentForm, emergencyContact: e.target.checked })} />
                       Emergency
                     </label>
                   </div>
@@ -7013,12 +7875,12 @@ const StudentModule = ({
 
                 <label className="flex items-start cursor-pointer">
                   <input type="checkbox" className="mt-1 mr-2"
-                         checked={parentForm.grantPortalAccess}
-                         onChange={(e) => {
-                           const checked = e.target.checked;
-                           setParentForm({ ...parentForm, grantPortalAccess: checked, password: checked ? parentForm.password : '' });
-                           if (!checked) setShowParentPassword(false);
-                         }} />
+                    checked={parentForm.grantPortalAccess}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setParentForm({ ...parentForm, grantPortalAccess: checked, password: checked ? parentForm.password : '' });
+                      if (!checked) setShowParentPassword(false);
+                    }} />
                   <span className="text-sm">
                     <span className="font-medium">Grant portal access</span>
                     <span className="block text-xs text-gray-500 mt-0.5">Requires email and password.</span>
@@ -7026,25 +7888,19 @@ const StudentModule = ({
                 </label>
 
                 {parentForm.grantPortalAccess && (
-                  /* ✅ Password with eye toggle */
                   <div className="relative max-w-md">
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Portal Password <span className="text-red-500">*</span>
                     </label>
                     <div className="relative">
-                      <input
-                        type={showParentPassword ? 'text' : 'password'}
+                      <input type={showParentPassword ? 'text' : 'password'}
                         value={parentForm.password}
                         onChange={(e) => setParentForm({ ...parentForm, password: e.target.value })}
                         placeholder="Minimum 6 characters"
                         className="w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
-                        required
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowParentPassword(v => !v)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
-                      >
+                        required />
+                      <button type="button" onClick={() => setShowParentPassword(v => !v)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700">
                         <i className={`fas fa-${showParentPassword ? 'eye-slash' : 'eye'}`} />
                       </button>
                     </div>
@@ -7055,12 +7911,12 @@ const StudentModule = ({
 
             <div className="flex gap-2 mt-6 pt-4 border-t">
               <button onClick={handleAddParent}
-                      disabled={loading || (!createNewParent && !selectedExistingParent)}
-                      className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                disabled={loading || (!createNewParent && !selectedExistingParent)}
+                className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
                 {loading ? 'Adding…' : 'Add Guardian'}
               </button>
               <button onClick={() => setShowAddParentModal(false)}
-                      className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
+                className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
                 Cancel
               </button>
             </div>
@@ -7084,11 +7940,11 @@ const StudentModule = ({
             </div>
             <div className="flex gap-2">
               <button onClick={confirmDelete} disabled={loading}
-                      className="flex-1 bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 disabled:opacity-50">
+                className="flex-1 bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 disabled:opacity-50">
                 {loading ? 'Deleting…' : 'Yes, Delete'}
               </button>
               <button onClick={() => setShowDeleteConfirm(false)}
-                      className="flex-1 bg-gray-500 text-white py-2 rounded-lg hover:bg-gray-600">
+                className="flex-1 bg-gray-500 text-white py-2 rounded-lg hover:bg-gray-600">
                 Cancel
               </button>
             </div>
