@@ -19058,19 +19058,28 @@ const upload = multer({
     }
   }
 });
-
 app.post('/api/schools/upload-logo', authenticate, upload.single('logo'), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
-    
-    const logoUrl = `/uploads/${req.file.filename}`;
-    res.json({ success: true, logoUrl });
-  } catch (error) {
-    console.error('Upload error:', error);
-    res.status(500).json({ message: error.message });
+    if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
+
+    // Read the uploaded file, convert to base64 data URL
+    const fileData = fs.readFileSync(req.file.path);
+    const base64 = `data:${req.file.mimetype};base64,${fileData.toString('base64')}`;
+
+    // Delete the temp file — we don't need it
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+
+    // Return BOTH the base64 (source of truth) and a best-effort URL
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host  = req.headers['x-forwarded-host'] || req.get('host');
+    const url   = `${proto}://${host}/uploads/${req.file.filename}`;
+
+    res.json({ success: true, logoUrl: url, base64 });
+  } catch (err) {
+    console.error('❌ Upload logo error:', err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
-
 app.post('/api/students/upload-photo', authenticate, upload.single('photo'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
