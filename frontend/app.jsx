@@ -11968,14 +11968,13 @@ const ExamModule = ({
 };
 
 // ============================================================================
-//  RESULTS MODULE — v5
+//  RESULTS MODULE — v5.2 (Fixed examTypeLabel)
 //
 //  · Session-aware reports + termly class matrix
 //  · Centered school name + logo on printouts
-//  · Clean white background design (no dark slate)
-//  · Category-aware term options (Primary: Term 1-3, Uni: Semester 1-2)
+//  · Clean white background design
+//  · Category-aware term options
 //  · Print-only captures the report — nothing else
-//  · Class Matrix tab removed (termly covers the use case)
 // ============================================================================
 const ResultsModule = ({
   exams, setExams, results, students, subjects, classes, courses, programs,
@@ -11993,12 +11992,12 @@ const ResultsModule = ({
   const isPrimary      = schoolCategory === 'ECDE_PRIMARY_JSS';
   const isRegularSchool = !isUniversity && !isTVET;
 
-  // ✅ School identity — same approach as CardManagementModule
+  // ✅ School identity — same robust approach as CardManagementModule
   const schoolName =
     currentSchool?.name?.trim() ||
     currentSchool?.schoolName?.trim() ||
     currentSchool?.school?.name?.trim() ||
-    '';
+    'School Name';
   const schoolLogo =
     currentSchool?.contact?.logo ||
     currentSchool?.branding?.logo ||
@@ -12008,9 +12007,6 @@ const ResultsModule = ({
     currentSchool?.motto ||
     currentSchool?.schoolMotto ||
     '';
-  const schoolAddress = currentSchool?.contact?.address || '';
-  const schoolPhone   = currentSchool?.contact?.phone   || '';
-  const schoolEmail   = currentSchool?.contact?.email   || '';
 
   // ✅ Category-aware term options
   const termOptions = useMemo(() => {
@@ -12021,27 +12017,33 @@ const ResultsModule = ({
         { value: 'Semester 2', label: 'Semester 2' }
       ];
     }
-    if (isTVET) {
-      return [
-        { value: '',         label: 'All Terms' },
-        { value: 'Term 1',   label: 'Term 1' },
-        { value: 'Term 2',   label: 'Term 2' },
-        { value: 'Term 3',   label: 'Term 3' }
-      ];
-    }
-    // Primary, Secondary
     return [
       { value: '',       label: 'All Terms' },
       { value: 'Term 1', label: 'Term 1' },
       { value: 'Term 2', label: 'Term 2' },
       { value: 'Term 3', label: 'Term 3' }
     ];
-  }, [isUniversity, isTVET]);
-
-  const defaultTermValue = useMemo(() => {
-    if (isUniversity) return 'Semester 1';
-    return 'Term 1';
   }, [isUniversity]);
+
+  const defaultTermValue = useMemo(() => (isUniversity ? 'Semester 1' : 'Term 1'), [isUniversity]);
+
+  // ✅ Exam type options + label helper (THE FIX)
+  const examTypeOptions = useMemo(() => ([
+    { value: '', label: 'All Types' },
+    { value: 'OPENER', label: 'Opener' },
+    { value: 'MIDTERM', label: 'Mid-Term' },
+    { value: 'ENDTERM', label: 'End Term' },
+    { value: 'CAT', label: 'CAT' },
+    { value: 'MOCK', label: 'Mock' },
+    { value: 'PRE_MOCK', label: 'Pre-Mock' },
+    { value: 'FINAL', label: 'Final Exam' }
+  ]), []);
+
+  // ✅ THE FIX — this was missing
+  const examTypeLabel = (type) => {
+    const found = examTypeOptions.find(o => o.value === type);
+    return found?.label || type || 'Other';
+  };
 
   // ============================================================
   // ROLE
@@ -12075,7 +12077,6 @@ const ResultsModule = ({
   // ============================================================
   const [viewMode, setViewMode] = useState('marks'); // 'marks' | 'report' | 'term-matrix'
 
-  // Marks entry
   const [selectedExam, setSelectedExam]         = useState('');
   const [selectedClass, setSelectedClass]       = useState('');
   const [selectedCourse, setSelectedCourse]     = useState('');
@@ -12098,7 +12099,6 @@ const ResultsModule = ({
   const [messageTemplate, setMessageTemplate]                       = useState('');
   const [sendingMessages, setSendingMessages]                       = useState(false);
 
-  // Detailed report
   const [reportClassId, setReportClassId]               = useState('');
   const [reportStudentId, setReportStudentId]           = useState('');
   const [reportTermFilter, setReportTermFilter]         = useState('');
@@ -12107,7 +12107,6 @@ const ResultsModule = ({
   const [reportData, setReportData]                     = useState(null);
   const [loadingReport, setLoadingReport]               = useState(false);
 
-  // Term matrix
   const [termMatrixClassId, setTermMatrixClassId]     = useState('');
   const [termMatrixTerm, setTermMatrixTerm]           = useState(defaultTermValue);
   const [termMatrixExamType, setTermMatrixExamType]   = useState('');
@@ -12115,7 +12114,6 @@ const ResultsModule = ({
   const [termMatrixData, setTermMatrixData]           = useState(null);
   const [loadingTermMatrix, setLoadingTermMatrix]     = useState(false);
 
-  // Student/parent view
   const [myResults, setMyResults]               = useState([]);
   const [myStudentRecord, setMyStudentRecord]   = useState(null);
   const [loadingMyData, setLoadingMyData]       = useState(false);
@@ -12133,7 +12131,6 @@ const ResultsModule = ({
   const hasLoadedChildrenData = useRef(false);
   const [loading, setLoading] = useState(false);
 
-  // Reset term default when school changes
   useEffect(() => {
     setTermMatrixTerm(defaultTermValue);
   }, [defaultTermValue]);
@@ -12174,7 +12171,6 @@ const ResultsModule = ({
       if (pct >= 30) return { grade: 'BE', points: 1 };
       return { grade: 'NI', points: 0 };
     }
-    // 8-4-4
     if (pct >= 80) return { grade: 'A',  points: 12 };
     if (pct >= 75) return { grade: 'A-', points: 11 };
     if (pct >= 70) return { grade: 'B+', points: 10 };
@@ -12717,17 +12713,6 @@ const ResultsModule = ({
     .filter(s => !reportClassId || s.classId === reportClassId)
     .map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}`, subLabel: s.admissionNumber }));
 
-  const examTypeOptions = [
-    { value: '', label: 'All Types' },
-    { value: 'OPENER', label: 'Opener' },
-    { value: 'MIDTERM', label: 'Mid-Term' },
-    { value: 'ENDTERM', label: 'End Term' },
-    { value: 'CAT', label: 'CAT' },
-    { value: 'MOCK', label: 'Mock' },
-    { value: 'PRE_MOCK', label: 'Pre-Mock' },
-    { value: 'FINAL', label: 'Final Exam' }
-  ];
-
   // ============================================================
   // PRINT — stylesheet injected once
   // ============================================================
@@ -12954,13 +12939,12 @@ const ResultsModule = ({
 
         {myStudentRecord ? (
           <div id="student-results-print" className="space-y-6">
-            {/* School header (centered) */}
             <div className="text-center border-b-2 border-slate-300 pb-4">
               {schoolLogo && (
                 <img src={schoolLogo} alt="" className="w-16 h-16 object-cover rounded-full mx-auto mb-2 border" />
               )}
               <h1 className="text-2xl font-black text-slate-800 uppercase tracking-wider">
-                {schoolName || 'School'}
+                {schoolName}
               </h1>
               {schoolMotto && (
                 <p className="text-xs italic text-slate-500 mt-1">"{schoolMotto}"</p>
@@ -13023,7 +13007,7 @@ const ResultsModule = ({
                     {myResults.map((r, i) => (
                       <tr key={i}>
                         <td className="px-4 py-3 font-medium">{r.examName}</td>
-                        <td className="px-4 py-3 text-sm">{r.examDate ? formatDate(r.examDate) : '—'}</td>
+                        <td className="px-4 py-3 text-sm">{r.examDate ? new Date(r.examDate).toLocaleDateString() : '—'}</td>
                         <td className="px-4 py-3">{r.itemName}</td>
                         <td className="px-4 py-3 text-center font-bold">{r.marks ?? '—'}</td>
                         <td className="px-4 py-3 text-center">
@@ -13108,7 +13092,7 @@ const ResultsModule = ({
                     <img src={schoolLogo} alt="" className="w-16 h-16 object-cover rounded-full mx-auto mb-2 border" />
                   )}
                   <h1 className="text-2xl font-black text-slate-800 uppercase tracking-wider">
-                    {schoolName || 'School'}
+                    {schoolName}
                   </h1>
                   {schoolMotto && (
                     <p className="text-xs italic text-slate-500 mt-1">"{schoolMotto}"</p>
@@ -13137,7 +13121,7 @@ const ResultsModule = ({
                         {childResults.map((r, i) => (
                           <tr key={i}>
                             <td className="px-4 py-3 font-medium">{r.examName}</td>
-                            <td className="px-4 py-3 text-sm">{r.examDate ? formatDate(r.examDate) : '—'}</td>
+                            <td className="px-4 py-3 text-sm">{r.examDate ? new Date(r.examDate).toLocaleDateString() : '—'}</td>
                             <td className="px-4 py-3">{r.itemName}</td>
                             <td className="px-4 py-3 text-center font-bold">{r.marks ?? '—'}</td>
                             <td className="px-4 py-3 text-center">
@@ -13272,19 +13256,17 @@ const ResultsModule = ({
 
           {reportData && (
             <div id="detailed-report-print" className="space-y-6">
-              {/* School header */}
               <div className="text-center border-b-2 border-slate-300 pb-4">
                 {schoolLogo && (
                   <img src={schoolLogo} alt="" className="w-16 h-16 object-cover rounded-full mx-auto mb-2 border" />
                 )}
                 <h1 className="text-2xl font-black text-slate-800 uppercase tracking-wider">
-                  {schoolName || 'School'}
+                  {schoolName}
                 </h1>
                 {schoolMotto && <p className="text-xs italic text-slate-500 mt-1">"{schoolMotto}"</p>}
                 <p className="text-xs uppercase tracking-widest text-slate-500 mt-2">Student Report Card</p>
               </div>
 
-              {/* Student header */}
               <div className="bg-slate-800 text-white rounded-xl p-6">
                 <div className="flex flex-wrap justify-between items-start gap-4">
                   <div>
@@ -13304,7 +13286,6 @@ const ResultsModule = ({
                 </div>
               </div>
 
-              {/* Term cards */}
               {reportData.termCards.length === 0 ? (
                 <div className="bg-white p-12 rounded-xl shadow-sm text-center border">
                   <i className="fas fa-file-alt text-6xl text-gray-300 mb-4"></i>
@@ -13386,7 +13367,6 @@ const ResultsModule = ({
                 ))
               )}
 
-              {/* Print-only signature block */}
               <div className="print-only pt-12 border-t border-slate-300">
                 <div className="grid grid-cols-3 gap-8 text-center text-xs text-slate-600">
                   <div>
@@ -13464,11 +13444,10 @@ const ResultsModule = ({
 
           {termMatrixData && (
             <div id="term-matrix-print" className="bg-white rounded-xl shadow-sm border overflow-hidden">
-              {/* Header */}
               <div className="bg-slate-800 text-white px-6 py-5">
                 <div className="text-center mb-4">
                   <h1 className="text-2xl font-black uppercase tracking-wider">
-                    {schoolName || 'School'}
+                    {schoolName}
                   </h1>
                   {schoolMotto && (
                     <p className="text-slate-300 text-sm italic mt-1">"{schoolMotto}"</p>
@@ -13500,7 +13479,6 @@ const ResultsModule = ({
                 </div>
               </div>
 
-              {/* Matrix table */}
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse text-sm">
                   <thead>
@@ -13587,7 +13565,6 @@ const ResultsModule = ({
                 </table>
               </div>
 
-              {/* Print-only signature block */}
               <div className="print-only px-6 py-6 border-t border-slate-300">
                 <div className="grid grid-cols-3 gap-8 text-center text-xs text-slate-600">
                   <div><div className="border-t border-slate-400 mt-10 pt-2">Class Teacher</div></div>
@@ -13841,7 +13818,7 @@ const ResultsModule = ({
                             .replace(/{subject}/g, itemName)
                             .replace(/{marks}/g, student.marks)
                             .replace(/{grade}/g, student.grade)
-                            .replace(/{school_name}/g, schoolName || 'School');
+                            .replace(/{school_name}/g, schoolName);
                           if ((messageType === 'SMS' || messageType === 'BOTH') && parent.User?.phone) {
                             await api.post('/messages', { type: 'SMS', content: msg, recipientType: 'PARENT',
                               recipients: [{ type: 'user', id: parent.userId }], sendNow: true, schoolId: currentSchool?.id });
@@ -39923,105 +39900,313 @@ const ExamCardOverridesModule = ({
   const userRole = user?.role || '';
   const canApprove = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'ACCOUNTANT', 'PRINCIPAL'].includes(userRole);
 
-  // ==================== SEARCHABLE SELECT ====================
-  const SearchableSelect = ({ label, value, onChange, options, placeholder, disabled }) => {
+  // ============================================================
+  //  SEARCHABLE SELECT — module scope, stable identity
+  //  · Portal-rendered dropdown (escapes overflow:hidden)
+  //  · Keyboard navigation (up/down/enter/escape)
+  //  · No focus stealing
+  //  · Clear button + auto-focus input
+  // ============================================================
+  const SearchableSelect = ({
+    label,
+    value,
+    onChange,
+    options = [],
+    placeholder = 'Search...',
+    disabled = false,
+    required = false,
+    className = '',
+    emptyMessage = 'No options available',
+    noOptionsMessage = 'No results found'
+  }) => {
     const [search, setSearch] = useState('');
     const [isOpen, setIsOpen] = useState(false);
     const [isFocused, setIsFocused] = useState(false);
+    const [highlightedIndex, setHighlightedIndex] = useState(-1);
+    const [dropdownRect, setDropdownRect] = useState(null);
+
     const dropdownRef = useRef(null);
     const inputRef = useRef(null);
+    const listRef = useRef(null);
+    const portalRef = useRef(null);
+
+    const safeOptions = useMemo(
+      () => (Array.isArray(options) ? options.filter(Boolean) : []),
+      [options]
+    );
 
     const filteredOptions = useMemo(() => {
-      if (!String(search || '').trim()) return options;
-      const q = String(search || '').toLowerCase();
-      return options.filter(opt =>
-        String(opt.label ?? '').toLowerCase().includes(q) ||
-        String(opt.subLabel ?? '').toLowerCase().includes(q) ||
-        String(opt.value ?? '').toLowerCase().includes(q)
-      );
-    }, [options, search]);
+      if (!safeOptions.length) return [];
+      if (!String(search || '').trim()) return safeOptions;
+      const q = String(search).toLowerCase();
+      return safeOptions.filter(opt => {
+        const label = String(opt.label ?? '').toLowerCase();
+        const sub = String(opt.subLabel ?? '').toLowerCase();
+        const val = String(opt.value ?? '').toLowerCase();
+        return label.includes(q) || sub.includes(q) || val.includes(q);
+      });
+    }, [safeOptions, search]);
 
-    const selectedOption = options.find(o => o.value === value);
+    const selectedOption = useMemo(
+      () => safeOptions.find(o => String(o.value) === String(value)) || null,
+      [safeOptions, value]
+    );
 
-    useEffect(() => {
-      const handler = (e) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-          setIsOpen(false);
-          setIsFocused(false);
-        }
-      };
-      document.addEventListener('mousedown', handler);
-      return () => document.removeEventListener('mousedown', handler);
-    }, []);
-
-    const handleSelect = (v) => {
-      onChange({ target: { value: v } });
-      const sel = options.find(o => o.value === v);
-      setSearch(sel ? sel.label : '');
-      setIsOpen(false);
-      setIsFocused(false);
+    // Position the portal dropdown under the input
+    const updateDropdownRect = () => {
+      if (!inputRef.current) return;
+      const r = inputRef.current.getBoundingClientRect();
+      setDropdownRect({
+        top: r.bottom + 4 + window.scrollY,
+        left: r.left + window.scrollX,
+        width: r.width
+      });
     };
 
-    const handleInput = (e) => {
+    // Click outside — check both the input wrapper AND the portal
+    useEffect(() => {
+      const handlePointerDown = (event) => {
+        const inInput = dropdownRef.current && dropdownRef.current.contains(event.target);
+        const inPortal = portalRef.current && portalRef.current.contains(event.target);
+        if (!inInput && !inPortal) {
+          setIsOpen(false);
+          setIsFocused(false);
+          setHighlightedIndex(-1);
+        }
+      };
+      document.addEventListener('mousedown', handlePointerDown);
+      document.addEventListener('touchstart', handlePointerDown, { passive: true });
+      return () => {
+        document.removeEventListener('mousedown', handlePointerDown);
+        document.removeEventListener('touchstart', handlePointerDown);
+      };
+    }, []);
+
+    // Reposition on scroll/resize while open
+    useEffect(() => {
+      if (!isOpen) return;
+      const onScroll = () => updateDropdownRect();
+      const onResize = () => updateDropdownRect();
+      window.addEventListener('scroll', onScroll, true);
+      window.addEventListener('resize', onResize);
+      return () => {
+        window.removeEventListener('scroll', onScroll, true);
+        window.removeEventListener('resize', onResize);
+      };
+    }, [isOpen]);
+
+    // Sync display text with the selected option
+    useEffect(() => {
+      if (isFocused) return;
+      if (selectedOption) setSearch(String(selectedOption.label ?? ''));
+      else setSearch('');
+    }, [value, selectedOption, isFocused]);
+
+    const openMenu = () => {
+      if (disabled) return;
+      setIsFocused(true);
+      setIsOpen(true);
+      updateDropdownRect();
+      if (selectedOption && !search) setSearch(String(selectedOption.label ?? ''));
+    };
+
+    const closeMenu = (restoreLabel = true) => {
+      setIsOpen(false);
+      setIsFocused(false);
+      setHighlightedIndex(-1);
+      if (restoreLabel) {
+        setSearch(selectedOption ? String(selectedOption.label ?? '') : '');
+      }
+    };
+
+    const handleSelect = (opt) => {
+      if (!opt || opt.disabled) return;
+      onChange({ target: { value: opt.value } });
+      setSearch(String(opt.label ?? ''));
+      setIsOpen(false);
+      setIsFocused(false);
+      setHighlightedIndex(-1);
+      requestAnimationFrame(() => inputRef.current?.focus());
+    };
+
+    const handleInputChange = (e) => {
       const v = e.target.value;
       setSearch(v);
       setIsOpen(true);
       setIsFocused(true);
+      setHighlightedIndex(-1);
       if (v === '') onChange({ target: { value: '' } });
     };
 
-    const handleBlur = () => {
-      setTimeout(() => {
-        if (document.activeElement !== inputRef.current) {
-          setIsOpen(false);
-          setIsFocused(false);
-          setSearch(selectedOption ? selectedOption.label : '');
+    const handleKeyDown = (e) => {
+      if (disabled) return;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (!isOpen) { openMenu(); return; }
+        setHighlightedIndex(i =>
+          filteredOptions.length === 0 ? -1 : (i + 1) % filteredOptions.length
+        );
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (!isOpen) { openMenu(); return; }
+        setHighlightedIndex(i =>
+          filteredOptions.length === 0
+            ? -1
+            : (i - 1 + filteredOptions.length) % filteredOptions.length
+        );
+      } else if (e.key === 'Enter') {
+        if (isOpen && highlightedIndex >= 0 && filteredOptions[highlightedIndex]) {
+          e.preventDefault();
+          handleSelect(filteredOptions[highlightedIndex]);
         }
-      }, 150);
+      } else if (e.key === 'Escape') {
+        if (isOpen) { e.preventDefault(); closeMenu(true); }
+      } else if (e.key === 'Tab') {
+        closeMenu(true);
+      }
     };
 
-    const displayValue = isFocused ? search : (selectedOption?.label || '');
+    useEffect(() => {
+      if (!isOpen || highlightedIndex < 0 || !listRef.current) return;
+      const el = listRef.current.children[highlightedIndex];
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+    }, [highlightedIndex, isOpen]);
+
+    const handleClear = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      onChange({ target: { value: '' } });
+      setSearch('');
+      setIsOpen(false);
+      setIsFocused(false);
+      setHighlightedIndex(-1);
+      requestAnimationFrame(() => inputRef.current?.focus());
+    };
+
+    // Prevent the wheel inside the dropdown from scrolling the page
+    const handleWheel = (e) => {
+      if (!listRef.current) return;
+      const { scrollTop, scrollHeight, clientHeight } = listRef.current;
+      const atTop = scrollTop === 0 && e.deltaY < 0;
+      const atBottom = scrollTop + clientHeight >= scrollHeight - 1 && e.deltaY > 0;
+      if (!atTop && !atBottom) e.stopPropagation();
+    };
+
+    const displayValue = isFocused
+      ? search
+      : (selectedOption ? String(selectedOption.label ?? '') : '');
 
     return (
-      <div className="relative" ref={dropdownRef}>
-        {label && <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>}
+      <div className={`relative ${className}`} ref={dropdownRef}>
+        {label && (
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            {label}
+            {required && <span className="text-red-500 ml-1">*</span>}
+          </label>
+        )}
+
         <div className="relative">
           <input
             ref={inputRef}
             type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+            className={`w-full px-3 py-2 pr-16 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
               disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
             }`}
             value={displayValue}
-            onChange={handleInput}
-            onFocus={() => { setIsFocused(true); setIsOpen(true); }}
-            onBlur={handleBlur}
-            placeholder={placeholder || 'Search...'}
+            onChange={handleInputChange}
+            onFocus={openMenu}
+            onBlur={() => {
+              setTimeout(() => {
+                const inInput = dropdownRef.current && dropdownRef.current.contains(document.activeElement);
+                const inPortal = portalRef.current && portalRef.current.contains(document.activeElement);
+                if (!inInput && !inPortal) closeMenu(true);
+              }, 120);
+            }}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
             disabled={disabled}
             autoComplete="off"
+            role="combobox"
+            aria-expanded={isOpen}
+            aria-haspopup="listbox"
           />
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">▾</div>
-        </div>
-        {isOpen && !disabled && (
-          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-            {filteredOptions.length > 0 ? (
-              filteredOptions.map(opt => (
-                <div
-                  key={opt.value}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 ${
-                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : ''
-                  }`}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => handleSelect(opt.value)}
-                >
-                  <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
-                </div>
-              ))
-            ) : (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">No results</div>
-            )}
+
+          {value && !disabled && (
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleClear}
+              className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
+              tabIndex={-1}
+              aria-label="Clear selection"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+            <svg
+              className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
           </div>
+        </div>
+
+        {/* Dropdown rendered in a portal so it escapes any overflow:hidden ancestor */}
+        {isOpen && !disabled && dropdownRect && createPortal(
+          <div
+            ref={portalRef}
+            style={{
+              position: 'absolute',
+              top: dropdownRect.top,
+              left: dropdownRect.left,
+              width: dropdownRect.width,
+              zIndex: 9999
+            }}
+          >
+            <div
+              ref={listRef}
+              onWheel={handleWheel}
+              role="listbox"
+              className="bg-white border border-gray-200 rounded-lg shadow-2xl max-h-96 overflow-y-auto overscroll-contain"
+            >
+              {safeOptions.length === 0 ? (
+                <div className="px-3 py-4 text-center text-gray-500 text-sm">{emptyMessage}</div>
+              ) : filteredOptions.length > 0 ? (
+                filteredOptions.map((opt, idx) => (
+                  <div
+                    key={String(opt.value ?? idx)}
+                    role="option"
+                    aria-selected={String(opt.value) === String(value)}
+                    className={`px-3 py-2 cursor-pointer border-b last:border-b-0 transition-colors ${
+                      String(opt.value) === String(value)
+                        ? 'bg-indigo-50 text-indigo-700'
+                        : idx === highlightedIndex
+                          ? 'bg-gray-100'
+                          : 'text-gray-900 hover:bg-indigo-50'
+                    } ${opt.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onMouseEnter={() => setHighlightedIndex(idx)}
+                    onClick={() => handleSelect(opt)}
+                  >
+                    <div className="font-medium">{String(opt.label ?? '')}</div>
+                    {opt.subLabel && (
+                      <div className="text-xs text-gray-500">{String(opt.subLabel)}</div>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <div className="px-3 py-4 text-center text-gray-500 text-sm">
+                  {String(search || '').trim() ? `No results for "${search}"` : noOptionsMessage}
+                </div>
+              )}
+            </div>
+          </div>,
+          document.body
         )}
       </div>
     );
@@ -40093,6 +40278,19 @@ const ExamCardOverridesModule = ({
 
   const getEntityOptions = () => isUniversity ? courseOptions : isTVET ? programOptions : classOptions;
 
+  // ✅ Student options for the Approve modal
+  const studentOptions = useMemo(() => {
+    const opts = [{ value: '', label: '' }];
+    (students || []).forEach(s => {
+      opts.push({
+        value: s.id,
+        label: `${s.firstName || ''} ${s.lastName || ''}`.trim() || 'Unnamed Student',
+        subLabel: String(s.admissionNumber || 'No admission')
+      });
+    });
+    return opts;
+  }, [students]);
+
   // Enrich each override with student/class names for display
   const enrichedOverrides = useMemo(() => {
     return (examCardOverrides || []).map(o => {
@@ -40107,11 +40305,7 @@ const ExamCardOverridesModule = ({
           className = classes.find(c => c.id === student.classId)?.name || '';
         }
       }
-      return {
-        ...o,
-        _student: student,
-        _className: className
-      };
+      return { ...o, _student: student, _className: className };
     });
   }, [examCardOverrides, students, classes, programs, courses, isUniversity, isTVET]);
 
@@ -40119,11 +40313,9 @@ const ExamCardOverridesModule = ({
   const filteredOverrides = useMemo(() => {
     let list = [...enrichedOverrides];
 
-    // Status filter
     if (filterStatus === 'active') list = list.filter(o => o.isActive !== false);
     else if (filterStatus === 'revoked') list = list.filter(o => o.isActive === false);
 
-    // Scope filter (class/program/course)
     if (filterScope) {
       list = list.filter(o => {
         const s = o._student;
@@ -40132,7 +40324,6 @@ const ExamCardOverridesModule = ({
       });
     }
 
-    // Search
     if (searchTerm) {
       const q = String(searchTerm || '').toLowerCase();
       list = list.filter(o => {
@@ -40276,6 +40467,7 @@ const ExamCardOverridesModule = ({
               onChange={(e) => setFilterScope(e.target.value)}
               options={getEntityOptions()}
               placeholder={`All ${getEntityLabel()}s`}
+              emptyMessage={`No ${getEntityLabel().toLowerCase()}s available`}
             />
           </div>
           <select
@@ -40396,29 +40588,26 @@ const ExamCardOverridesModule = ({
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold">Grant Exam Card Override</h3>
               <button
-                onClick={() => { setShowApproveModal(false); setApproveForm({ studentId: '', reason: '', balanceAtApproval: '' }); }}
+                onClick={() => {
+                  setShowApproveModal(false);
+                  setApproveForm({ studentId: '', reason: '', balanceAtApproval: '' });
+                }}
                 className="text-gray-500 hover:text-gray-700 text-xl"
               >✕</button>
             </div>
 
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Student <span className="text-red-500">*</span>
-                </label>
-                <select
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                  value={approveForm.studentId}
-                  onChange={(e) => setApproveForm({ ...approveForm, studentId: e.target.value })}
-                >
-                  <option value="">-- Select Student --</option>
-                  {(students || []).map(s => (
-                    <option key={s.id} value={s.id}>
-                      {s.firstName} {s.lastName} ({s.admissionNumber})
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {/* ✅ Searchable student picker */}
+              <SearchableSelect
+                label="Student"
+                value={approveForm.studentId}
+                onChange={(e) => setApproveForm({ ...approveForm, studentId: e.target.value })}
+                options={studentOptions}
+                placeholder="Search students by name or admission..."
+                required
+                emptyMessage="No students available"
+                noOptionsMessage="No students found"
+              />
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -40451,7 +40640,10 @@ const ExamCardOverridesModule = ({
 
               <div className="flex justify-end gap-2 pt-4 border-t">
                 <button
-                  onClick={() => { setShowApproveModal(false); setApproveForm({ studentId: '', reason: '', balanceAtApproval: '' }); }}
+                  onClick={() => {
+                    setShowApproveModal(false);
+                    setApproveForm({ studentId: '', reason: '', balanceAtApproval: '' });
+                  }}
                   disabled={saving}
                   className="px-5 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 disabled:opacity-50"
                 >
@@ -40472,7 +40664,6 @@ const ExamCardOverridesModule = ({
     </div>
   );
 };
-
 
 // ==================== FEATURE PICKER ====================
 const FeaturePicker = ({ value = [], onChange, disabled }) => {
