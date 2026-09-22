@@ -5156,7 +5156,7 @@ const StudentSelect = ({ label, value, onChange, options = [] }) => (
 );
 
 // ============================================================
-//  STUDENT MODULE — Enhanced v2
+//  STUDENT MODULE — Enhanced v3 (multi-guardian + grouped exams)
 // ============================================================
 const StudentModule = ({
   students = [],
@@ -5320,7 +5320,6 @@ const StudentModule = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [classFilter, setClassFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  // ✅ DEFAULT TO TABLE VIEW
   const [viewMode, setViewMode] = useState('table');
 
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -5376,6 +5375,19 @@ const StudentModule = ({
   // ==================================================================
   //  FORM INIT
   // ==================================================================
+  function createEmptyGuardian(overrides = {}) {
+    return {
+      firstName: '', middleName: '', lastName: '',
+      email: '', phone: '',
+      relationship: 'Mother',
+      isPrimary: false, emergencyContact: false,
+      occupation: '', employer: '', monthlyIncome: '',
+      grantPortalAccess: false, password: '',
+      useExisting: false, existingUserId: null,
+      ...overrides
+    };
+  }
+
   function emptyForm() {
     return {
       admissionNumber: '',
@@ -5391,7 +5403,7 @@ const StudentModule = ({
       currentYear: 1, currentSemester: 1, currentModule: '',
       boardingStatus: 'DAY',
       transportRouteId: '',
-      passportPhoto: '',   // ✅ NEW
+      passportPhoto: '',
       medicalInfo: { bloodGroup: '', allergies: '', disabilities: '' },
 
       studentLogin: {
@@ -5400,15 +5412,8 @@ const StudentModule = ({
         password: ''
       },
 
-      parent: {
-        firstName: '', middleName: '', lastName: '',
-        email: '', phone: '',
-        relationship: 'Mother',
-        isPrimary: true, emergencyContact: false,
-        occupation: '', employer: '', monthlyIncome: '',
-        grantPortalAccess: false, password: '',
-        useExisting: false, existingUserId: null
-      },
+      // ✅ Multi-guardian array. First = required primary. Others = optional.
+      guardians: [createEmptyGuardian({ isPrimary: true, relationship: 'Mother' })],
       isActive: true
     };
   }
@@ -5540,7 +5545,7 @@ const StudentModule = ({
       if (n >= 30) return { grade: 'Below Expectations', points: 1 };
       return { grade: 'Needs Improvement', points: 0 };
     }
-    // 844 (Form 1–4)
+    // 844
     if (n >= 80) return { grade: 'A', points: 12 };
     if (n >= 75) return { grade: 'A-', points: 11 };
     if (n >= 70) return { grade: 'B+', points: 10 };
@@ -5586,13 +5591,11 @@ const StudentModule = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate size (5 MB max)
     if (file.size > 5 * 1024 * 1024) {
       setSubmitError('Photo must be less than 5 MB');
       return;
     }
 
-    // Validate type
     if (!/^image\/(jpeg|jpg|png|gif|webp)$/i.test(file.type)) {
       setSubmitError('Only JPG, PNG, GIF, or WEBP images are allowed');
       return;
@@ -5617,11 +5620,51 @@ const StudentModule = ({
       return res.data?.photoUrl || null;
     } catch (err) {
       console.error('Photo upload failed:', err);
-      // Fallback: keep the base64 preview in the DB if the endpoint is missing
-      return photoPreview || null;
+      // Do NOT fall back to base64 — it corrupts the DB
+      return null;
     } finally {
       setUploadingPhoto(false);
     }
+  };
+
+  // ==================================================================
+  //  MULTI-GUARDIAN HELPERS
+  // ==================================================================
+  const addGuardianField = () => {
+    setFormState(prev => {
+      const list = [...(prev.guardians || [])];
+      if (list.length >= 5) return prev; // cap at 5
+      list.push(createEmptyGuardian({
+        isPrimary: false,
+        relationship: list.length === 1 ? 'Father' : 'Guardian'
+      }));
+      return { ...prev, guardians: list };
+    });
+  };
+
+  const removeGuardianField = (index) => {
+    setFormState(prev => {
+      const list = [...(prev.guardians || [])];
+      if (list.length <= 1) return prev; // keep at least one
+      list.splice(index, 1);
+      // Ensure exactly one primary
+      if (!list.some(g => g.isPrimary)) list[0].isPrimary = true;
+      return { ...prev, guardians: list };
+    });
+  };
+
+  const updateGuardianField = (index, patch) => {
+    setFormState(prev => {
+      const list = [...(prev.guardians || [])];
+      if (!list[index]) return prev;
+      list[index] = { ...list[index], ...patch };
+
+      // Only one primary across the array
+      if (patch.isPrimary === true) {
+        list.forEach((g, i) => { if (i !== index) g.isPrimary = false; });
+      }
+      return { ...prev, guardians: list };
+    });
   };
 
   // ==================================================================
@@ -5649,14 +5692,27 @@ const StudentModule = ({
       }
     }
 
-    if (prepared.parent && typeof prepared.parent === 'object') {
-      const parent = { ...prepared.parent };
-      parent.monthlyIncome = toNumberOrNull(parent.monthlyIncome);
-      if (!parent.grantPortalAccess) {
-        delete parent.password;
-        delete parent.existingUserId;
+    // ✅ Normalize guardians array
+    if (Array.isArray(prepared.guardians)) {
+      prepared.guardians = prepared.guardians
+        .map(g => {
+          const gg = { ...g };
+          gg.monthlyIncome = toNumberOrNull(gg.monthlyIncome);
+          if (!gg.grantPortalAccess) {
+            delete gg.password;
+            delete gg.existingUserId;
+          }
+          return gg;
+        })
+        .filter(g => {
+          if (g.useExisting) return !!g.existingUserId;
+          return !!(g.firstName?.trim() || g.lastName?.trim() || g.email?.trim() || g.phone?.trim());
+        });
+
+      // Guarantee at least one primary
+      if (prepared.guardians.length > 0 && !prepared.guardians.some(g => g.isPrimary)) {
+        prepared.guardians[0].isPrimary = true;
       }
-      prepared.parent = parent;
     }
 
     if (!prepared.admissionNumber || !String(prepared.admissionNumber).trim()) {
@@ -5772,15 +5828,7 @@ const StudentModule = ({
       passportPhoto: student.passportPhoto || '',
       medicalInfo: student.medicalInfo || { bloodGroup: '', allergies: '', disabilities: '' },
       studentLogin: { createAccount: false, email: '', password: '' },
-      parent: {
-        firstName: '', middleName: '', lastName: '',
-        email: '', phone: '',
-        relationship: 'Mother',
-        isPrimary: true, emergencyContact: false,
-        occupation: '', employer: '', monthlyIncome: '',
-        grantPortalAccess: false, password: '',
-        useExisting: false, existingUserId: null
-      },
+      guardians: [createEmptyGuardian({ isPrimary: true })], // edit doesn't use these
       isActive: student.isActive !== false
     });
     setShowForm(true);
@@ -5817,6 +5865,7 @@ const StudentModule = ({
     if (isTVET && !f.programId) { setSubmitError('Please select a program.'); return; }
     if (!isUniversity && !isTVET && !f.classId) { setSubmitError('Please select a class.'); return; }
 
+    // Student login block
     if (f.studentLogin?.createAccount) {
       if (!f.studentLogin.email?.trim()) { setSubmitError('Student login email is required.'); return; }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.studentLogin.email.trim())) {
@@ -5827,28 +5876,53 @@ const StudentModule = ({
       }
     }
 
-    const p = f.parent || {};
-    if (!p.useExisting) {
-      if (!p.firstName?.trim() || !p.lastName?.trim()) {
-        setSubmitError('Guardian first name and last name are required.'); return;
+    // ✅ Guardians validation
+    const guardians = Array.isArray(f.guardians) ? f.guardians : [];
+    const primary = guardians.find(g => g.isPrimary) || guardians[0];
+    if (!primary) { setSubmitError('At least one guardian is required.'); return; }
+
+    if (primary.useExisting) {
+      if (!primary.existingUserId) { setSubmitError('Please select an existing primary guardian.'); return; }
+    } else {
+      if (!primary.firstName?.trim() || !primary.lastName?.trim()) {
+        setSubmitError('Primary guardian first and last name are required.'); return;
       }
-      if (!p.phone?.trim() && !p.email?.trim()) {
-        setSubmitError('Provide at least a phone number or email for the guardian.'); return;
+      if (!primary.phone?.trim() && !primary.email?.trim()) {
+        setSubmitError('Provide at least a phone or email for the primary guardian.'); return;
       }
-      if (p.grantPortalAccess) {
-        if (!p.email?.trim()) { setSubmitError('Email is required to grant portal access.'); return; }
-        if (!p.password?.trim()) { setSubmitError('Password is required to grant portal access.'); return; }
+      if (primary.grantPortalAccess) {
+        if (!primary.email?.trim()) { setSubmitError('Email required for primary guardian portal access.'); return; }
+        if (!primary.password?.trim() || primary.password.length < 6) {
+          setSubmitError('Password (min 6 chars) required for portal access.'); return;
+        }
       }
-    } else if (!p.existingUserId) {
-      setSubmitError('Please select an existing parent/guardian.'); return;
+    }
+
+    // Extra guardians: if partially filled, require name; if portal access is on, require email + password
+    for (let i = 0; i < guardians.length; i++) {
+      const g = guardians[i];
+      if (g === primary) continue;
+      const filled = g.firstName?.trim() || g.lastName?.trim() ||
+                     g.email?.trim() || g.phone?.trim() || g.useExisting;
+      if (!filled) continue;
+      if (g.useExisting) {
+        if (!g.existingUserId) { setSubmitError(`Guardian ${i + 1}: please select an existing guardian.`); return; }
+      } else {
+        if (!g.firstName?.trim() || !g.lastName?.trim()) {
+          setSubmitError(`Guardian ${i + 1}: first and last name are required.`); return;
+        }
+        if (g.grantPortalAccess) {
+          if (!g.email?.trim()) { setSubmitError(`Guardian ${i + 1}: email required for portal access.`); return; }
+          if (!g.password?.trim() || g.password.length < 6) {
+            setSubmitError(`Guardian ${i + 1}: password (min 6 chars) required.`); return;
+          }
+        }
+      }
     }
 
     setLoading(true);
     try {
-      // 1. Upload photo if selected
       const photoUrl = await uploadStudentPhoto();
-
-      // 2. Prepare payload
       const payload = prepareFormData({ ...f, passportPhoto: photoUrl || f.passportPhoto || null });
 
       if (typeof onSubmit === 'function') {
@@ -5954,7 +6028,7 @@ const StudentModule = ({
   };
 
   // ==================================================================
-  //  INVOICE — Fee statement with terms, payments, carry-forward
+  //  INVOICE
   // ==================================================================
   const openInvoice = async (student) => {
     if (!student) return;
@@ -5964,7 +6038,6 @@ const StudentModule = ({
     setInvoiceData(null);
 
     try {
-      // 1. Fetch the student's full statement from the backend
       let stmt = null;
       try {
         const r = await api.get(`/students/${student.id}/fee-statement`);
@@ -5972,12 +6045,7 @@ const StudentModule = ({
       } catch (err) {
         console.warn('fee-statement endpoint failed, computing locally');
       }
-
-      // 2. If the backend didn't provide a statement, build it from local props
-      if (!stmt) {
-        stmt = buildLocalStatement(student);
-      }
-
+      if (!stmt) stmt = buildLocalStatement(student);
       setInvoiceData(stmt);
     } catch (err) {
       console.error('openInvoice error:', err);
@@ -5987,16 +6055,13 @@ const StudentModule = ({
     }
   };
 
-  // Fallback invoice builder — uses props only (works even if API is offline)
   const buildLocalStatement = (student) => {
-    // Find fees that apply to this student
     const applicable = (fees || []).filter(f => {
       if (isUniversity) return String(f.courseId) === String(student.courseId);
       if (isTVET)       return String(f.programId) === String(student.programId);
       return String(f.classId) === String(student.classId);
     });
 
-    // Group fees by term/semester/module
     const groups = {};
     applicable.forEach(fee => {
       const key = isUniversity
@@ -6011,14 +6076,12 @@ const StudentModule = ({
 
       const amount = parseFloat(fee.amount) || 0;
 
-      // Resolve discount for this fee
       let discount = 0;
       const studentDiscounts = (discounts || []).filter(d =>
         String(d.studentId) === String(student.id) &&
         (d.isActive !== false && d.isActive !== 0 && d.isActive !== 'false')
       );
       if (studentDiscounts.length > 0) {
-        // Sum all applicable discounts (feeId match OR student-wide feeId=null)
         let totalDisc = 0;
         studentDiscounts.forEach(d => {
           if (d.feeId == null || String(d.feeId) === String(fee.id)) {
@@ -6030,7 +6093,6 @@ const StudentModule = ({
         });
         discount = Math.min(totalDisc, amount);
       } else {
-        // Fallback to fee-level default
         if (parseFloat(fee.discountPercent) > 0) discount = amount * (parseFloat(fee.discountPercent) / 100);
         else if (parseFloat(fee.discountAmount) > 0) discount = parseFloat(fee.discountAmount);
       }
@@ -6045,21 +6107,19 @@ const StudentModule = ({
       groups[key].paid += paid;
     });
 
-    // Sort groups chronologically (Term 1, Term 2, Term 3, ...)
     const sortedGroups = Object.values(groups).sort((a, b) => {
       const na = parseInt(String(a.term).replace(/\D/g, '')) || 0;
       const nb = parseInt(String(b.term).replace(/\D/g, '')) || 0;
       return na - nb;
     });
 
-    // Compute carry-forward
     let carryForward = 0;
     const termStatements = sortedGroups.map(g => {
       const net = Math.max(0, g.total - g.discount);
-      const billed = net + carryForward;         // what's payable this term
+      const billed = net + carryForward;
       const paidThisTerm = g.paid;
       const newBalance = billed - paidThisTerm;
-      const nextCarry = newBalance > 0 ? newBalance : 0; // only carry forward positive balances
+      const nextCarry = newBalance > 0 ? newBalance : 0;
 
       const row = {
         term: g.term,
@@ -6107,7 +6167,7 @@ const StudentModule = ({
   };
 
   // ==================================================================
-  //  ADD PARENT / GUARDIAN
+  //  ADD PARENT / GUARDIAN (from details modal)
   // ==================================================================
   const handleAddParentClick = (student) => {
     if (!canEdit || !student) return;
@@ -6188,7 +6248,6 @@ const StudentModule = ({
         if (setParents) setParents(pr.data.parents || []);
       } catch {}
 
-      // Refresh the details modal if open
       if (showDetailsModal && selectedStudent) {
         try {
           const g = await api.get(`/parents?studentId=${selectedStudent.id}`);
@@ -6207,7 +6266,7 @@ const StudentModule = ({
   };
 
   // ==================================================================
-  //  RESOLVE CLASS NAME HELPER
+  //  HELPERS
   // ==================================================================
   const getStudentClassLabel = (student) => {
     if (!student) return '—';
@@ -6252,37 +6311,93 @@ const StudentModule = ({
   };
 
   // ==================================================================
-  //  GROUP RESULTS BY EXAM FOR COMPREHENSIVE REPORT
+  //  📚 GROUPED ACADEMIC REPORT
+  //
+  //  Groups student results into "report cards" by:
+  //    1. Exam Term        (e.g. "Term 1", "End Term 1", "Semester 1")
+  //    2. Exam Type        (e.g. OPENER, MIDTERM, ENDTERM, FINAL)
+  //    3. Academic Year    (e.g. "2026")
+  //
+  //  So "End Term 1 — FINAL" and "End Term 1 — OPENER" become two
+  //  different report cards even if the term string is the same.
   // ==================================================================
+  const examLabelMap = {
+    OPENER: 'Opener',
+    MIDTERM: 'Mid-Term',
+    ENDTERM: 'End of Term',
+    CAT: 'CAT',
+    MOCK: 'Mock',
+    PRE_MOCK: 'Pre-Mock',
+    PRACTICAL: 'Practical',
+    PROJECT: 'Project',
+    MAIN_EXAM: 'Main Exam',
+    SUPPLEMENTARY: 'Supplementary',
+    SPECIAL: 'Special',
+    QUIZ: 'Quiz',
+    ASSIGNMENT: 'Assignment',
+    FINAL: 'Final Exam',
+    LAB: 'Lab',
+    PRESENTATION: 'Presentation',
+    THESIS: 'Thesis',
+    DEFENSE: 'Defense'
+  };
+
+  const normalizeExamType = (type) => {
+    if (!type) return 'OTHER';
+    const t = String(type).trim().toUpperCase();
+    return examLabelMap[t] ? t : 'OTHER';
+  };
+
+  const normalizeTerm = (exam) => {
+    if (!exam) return 'Unspecified Term';
+    return exam.term || exam.academicYear ? `${exam.term || ''}${exam.term && exam.academicYear ? ' ' : ''}${exam.academicYear ? `(${exam.academicYear})` : ''}`.trim() : 'Unspecified Term';
+  };
+
   const groupedResults = useMemo(() => {
     if (!studentResults || studentResults.length === 0) return [];
 
-    // Group by exam (Term/Period)
+    // Build a map keyed by (termKey + typeKey)
     const map = new Map();
-    studentResults.forEach(r => {
-      const exam = exams.find(e => e.id === r.examId);
-      const examKey = exam?.id || r.examId || 'unknown';
-      const examLabel = exam?.name || 'Unspecified Exam';
-      const examTerm = exam?.term || 'Unspecified';
-      const examDate = exam?.date;
 
-      if (!map.has(examKey)) {
-        map.set(examKey, {
-          examId: examKey,
-          examName: examLabel,
-          term: examTerm,
+    studentResults.forEach(r => {
+      // Resolve exam entity
+      const exam = exams.find(e => e.id === r.examId) || r.Exam || null;
+
+      const termLabel = normalizeTerm(exam);
+      const typeRaw = normalizeExamType(exam?.type);
+      const typeLabel = examLabelMap[typeRaw] || 'Other';
+      const examDate = exam?.date || r.createdAt || null;
+      const examYear = exam?.academicYear || (examDate ? new Date(examDate).getFullYear().toString() : '');
+
+      // Composite key: same term + same type + same year = one report card
+      const key = `${termLabel}||${typeRaw}||${examYear}`;
+
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          term: termLabel,
+          year: examYear,
+          examTypeRaw: typeRaw,
+          examType: typeLabel,
           date: examDate,
+          examNames: new Set(),
           subjects: [],
           totalMarks: 0,
           totalPoints: 0,
           count: 0
         });
       }
-      const group = map.get(examKey);
+      const group = map.get(key);
 
+      if (exam?.name) group.examNames.add(exam.name);
+      if (examDate && (!group.date || new Date(examDate) > new Date(group.date))) {
+        group.date = examDate;
+      }
+
+      // Resolve subject / unit name
       const itemName = isUniversity || isTVET
-        ? (units.find(u => u.id === r.unitId)?.name || '—')
-        : (subjects.find(s => s.id === r.subjectId)?.name || '—');
+        ? (units.find(u => u.id === r.unitId)?.name || r.CourseUnit?.name || '—')
+        : (subjects.find(s => s.id === r.subjectId)?.name || r.Subject?.name || '—');
 
       const marks = parseFloat(r.marks) || 0;
       const levelHint = studentDetails?.classId
@@ -6304,20 +6419,32 @@ const StudentModule = ({
       group.count += 1;
     });
 
-    return Array.from(map.values()).map(g => {
+    // Convert to array, compute averages, sort by date DESC (most recent first)
+    const list = Array.from(map.values()).map(g => {
       const avg = g.count > 0 ? g.totalMarks / g.count : 0;
+      const levelHint = studentDetails?.classId
+        ? classes.find(c => c.id === studentDetails.classId)?.name
+        : null;
       return {
         ...g,
+        examNames: Array.from(g.examNames),
+        examDisplayName: Array.from(g.examNames).join(', ') || `${g.examType}`,
         average: avg,
-        meanGrade: getGrade(avg, studentDetails?.classId
-          ? classes.find(c => c.id === studentDetails.classId)?.name : null
-        ).grade
+        meanGrade: getGrade(avg, levelHint).grade
       };
     });
+
+    list.sort((a, b) => {
+      const da = a.date ? new Date(a.date).getTime() : 0;
+      const db = b.date ? new Date(b.date).getTime() : 0;
+      return db - da;
+    });
+
+    return list;
   }, [studentResults, exams, subjects, units, studentDetails, classes, isUniversity, isTVET]);
 
   // ==================================================================
-  //  GROUP ATTENDANCE BY MONTH FOR CLARITY
+  //  ATTENDANCE SUMMARY
   // ==================================================================
   const attendanceSummary = useMemo(() => {
     if (!studentAttendance || studentAttendance.length === 0) {
@@ -6342,7 +6469,6 @@ const StudentModule = ({
 
     const total = studentAttendance.length;
     const presentPct = total > 0 ? ((byStatus.PRESENT / total) * 100).toFixed(1) : 0;
-
     const monthRows = Object.values(byMonth).sort((a, b) => a.month.localeCompare(b.month));
 
     return { byStatus, byMonth: monthRows, total, presentPct };
@@ -6475,7 +6601,6 @@ const StudentModule = ({
                   className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 flex items-center gap-2">
             <i className="fas fa-filter" />Filters
           </button>
-          {/* ✅ View mode toggle — defaults to table but kept switchable */}
           <button onClick={() => setViewMode(v => v === 'grid' ? 'table' : 'grid')}
                   className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 flex items-center gap-2">
             <i className={`fas fa-${viewMode === 'grid' ? 'table' : 'th-large'}`} />
@@ -6799,105 +6924,195 @@ const StudentModule = ({
               </div>
             )}
 
-            {/* Guardian */}
+            {/* ==================== GUARDIANS (multi) ==================== */}
             {!editingId && (
               <div className="bg-gray-50 p-4 rounded-lg border border-indigo-100">
-                <h4 className="font-medium text-indigo-600 mb-3">
-                  Parent / Guardian <span className="text-red-500">*</span>
-                </h4>
+                <div className="flex justify-between items-center mb-3">
+                  <h4 className="font-medium text-indigo-600">
+                    Parent / Guardian(s) <span className="text-red-500">*</span>
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={addGuardianField}
+                    className="text-sm bg-indigo-600 text-white px-3 py-1 rounded-lg hover:bg-indigo-700"
+                  >
+                    <i className="fas fa-plus mr-1" />Add Another
+                  </button>
+                </div>
                 <p className="text-xs text-gray-500 mb-3">
-                  Details are required. Portal login is optional.
+                  First guardian is required (marked primary). Additional guardians are optional.
                 </p>
 
-                {enableParentPortal && parentUserOptions.length > 0 && (
-                  <div className="flex items-center gap-4 mb-3">
-                    <label className="flex items-center">
-                      <input type="radio" className="mr-2"
-                        checked={!formState.parent?.useExisting}
-                        onChange={() => setFormState({ ...formState, parent: { ...formState.parent, useExisting: false, existingUserId: null } })} />
-                      New Guardian
-                    </label>
-                    <label className="flex items-center">
-                      <input type="radio" className="mr-2"
-                        checked={!!formState.parent?.useExisting}
-                        onChange={() => setFormState({ ...formState, parent: { ...formState.parent, useExisting: true } })} />
-                      Use Existing
-                    </label>
-                  </div>
-                )}
-
-                {formState.parent?.useExisting ? (
-                  <SearchableSelect label="Select Existing Parent/Guardian *"
-                    value={formState.parent?.existingUserId || ''}
-                    onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, existingUserId: e.target.value } })}
-                    options={parentUserOptions} placeholder="Search by name or email…" required />
-                ) : (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <TextInput label="First Name *" value={formState.parent?.firstName || ''} onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, firstName: e.target.value } })} required />
-                      <TextInput label="Last Name *" value={formState.parent?.lastName || ''} onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, lastName: e.target.value } })} required />
-                      <TextInput label="Phone" value={formState.parent?.phone || ''} onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, phone: e.target.value } })} />
-                      <TextInput label="Email" type="email" value={formState.parent?.email || ''} onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, email: e.target.value } })} />
+                {(formState.guardians || []).map((guardian, idx) => (
+                  <div
+                    key={idx}
+                    className="bg-white border border-indigo-100 rounded-lg p-4 mb-3"
+                  >
+                    <div className="flex justify-between items-center mb-3">
+                      <span className="font-medium text-sm text-indigo-700">
+                        Guardian {idx + 1}
+                        {guardian.isPrimary && (
+                          <span className="ml-2 text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded-full">
+                            Primary
+                          </span>
+                        )}
+                        {idx === 0 && (
+                          <span className="ml-2 text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded-full">
+                            Required
+                          </span>
+                        )}
+                        {idx > 0 && (
+                          <span className="ml-2 text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                            Optional
+                          </span>
+                        )}
+                      </span>
+                      {idx > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => removeGuardianField(idx)}
+                          className="text-red-600 hover:text-red-800 text-sm"
+                        >
+                          <i className="fas fa-trash mr-1" />Remove
+                        </button>
+                      )}
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <SelectField label="Relationship *" value={formState.parent?.relationship || 'Mother'} onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, relationship: e.target.value } })} options={relationshipOptions} />
-                      <div className="flex items-center gap-4 pt-5">
+
+                    {enableParentPortal && parentUserOptions.length > 0 && (
+                      <div className="flex items-center gap-4 mb-3">
                         <label className="flex items-center text-sm">
-                          <input type="checkbox" className="mr-2"
-                            checked={formState.parent?.isPrimary !== false}
-                            onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, isPrimary: e.target.checked } })} />
-                          Primary
+                          <input
+                            type="radio"
+                            className="mr-2"
+                            checked={!guardian.useExisting}
+                            onChange={() => updateGuardianField(idx, { useExisting: false, existingUserId: null })}
+                          />
+                          New Guardian
                         </label>
                         <label className="flex items-center text-sm">
-                          <input type="checkbox" className="mr-2"
-                            checked={!!formState.parent?.emergencyContact}
-                            onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, emergencyContact: e.target.checked } })} />
-                          Emergency
+                          <input
+                            type="radio"
+                            className="mr-2"
+                            checked={!!guardian.useExisting}
+                            onChange={() => updateGuardianField(idx, { useExisting: true })}
+                          />
+                          Use Existing
                         </label>
                       </div>
-                    </div>
+                    )}
 
-                    <label className="flex items-start cursor-pointer">
-                      <input type="checkbox" className="mt-1 mr-2"
-                        checked={!!formState.parent?.grantPortalAccess}
-                        onChange={(e) => {
-                          const checked = e.target.checked;
-                          setFormState({
-                            ...formState,
-                            parent: { ...formState.parent, grantPortalAccess: checked, password: checked ? (formState.parent?.password || '') : '' }
-                          });
-                          if (!checked) setShowParentPassword(false);
-                        }} />
-                      <span className="text-sm">
-                        <span className="font-medium">Grant portal access</span>
-                        <span className="block text-xs text-gray-500 mt-0.5">
-                          Optional. Requires the email above and a password.
-                        </span>
-                      </span>
-                    </label>
-
-                    {formState.parent?.grantPortalAccess && (
-                      <div className="relative max-w-md">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Portal Password <span className="text-red-500">*</span>
-                        </label>
-                        <div className="relative">
-                          <input type={showParentPassword ? 'text' : 'password'}
-                            value={formState.parent?.password || ''}
-                            onChange={(e) => setFormState({ ...formState, parent: { ...formState.parent, password: e.target.value } })}
-                            placeholder="Minimum 6 characters"
-                            className="w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
-                            required />
-                          <button type="button"
-                            onClick={() => setShowParentPassword(v => !v)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700">
-                            <i className={`fas fa-${showParentPassword ? 'eye-slash' : 'eye'}`} />
-                          </button>
+                    {guardian.useExisting ? (
+                      <SearchableSelect
+                        label="Select Existing Parent/Guardian *"
+                        value={guardian.existingUserId || ''}
+                        onChange={(e) => updateGuardianField(idx, { existingUserId: e.target.value })}
+                        options={parentUserOptions}
+                        placeholder="Search by name or email…"
+                      />
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <TextInput
+                            label={idx === 0 ? 'First Name *' : 'First Name'}
+                            value={guardian.firstName || ''}
+                            onChange={(e) => updateGuardianField(idx, { firstName: e.target.value })}
+                          />
+                          <TextInput
+                            label={idx === 0 ? 'Last Name *' : 'Last Name'}
+                            value={guardian.lastName || ''}
+                            onChange={(e) => updateGuardianField(idx, { lastName: e.target.value })}
+                          />
+                          <TextInput
+                            label="Phone"
+                            value={guardian.phone || ''}
+                            onChange={(e) => updateGuardianField(idx, { phone: e.target.value })}
+                          />
+                          <TextInput
+                            label="Email"
+                            type="email"
+                            value={guardian.email || ''}
+                            onChange={(e) => updateGuardianField(idx, { email: e.target.value })}
+                          />
                         </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <SelectField
+                            label="Relationship *"
+                            value={guardian.relationship || 'Mother'}
+                            onChange={(e) => updateGuardianField(idx, { relationship: e.target.value })}
+                            options={relationshipOptions}
+                          />
+                          <div className="flex items-center gap-4 pt-5">
+                            <label className="flex items-center text-sm">
+                              <input
+                                type="checkbox"
+                                className="mr-2"
+                                checked={guardian.isPrimary === true}
+                                onChange={(e) => updateGuardianField(idx, { isPrimary: e.target.checked })}
+                              />
+                              Primary
+                            </label>
+                            <label className="flex items-center text-sm">
+                              <input
+                                type="checkbox"
+                                className="mr-2"
+                                checked={!!guardian.emergencyContact}
+                                onChange={(e) => updateGuardianField(idx, { emergencyContact: e.target.checked })}
+                              />
+                              Emergency
+                            </label>
+                          </div>
+                        </div>
+
+                        <label className="flex items-start cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="mt-1 mr-2"
+                            checked={!!guardian.grantPortalAccess}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              updateGuardianField(idx, {
+                                grantPortalAccess: checked,
+                                password: checked ? (guardian.password || '') : ''
+                              });
+                              if (!checked) setShowParentPassword(false);
+                            }}
+                          />
+                          <span className="text-sm">
+                            <span className="font-medium">Grant portal access</span>
+                            <span className="block text-xs text-gray-500 mt-0.5">
+                              Optional. Requires email and password.
+                            </span>
+                          </span>
+                        </label>
+
+                        {guardian.grantPortalAccess && (
+                          <div className="relative max-w-md">
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Portal Password <span className="text-red-500">*</span>
+                            </label>
+                            <div className="relative">
+                              <input
+                                type={showParentPassword ? 'text' : 'password'}
+                                value={guardian.password || ''}
+                                onChange={(e) => updateGuardianField(idx, { password: e.target.value })}
+                                placeholder="Minimum 6 characters"
+                                className="w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowParentPassword(v => !v)}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                              >
+                                <i className={`fas fa-${showParentPassword ? 'eye-slash' : 'eye'}`} />
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
-                )}
+                ))}
               </div>
             )}
 
@@ -6975,7 +7190,6 @@ const StudentModule = ({
           ))}
         </div>
       ) : (
-        /* ==================== TABLE VIEW (default) ==================== */
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -7040,7 +7254,6 @@ const StudentModule = ({
       {showDetailsModal && selectedStudent && studentDetails && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl max-h-[92vh] overflow-auto">
-            {/* Header with photo */}
             <div className="sticky top-0 bg-white z-10 border-b">
               <div className="flex justify-between items-center px-6 py-4">
                 <h2 className="text-2xl font-bold text-gray-800">Student Details</h2>
@@ -7050,7 +7263,7 @@ const StudentModule = ({
               </div>
             </div>
 
-            {/* ---- IDENTITY CARD ---- */}
+            {/* IDENTITY CARD */}
             <div className="bg-gradient-to-r from-indigo-500 to-purple-600 p-6 text-white">
               <div className="flex items-center gap-6">
                 {studentDetails.passportPhoto ? (
@@ -7100,7 +7313,7 @@ const StudentModule = ({
               </div>
             </div>
 
-            {/* ---- TABS ---- */}
+            {/* TABS */}
             <div className="border-b px-6 flex gap-4 overflow-x-auto bg-white sticky top-16 z-10">
               {[
                 { id: 'overview', label: 'Overview', icon: 'user' },
@@ -7123,7 +7336,6 @@ const StudentModule = ({
               {/* ==================== OVERVIEW ==================== */}
               {activeDetailTab === 'overview' && (
                 <div className="space-y-6">
-                  {/* Personal Information — Document style */}
                   <div className="bg-white border rounded-lg overflow-hidden">
                     <div className="bg-gray-50 px-4 py-2 border-b">
                       <h3 className="font-semibold text-gray-700"><i className="fas fa-user mr-2 text-indigo-600" />Personal Information</h3>
@@ -7151,7 +7363,6 @@ const StudentModule = ({
                     </div>
                   </div>
 
-                  {/* Academic — Document style */}
                   <div className="bg-white border rounded-lg overflow-hidden">
                     <div className="bg-gray-50 px-4 py-2 border-b">
                       <h3 className="font-semibold text-gray-700"><i className="fas fa-graduation-cap mr-2 text-indigo-600" />Academic Information</h3>
@@ -7182,7 +7393,6 @@ const StudentModule = ({
                     </div>
                   </div>
 
-                  {/* Medical */}
                   <div className="bg-white border rounded-lg overflow-hidden">
                     <div className="bg-gray-50 px-4 py-2 border-b">
                       <h3 className="font-semibold text-gray-700"><i className="fas fa-heartbeat mr-2 text-red-500" />Medical Information</h3>
@@ -7201,7 +7411,6 @@ const StudentModule = ({
                     </div>
                   </div>
 
-                  {/* Quick stats */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div className="bg-blue-50 p-4 rounded-lg text-center">
                       <p className="text-3xl font-bold text-blue-600">{studentResults.length}</p>
@@ -7223,7 +7432,9 @@ const StudentModule = ({
                 </div>
               )}
 
-              {/* ==================== ACADEMIC REPORT (term-by-term) ==================== */}
+              {/* ============================================================ */}
+              {/* ==================== ACADEMIC REPORT (grouped) ============== */}
+              {/* ============================================================ */}
               {activeDetailTab === 'academic' && (
                 <div>
                   {groupedResults.length === 0 ? (
@@ -7234,43 +7445,71 @@ const StudentModule = ({
                   ) : (
                     <div className="space-y-6">
                       {/* Overall summary */}
-                      <div className="grid grid-cols-3 gap-4">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div className="bg-indigo-50 p-4 rounded-lg text-center">
-                          <p className="text-sm text-gray-600">Total Exams</p>
+                          <p className="text-xs text-gray-500 uppercase">Report Cards</p>
                           <p className="text-3xl font-bold text-indigo-600">{groupedResults.length}</p>
                         </div>
                         <div className="bg-blue-50 p-4 rounded-lg text-center">
-                          <p className="text-sm text-gray-600">Total Subjects</p>
+                          <p className="text-xs text-gray-500 uppercase">Total Subjects</p>
                           <p className="text-3xl font-bold text-blue-600">{studentResults.length}</p>
                         </div>
                         <div className="bg-green-50 p-4 rounded-lg text-center">
-                          <p className="text-sm text-gray-600">Overall Average</p>
+                          <p className="text-xs text-gray-500 uppercase">Overall Average</p>
                           <p className="text-3xl font-bold text-green-600">
                             {groupedResults.length > 0
                               ? (groupedResults.reduce((s, g) => s + g.average, 0) / groupedResults.length).toFixed(1)
                               : 0}%
                           </p>
                         </div>
+                        <div className="bg-purple-50 p-4 rounded-lg text-center">
+                          <p className="text-xs text-gray-500 uppercase">Mean Points</p>
+                          <p className="text-3xl font-bold text-purple-600">
+                            {(() => {
+                              const total = groupedResults.reduce((s, g) => s + g.totalPoints, 0);
+                              const count = groupedResults.reduce((s, g) => s + g.count, 0);
+                              return count > 0 ? (total / count).toFixed(2) : '0.00';
+                            })()}
+                          </p>
+                        </div>
                       </div>
 
-                      {/* Term-by-term report cards */}
+                      {/* Report cards (grouped by term + exam type + year) */}
                       {groupedResults.map((group, gi) => (
                         <div key={gi} className="bg-white border rounded-lg overflow-hidden">
-                          <div className="bg-gradient-to-r from-indigo-500 to-purple-500 px-4 py-3 text-white flex justify-between items-center">
-                            <div>
-                              <h3 className="font-bold text-lg">{group.examName}</h3>
-                              <p className="text-sm text-indigo-100">
-                                {group.term !== 'Unspecified' ? `${group.term} • ` : ''}
-                                {group.date ? formatDate(group.date) : 'Date N/A'}
-                              </p>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-sm text-indigo-100">Mean Grade</p>
-                              <span className={`inline-block px-3 py-1 rounded-full text-sm font-bold ${getGradeColor(group.meanGrade)}`}>
-                                {group.meanGrade || '—'}
-                              </span>
+                          {/* Group header */}
+                          <div className="bg-gradient-to-r from-indigo-500 to-purple-500 px-4 py-3 text-white">
+                            <div className="flex justify-between items-start gap-4">
+                              <div className="min-w-0">
+                                <h3 className="font-bold text-lg truncate">
+                                  {group.term}
+                                </h3>
+                                <p className="text-sm text-indigo-100 mt-0.5">
+                                  <span className="inline-block bg-white bg-opacity-20 px-2 py-0.5 rounded text-xs uppercase tracking-wide mr-2">
+                                    {group.examType}
+                                  </span>
+                                  {group.year && (
+                                    <span className="text-xs">
+                                      <i className="fas fa-calendar-alt mr-1" />{group.year}
+                                    </span>
+                                  )}
+                                </p>
+                                {group.examDisplayName && (
+                                  <p className="text-xs text-indigo-200 mt-1 truncate">
+                                    <i className="fas fa-file-alt mr-1" />{group.examDisplayName}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="text-right flex-shrink-0">
+                                <p className="text-xs text-indigo-100">Mean Grade</p>
+                                <span className={`inline-block px-3 py-1 rounded-full text-sm font-bold ${getGradeColor(group.meanGrade)}`}>
+                                  {group.meanGrade || '—'}
+                                </span>
+                              </div>
                             </div>
                           </div>
+
+                          {/* Subject rows */}
                           <table className="w-full">
                             <thead className="bg-gray-50">
                               <tr>
@@ -7286,7 +7525,7 @@ const StudentModule = ({
                                 <tr key={si} className="hover:bg-gray-50">
                                   <td className="px-4 py-2 font-medium">{s.subjectName}</td>
                                   <td className="px-4 py-2 text-center">
-                                    {s.isAbsent ? <span className="text-red-500 font-medium">ABSENT</span> : (s.marks || '—')}
+                                    {s.isAbsent ? <span className="text-red-500 font-medium">ABSENT</span> : (s.marks ?? '—')}
                                   </td>
                                   <td className="px-4 py-2 text-center">
                                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${getGradeColor(s.grade)}`}>
@@ -7324,7 +7563,6 @@ const StudentModule = ({
               {/* ==================== FEES TAB ==================== */}
               {activeDetailTab === 'fees' && (
                 <div className="space-y-4">
-                  {/* Summary */}
                   <div className="grid grid-cols-3 gap-4">
                     <div className="bg-green-50 p-4 rounded-lg">
                       <p className="text-sm text-gray-600">Total Paid</p>
@@ -7454,7 +7692,7 @@ const StudentModule = ({
                 </div>
               )}
 
-              {/* ==================== ATTENDANCE (clear visual) ==================== */}
+              {/* ==================== ATTENDANCE ==================== */}
               {activeDetailTab === 'attendance' && (
                 <div className="space-y-4">
                   {studentAttendance.length === 0 ? (
@@ -7464,7 +7702,6 @@ const StudentModule = ({
                     </div>
                   ) : (
                     <>
-                      {/* Big summary cards */}
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div className="bg-white p-4 rounded-lg border-l-4 border-green-500 shadow-sm">
                           <p className="text-xs text-gray-500 uppercase tracking-wide">Present</p>
@@ -7484,7 +7721,6 @@ const StudentModule = ({
                         </div>
                       </div>
 
-                      {/* Progress bar */}
                       <div className="bg-white p-4 rounded-lg border">
                         <div className="flex justify-between text-sm mb-2">
                           <span className="font-medium text-gray-700">Attendance Overview</span>
@@ -7500,7 +7736,6 @@ const StudentModule = ({
                         </div>
                       </div>
 
-                      {/* Monthly breakdown */}
                       {attendanceSummary.byMonth.length > 0 && (
                         <div className="bg-white border rounded-lg overflow-hidden">
                           <div className="bg-gray-50 px-4 py-2 border-b">
@@ -7535,7 +7770,6 @@ const StudentModule = ({
                         </div>
                       )}
 
-                      {/* Recent records */}
                       <div className="bg-white border rounded-lg overflow-hidden">
                         <div className="bg-gray-50 px-4 py-2 border-b">
                           <h3 className="font-semibold text-gray-700"><i className="fas fa-list mr-2 text-indigo-600" />Recent Records</h3>
@@ -7583,7 +7817,6 @@ const StudentModule = ({
               )}
             </div>
 
-            {/* Footer */}
             <div className="flex justify-end gap-2 px-6 py-4 border-t bg-gray-50 sticky bottom-0">
               {canEdit && (
                 <button onClick={() => { setShowDetailsModal(false); openEdit(selectedStudent); }}
@@ -7628,7 +7861,6 @@ const StudentModule = ({
               </div>
             ) : invoiceData ? (
               <div className="p-6 space-y-6">
-                {/* School header */}
                 <div className="border-b pb-4">
                   <h3 className="text-2xl font-bold text-indigo-700">
                     {currentSchool?.name || 'School'}
@@ -7641,7 +7873,6 @@ const StudentModule = ({
                   </p>
                 </div>
 
-                {/* Student info */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-xs text-gray-500 uppercase tracking-wide">Student</p>
@@ -7659,7 +7890,6 @@ const StudentModule = ({
                   </div>
                 </div>
 
-                {/* Term-by-term statement */}
                 <div className="space-y-4">
                   {invoiceData.termStatements && invoiceData.termStatements.length > 0 ? (
                     invoiceData.termStatements.map((term, ti) => (
@@ -7741,7 +7971,6 @@ const StudentModule = ({
                   )}
                 </div>
 
-                {/* Grand totals */}
                 {invoiceData.totals && (
                   <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-lg border-2 border-indigo-200">
                     <h4 className="font-bold text-lg mb-4 text-gray-800">Overall Summary</h4>
@@ -7772,7 +8001,6 @@ const StudentModule = ({
                   </div>
                 )}
 
-                {/* Payment history (all payments flat) */}
                 {studentPayments && studentPayments.length > 0 && (
                   <div className="border rounded-lg overflow-hidden">
                     <div className="bg-gray-50 px-4 py-2 border-b">
