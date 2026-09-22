@@ -1854,11 +1854,16 @@ const Subject = sequelize.define('Subject', {
   maxMarks: { type: DataTypes.INTEGER, defaultValue: 100 },
   passMarks: { type: DataTypes.INTEGER, defaultValue: 50 }
 });
-
 const Exam = sequelize.define('Exam', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
   name: { type: DataTypes.STRING, allowNull: false },
-  type: { /* ... */ },
+  type: {
+    type: DataTypes.ENUM(
+      'OPENER', 'MIDTERM', 'ENDTERM', 'CAT', 'MOCK', 'PRE_MOCK',
+      'PRACTICAL', 'PROJECT', 'MAIN_EXAM', 'SUPPLEMENTARY', 'SPECIAL',
+      'QUIZ', 'ASSIGNMENT', 'FINAL', 'LAB', 'PRESENTATION', 'THESIS', 'DEFENSE'
+    )
+  },
   schoolId: { type: DataTypes.UUID, allowNull: false },
   classId: { type: DataTypes.UUID, allowNull: true },
   subjectId: { type: DataTypes.UUID, allowNull: true },
