@@ -13751,15 +13751,15 @@ const ResultsModule = ({
   const uniqueGrades = [...new Set(resultEntries.map(e => e.grade).filter(Boolean))];
 
   // ============================================================
-  // PRINT HEADER — logo beside school name
+  // PRINT HEADER — logo beside school name (MATCHING SCREENSHOT)
   // ============================================================
   const PrintHeader = ({ title, subtitle }) => (
-    <div className="flex items-center gap-5 border-b-2 border-slate-300 pb-4 mb-4">
+    <div className="flex items-center gap-6 border-b-2 border-slate-300 pb-5 mb-5">
       {schoolLogo && (
         <img
           src={schoolLogo}
           alt=""
-          className="w-28 h-28 object-contain rounded-full border-2 border-slate-200 flex-shrink-0"
+          className="w-24 h-24 object-contain rounded-full border-2 border-slate-200 flex-shrink-0 bg-white"
           onError={(e) => { e.currentTarget.style.display = 'none'; }}
         />
       )}
@@ -13771,10 +13771,10 @@ const ResultsModule = ({
           <p className="text-sm italic text-slate-500 mt-1">"{schoolMotto}"</p>
         )}
         {title && (
-          <p className="text-base font-bold text-slate-700 mt-1 uppercase tracking-wider">{title}</p>
+          <p className="text-lg font-bold text-slate-700 mt-2 uppercase tracking-wider">{title}</p>
         )}
         {subtitle && (
-          <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
+          <p className="text-sm text-slate-500 mt-1">{subtitle}</p>
         )}
       </div>
     </div>
@@ -14438,11 +14438,10 @@ const ResultsModule = ({
                                       {cell.grade}
                                     </span>
                                     {cell.delta != null && cell.delta !== 0 && (
-                                      <span className={`ml-0.5 inline-flex items-center gap-0.5 font-bold text-[10px] ${
+                                      <span className={`ml-0.5 inline-flex items-center font-bold text-sm ${
                                         cell.delta > 0 ? 'text-emerald-600' : 'text-red-600'
                                       }`}>
                                         {cell.delta > 0 ? '▲' : '▼'}
-                                        <span>{cell.delta > 0 ? `+${cell.delta}` : cell.delta}</span>
                                       </span>
                                     )}
                                   </div>
@@ -44368,29 +44367,72 @@ const SettingsModule = ({
       setTimeout(() => setError(''), 3000);
     }
   };
-
   // ============================================================
-  //  LOGO UPLOAD
-  // ============================================================
-  const handleLogoUpload = async (e) => {
-    if (!canEditSchool) { alert('You do not have permission to upload a logo'); return; }
-    const file = e.target.files[0];
-    if (!file) return;
-    const formData = new FormData();
-    formData.append('logo', file);
-    if (school?.id) formData.append('schoolId', school.id);
-    setLoading(true);
-    try {
-      const res = await api.post('/schools/upload-logo', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-      setSchoolForm(prev => ({ ...prev, contact: { ...prev.contact, logo: res.data.logoUrl } }));
-      setSuccess('Logo uploaded successfully');
-      setTimeout(() => setSuccess(''), 3000);
-    } catch (err) {
-      setError(err.response?.data?.message || 'Failed to upload logo');
-      setTimeout(() => setError(''), 3000);
-    } finally { setLoading(false); }
-  };
+//  LOGO UPLOAD
+//  Saves the logo as a base64 data-URL (preferred — survives
+//  restarts and deploys on ephemeral hosts like Render), with
+//  the /uploads/ URL as a fallback for the immediate session.
+// ============================================================
+const handleLogoUpload = async (e) => {
+  if (!canEditSchool) {
+    alert('You do not have permission to upload a logo');
+    return;
+  }
 
+  const file = e.target.files?.[0];
+  if (!file) return;
+
+  // Light client-side guard so users don't paste a 20 MB image
+  if (file.size > 5 * 1024 * 1024) {
+    setError('Logo must be smaller than 5 MB');
+    setTimeout(() => setError(''), 3000);
+    e.target.value = '';
+    return;
+  }
+  if (!/^image\/(png|jpe?g|gif|webp|svg\+xml)$/i.test(file.type)) {
+    setError('Only PNG, JPG, GIF, WEBP, or SVG images are allowed');
+    setTimeout(() => setError(''), 3000);
+    e.target.value = '';
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('logo', file);
+  if (school?.id) formData.append('schoolId', school.id);
+
+  setLoading(true);
+  setError('');
+  try {
+    const res = await api.post('/schools/upload-logo', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+
+    if (!res.data?.success && !res.data?.base64 && !res.data?.logoUrl) {
+      throw new Error(res.data?.message || 'Upload failed');
+    }
+
+    // ✅ Prefer base64 — it survives restarts and deploys.
+    //    Fall back to the /uploads URL if the backend hasn't been
+    //    updated to return base64 yet.
+    const logoToSave = res.data.base64 || res.data.logoUrl;
+
+    setSchoolForm((prev) => ({
+      ...prev,
+      contact: { ...prev.contact, logo: logoToSave }
+    }));
+
+    setSuccess('Logo uploaded successfully. Click "Save Changes" to persist it.');
+    setTimeout(() => setSuccess(''), 4000);
+  } catch (err) {
+    console.error('❌ Logo upload error:', err);
+    setError(err.response?.data?.message || err.message || 'Failed to upload logo');
+    setTimeout(() => setError(''), 4000);
+  } finally {
+    setLoading(false);
+    // Allow re-uploading the same file if needed
+    e.target.value = '';
+  }
+};
   // ============================================================
   //  SAVE SCHOOL
   // ============================================================
