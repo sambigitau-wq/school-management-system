@@ -1640,7 +1640,7 @@ const Student = sequelize.define('Student', {
 
   // ---- Attachments ----
   birthCertificate: { type: DataTypes.STRING, allowNull: true },
-  passportPhoto: { type: DataTypes.STRING, allowNull: true },
+passportPhoto: { type: DataTypes.TEXT, allowNull: true },
 
   // ---- Academic placement ----
   classId:        { type: DataTypes.UUID, allowNull: true },
@@ -7264,32 +7264,70 @@ app.get('/api/users/:id', authenticate, async (req, res) => {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
-
 app.post('/api/users', authenticate, requireSchoolAdmin, async (req, res) => {
   try {
     const { email, password, firstName, lastName, phone, role, schoolId } = req.body;
 
-    const existingUser = await User.findOne({ where: { email } });
-    if (existingUser) return res.status(400).json({ message: 'Email already registered' });
+    // ---- Validate required fields ----
+    if (!email || !String(email).trim()) {
+      return res.status(400).json({ success: false, message: 'Email is required' });
+    }
+    if (!firstName || !String(firstName).trim()) {
+      return res.status(400).json({ success: false, message: 'First name is required' });
+    }
+    if (!lastName || !String(lastName).trim()) {
+      return res.status(400).json({ success: false, message: 'Last name is required' });
+    }
 
+    const trimmedEmail = String(email).trim().toLowerCase();
+    const targetSchoolId = schoolId || req.user.schoolId;
+
+    // ---- Idempotent: return existing user if the email already exists ----
+    const existingUser = await User.findOne({ where: { email: trimmedEmail } });
+    if (existingUser) {
+      console.log(`ℹ️  User already exists: ${trimmedEmail} (id=${existingUser.id})`);
+      const userData = existingUser.toJSON();
+      delete userData.password;
+      return res.status(200).json({
+        success: true,
+        user: userData,
+        existing: true,
+        message: 'User account already exists'
+      });
+    }
+
+    // ---- Create new user ----
     const hashedPassword = await bcrypt.hash(password || 'Password123!', 10);
+
     const user = await User.create({
-      email,
+      email: trimmedEmail,
       password: hashedPassword,
-      firstName,
-      lastName,
-      phone,
-      role,
-      schoolId: schoolId || req.user.schoolId
+      firstName: String(firstName).trim(),
+      lastName: String(lastName).trim(),
+      phone: phone ? String(phone).trim() : null,
+      role: role || 'TEACHER',
+      schoolId: targetSchoolId
     });
 
     user.password = undefined;
     await createAuditLog(req, 'CREATE', 'USER', user.id, null, user);
 
-    res.status(201).json({ success: true, user });
+    res.status(201).json({ success: true, user, existing: false });
   } catch (error) {
-    console.error('Create user error:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    console.error('❌ Create user error:', error);
+
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      return res.status(409).json({ success: false, message: 'A user with this email already exists' });
+    }
+    if (error.name === 'SequelizeValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: error.errors.map(e => e.message)
+      });
+    }
+
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 });
 
@@ -7609,110 +7647,145 @@ app.post('/api/students', authenticate, async (req, res) => {
 
       await student.update({ userId: studentUser.id }, { transaction });
     }
+// ==================== 3. Parents / Guardians ====================
+const guardians = Array.isArray(req.body.guardians)
+  ? req.body.guardians
+  : (parent ? [parent] : []); // backward compat with old single-parent payload
 
-    // ==================== 3. Parent / Guardian ====================
-    if (parent) {
-      // Case A: link to an existing parent user
-      if (parent.useExisting && parent.existingUserId) {
-        const existingUser = await User.findOne({
-          where: { id: parent.existingUserId, schoolId },
-          transaction,
-        });
+if (guardians.length > 0) {
+  // Only ONE primary across all guardians
+  let primaryAssigned = false;
 
-        if (!existingUser) {
+  for (let i = 0; i < guardians.length; i++) {
+    const g = guardians[i];
+    const isFirst = i === 0;
+
+    // Skip completely empty optional guardians
+    const filled = g.firstName?.trim() || g.lastName?.trim() ||
+                   g.email?.trim() || g.phone?.trim() || g.useExisting;
+    if (!isFirst && !filled) continue;
+
+    // ---- Case A: link to an existing parent user ----
+    if (g.useExisting && g.existingUserId) {
+      const existingUser = await User.findOne({
+        where: { id: g.existingUserId, schoolId },
+        transaction,
+      });
+
+      if (!existingUser) {
+        if (isFirst) {
           await transaction.rollback();
-          return res.status(400).json({ success: false, message: 'Selected existing parent not found' });
+          return res.status(400).json({ success: false, message: 'Selected existing guardian not found' });
         }
-
-        await Parent.create({
-          userId: existingUser.id,
-          studentId: student.id,
-          relationship: parent.relationship || 'Guardian',
-          isPrimary: parent.isPrimary ?? false,
-          emergencyContact: parent.emergencyContact ?? false,
-          occupation: parent.occupation || null,
-          employer: parent.employer || null,
-          monthlyIncome: parent.monthlyIncome || null,
-          schoolId,
-          hasPortalAccount: true,
-        }, { transaction });
+        continue; // skip extra invalid one
       }
-      // Case B: new guardian
-      else {
-        const {
-          firstName, lastName, email, phone,
-          relationship = 'Guardian',
-          isPrimary = false,
-          emergencyContact = false,
-          occupation = null,
-          employer = null,
-          monthlyIncome = null,
-          grantPortalAccess = false,
-          password = null,
-        } = parent;
 
-        if (!firstName?.trim() || !lastName?.trim()) {
-          await transaction.rollback();
-          return res.status(400).json({ success: false, message: 'Guardian first and last name are required' });
-        }
-        if (!phone?.trim() && !email?.trim()) {
-          await transaction.rollback();
-          return res.status(400).json({ success: false, message: 'Provide at least a phone or email for the guardian' });
-        }
-        if (grantPortalAccess) {
-          if (!email?.trim()) {
-            await transaction.rollback();
-            return res.status(400).json({ success: false, message: 'Email is required to grant portal access' });
-          }
-          if (!password || password.length < 6) {
-            await transaction.rollback();
-            return res.status(400).json({ success: false, message: 'Password (min 6 chars) is required for portal access' });
-          }
-        }
+      // Determine if this should be primary
+      let makePrimary = !!g.isPrimary && !primaryAssigned;
+      if (isFirst && !primaryAssigned) makePrimary = true;
+      if (makePrimary) primaryAssigned = true;
 
-        let linkedUserId = null;
+      await Parent.create({
+        userId: existingUser.id,
+        studentId: student.id,
+        relationship: g.relationship || 'Guardian',
+        isPrimary: makePrimary,
+        emergencyContact: !!g.emergencyContact,
+        occupation: g.occupation || null,
+        employer: g.employer || null,
+        monthlyIncome: g.monthlyIncome || null,
+        schoolId,
+        hasPortalAccount: true,
+      }, { transaction });
 
-        if (grantPortalAccess) {
-          const existingUser = await User.findOne({
-            where: { email: email.trim(), schoolId },
-            transaction,
-          });
+      continue;
+    }
 
-          if (existingUser) {
-            linkedUserId = existingUser.id;
-          } else {
-            const hashed = await bcrypt.hash(password, 10);
-            const newUser = await User.create({
-              email: email.trim(),
-              password: hashed,
-              firstName: firstName.trim(),
-              lastName: lastName.trim(),
-              phone: phone?.trim() || null,
-              role: 'PARENT',
-              schoolId,
-            }, { transaction });
-            linkedUserId = newUser.id;
-          }
-        }
+    // ---- Case B: new guardian ----
+    const {
+      firstName, lastName, email, phone,
+      relationship = 'Guardian',
+      isPrimary = false,
+      emergencyContact = false,
+      occupation = null,
+      employer = null,
+      monthlyIncome = null,
+      grantPortalAccess = false,
+      password = null,
+    } = g;
 
-        await Parent.create({
-          userId: linkedUserId,
-          studentId: student.id,
-          relationship,
-          isPrimary,
-          emergencyContact,
-          occupation,
-          employer,
-          monthlyIncome,
-          schoolId,
-          firstName: firstName.trim(),
-          lastName: lastName.trim(),
-          email: email?.trim() || null,
-          phone: phone?.trim() || null,
-          hasPortalAccount: !!linkedUserId,
-        }, { transaction });
+    // First guardian MUST have a name
+    if (isFirst && (!firstName?.trim() || !lastName?.trim())) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'Primary guardian first and last name are required' });
+    }
+    // Extra guardians: only enforce name IF they have any other content
+    if (!isFirst && (!firstName?.trim() || !lastName?.trim())) continue;
+
+    // Contact required for first guardian
+    if (isFirst && !phone?.trim() && !email?.trim()) {
+      await transaction.rollback();
+      return res.status(400).json({ success: false, message: 'Provide at least a phone or email for the guardian' });
+    }
+
+    if (grantPortalAccess) {
+      if (!email?.trim()) {
+        await transaction.rollback();
+        return res.status(400).json({ success: false, message: 'Email is required to grant portal access' });
+      }
+      if (!password || password.length < 6) {
+        await transaction.rollback();
+        return res.status(400).json({ success: false, message: 'Password (min 6 chars) is required for portal access' });
       }
     }
+
+    let linkedUserId = null;
+    if (grantPortalAccess) {
+      const existingUser = await User.findOne({
+        where: { email: email.trim(), schoolId },
+        transaction,
+      });
+
+      if (existingUser) {
+        linkedUserId = existingUser.id;
+      } else {
+        const hashed = await bcrypt.hash(password, 10);
+        const newUser = await User.create({
+          email: email.trim(),
+          password: hashed,
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          phone: phone?.trim() || null,
+          role: 'PARENT',
+          schoolId,
+        }, { transaction });
+        linkedUserId = newUser.id;
+      }
+    }
+
+    // Determine primary
+    let makePrimary = !!isPrimary && !primaryAssigned;
+    if (isFirst && !primaryAssigned) makePrimary = true;
+    if (makePrimary) primaryAssigned = true;
+
+    await Parent.create({
+      userId: linkedUserId,
+      studentId: student.id,
+      relationship,
+      isPrimary: makePrimary,
+      emergencyContact,
+      occupation,
+      employer,
+      monthlyIncome,
+      schoolId,
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      email: email?.trim() || null,
+      phone: phone?.trim() || null,
+      hasPortalAccount: !!linkedUserId,
+    }, { transaction });
+  }
+}
 
     // ==================== Commit ====================
     await transaction.commit();
@@ -18509,26 +18582,38 @@ app.post('/api/schools/upload-logo', authenticate, upload.single('logo'), async 
 
 app.post('/api/students/upload-photo', authenticate, upload.single('photo'), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
-    
-    const photoUrl = `/uploads/${req.file.filename}`;
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No file uploaded' });
+    }
+
+    // Build a FULL URL that the frontend can render directly
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host  = req.headers['x-forwarded-host'] || req.get('host');
+    const base  = `${proto}://${host}`;
+
+    const photoUrl = `${base}/uploads/${req.file.filename}`;
+
+    console.log('✅ Student photo uploaded:', photoUrl);
+
     res.json({ success: true, photoUrl });
   } catch (error) {
-    console.error('Upload error:', error);
-    res.status(500).json({ message: error.message });
+    console.error('❌ Upload photo error:', error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
-
 app.use('/uploads', (req, res, next) => {
   const filePath = path.join(uploadDir, req.url);
-  
+
+  // Allow images to be embedded cross-origin (Vercel → Render)
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
   if (!fs.existsSync(filePath)) {
     return res.sendFile(path.join(publicDir, 'default-logo.svg'));
   }
-  
+
   express.static(uploadDir)(req, res, next);
 });
-
 // ==================== UNIVERSITY/TVET ROUTES ====================
 // ==================== FACULTIES ROUTE - MAKE SURE IT WORKS FOR ALL SCHOOL TYPES ====================
 app.get('/api/faculties', authenticate, async (req, res) => {
