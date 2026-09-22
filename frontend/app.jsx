@@ -5156,7 +5156,17 @@ const StudentSelect = ({ label, value, onChange, options = [] }) => (
 );
 
 // ============================================================
-//  STUDENT MODULE — Enhanced v3 (multi-guardian + grouped exams)
+//  STUDENT MODULE — v6
+//  Features:
+//   · Persistent photo (fallback-safe)
+//   · Multi-guardian
+//   · Religion field
+//   · Knec-style grouped academic report
+//   · KNEC aptitude analysis
+//   · Term-wise invoice with installments + B/F
+//   · Print-ready invoice with school name + logo
+//   · Smart labels per school category
+//   · Adaptive grading
 // ============================================================
 const StudentModule = ({
   students = [],
@@ -5185,13 +5195,12 @@ const StudentModule = ({
   setAttendance,
   user
 }) => {
-  // ---- Aliases for module-scope sub-components ----
   const SearchableSelect = StudentSearchableSelect;
   const TextInput = StudentTextInput;
   const SelectField = StudentSelect;
 
   // ==================================================================
-  //  SAFE HELPERS
+  //  HELPERS
   // ==================================================================
   const CURRENT_YEAR = new Date().getFullYear();
   const ADM_PREFIX = 'ADM';
@@ -5206,23 +5215,17 @@ const StudentModule = ({
     return `${y}-${m}-${day}`;
   };
 
-  const safeDateForApi = (value) => {
-    const iso = toDateInput(value);
-    return iso || null;
-  };
+  const safeDateForApi = (value) => toDateInput(value) || null;
 
   const formatDate = (value) => {
     const iso = toDateInput(value);
     if (!iso) return '—';
-    const d = new Date(iso);
-    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-KE', {
-      style: 'currency', currency: 'KES', minimumFractionDigits: 0
-    }).format(amount || 0);
-  };
+  const formatCurrency = (amount) =>
+    new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 })
+      .format(amount || 0);
 
   const buildAdmissionNumber = (year, seq, prefix = ADM_PREFIX) => {
     const y = Number.parseInt(year, 10);
@@ -5236,8 +5239,7 @@ const StudentModule = ({
     if (!adm || typeof adm !== 'string') return 0;
     const expected = `${prefix}/${year}/`;
     if (!adm.startsWith(expected)) return 0;
-    const tail = adm.slice(expected.length);
-    const n = Number.parseInt(tail, 10);
+    const n = Number.parseInt(adm.slice(expected.length), 10);
     return Number.isFinite(n) ? n : 0;
   };
 
@@ -5257,18 +5259,31 @@ const StudentModule = ({
     return Number.isFinite(n) ? n : null;
   };
 
+  // ✅ Persistent photo URL helper
+  // If the student has a base64 photo → use it directly (never breaks).
+  // Else if they have a URL → use it.
+  // Else if they have an id → use the backend photo endpoint (which will 404 → initials).
+  const resolvePhotoUrl = (student) => {
+    if (!student) return null;
+    const p = student.passportPhoto;
+    if (!p) return student.id ? `/api/students/${student.id}/photo` : null;
+    if (typeof p === 'string' && p.startsWith('data:image/')) return p;   // base64
+    if (typeof p === 'string' && p.startsWith('http')) return p;          // full url
+    if (typeof p === 'string' && p.startsWith('/')) return p;             // relative
+    return student.id ? `/api/students/${student.id}/photo` : null;
+  };
+
   // ==================================================================
   //  PERMISSIONS
   // ==================================================================
   const canEdit = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER'].includes(user?.role);
   const canDelete = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
   const canAdd = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'CLASS_TEACHER'].includes(user?.role);
-
   const isStudent = user?.role === 'STUDENT';
   const isParent = user?.role === 'PARENT';
 
   // ==================================================================
-  //  SCHOOL TYPE
+  //  SCHOOL TYPE + SMART LABELS
   // ==================================================================
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
   const isUniversity = schoolCategory === 'UNIVERSITY';
@@ -5276,22 +5291,24 @@ const StudentModule = ({
   const isSecondary = schoolCategory === 'SENIOR_SECONDARY';
   const isPrimary = schoolCategory === 'ECDE_PRIMARY_JSS';
 
+  const SUBJECT_LABEL = isUniversity ? 'Unit' : isTVET ? 'Module' : 'Subject';
+  const GROUP_LABEL = isUniversity ? 'Course' : isTVET ? 'Program' : 'Class';
+  const TERM_LABEL = isUniversity ? 'Semester' : isTVET ? 'Module' : 'Term';
+
   const enableParentPortal =
     currentSchool?.enableParentPortal === true ||
     currentSchool?.settings?.enableParentPortal === true;
 
   // ==================================================================
-  //  SENIOR SECONDARY — Form vs Grade detection
+  //  GRADING FLAVOR
   // ==================================================================
   const isCBCSeniorLevel = (levelName) => {
     if (!levelName) return false;
-    const s = String(levelName).trim().toLowerCase();
-    return /^grade\s*1[0-2]$/.test(s);
+    return /^grade\s*1[0-2]$/.test(String(levelName).trim().toLowerCase());
   };
   const isFormLevel = (levelName) => {
     if (!levelName) return false;
-    const s = String(levelName).trim().toLowerCase();
-    return /^form\s*[1-4]$/.test(s);
+    return /^form\s*[1-4]$/.test(String(levelName).trim().toLowerCase());
   };
   const resolveGradingFlavor = (category, levelHint) => {
     if (category === 'COLLEGE_TVET') return 'TVET';
@@ -5331,7 +5348,6 @@ const StudentModule = ({
   const [studentAttendance, setStudentAttendance] = useState([]);
   const [activeDetailTab, setActiveDetailTab] = useState('overview');
 
-  // ✅ INVOICE STATE
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [invoiceData, setInvoiceData] = useState(null);
   const [loadingInvoice, setLoadingInvoice] = useState(false);
@@ -5343,12 +5359,10 @@ const StudentModule = ({
   const [autoAdm, setAutoAdm] = useState(true);
   const [admPreview, setAdmPreview] = useState('');
 
-  // ✅ Photo state
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState('');
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
-  // ✅ Password visibility toggles
   const [showStudentPassword, setShowStudentPassword] = useState(false);
   const [showParentPassword, setShowParentPassword] = useState(false);
 
@@ -5405,30 +5419,19 @@ const StudentModule = ({
       transportRouteId: '',
       passportPhoto: '',
       medicalInfo: { bloodGroup: '', allergies: '', disabilities: '' },
-
-      studentLogin: {
-        createAccount: false,
-        email: '',
-        password: ''
-      },
-
-      // ✅ Multi-guardian array. First = required primary. Others = optional.
+      studentLogin: { createAccount: false, email: '', password: '' },
       guardians: [createEmptyGuardian({ isPrimary: true, relationship: 'Mother' })],
       isActive: true
     };
   }
 
   useEffect(() => {
-    if (showForm && !editingId && autoAdm && currentSchool?.id) {
-      fetchNextAdmissionNumber();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (showForm && !editingId && autoAdm && currentSchool?.id) fetchNextAdmissionNumber();
   }, [showForm, editingId, autoAdm, currentSchool?.id]);
 
   useEffect(() => {
     if (!currentSchool?.id) return;
     fetchNextAdmissionNumber();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSchool?.id]);
 
   // ==================================================================
@@ -5442,19 +5445,13 @@ const StudentModule = ({
         params: { schoolId: currentSchool.id, year: CURRENT_YEAR }
       });
       const next = res.data?.admissionNumber;
-      const safe = typeof next === 'string' && /\/\d{4}$/.test(next)
-        ? next
-        : nextAdmissionNumber(students, CURRENT_YEAR);
+      const safe = typeof next === 'string' && /\/\d{4}$/.test(next) ? next : nextAdmissionNumber(students, CURRENT_YEAR);
       setAdmPreview(safe);
-      if (autoAdm) {
-        setFormState(prev => ({ ...prev, admissionNumber: safe }));
-      }
+      if (autoAdm) setFormState(prev => ({ ...prev, admissionNumber: safe }));
     } catch (err) {
       const safe = nextAdmissionNumber(students, CURRENT_YEAR);
       setAdmPreview(safe);
-      if (autoAdm) {
-        setFormState(prev => ({ ...prev, admissionNumber: safe }));
-      }
+      if (autoAdm) setFormState(prev => ({ ...prev, admissionNumber: safe }));
     } finally {
       setLoadingAdm(false);
     }
@@ -5464,8 +5461,7 @@ const StudentModule = ({
   //  OPTIONS
   // ==================================================================
   const classOptions = useMemo(() => (classes || []).map(c => ({
-    value: c.id, label: c.name,
-    subLabel: c.capacity ? `Capacity ${c.capacity}` : ''
+    value: c.id, label: c.name, subLabel: c.capacity ? `Capacity ${c.capacity}` : ''
   })), [classes]);
 
   const courseOptions = useMemo(() => (courses || []).map(c => ({
@@ -5513,6 +5509,7 @@ const StudentModule = ({
   const idTypeOptions = ['NATIONAL_ID', 'BIRTH_CERTIFICATE', 'PASSPORT', 'SCHOOL_ID', 'OTHER'];
   const bloodGroupOptions = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-', 'Unknown'];
   const moduleLevelOptions = ['Module 1', 'Module 2', 'Module 3', 'Module 4'];
+  const religionOptions = ['Christianity', 'Islam', 'Hinduism', 'Buddhism', 'Sikhism', 'Judaism', 'Traditional', 'Other', 'Prefer not to say'];
 
   // ==================================================================
   //  GRADE HELPERS
@@ -5522,8 +5519,12 @@ const StudentModule = ({
     const n = Number(marks);
     if (!Number.isFinite(n)) return { grade: '', points: 0 };
 
-    const flavor = resolveGradingFlavor(schoolCategory, levelHint);
+    if (currentSchool?.gradingConfig?.scale?.length > 0) {
+      const band = currentSchool.gradingConfig.scale.find(b => n >= b.min && n <= b.max);
+      if (band) return { grade: band.code || band.grade || '', points: band.points || 0 };
+    }
 
+    const flavor = resolveGradingFlavor(schoolCategory, levelHint);
     if (flavor === 'UNI') {
       if (n >= 70) return { grade: 'A', points: 5.0 };
       if (n >= 60) return { grade: 'B', points: 4.0 };
@@ -5539,13 +5540,12 @@ const StudentModule = ({
       return { grade: 'FAIL', points: 1 };
     }
     if (flavor === 'CBC') {
-      if (n >= 80) return { grade: 'Exceeding Expectations', points: 4 };
-      if (n >= 65) return { grade: 'Meeting Expectations', points: 3 };
-      if (n >= 50) return { grade: 'Approaching Expectations', points: 2 };
-      if (n >= 30) return { grade: 'Below Expectations', points: 1 };
-      return { grade: 'Needs Improvement', points: 0 };
+      if (n >= 80) return { grade: 'EE', points: 4 };
+      if (n >= 65) return { grade: 'ME', points: 3 };
+      if (n >= 50) return { grade: 'AE', points: 2 };
+      if (n >= 30) return { grade: 'BE', points: 1 };
+      return { grade: 'NI', points: 0 };
     }
-    // 844
     if (n >= 80) return { grade: 'A', points: 12 };
     if (n >= 75) return { grade: 'A-', points: 11 };
     if (n >= 70) return { grade: 'B+', points: 10 };
@@ -5562,45 +5562,35 @@ const StudentModule = ({
 
   const getGradeColor = (grade) => {
     if (!grade || grade === '') return 'bg-gray-100 text-gray-500';
-
     if (grade === 'DISTINCTION') return 'bg-green-100 text-green-800';
     if (grade === 'CREDIT') return 'bg-blue-100 text-blue-800';
     if (grade === 'MERIT') return 'bg-yellow-100 text-yellow-800';
     if (grade === 'PASS') return 'bg-orange-100 text-orange-800';
     if (grade === 'FAIL') return 'bg-red-100 text-red-800';
-
-    if (grade === 'Exceeding Expectations') return 'bg-green-100 text-green-800';
-    if (grade === 'Meeting Expectations') return 'bg-blue-100 text-blue-800';
-    if (grade === 'Approaching Expectations') return 'bg-yellow-100 text-yellow-800';
-    if (grade === 'Below Expectations') return 'bg-orange-100 text-orange-800';
-    if (grade === 'Needs Improvement') return 'bg-red-100 text-red-800';
-
+    if (grade === 'EE' || grade === 'Exceeding Expectations') return 'bg-green-100 text-green-800';
+    if (grade === 'ME' || grade === 'Meeting Expectations') return 'bg-blue-100 text-blue-800';
+    if (grade === 'AE' || grade === 'Approaching Expectations') return 'bg-yellow-100 text-yellow-800';
+    if (grade === 'BE' || grade === 'Below Expectations') return 'bg-orange-100 text-orange-800';
+    if (grade === 'NI' || grade === 'Needs Improvement') return 'bg-red-100 text-red-800';
     if (['A', 'A-'].includes(grade)) return 'bg-green-100 text-green-800';
     if (['B+', 'B', 'B-'].includes(grade)) return 'bg-blue-100 text-blue-800';
     if (['C+', 'C', 'C-'].includes(grade)) return 'bg-yellow-100 text-yellow-800';
     if (['D+', 'D', 'D-'].includes(grade)) return 'bg-orange-100 text-orange-800';
     if (grade === 'E') return 'bg-red-100 text-red-800';
-
     return 'bg-gray-100 text-gray-800';
   };
 
   // ==================================================================
-  //  PHOTO HANDLING
+  //  PHOTO HANDLING — Prefer base64 for persistence
   // ==================================================================
   const handlePhotoSelect = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    if (file.size > 5 * 1024 * 1024) {
-      setSubmitError('Photo must be less than 5 MB');
-      return;
-    }
-
+    if (file.size > 5 * 1024 * 1024) { setSubmitError('Photo must be less than 5 MB'); return; }
     if (!/^image\/(jpeg|jpg|png|gif|webp)$/i.test(file.type)) {
       setSubmitError('Only JPG, PNG, GIF, or WEBP images are allowed');
       return;
     }
-
     setPhotoFile(file);
     const reader = new FileReader();
     reader.onloadend = () => setPhotoPreview(reader.result);
@@ -5609,7 +5599,6 @@ const StudentModule = ({
 
   const uploadStudentPhoto = async () => {
     if (!photoFile) return formState.passportPhoto || null;
-
     setUploadingPhoto(true);
     try {
       const fd = new FormData();
@@ -5617,11 +5606,30 @@ const StudentModule = ({
       const res = await api.post('/students/upload-photo', fd, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
-      return res.data?.photoUrl || null;
-    } catch (err) {
-      console.error('Photo upload failed:', err);
-      // Do NOT fall back to base64 — it corrupts the DB
+
+      // ✅ Prefer base64 — survives server restarts
+      const base64 = res.data?.base64;
+      const url = res.data?.photoUrl;
+
+      if (base64) {
+        console.log('✅ Photo stored as base64 (persistent)');
+        return base64;
+      }
+      if (url) {
+        console.log('✅ Photo stored as URL:', url);
+        return url;
+      }
+      // Final fallback — save the local preview (base64) we already have
+      if (photoPreview) {
+        console.log('⚠️ Falling back to local base64');
+        return photoPreview;
+      }
       return null;
+    } catch (err) {
+      console.error('❌ Photo upload failed:', err);
+      setSubmitError('Photo upload failed: ' + (err.response?.data?.message || err.message));
+      // Still return local preview so photo isn't lost
+      return photoPreview || null;
     } finally {
       setUploadingPhoto(false);
     }
@@ -5633,7 +5641,7 @@ const StudentModule = ({
   const addGuardianField = () => {
     setFormState(prev => {
       const list = [...(prev.guardians || [])];
-      if (list.length >= 5) return prev; // cap at 5
+      if (list.length >= 5) return prev;
       list.push(createEmptyGuardian({
         isPrimary: false,
         relationship: list.length === 1 ? 'Father' : 'Guardian'
@@ -5645,9 +5653,8 @@ const StudentModule = ({
   const removeGuardianField = (index) => {
     setFormState(prev => {
       const list = [...(prev.guardians || [])];
-      if (list.length <= 1) return prev; // keep at least one
+      if (list.length <= 1) return prev;
       list.splice(index, 1);
-      // Ensure exactly one primary
       if (!list.some(g => g.isPrimary)) list[0].isPrimary = true;
       return { ...prev, guardians: list };
     });
@@ -5658,11 +5665,7 @@ const StudentModule = ({
       const list = [...(prev.guardians || [])];
       if (!list[index]) return prev;
       list[index] = { ...list[index], ...patch };
-
-      // Only one primary across the array
-      if (patch.isPrimary === true) {
-        list.forEach((g, i) => { if (i !== index) g.isPrimary = false; });
-      }
+      if (patch.isPrimary === true) list.forEach((g, i) => { if (i !== index) g.isPrimary = false; });
       return { ...prev, guardians: list };
     });
   };
@@ -5673,7 +5676,6 @@ const StudentModule = ({
   const prepareFormData = (data) => {
     const uuidFields = ['classId', 'courseId', 'programId', 'facultyId', 'departmentId', 'transportRouteId'];
     const numericFields = ['currentYear', 'currentSemester'];
-
     const prepared = { ...data };
 
     uuidFields.forEach(f => { if (prepared[f] === '') prepared[f] = null; });
@@ -5681,50 +5683,31 @@ const StudentModule = ({
 
     if (prepared.studentLogin && typeof prepared.studentLogin === 'object') {
       const sl = { ...prepared.studentLogin };
-      if (!sl.createAccount) {
-        prepared.studentLogin = { createAccount: false, email: '', password: '' };
-      } else {
-        prepared.studentLogin = {
-          createAccount: true,
-          email: (sl.email || '').trim(),
-          password: sl.password || ''
-        };
-      }
+      if (!sl.createAccount) prepared.studentLogin = { createAccount: false, email: '', password: '' };
+      else prepared.studentLogin = { createAccount: true, email: (sl.email || '').trim(), password: sl.password || '' };
     }
 
-    // ✅ Normalize guardians array
     if (Array.isArray(prepared.guardians)) {
       prepared.guardians = prepared.guardians
         .map(g => {
           const gg = { ...g };
           gg.monthlyIncome = toNumberOrNull(gg.monthlyIncome);
-          if (!gg.grantPortalAccess) {
-            delete gg.password;
-            delete gg.existingUserId;
-          }
+          if (!gg.grantPortalAccess) { delete gg.password; delete gg.existingUserId; }
           return gg;
         })
         .filter(g => {
           if (g.useExisting) return !!g.existingUserId;
           return !!(g.firstName?.trim() || g.lastName?.trim() || g.email?.trim() || g.phone?.trim());
         });
-
-      // Guarantee at least one primary
       if (prepared.guardians.length > 0 && !prepared.guardians.some(g => g.isPrimary)) {
         prepared.guardians[0].isPrimary = true;
       }
     }
 
-    if (!prepared.admissionNumber || !String(prepared.admissionNumber).trim()) {
-      delete prepared.admissionNumber;
-    } else {
-      prepared.admissionNumber = String(prepared.admissionNumber).trim().toUpperCase();
-    }
+    if (!prepared.admissionNumber || !String(prepared.admissionNumber).trim()) delete prepared.admissionNumber;
+    else prepared.admissionNumber = String(prepared.admissionNumber).trim().toUpperCase();
 
-    if ('dateOfBirth' in prepared) {
-      prepared.dateOfBirth = safeDateForApi(prepared.dateOfBirth);
-    }
-
+    if ('dateOfBirth' in prepared) prepared.dateOfBirth = safeDateForApi(prepared.dateOfBirth);
     return prepared;
   };
 
@@ -5733,17 +5716,14 @@ const StudentModule = ({
   // ==================================================================
   const filteredStudents = useMemo(() => {
     const list = Array.isArray(students) ? students : [];
-
     if (isStudent && myStudentRecord) return [myStudentRecord];
     if (isParent) {
       const myChildrenIds = (parents || []).filter(p => p.userId === user?.id).map(p => p.studentId);
       return list.filter(s => myChildrenIds.includes(s.id));
     }
-
     return list.filter(student => {
       if (!student) return false;
       if (currentSchool?.id && student.schoolId !== currentSchool.id) return false;
-
       const term = searchTerm.trim().toLowerCase();
       const matchesSearch = !term ||
         (student.firstName || '').toLowerCase().includes(term) ||
@@ -5752,28 +5732,16 @@ const StudentModule = ({
         (student.idNumber || '').toLowerCase().includes(term) ||
         (student.email || '').toLowerCase().includes(term) ||
         (student.phone || '').toLowerCase().includes(term);
-
       let matchesScope = true;
-      if (isUniversity) {
-        matchesScope = !classFilter || student.courseId === classFilter;
-      } else if (isTVET) {
-        matchesScope = !classFilter || student.programId === classFilter;
-      } else {
-        matchesScope = !classFilter || student.classId === classFilter;
-      }
-
-      const matchesStatus =
-        statusFilter === 'all' ||
+      if (isUniversity) matchesScope = !classFilter || student.courseId === classFilter;
+      else if (isTVET) matchesScope = !classFilter || student.programId === classFilter;
+      else matchesScope = !classFilter || student.classId === classFilter;
+      const matchesStatus = statusFilter === 'all' ||
         (statusFilter === 'active' && student.isActive !== false) ||
         (statusFilter === 'inactive' && student.isActive === false);
-
       return matchesSearch && matchesScope && matchesStatus;
     });
-  }, [
-    students, searchTerm, classFilter, statusFilter,
-    isUniversity, isTVET, isStudent, myStudentRecord, isParent,
-    parents, user, currentSchool
-  ]);
+  }, [students, searchTerm, classFilter, statusFilter, isUniversity, isTVET, isStudent, myStudentRecord, isParent, parents, user, currentSchool]);
 
   // ==================================================================
   //  OPEN / CLOSE FORM
@@ -5798,7 +5766,7 @@ const StudentModule = ({
     setAutoAdm(false);
     setSubmitError('');
     setPhotoFile(null);
-    setPhotoPreview(student.passportPhoto || '');
+    setPhotoPreview(resolvePhotoUrl(student) || '');
     setShowStudentPassword(false);
     setShowParentPassword(false);
     setFormState({
@@ -5828,7 +5796,7 @@ const StudentModule = ({
       passportPhoto: student.passportPhoto || '',
       medicalInfo: student.medicalInfo || { bloodGroup: '', allergies: '', disabilities: '' },
       studentLogin: { createAccount: false, email: '', password: '' },
-      guardians: [createEmptyGuardian({ isPrimary: true })], // edit doesn't use these
+      guardians: [createEmptyGuardian({ isPrimary: true })],
       isActive: student.isActive !== false
     });
     setShowForm(true);
@@ -5853,19 +5821,15 @@ const StudentModule = ({
   const handleCreate = async (e) => {
     e.preventDefault();
     setSubmitError('');
-
     if (!canAdd) { setSubmitError('You do not have permission to add students'); return; }
     const f = formState;
 
-    if (!f.firstName?.trim() || !f.lastName?.trim()) {
-      setSubmitError('First and last name are required.'); return;
-    }
+    if (!f.firstName?.trim() || !f.lastName?.trim()) { setSubmitError('First and last name are required.'); return; }
     if (!f.dateOfBirth) { setSubmitError('Date of birth is required.'); return; }
     if (isUniversity && !f.courseId) { setSubmitError('Please select a course.'); return; }
     if (isTVET && !f.programId) { setSubmitError('Please select a program.'); return; }
     if (!isUniversity && !isTVET && !f.classId) { setSubmitError('Please select a class.'); return; }
 
-    // Student login block
     if (f.studentLogin?.createAccount) {
       if (!f.studentLogin.email?.trim()) { setSubmitError('Student login email is required.'); return; }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.studentLogin.email.trim())) {
@@ -5876,7 +5840,6 @@ const StudentModule = ({
       }
     }
 
-    // ✅ Guardians validation
     const guardians = Array.isArray(f.guardians) ? f.guardians : [];
     const primary = guardians.find(g => g.isPrimary) || guardians[0];
     if (!primary) { setSubmitError('At least one guardian is required.'); return; }
@@ -5884,38 +5847,26 @@ const StudentModule = ({
     if (primary.useExisting) {
       if (!primary.existingUserId) { setSubmitError('Please select an existing primary guardian.'); return; }
     } else {
-      if (!primary.firstName?.trim() || !primary.lastName?.trim()) {
-        setSubmitError('Primary guardian first and last name are required.'); return;
-      }
-      if (!primary.phone?.trim() && !primary.email?.trim()) {
-        setSubmitError('Provide at least a phone or email for the primary guardian.'); return;
-      }
+      if (!primary.firstName?.trim() || !primary.lastName?.trim()) { setSubmitError('Primary guardian first and last name are required.'); return; }
+      if (!primary.phone?.trim() && !primary.email?.trim()) { setSubmitError('Provide at least a phone or email for the primary guardian.'); return; }
       if (primary.grantPortalAccess) {
         if (!primary.email?.trim()) { setSubmitError('Email required for primary guardian portal access.'); return; }
-        if (!primary.password?.trim() || primary.password.length < 6) {
-          setSubmitError('Password (min 6 chars) required for portal access.'); return;
-        }
+        if (!primary.password?.trim() || primary.password.length < 6) { setSubmitError('Password (min 6 chars) required for portal access.'); return; }
       }
     }
 
-    // Extra guardians: if partially filled, require name; if portal access is on, require email + password
     for (let i = 0; i < guardians.length; i++) {
       const g = guardians[i];
       if (g === primary) continue;
-      const filled = g.firstName?.trim() || g.lastName?.trim() ||
-                     g.email?.trim() || g.phone?.trim() || g.useExisting;
+      const filled = g.firstName?.trim() || g.lastName?.trim() || g.email?.trim() || g.phone?.trim() || g.useExisting;
       if (!filled) continue;
       if (g.useExisting) {
         if (!g.existingUserId) { setSubmitError(`Guardian ${i + 1}: please select an existing guardian.`); return; }
       } else {
-        if (!g.firstName?.trim() || !g.lastName?.trim()) {
-          setSubmitError(`Guardian ${i + 1}: first and last name are required.`); return;
-        }
+        if (!g.firstName?.trim() || !g.lastName?.trim()) { setSubmitError(`Guardian ${i + 1}: first and last name are required.`); return; }
         if (g.grantPortalAccess) {
           if (!g.email?.trim()) { setSubmitError(`Guardian ${i + 1}: email required for portal access.`); return; }
-          if (!g.password?.trim() || g.password.length < 6) {
-            setSubmitError(`Guardian ${i + 1}: password (min 6 chars) required.`); return;
-          }
+          if (!g.password?.trim() || g.password.length < 6) { setSubmitError(`Guardian ${i + 1}: password (min 6 chars) required.`); return; }
         }
       }
     }
@@ -5925,11 +5876,8 @@ const StudentModule = ({
       const photoUrl = await uploadStudentPhoto();
       const payload = prepareFormData({ ...f, passportPhoto: photoUrl || f.passportPhoto || null });
 
-      if (typeof onSubmit === 'function') {
-        await onSubmit(e, payload);
-      } else {
-        await api.post('/students', { ...payload, schoolId: currentSchool?.id });
-      }
+      if (typeof onSubmit === 'function') await onSubmit(e, payload);
+      else await api.post('/students', { ...payload, schoolId: currentSchool?.id });
 
       setSuccessMessage('✅ Student registered successfully');
       closeForm();
@@ -5939,9 +5887,7 @@ const StudentModule = ({
       if (/admission/i.test(msg) && /(taken|exists|unique|duplicate)/i.test(msg)) {
         setSubmitError(`${msg}. Fetching the next available number…`);
         await fetchNextAdmissionNumber();
-      } else {
-        setSubmitError(msg);
-      }
+      } else setSubmitError(msg);
     } finally {
       setLoading(false);
     }
@@ -5957,15 +5903,9 @@ const StudentModule = ({
     setLoading(true);
     try {
       const photoUrl = await uploadStudentPhoto();
-      const payload = prepareFormData({
-        ...formState,
-        passportPhoto: photoUrl || formState.passportPhoto || null
-      });
-      if (typeof handleUpdate === 'function') {
-        await handleUpdate('/students', editingId, payload, setStudents, students);
-      } else {
-        await api.put(`/students/${editingId}`, payload);
-      }
+      const payload = prepareFormData({ ...formState, passportPhoto: photoUrl || formState.passportPhoto || null });
+      if (typeof handleUpdate === 'function') await handleUpdate('/students', editingId, payload, setStudents, students);
+      else await api.put(`/students/${editingId}`, payload);
       setSuccessMessage('✅ Student updated successfully');
       closeForm();
       setTimeout(() => setSuccessMessage(''), 4000);
@@ -5983,11 +5923,8 @@ const StudentModule = ({
     if (!canDelete || !selectedStudent) return;
     setLoading(true);
     try {
-      if (typeof handleDelete === 'function') {
-        await handleDelete('/students', selectedStudent.id, setStudents, students);
-      } else {
-        await api.delete(`/students/${selectedStudent.id}`);
-      }
+      if (typeof handleDelete === 'function') await handleDelete('/students', selectedStudent.id, setStudents, students);
+      else await api.delete(`/students/${selectedStudent.id}`);
       setSuccessMessage('✅ Student deleted successfully');
       setShowDeleteConfirm(false);
       setSelectedStudent(null);
@@ -6010,14 +5947,10 @@ const StudentModule = ({
     try {
       const s = await api.get(`/students/${student.id}`);
       setStudentDetails(s.data.student || student);
-      try { const r = await api.get(`/results?studentId=${student.id}`); setStudentResults(r.data.results || []); }
-      catch { setStudentResults([]); }
-      try { const p = await api.get(`/payments?studentId=${student.id}`); setStudentPayments(p.data.payments || []); }
-      catch { setStudentPayments([]); }
-      try { const g = await api.get(`/parents?studentId=${student.id}`); setStudentParents(g.data.parents || []); }
-      catch { setStudentParents([]); }
-      try { const a = await api.get(`/attendance?studentId=${student.id}&limit=100`); setStudentAttendance(a.data.attendance || []); }
-      catch { setStudentAttendance([]); }
+      try { const r = await api.get(`/results?studentId=${student.id}`); setStudentResults(r.data.results || []); } catch { setStudentResults([]); }
+      try { const p = await api.get(`/payments?studentId=${student.id}`); setStudentPayments(p.data.payments || []); } catch { setStudentPayments([]); }
+      try { const g = await api.get(`/parents?studentId=${student.id}`); setStudentParents(g.data.parents || []); } catch { setStudentParents([]); }
+      try { const a = await api.get(`/attendance?studentId=${student.id}&limit=100`); setStudentAttendance(a.data.attendance || []); } catch { setStudentAttendance([]); }
       setShowDetailsModal(true);
     } catch (err) {
       console.error('loadStudentDetails error:', err);
@@ -6028,122 +5961,164 @@ const StudentModule = ({
   };
 
   // ==================================================================
-  //  INVOICE
+  //  INVOICE — term-wise, installments, B/F
   // ==================================================================
-  const openInvoice = async (student) => {
-    if (!student) return;
-    setSelectedStudent(student);
-    setShowInvoiceModal(true);
-    setLoadingInvoice(true);
-    setInvoiceData(null);
+  const buildInvoiceData = (student) => {
+    if (!student) return null;
 
-    try {
-      let stmt = null;
-      try {
-        const r = await api.get(`/students/${student.id}/fee-statement`);
-        stmt = r.data?.statement;
-      } catch (err) {
-        console.warn('fee-statement endpoint failed, computing locally');
-      }
-      if (!stmt) stmt = buildLocalStatement(student);
-      setInvoiceData(stmt);
-    } catch (err) {
-      console.error('openInvoice error:', err);
-      setErrorMessage('Failed to load invoice');
-    } finally {
-      setLoadingInvoice(false);
-    }
-  };
+    const studentPayments = (payments || []).filter(p => String(p.studentId) === String(student.id));
 
-  const buildLocalStatement = (student) => {
-    const applicable = (fees || []).filter(f => {
+    const applicableFees = (fees || []).filter(f => {
       if (isUniversity) return String(f.courseId) === String(student.courseId);
-      if (isTVET)       return String(f.programId) === String(student.programId);
+      if (isTVET) return String(f.programId) === String(student.programId);
       return String(f.classId) === String(student.classId);
     });
 
-    const groups = {};
-    applicable.forEach(fee => {
-      const key = isUniversity
-        ? (fee.term || fee.semester ? `Semester ${fee.semester || fee.term}` : 'Unspecified')
-        : isTVET
-        ? (fee.module ? `Module ${fee.module}` : fee.term || 'Unspecified')
-        : (fee.term || 'Unspecified');
+    const referencedFeeIds = new Set(
+      studentPayments.map(p => p.feeId).filter(Boolean).map(String)
+    );
 
-      if (!groups[key]) {
-        groups[key] = { term: key, fees: [], total: 0, paid: 0, discount: 0 };
+    const feeById = new Map();
+    [...applicableFees, ...(fees || [])].forEach(f => {
+      if (!f?.id) return;
+      const idStr = String(f.id);
+      if (!feeById.has(idStr)) feeById.set(idStr, f);
+    });
+
+    const getTermKey = (fee) => {
+      if (!fee) return 'Unspecified Term';
+      if (isUniversity) return fee.semester ? `Semester ${fee.semester}` : (fee.term || 'Unspecified Semester');
+      if (isTVET) return fee.module ? `Module ${fee.module}` : (fee.term || 'Unspecified Module');
+      return fee.term || 'Unspecified Term';
+    };
+
+    const termGroups = new Map();
+    const ensureTermGroup = (term) => {
+      if (!termGroups.has(term)) {
+        termGroups.set(term, { term, fees: [], cashOnly: [], totalBilled: 0, totalDiscount: 0, totalPaid: 0 });
       }
+      return termGroups.get(term);
+    };
 
-      const amount = parseFloat(fee.amount) || 0;
+    const seenFeeIds = new Set();
+    for (const fee of [...applicableFees, ...referencedFeeIds]) {
+      const feeObj = typeof fee === 'string' ? feeById.get(fee) : fee;
+      if (!feeObj) continue;
+      if (seenFeeIds.has(String(feeObj.id))) continue;
+      seenFeeIds.add(String(feeObj.id));
+
+      const term = getTermKey(feeObj);
+      const group = ensureTermGroup(term);
+      const amount = parseFloat(feeObj.amount) || 0;
 
       let discount = 0;
       const studentDiscounts = (discounts || []).filter(d =>
         String(d.studentId) === String(student.id) &&
-        (d.isActive !== false && d.isActive !== 0 && d.isActive !== 'false')
+        (d.isActive !== false && d.isActive !== 0 && d.isActive !== 'false') &&
+        (d.feeId == null || String(d.feeId) === String(feeObj.id))
       );
       if (studentDiscounts.length > 0) {
-        let totalDisc = 0;
+        let total = 0;
         studentDiscounts.forEach(d => {
-          if (d.feeId == null || String(d.feeId) === String(fee.id)) {
-            const v = parseFloat(d.value) || 0;
-            const t = String(d.type || '').toUpperCase();
-            if (t === 'PERCENT' || t === 'PERCENTAGE') totalDisc += amount * (v / 100);
-            else totalDisc += v;
-          }
+          const v = parseFloat(d.value) || 0;
+          const t = String(d.type || '').toUpperCase();
+          if (t === 'PERCENT' || t === 'PERCENTAGE') total += amount * (v / 100);
+          else total += v;
         });
-        discount = Math.min(totalDisc, amount);
+        discount = Math.min(total, amount);
       } else {
-        if (parseFloat(fee.discountPercent) > 0) discount = amount * (parseFloat(fee.discountPercent) / 100);
-        else if (parseFloat(fee.discountAmount) > 0) discount = parseFloat(fee.discountAmount);
+        const pct = parseFloat(feeObj.discountPercent) || 0;
+        const amt = parseFloat(feeObj.discountAmount) || 0;
+        if (pct > 0) discount = amount * (pct / 100);
+        else if (amt > 0) discount = amt;
       }
 
-      const paid = (payments || [])
-        .filter(p => String(p.studentId) === String(student.id) && String(p.feeId) === String(fee.id))
-        .reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+      const feePayments = studentPayments.filter(p => String(p.feeId) === String(feeObj.id));
+      const paid = feePayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
 
-      groups[key].fees.push({ ...fee, discount, paid, net: Math.max(0, amount - discount) });
-      groups[key].total += amount;
-      groups[key].discount += discount;
-      groups[key].paid += paid;
-    });
+      group.fees.push({
+        id: feeObj.id,
+        name: feeObj.name || 'Fee',
+        category: feeObj.category,
+        amount,
+        discount,
+        net: Math.max(0, amount - discount),
+        paid,
+        installments: feePayments
+          .map(p => ({
+            id: p.id,
+            date: p.date || p.paymentDate || p.createdAt,
+            amount: parseFloat(p.amount) || 0,
+            method: p.paymentMethod,
+            receiptNo: p.receiptNo,
+            reference: p.transactionId || p.mpesaCode || p.bankReference || p.reference || ''
+          }))
+          .sort((a, b) => new Date(a.date) - new Date(b.date))
+      });
 
-    const sortedGroups = Object.values(groups).sort((a, b) => {
+      group.totalBilled += amount;
+      group.totalDiscount += discount;
+      group.totalPaid += paid;
+    }
+
+    // Payments with no identifiable fee
+    for (const p of studentPayments) {
+      if (p.feeId && seenFeeIds.has(String(p.feeId))) continue;
+      const d = new Date(p.date || p.paymentDate || p.createdAt);
+      const month = d.getMonth() + 1;
+      let term = 'General';
+      if (!isUniversity && !isTVET) term = month <= 4 ? 'Term 1' : month <= 8 ? 'Term 2' : 'Term 3';
+      else if (isUniversity) term = month <= 6 ? 'Semester 1' : 'Semester 2';
+      else term = 'Module Payment';
+      const group = ensureTermGroup(term);
+      group.cashOnly.push({
+        id: p.id,
+        date: p.date || p.paymentDate || p.createdAt,
+        amount: parseFloat(p.amount) || 0,
+        method: p.paymentMethod,
+        receiptNo: p.receiptNo,
+        reference: p.transactionId || p.mpesaCode || p.bankReference || p.reference || ''
+      });
+      group.totalPaid += parseFloat(p.amount) || 0;
+    }
+
+    const termSort = (a, b) => {
       const na = parseInt(String(a.term).replace(/\D/g, '')) || 0;
       const nb = parseInt(String(b.term).replace(/\D/g, '')) || 0;
       return na - nb;
-    });
+    };
+    const sortedTerms = Array.from(termGroups.values()).sort(termSort);
 
-    let carryForward = 0;
-    const termStatements = sortedGroups.map(g => {
-      const net = Math.max(0, g.total - g.discount);
-      const billed = net + carryForward;
-      const paidThisTerm = g.paid;
-      const newBalance = billed - paidThisTerm;
-      const nextCarry = newBalance > 0 ? newBalance : 0;
-
+    let broughtForward = 0;
+    const termStatements = sortedTerms.map(g => {
+      const netBilled = Math.max(0, g.totalBilled - g.totalDiscount);
+      const billedThisTerm = netBilled + broughtForward;
+      const paidThisTerm = g.totalPaid;
+      const balance = billedThisTerm - paidThisTerm;
+      const carriedForward = balance > 0 ? balance : 0;
       const row = {
         term: g.term,
         fees: g.fees,
-        grossBilled: g.total,
-        discount: g.discount,
-        netBilled: net,
-        broughtForward: carryForward,
-        billedThisTerm: billed,
+        cashOnly: g.cashOnly,
+        grossBilled: g.totalBilled,
+        discount: g.totalDiscount,
+        netBilled,
+        broughtForward,
+        billedThisTerm,
         paidThisTerm,
-        balanceCarriedForward: nextCarry,
-        isPaid: newBalance <= 0
+        balanceCarriedForward: carriedForward,
+        isPaid: balance <= 0
       };
-
-      carryForward = nextCarry;
+      broughtForward = carriedForward;
       return row;
     });
 
     const totals = {
       grossBilled: termStatements.reduce((s, t) => s + t.grossBilled, 0),
-      discount:    termStatements.reduce((s, t) => s + t.discount, 0),
-      netBilled:   termStatements.reduce((s, t) => s + t.netBilled, 0),
-      paid:        termStatements.reduce((s, t) => s + t.paidThisTerm, 0),
-      outstanding: carryForward
+      discount: termStatements.reduce((s, t) => s + t.discount, 0),
+      netBilled: termStatements.reduce((s, t) => s + t.netBilled, 0),
+      paid: termStatements.reduce((s, t) => s + t.paidThisTerm, 0),
+      outstanding: broughtForward
     };
 
     return {
@@ -6152,18 +6127,37 @@ const StudentModule = ({
         firstName: student.firstName,
         lastName: student.lastName,
         admissionNumber: student.admissionNumber,
-        courseName: courses.find(c => c.id === student.courseId)?.name,
-        programName: programs.find(p => p.id === student.programId)?.name,
-        className: classes.find(c => c.id === student.classId)?.name
+        className: classes.find(c => c.id === student.classId)?.name || student.className || student.Class?.name || '—',
+        programName: programs.find(p => p.id === student.programId)?.name || student.programName || '—',
+        courseName: courses.find(c => c.id === student.courseId)?.name || student.courseName || '—',
       },
-      termStatements,
-      totals,
       school: {
         name: currentSchool?.name,
         motto: currentSchool?.motto,
-        contact: currentSchool?.contact
-      }
+        contact: currentSchool?.contact,
+        logo: currentSchool?.contact?.logo
+      },
+      termStatements,
+      totals,
+      generatedAt: new Date()
     };
+  };
+
+  const openInvoice = async (student) => {
+    if (!student) return;
+    setSelectedStudent(student);
+    setShowInvoiceModal(true);
+    setLoadingInvoice(true);
+    setInvoiceData(null);
+    try {
+      const localData = buildInvoiceData(student);
+      setInvoiceData(localData);
+    } catch (err) {
+      console.error('openInvoice error:', err);
+      setInvoiceData(buildInvoiceData(student));
+    } finally {
+      setLoadingInvoice(false);
+    }
   };
 
   // ==================================================================
@@ -6188,14 +6182,9 @@ const StudentModule = ({
 
   const handleAddParent = async () => {
     if (!canEdit || !selectedStudentForParent) return;
-
     if (createNewParent) {
-      if (!parentForm.firstName?.trim() || !parentForm.lastName?.trim()) {
-        setErrorMessage('Guardian first and last name are required'); return;
-      }
-      if (!parentForm.phone?.trim() && !parentForm.email?.trim()) {
-        setErrorMessage('Provide at least a phone number or email'); return;
-      }
+      if (!parentForm.firstName?.trim() || !parentForm.lastName?.trim()) { setErrorMessage('Guardian first and last name are required'); return; }
+      if (!parentForm.phone?.trim() && !parentForm.email?.trim()) { setErrorMessage('Provide at least a phone number or email'); return; }
       if (parentForm.grantPortalAccess) {
         if (!parentForm.email?.trim()) { setErrorMessage('Email required for portal access'); return; }
         if (!parentForm.password?.trim()) { setErrorMessage('Password required for portal access'); return; }
@@ -6207,10 +6196,8 @@ const StudentModule = ({
     setLoading(true);
     try {
       let userId = null;
-
-      if (!createNewParent) {
-        userId = selectedExistingParent.userId;
-      } else if (parentForm.grantPortalAccess) {
+      if (!createNewParent) userId = selectedExistingParent.userId;
+      else if (parentForm.grantPortalAccess) {
         const userRes = await api.post('/users', {
           email: parentForm.email.trim(),
           password: parentForm.password,
@@ -6243,18 +6230,10 @@ const StudentModule = ({
         schoolId: currentSchool?.id
       });
 
-      try {
-        const pr = await api.get('/parents');
-        if (setParents) setParents(pr.data.parents || []);
-      } catch {}
-
+      try { const pr = await api.get('/parents'); if (setParents) setParents(pr.data.parents || []); } catch {}
       if (showDetailsModal && selectedStudent) {
-        try {
-          const g = await api.get(`/parents?studentId=${selectedStudent.id}`);
-          setStudentParents(g.data.parents || []);
-        } catch {}
+        try { const g = await api.get(`/parents?studentId=${selectedStudent.id}`); setStudentParents(g.data.parents || []); } catch {}
       }
-
       setShowAddParentModal(false);
       setSuccessMessage('✅ Guardian added successfully');
       setTimeout(() => setSuccessMessage(''), 4000);
@@ -6283,7 +6262,6 @@ const StudentModule = ({
       if (!admissionNumber) setShowAdmissionModal(true);
       else loadMyStudentData();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStudent, admissionNumber]);
 
   const loadMyStudentData = async () => {
@@ -6311,35 +6289,15 @@ const StudentModule = ({
   };
 
   // ==================================================================
-  //  📚 GROUPED ACADEMIC REPORT
-  //
-  //  Groups student results into "report cards" by:
-  //    1. Exam Term        (e.g. "Term 1", "End Term 1", "Semester 1")
-  //    2. Exam Type        (e.g. OPENER, MIDTERM, ENDTERM, FINAL)
-  //    3. Academic Year    (e.g. "2026")
-  //
-  //  So "End Term 1 — FINAL" and "End Term 1 — OPENER" become two
-  //  different report cards even if the term string is the same.
+  //  GROUPED ACADEMIC REPORT (mirrors Results module)
   // ==================================================================
   const examLabelMap = {
-    OPENER: 'Opener',
-    MIDTERM: 'Mid-Term',
-    ENDTERM: 'End of Term',
-    CAT: 'CAT',
-    MOCK: 'Mock',
-    PRE_MOCK: 'Pre-Mock',
-    PRACTICAL: 'Practical',
-    PROJECT: 'Project',
-    MAIN_EXAM: 'Main Exam',
-    SUPPLEMENTARY: 'Supplementary',
-    SPECIAL: 'Special',
-    QUIZ: 'Quiz',
-    ASSIGNMENT: 'Assignment',
-    FINAL: 'Final Exam',
-    LAB: 'Lab',
-    PRESENTATION: 'Presentation',
-    THESIS: 'Thesis',
-    DEFENSE: 'Defense'
+    OPENER: 'Opener', MIDTERM: 'Mid-Term', ENDTERM: 'End of Term',
+    CAT: 'CAT', MOCK: 'Mock', PRE_MOCK: 'Pre-Mock',
+    PRACTICAL: 'Practical', PROJECT: 'Project', MAIN_EXAM: 'Main Exam',
+    SUPPLEMENTARY: 'Supplementary', SPECIAL: 'Special', QUIZ: 'Quiz',
+    ASSIGNMENT: 'Assignment', FINAL: 'Final Exam', LAB: 'Lab',
+    PRESENTATION: 'Presentation', THESIS: 'Thesis', DEFENSE: 'Defense'
   };
 
   const normalizeExamType = (type) => {
@@ -6348,70 +6306,40 @@ const StudentModule = ({
     return examLabelMap[t] ? t : 'OTHER';
   };
 
-  const normalizeTerm = (exam) => {
-    if (!exam) return 'Unspecified Term';
-    return exam.term || exam.academicYear ? `${exam.term || ''}${exam.term && exam.academicYear ? ' ' : ''}${exam.academicYear ? `(${exam.academicYear})` : ''}`.trim() : 'Unspecified Term';
-  };
-
   const groupedResults = useMemo(() => {
     if (!studentResults || studentResults.length === 0) return [];
-
-    // Build a map keyed by (termKey + typeKey)
     const map = new Map();
-
     studentResults.forEach(r => {
-      // Resolve exam entity
       const exam = exams.find(e => e.id === r.examId) || r.Exam || null;
-
-      const termLabel = normalizeTerm(exam);
+      const termLabel = exam?.term || 'Unspecified Term';
+      const yearLabel = exam?.academicYear || '';
       const typeRaw = normalizeExamType(exam?.type);
       const typeLabel = examLabelMap[typeRaw] || 'Other';
-      const examDate = exam?.date || r.createdAt || null;
-      const examYear = exam?.academicYear || (examDate ? new Date(examDate).getFullYear().toString() : '');
-
-      // Composite key: same term + same type + same year = one report card
-      const key = `${termLabel}||${typeRaw}||${examYear}`;
+      const key = `${termLabel}||${typeRaw}||${yearLabel}`;
 
       if (!map.has(key)) {
         map.set(key, {
-          key,
-          term: termLabel,
-          year: examYear,
-          examTypeRaw: typeRaw,
-          examType: typeLabel,
-          date: examDate,
-          examNames: new Set(),
-          subjects: [],
-          totalMarks: 0,
-          totalPoints: 0,
-          count: 0
+          key, term: termLabel, year: yearLabel,
+          examTypeRaw: typeRaw, examType: typeLabel,
+          date: exam?.date || r.createdAt,
+          examNames: new Set(), subjects: [],
+          totalMarks: 0, totalPoints: 0, count: 0
         });
       }
       const group = map.get(key);
-
       if (exam?.name) group.examNames.add(exam.name);
-      if (examDate && (!group.date || new Date(examDate) > new Date(group.date))) {
-        group.date = examDate;
-      }
 
-      // Resolve subject / unit name
       const itemName = isUniversity || isTVET
         ? (units.find(u => u.id === r.unitId)?.name || r.CourseUnit?.name || '—')
         : (subjects.find(s => s.id === r.subjectId)?.name || r.Subject?.name || '—');
 
       const marks = parseFloat(r.marks) || 0;
-      const levelHint = studentDetails?.classId
-        ? classes.find(c => c.id === studentDetails.classId)?.name
-        : null;
+      const levelHint = studentDetails?.classId ? classes.find(c => c.id === studentDetails.classId)?.name : null;
       const calc = getGrade(marks, levelHint);
 
       group.subjects.push({
-        id: r.id,
-        subjectName: itemName,
-        marks,
-        grade: r.grade || calc.grade,
-        points: r.points ?? calc.points,
-        remarks: r.remarks,
+        id: r.id, subjectName: itemName, marks,
+        grade: r.grade || calc.grade, points: r.points ?? calc.points,
         isAbsent: r.isAbsent
       });
       group.totalMarks += marks;
@@ -6419,45 +6347,66 @@ const StudentModule = ({
       group.count += 1;
     });
 
-    // Convert to array, compute averages, sort by date DESC (most recent first)
-    const list = Array.from(map.values()).map(g => {
-      const avg = g.count > 0 ? g.totalMarks / g.count : 0;
-      const levelHint = studentDetails?.classId
-        ? classes.find(c => c.id === studentDetails.classId)?.name
-        : null;
-      return {
-        ...g,
-        examNames: Array.from(g.examNames),
-        examDisplayName: Array.from(g.examNames).join(', ') || `${g.examType}`,
-        average: avg,
-        meanGrade: getGrade(avg, levelHint).grade
-      };
-    });
-
-    list.sort((a, b) => {
+    return Array.from(map.values()).map(g => ({
+      ...g,
+      examNames: Array.from(g.examNames),
+      examDisplayName: Array.from(g.examNames).join(', ') || g.examType,
+      average: g.count > 0 ? g.totalMarks / g.count : 0,
+      meanGrade: getGrade(g.count > 0 ? g.totalMarks / g.count : 0).grade
+    })).sort((a, b) => {
       const da = a.date ? new Date(a.date).getTime() : 0;
       const db = b.date ? new Date(b.date).getTime() : 0;
       return db - da;
     });
-
-    return list;
   }, [studentResults, exams, subjects, units, studentDetails, classes, isUniversity, isTVET]);
 
-  // ==================================================================
-  //  ATTENDANCE SUMMARY
-  // ==================================================================
+  // KNEC aptitude
+  const knecAptitude = useMemo(() => {
+    const streams = {
+      STEM: ['mathematics', 'maths', 'math', 'physics', 'chemistry', 'biology', 'science', 'computer', 'technical', 'metalwork', 'woodwork'],
+      LANGUAGES: ['english', 'kiswahili', 'literature', 'french', 'german', 'arabic'],
+      SOCIAL: ['history', 'geography', 'cre', 'ire', 'social', 'civics', 'government'],
+      ARTS: ['art', 'music', 'drama', 'creative', 'theatre'],
+      BUSINESS: ['business', 'commerce', 'accounts', 'accounting', 'economics'],
+      APPLIED: ['agriculture', 'home science', 'nutrition', 'foods']
+    };
+    const classify = (name) => {
+      if (!name) return null;
+      const s = String(name).toLowerCase();
+      for (const [stream, keys] of Object.entries(streams)) {
+        if (keys.some(k => s.includes(k))) return stream;
+      }
+      return null;
+    };
+    const byStream = {};
+    studentResults.forEach(r => {
+      const exam = exams.find(e => e.id === r.examId);
+      const name = isUniversity || isTVET
+        ? units.find(u => u.id === r.unitId)?.name
+        : subjects.find(s => s.id === r.subjectId)?.name;
+      const stream = classify(name);
+      if (!stream) return;
+      const m = parseFloat(r.marks);
+      if (isNaN(m)) return;
+      if (!byStream[stream]) byStream[stream] = { sum: 0, count: 0 };
+      byStream[stream].sum += m;
+      byStream[stream].count += 1;
+    });
+    return Object.entries(byStream)
+      .map(([stream, t]) => ({ stream, average: t.count > 0 ? t.sum / t.count : 0, count: t.count }))
+      .sort((a, b) => b.average - a.average);
+  }, [studentResults, exams, subjects, units, isUniversity, isTVET]);
+
+  // Attendance summary
   const attendanceSummary = useMemo(() => {
     if (!studentAttendance || studentAttendance.length === 0) {
       return { byStatus: {}, byMonth: [], total: 0, presentPct: 0 };
     }
-
     const byStatus = { PRESENT: 0, ABSENT: 0, LATE: 0, PERMISSION: 0, SICK: 0, FIELD_TRIP: 0, EXCUSED: 0 };
     const byMonth = {};
-
     studentAttendance.forEach(a => {
       const s = (a.status || 'PRESENT').toUpperCase();
       if (byStatus[s] !== undefined) byStatus[s] += 1;
-
       const monthKey = a.date ? String(a.date).slice(0, 7) : 'Unknown';
       if (!byMonth[monthKey]) byMonth[monthKey] = { month: monthKey, present: 0, absent: 0, late: 0, other: 0, total: 0 };
       byMonth[monthKey].total += 1;
@@ -6466,13 +6415,50 @@ const StudentModule = ({
       else if (s === 'LATE') byMonth[monthKey].late += 1;
       else byMonth[monthKey].other += 1;
     });
-
     const total = studentAttendance.length;
     const presentPct = total > 0 ? ((byStatus.PRESENT / total) * 100).toFixed(1) : 0;
     const monthRows = Object.values(byMonth).sort((a, b) => a.month.localeCompare(b.month));
-
     return { byStatus, byMonth: monthRows, total, presentPct };
   }, [studentAttendance]);
+
+  // ==================================================================
+  //  PHOTO RENDER HELPER
+  // ==================================================================
+  const PhotoAvatar = ({ student, size = 'lg' }) => {
+    const sizeClasses = {
+      sm: 'w-10 h-10 text-sm',
+      md: 'w-12 h-12 text-base',
+      lg: 'w-16 h-16 text-xl',
+      xl: 'w-32 h-32 text-5xl'
+    }[size] || 'w-16 h-16 text-xl';
+
+    const url = resolvePhotoUrl(student);
+
+    if (url) {
+      return (
+        <img
+          src={url}
+          alt={`${student?.firstName || ''} ${student?.lastName || ''}`}
+          className={`${sizeClasses} rounded-full object-cover border-2 border-white shadow-sm flex-shrink-0`}
+          onError={(e) => {
+            e.target.style.display = 'none';
+            const parent = e.target.parentElement;
+            if (parent) {
+              const fallback = parent.querySelector('.photo-fallback');
+              if (fallback) fallback.style.display = 'flex';
+            }
+          }}
+        />
+      );
+    }
+    return (
+      <div className={`${sizeClasses} bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0 photo-fallback`}>
+        <span className="font-bold text-indigo-600">
+          {student?.firstName?.[0] || '?'}{student?.lastName?.[0] || '?'}
+        </span>
+      </div>
+    );
+  };
 
   // ==================================================================
   //  RENDER — student role view
@@ -6510,19 +6496,7 @@ const StudentModule = ({
             <div className="bg-white rounded-xl shadow-sm overflow-hidden">
               <div className="bg-gradient-to-r from-indigo-500 to-purple-600 p-6 text-white">
                 <div className="flex items-center space-x-4">
-                  {myStudentRecord.passportPhoto ? (
-                    <img
-                      src={myStudentRecord.passportPhoto}
-                      alt={`${myStudentRecord.firstName} ${myStudentRecord.lastName}`}
-                      className="w-20 h-20 rounded-full object-cover border-4 border-white shadow-lg"
-                    />
-                  ) : (
-                    <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center border-4 border-white">
-                      <span className="text-3xl font-bold text-indigo-600">
-                        {myStudentRecord.firstName?.[0]}{myStudentRecord.lastName?.[0]}
-                      </span>
-                    </div>
-                  )}
+                  <PhotoAvatar student={myStudentRecord} size="xl" />
                   <div>
                     <h3 className="text-2xl font-bold">{myStudentRecord.firstName} {myStudentRecord.lastName}</h3>
                     <p className="text-indigo-100">Admission: {myStudentRecord.admissionNumber || '—'}</p>
@@ -6574,17 +6548,13 @@ const StudentModule = ({
       {successMessage && (
         <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center justify-between">
           <span><i className="fas fa-check-circle mr-2" />{successMessage}</span>
-          <button onClick={() => setSuccessMessage('')} className="text-green-500 hover:text-green-700">
-            <i className="fas fa-times" />
-          </button>
+          <button onClick={() => setSuccessMessage('')} className="text-green-500 hover:text-green-700"><i className="fas fa-times" /></button>
         </div>
       )}
       {errorMessage && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
           <span><i className="fas fa-exclamation-circle mr-2" />{errorMessage}</span>
-          <button onClick={() => setErrorMessage('')} className="text-red-500 hover:text-red-700">
-            <i className="fas fa-times" />
-          </button>
+          <button onClick={() => setErrorMessage('')} className="text-red-500 hover:text-red-700"><i className="fas fa-times" /></button>
         </div>
       )}
 
@@ -6619,26 +6589,15 @@ const StudentModule = ({
       {showFilters && (
         <div className="bg-white p-4 rounded-xl shadow-sm border">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <TextInput
-              label="Search"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Name, admission no, email…"
-            />
+            <TextInput label="Search" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Name, admission no, email…" />
             {!isUniversity && !isTVET && (
-              <SearchableSelect label="Class" value={classFilter}
-                onChange={(e) => setClassFilter(e.target.value)}
-                options={classFilterOptions} placeholder="All classes" />
+              <SearchableSelect label="Class" value={classFilter} onChange={(e) => setClassFilter(e.target.value)} options={classFilterOptions} placeholder="All classes" />
             )}
             {isUniversity && (
-              <SearchableSelect label="Course" value={classFilter}
-                onChange={(e) => setClassFilter(e.target.value)}
-                options={courseOptions} placeholder="All courses" />
+              <SearchableSelect label="Course" value={classFilter} onChange={(e) => setClassFilter(e.target.value)} options={courseOptions} placeholder="All courses" />
             )}
             {isTVET && (
-              <SearchableSelect label="Program" value={classFilter}
-                onChange={(e) => setClassFilter(e.target.value)}
-                options={programOptions} placeholder="All programs" />
+              <SearchableSelect label="Program" value={classFilter} onChange={(e) => setClassFilter(e.target.value)} options={programOptions} placeholder="All programs" />
             )}
             <SelectField label="Status" value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
@@ -6649,20 +6608,14 @@ const StudentModule = ({
               ]} />
           </div>
           <div className="mt-4 flex justify-between items-center">
-            <span className="text-sm text-gray-500">
-              Showing {filteredStudents.length} of {(students || []).length}
-            </span>
-            <button
-              onClick={() => { setSearchTerm(''); setClassFilter(''); setStatusFilter('all'); }}
-              className="text-sm text-indigo-600 hover:text-indigo-800"
-            >
-              Clear Filters
-            </button>
+            <span className="text-sm text-gray-500">Showing {filteredStudents.length} of {(students || []).length}</span>
+            <button onClick={() => { setSearchTerm(''); setClassFilter(''); setStatusFilter('all'); }}
+              className="text-sm text-indigo-600 hover:text-indigo-800">Clear Filters</button>
           </div>
         </div>
       )}
 
-      {/* ==================== FORM ==================== */}
+      {/* FORM */}
       {showForm && (canAdd || canEdit) && (
         <div id="student-form" className="bg-white p-6 rounded-xl shadow-sm border-2 border-indigo-100">
           <div className="flex justify-between items-center mb-4">
@@ -6670,9 +6623,7 @@ const StudentModule = ({
               <i className={`fas fa-${editingId ? 'edit' : 'user-plus'} text-indigo-600`} />
               {editingId ? 'Edit Student' : 'Register New Student'}
             </h3>
-            <button onClick={closeForm} className="text-gray-500 hover:text-gray-700">
-              <i className="fas fa-times" />
-            </button>
+            <button onClick={closeForm} className="text-gray-500 hover:text-gray-700"><i className="fas fa-times" /></button>
           </div>
 
           {submitError && (
@@ -6694,27 +6645,14 @@ const StudentModule = ({
                   )}
                 </div>
                 <div>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    id="student-photo-input"
-                    className="hidden"
-                    onChange={handlePhotoSelect}
-                  />
-                  <label
-                    htmlFor="student-photo-input"
-                    className="cursor-pointer bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 inline-flex items-center gap-2"
-                  >
+                  <input type="file" accept="image/*" id="student-photo-input" className="hidden" onChange={handlePhotoSelect} />
+                  <label htmlFor="student-photo-input"
+                    className="cursor-pointer bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 inline-flex items-center gap-2">
                     <i className="fas fa-camera" />Choose Photo
                   </label>
                   {photoPreview && (
-                    <button
-                      type="button"
-                      onClick={() => { setPhotoFile(null); setPhotoPreview(''); }}
-                      className="ml-2 text-red-600 hover:text-red-800 text-sm"
-                    >
-                      Remove
-                    </button>
+                    <button type="button" onClick={() => { setPhotoFile(null); setPhotoPreview(''); }}
+                      className="ml-2 text-red-600 hover:text-red-800 text-sm">Remove</button>
                   )}
                   <p className="text-xs text-gray-500 mt-2">JPG, PNG, GIF, or WEBP. Max 5 MB.</p>
                 </div>
@@ -6728,13 +6666,11 @@ const StudentModule = ({
                   <label className="block text-sm font-medium text-gray-700">Admission Number</label>
                   {!editingId && (
                     <div className="flex items-center bg-gray-100 rounded-lg p-0.5 text-xs">
-                      <button type="button"
-                        onClick={() => { setAutoAdm(true); fetchNextAdmissionNumber(); }}
+                      <button type="button" onClick={() => { setAutoAdm(true); fetchNextAdmissionNumber(); }}
                         className={`px-3 py-1 rounded-md transition-colors ${autoAdm ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
                         <i className="fas fa-magic mr-1" />Auto
                       </button>
-                      <button type="button"
-                        onClick={() => { setAutoAdm(false); setFormState({ ...formState, admissionNumber: '' }); }}
+                      <button type="button" onClick={() => { setAutoAdm(false); setFormState({ ...formState, admissionNumber: '' }); }}
                         className={`px-3 py-1 rounded-md transition-colors ${!autoAdm ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}>
                         <i className="fas fa-keyboard mr-1" />Manual
                       </button>
@@ -6742,17 +6678,12 @@ const StudentModule = ({
                   )}
                 </div>
                 <div className="flex gap-2">
-                  <input type="text"
-                    value={formState.admissionNumber || ''}
-                    onChange={(e) => {
-                      if (autoAdm) setAutoAdm(false);
-                      setFormState({ ...formState, admissionNumber: e.target.value });
-                    }}
+                  <input type="text" value={formState.admissionNumber || ''}
+                    onChange={(e) => { if (autoAdm) setAutoAdm(false); setFormState({ ...formState, admissionNumber: e.target.value }); }}
                     placeholder={autoAdm && !editingId ? (admPreview || 'Auto-generated on save') : 'e.g., 123 or ADM/2026/0001'}
                     className="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white" />
                   {!editingId && autoAdm && (
-                    <button type="button" onClick={() => fetchNextAdmissionNumber()}
-                      disabled={loadingAdm}
+                    <button type="button" onClick={() => fetchNextAdmissionNumber()} disabled={loadingAdm}
                       className="px-3 py-2 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 border border-indigo-200 disabled:opacity-50">
                       {loadingAdm ? <i className="fas fa-spinner fa-spin" /> : <i className="fas fa-sync-alt" />}
                     </button>
@@ -6784,6 +6715,8 @@ const StudentModule = ({
                 <TextInput label="Date of Birth *" type="date" value={formState.dateOfBirth} onChange={(e) => setFormState({ ...formState, dateOfBirth: e.target.value })} required max={toDateInput(new Date())} />
                 <SelectField label="Gender *" value={formState.gender} onChange={(e) => setFormState({ ...formState, gender: e.target.value })} options={genderOptions} />
                 <TextInput label="Nationality" value={formState.nationality} onChange={(e) => setFormState({ ...formState, nationality: e.target.value })} />
+                {/* ✅ Religion */}
+                <SelectField label="Religion" value={formState.religion || ''} onChange={(e) => setFormState({ ...formState, religion: e.target.value })} options={religionOptions} />
               </div>
             </div>
 
@@ -6821,11 +6754,9 @@ const StudentModule = ({
                   <SearchableSelect label="Course *" value={formState.courseId}
                     onChange={(e) => setFormState({ ...formState, courseId: e.target.value })}
                     options={courseOptions} placeholder="Search course…" required disabled={!formState.departmentId} />
-                  <TextInput label="Year of Study" type="number" min="1" max="6"
-                    value={formState.currentYear}
+                  <TextInput label="Year of Study" type="number" min="1" max="6" value={formState.currentYear}
                     onChange={(e) => setFormState({ ...formState, currentYear: parseInt(e.target.value, 10) || 1 })} />
-                  <TextInput label="Semester" type="number" min="1" max="3"
-                    value={formState.currentSemester}
+                  <TextInput label="Semester" type="number" min="1" max="3" value={formState.currentSemester}
                     onChange={(e) => setFormState({ ...formState, currentSemester: parseInt(e.target.value, 10) || 1 })} />
                 </>)}
                 {isTVET && (<>
@@ -6874,8 +6805,7 @@ const StudentModule = ({
                   <i className="fas fa-user-shield" />Student Portal Access
                 </h4>
                 <label className="flex items-start cursor-pointer">
-                  <input type="checkbox" className="mt-1 mr-2"
-                    checked={!!formState.studentLogin?.createAccount}
+                  <input type="checkbox" className="mt-1 mr-2" checked={!!formState.studentLogin?.createAccount}
                     onChange={(e) => {
                       const checked = e.target.checked;
                       setFormState({
@@ -6890,9 +6820,7 @@ const StudentModule = ({
                     }} />
                   <span className="text-sm">
                     <span className="font-medium">Create student login account</span>
-                    <span className="block text-xs text-gray-500 mt-0.5">
-                      Optional. If enabled, the student can log in to view their own results, attendance, and fees.
-                    </span>
+                    <span className="block text-xs text-gray-500 mt-0.5">Optional. If enabled, the student can log in to view their own results, attendance, and fees.</span>
                   </span>
                 </label>
                 {formState.studentLogin?.createAccount && (
@@ -6912,8 +6840,7 @@ const StudentModule = ({
                           placeholder="Minimum 6 characters"
                           className="w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
                           required />
-                        <button type="button"
-                          onClick={() => setShowStudentPassword(v => !v)}
+                        <button type="button" onClick={() => setShowStudentPassword(v => !v)}
                           className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700">
                           <i className={`fas fa-${showStudentPassword ? 'eye-slash' : 'eye'}`} />
                         </button>
@@ -6924,55 +6851,29 @@ const StudentModule = ({
               </div>
             )}
 
-            {/* ==================== GUARDIANS (multi) ==================== */}
+            {/* Guardians */}
             {!editingId && (
               <div className="bg-gray-50 p-4 rounded-lg border border-indigo-100">
                 <div className="flex justify-between items-center mb-3">
-                  <h4 className="font-medium text-indigo-600">
-                    Parent / Guardian(s) <span className="text-red-500">*</span>
-                  </h4>
-                  <button
-                    type="button"
-                    onClick={addGuardianField}
-                    className="text-sm bg-indigo-600 text-white px-3 py-1 rounded-lg hover:bg-indigo-700"
-                  >
+                  <h4 className="font-medium text-indigo-600">Parent / Guardian(s) <span className="text-red-500">*</span></h4>
+                  <button type="button" onClick={addGuardianField}
+                    className="text-sm bg-indigo-600 text-white px-3 py-1 rounded-lg hover:bg-indigo-700">
                     <i className="fas fa-plus mr-1" />Add Another
                   </button>
                 </div>
-                <p className="text-xs text-gray-500 mb-3">
-                  First guardian is required (marked primary). Additional guardians are optional.
-                </p>
+                <p className="text-xs text-gray-500 mb-3">First guardian is required (marked primary). Additional guardians are optional.</p>
 
                 {(formState.guardians || []).map((guardian, idx) => (
-                  <div
-                    key={idx}
-                    className="bg-white border border-indigo-100 rounded-lg p-4 mb-3"
-                  >
+                  <div key={idx} className="bg-white border border-indigo-100 rounded-lg p-4 mb-3">
                     <div className="flex justify-between items-center mb-3">
                       <span className="font-medium text-sm text-indigo-700">
                         Guardian {idx + 1}
-                        {guardian.isPrimary && (
-                          <span className="ml-2 text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded-full">
-                            Primary
-                          </span>
-                        )}
-                        {idx === 0 && (
-                          <span className="ml-2 text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded-full">
-                            Required
-                          </span>
-                        )}
-                        {idx > 0 && (
-                          <span className="ml-2 text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
-                            Optional
-                          </span>
-                        )}
+                        {guardian.isPrimary && <span className="ml-2 text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded-full">Primary</span>}
+                        {idx === 0 && <span className="ml-2 text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded-full">Required</span>}
+                        {idx > 0 && <span className="ml-2 text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">Optional</span>}
                       </span>
                       {idx > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => removeGuardianField(idx)}
-                          className="text-red-600 hover:text-red-800 text-sm"
-                        >
+                        <button type="button" onClick={() => removeGuardianField(idx)} className="text-red-600 hover:text-red-800 text-sm">
                           <i className="fas fa-trash mr-1" />Remove
                         </button>
                       )}
@@ -6981,129 +6882,77 @@ const StudentModule = ({
                     {enableParentPortal && parentUserOptions.length > 0 && (
                       <div className="flex items-center gap-4 mb-3">
                         <label className="flex items-center text-sm">
-                          <input
-                            type="radio"
-                            className="mr-2"
-                            checked={!guardian.useExisting}
-                            onChange={() => updateGuardianField(idx, { useExisting: false, existingUserId: null })}
-                          />
+                          <input type="radio" className="mr-2" checked={!guardian.useExisting}
+                            onChange={() => updateGuardianField(idx, { useExisting: false, existingUserId: null })} />
                           New Guardian
                         </label>
                         <label className="flex items-center text-sm">
-                          <input
-                            type="radio"
-                            className="mr-2"
-                            checked={!!guardian.useExisting}
-                            onChange={() => updateGuardianField(idx, { useExisting: true })}
-                          />
+                          <input type="radio" className="mr-2" checked={!!guardian.useExisting}
+                            onChange={() => updateGuardianField(idx, { useExisting: true })} />
                           Use Existing
                         </label>
                       </div>
                     )}
 
                     {guardian.useExisting ? (
-                      <SearchableSelect
-                        label="Select Existing Parent/Guardian *"
+                      <SearchableSelect label="Select Existing Parent/Guardian *"
                         value={guardian.existingUserId || ''}
                         onChange={(e) => updateGuardianField(idx, { existingUserId: e.target.value })}
-                        options={parentUserOptions}
-                        placeholder="Search by name or email…"
-                      />
+                        options={parentUserOptions} placeholder="Search by name or email…" />
                     ) : (
                       <div className="space-y-4">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <TextInput
-                            label={idx === 0 ? 'First Name *' : 'First Name'}
-                            value={guardian.firstName || ''}
-                            onChange={(e) => updateGuardianField(idx, { firstName: e.target.value })}
-                          />
-                          <TextInput
-                            label={idx === 0 ? 'Last Name *' : 'Last Name'}
-                            value={guardian.lastName || ''}
-                            onChange={(e) => updateGuardianField(idx, { lastName: e.target.value })}
-                          />
-                          <TextInput
-                            label="Phone"
-                            value={guardian.phone || ''}
-                            onChange={(e) => updateGuardianField(idx, { phone: e.target.value })}
-                          />
-                          <TextInput
-                            label="Email"
-                            type="email"
-                            value={guardian.email || ''}
-                            onChange={(e) => updateGuardianField(idx, { email: e.target.value })}
-                          />
+                          <TextInput label={idx === 0 ? 'First Name *' : 'First Name'} value={guardian.firstName || ''}
+                            onChange={(e) => updateGuardianField(idx, { firstName: e.target.value })} />
+                          <TextInput label={idx === 0 ? 'Last Name *' : 'Last Name'} value={guardian.lastName || ''}
+                            onChange={(e) => updateGuardianField(idx, { lastName: e.target.value })} />
+                          <TextInput label="Phone" value={guardian.phone || ''}
+                            onChange={(e) => updateGuardianField(idx, { phone: e.target.value })} />
+                          <TextInput label="Email" type="email" value={guardian.email || ''}
+                            onChange={(e) => updateGuardianField(idx, { email: e.target.value })} />
                         </div>
-
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <SelectField
-                            label="Relationship *"
-                            value={guardian.relationship || 'Mother'}
+                          <SelectField label="Relationship *" value={guardian.relationship || 'Mother'}
                             onChange={(e) => updateGuardianField(idx, { relationship: e.target.value })}
-                            options={relationshipOptions}
-                          />
+                            options={relationshipOptions} />
                           <div className="flex items-center gap-4 pt-5">
                             <label className="flex items-center text-sm">
-                              <input
-                                type="checkbox"
-                                className="mr-2"
-                                checked={guardian.isPrimary === true}
-                                onChange={(e) => updateGuardianField(idx, { isPrimary: e.target.checked })}
-                              />
+                              <input type="checkbox" className="mr-2" checked={guardian.isPrimary === true}
+                                onChange={(e) => updateGuardianField(idx, { isPrimary: e.target.checked })} />
                               Primary
                             </label>
                             <label className="flex items-center text-sm">
-                              <input
-                                type="checkbox"
-                                className="mr-2"
-                                checked={!!guardian.emergencyContact}
-                                onChange={(e) => updateGuardianField(idx, { emergencyContact: e.target.checked })}
-                              />
+                              <input type="checkbox" className="mr-2" checked={!!guardian.emergencyContact}
+                                onChange={(e) => updateGuardianField(idx, { emergencyContact: e.target.checked })} />
                               Emergency
                             </label>
                           </div>
                         </div>
-
                         <label className="flex items-start cursor-pointer">
-                          <input
-                            type="checkbox"
-                            className="mt-1 mr-2"
-                            checked={!!guardian.grantPortalAccess}
+                          <input type="checkbox" className="mt-1 mr-2" checked={!!guardian.grantPortalAccess}
                             onChange={(e) => {
                               const checked = e.target.checked;
-                              updateGuardianField(idx, {
-                                grantPortalAccess: checked,
-                                password: checked ? (guardian.password || '') : ''
-                              });
+                              updateGuardianField(idx, { grantPortalAccess: checked, password: checked ? (guardian.password || '') : '' });
                               if (!checked) setShowParentPassword(false);
-                            }}
-                          />
+                            }} />
                           <span className="text-sm">
                             <span className="font-medium">Grant portal access</span>
-                            <span className="block text-xs text-gray-500 mt-0.5">
-                              Optional. Requires email and password.
-                            </span>
+                            <span className="block text-xs text-gray-500 mt-0.5">Optional. Requires email and password.</span>
                           </span>
                         </label>
-
                         {guardian.grantPortalAccess && (
                           <div className="relative max-w-md">
                             <label className="block text-sm font-medium text-gray-700 mb-1">
                               Portal Password <span className="text-red-500">*</span>
                             </label>
                             <div className="relative">
-                              <input
-                                type={showParentPassword ? 'text' : 'password'}
+                              <input type={showParentPassword ? 'text' : 'password'}
                                 value={guardian.password || ''}
                                 onChange={(e) => updateGuardianField(idx, { password: e.target.value })}
                                 placeholder="Minimum 6 characters"
-                                className="w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setShowParentPassword(v => !v)}
-                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
-                              >
+                                className="w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white" />
+                              <button type="button" onClick={() => setShowParentPassword(v => !v)}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700">
                                 <i className={`fas fa-${showParentPassword ? 'eye-slash' : 'eye'}`} />
                               </button>
                             </div>
@@ -7124,42 +6973,25 @@ const StudentModule = ({
                   : <><i className={`fas fa-${editingId ? 'save' : 'plus-circle'}`} />{editingId ? 'Update Student' : 'Register Student'}</>}
               </button>
               <button type="button" onClick={closeForm} disabled={loading}
-                className="bg-gray-500 text-white py-2.5 px-6 rounded-lg hover:bg-gray-600">
-                Cancel
-              </button>
+                className="bg-gray-500 text-white py-2.5 px-6 rounded-lg hover:bg-gray-600">Cancel</button>
             </div>
           </form>
         </div>
       )}
 
-      {/* ==================== LIST ==================== */}
+      {/* LIST */}
       {viewMode === 'grid' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredStudents.length === 0 ? (
             <div className="col-span-full text-center py-12 text-gray-500">
               <i className="fas fa-users text-5xl text-gray-300 mb-3 block" />
               <p className="text-lg font-medium">No students found</p>
-              <p className="text-sm text-gray-400 mt-1">
-                {searchTerm || classFilter || statusFilter !== 'all'
-                  ? 'Try adjusting your filters'
-                  : 'Click "Add Student" to get started'}
-              </p>
             </div>
           ) : filteredStudents.map(student => (
             <div key={student.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow bg-white">
               <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center space-x-3 min-w-0">
-                  {student.passportPhoto ? (
-                    <img src={student.passportPhoto}
-                      alt={`${student.firstName} ${student.lastName}`}
-                      className="w-12 h-12 rounded-full object-cover flex-shrink-0" />
-                  ) : (
-                    <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0">
-                      <span className="text-indigo-600 font-bold text-lg">
-                        {student.firstName?.[0]}{student.lastName?.[0]}
-                      </span>
-                    </div>
-                  )}
+                  <PhotoAvatar student={student} size="md" />
                   <div className="min-w-0">
                     <h3 className="font-semibold truncate">{student.firstName} {student.lastName}</h3>
                     <p className="text-sm text-gray-600 truncate">{student.admissionNumber || '—'}</p>
@@ -7173,10 +7005,7 @@ const StudentModule = ({
                 </div>
               </div>
               <div className="space-y-1 text-sm">
-                <p className="text-gray-600">
-                  <i className="fas fa-graduation-cap w-5 text-gray-400" />
-                  {getStudentClassLabel(student)}
-                </p>
+                <p className="text-gray-600"><i className="fas fa-graduation-cap w-5 text-gray-400" />{getStudentClassLabel(student)}</p>
                 {student.email && <p className="text-gray-600"><i className="fas fa-envelope w-5 text-gray-400" />{student.email}</p>}
                 {student.phone && <p className="text-gray-600"><i className="fas fa-phone w-5 text-gray-400" />{student.phone}</p>}
                 <p className="text-gray-600"><i className="fas fa-calendar w-5 text-gray-400" />DOB: {formatDate(student.dateOfBirth)}</p>
@@ -7213,18 +7042,7 @@ const StudentModule = ({
                   <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-500">No students found</td></tr>
                 ) : filteredStudents.map(student => (
                   <tr key={student.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3">
-                      {student.passportPhoto ? (
-                        <img src={student.passportPhoto} alt=""
-                          className="w-10 h-10 rounded-full object-cover" />
-                      ) : (
-                        <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
-                          <span className="text-indigo-600 font-bold text-sm">
-                            {student.firstName?.[0]}{student.lastName?.[0]}
-                          </span>
-                        </div>
-                      )}
-                    </td>
+                    <td className="px-4 py-3"><PhotoAvatar student={student} size="sm" /></td>
                     <td className="px-4 py-3 font-mono text-sm">{student.admissionNumber || '—'}</td>
                     <td className="px-4 py-3 font-medium">{student.firstName} {student.lastName}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{student.email || '—'}</td>
@@ -7250,7 +7068,7 @@ const StudentModule = ({
         </div>
       )}
 
-      {/* ==================== DETAILS MODAL ==================== */}
+      {/* DETAILS MODAL — full version below */}
       {showDetailsModal && selectedStudent && studentDetails && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl max-h-[92vh] overflow-auto">
@@ -7266,42 +7084,19 @@ const StudentModule = ({
             {/* IDENTITY CARD */}
             <div className="bg-gradient-to-r from-indigo-500 to-purple-600 p-6 text-white">
               <div className="flex items-center gap-6">
-                {studentDetails.passportPhoto ? (
-                  <img
-                    src={studentDetails.passportPhoto}
-                    alt={`${studentDetails.firstName} ${studentDetails.lastName}`}
-                    className="w-32 h-32 rounded-xl object-cover border-4 border-white shadow-lg flex-shrink-0"
-                  />
-                ) : (
-                  <div className="w-32 h-32 bg-white rounded-xl flex items-center justify-center border-4 border-white shadow-lg flex-shrink-0">
-                    <span className="text-5xl font-bold text-indigo-600">
-                      {studentDetails.firstName?.[0]}{studentDetails.lastName?.[0]}
-                    </span>
-                  </div>
-                )}
+                <PhotoAvatar student={studentDetails} size="xl" />
                 <div className="flex-1 min-w-0">
                   <h3 className="text-3xl font-bold truncate">
                     {studentDetails.firstName} {studentDetails.middleName ? `${studentDetails.middleName} ` : ''}{studentDetails.lastName}
                   </h3>
                   <p className="text-indigo-100 text-lg font-mono mt-1">{studentDetails.admissionNumber || '—'}</p>
-                  <p className="text-indigo-200 mt-1">
-                    <i className="fas fa-graduation-cap mr-2" />
-                    {getStudentClassLabel(studentDetails)}
-                  </p>
+                  <p className="text-indigo-200 mt-1"><i className="fas fa-graduation-cap mr-2" />{getStudentClassLabel(studentDetails)}</p>
                   <div className="flex flex-wrap gap-3 mt-3 text-sm">
                     <span className={`px-3 py-1 rounded-full ${studentDetails.isActive !== false ? 'bg-green-500 bg-opacity-30 text-white' : 'bg-red-500 bg-opacity-30 text-white'}`}>
                       {studentDetails.isActive !== false ? '● Active' : '● Inactive'}
                     </span>
-                    {studentDetails.gender && (
-                      <span className="px-3 py-1 rounded-full bg-white bg-opacity-20 text-white">
-                        {studentDetails.gender}
-                      </span>
-                    )}
-                    {studentDetails.boardingStatus && (
-                      <span className="px-3 py-1 rounded-full bg-white bg-opacity-20 text-white">
-                        {studentDetails.boardingStatus}
-                      </span>
-                    )}
+                    {studentDetails.gender && <span className="px-3 py-1 rounded-full bg-white bg-opacity-20 text-white">{studentDetails.gender}</span>}
+                    {studentDetails.boardingStatus && <span className="px-3 py-1 rounded-full bg-white bg-opacity-20 text-white">{studentDetails.boardingStatus}</span>}
                   </div>
                 </div>
                 <div className="flex-shrink-0">
@@ -7326,14 +7121,13 @@ const StudentModule = ({
                   className={`px-4 py-3 font-medium whitespace-nowrap border-b-2 transition-colors flex items-center gap-2 ${
                     activeDetailTab === tab.id ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'
                   }`}>
-                  <i className={`fas fa-${tab.icon}`} />
-                  {tab.label}
+                  <i className={`fas fa-${tab.icon}`} />{tab.label}
                 </button>
               ))}
             </div>
 
             <div className="p-6">
-              {/* ==================== OVERVIEW ==================== */}
+              {/* OVERVIEW */}
               {activeDetailTab === 'overview' && (
                 <div className="space-y-6">
                   <div className="bg-white border rounded-lg overflow-hidden">
@@ -7432,26 +7226,23 @@ const StudentModule = ({
                 </div>
               )}
 
-              {/* ============================================================ */}
-              {/* ==================== ACADEMIC REPORT (grouped) ============== */}
-              {/* ============================================================ */}
+              {/* ACADEMIC — Knec grouped report */}
               {activeDetailTab === 'academic' && (
-                <div>
+                <div className="space-y-6">
                   {groupedResults.length === 0 ? (
                     <div className="text-center py-12">
                       <i className="fas fa-file-alt text-5xl text-gray-300 mb-4"></i>
                       <p className="text-gray-500">No academic records found.</p>
                     </div>
                   ) : (
-                    <div className="space-y-6">
-                      {/* Overall summary */}
+                    <>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div className="bg-indigo-50 p-4 rounded-lg text-center">
                           <p className="text-xs text-gray-500 uppercase">Report Cards</p>
                           <p className="text-3xl font-bold text-indigo-600">{groupedResults.length}</p>
                         </div>
                         <div className="bg-blue-50 p-4 rounded-lg text-center">
-                          <p className="text-xs text-gray-500 uppercase">Total Subjects</p>
+                          <p className="text-xs text-gray-500 uppercase">Total {SUBJECT_LABEL}s</p>
                           <p className="text-3xl font-bold text-blue-600">{studentResults.length}</p>
                         </div>
                         <div className="bg-green-50 p-4 rounded-lg text-center">
@@ -7474,50 +7265,68 @@ const StudentModule = ({
                         </div>
                       </div>
 
-                      {/* Report cards (grouped by term + exam type + year) */}
+                      {knecAptitude.length > 0 && (
+                        <div className="bg-white border-2 border-purple-200 rounded-lg overflow-hidden">
+                          <div className="bg-gradient-to-r from-purple-500 to-indigo-500 px-4 py-3 text-white">
+                            <h3 className="font-bold text-lg flex items-center gap-2">
+                              <i className="fas fa-brain" />KNEC Aptitude Analysis
+                            </h3>
+                            <p className="text-xs text-purple-100 mt-1">Based on the student's average performance across subject streams</p>
+                          </div>
+                          <div className="p-4">
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                              {knecAptitude.map((s, i) => {
+                                const isTop = i < 2;
+                                return (
+                                  <div key={s.stream} className={`p-3 rounded-lg border-2 text-center ${isTop ? 'border-purple-400 bg-purple-50' : 'border-gray-200 bg-gray-50'}`}>
+                                    <p className="text-xs font-medium text-gray-600 uppercase">{s.stream}</p>
+                                    <p className={`text-2xl font-bold mt-1 ${isTop ? 'text-purple-700' : 'text-gray-700'}`}>{s.average.toFixed(0)}%</p>
+                                    <p className="text-[10px] text-gray-500 mt-1">{s.count} subjects</p>
+                                    {isTop && <p className="text-xs text-purple-600 mt-1 font-medium">⭐ Likely to thrive</p>}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            {knecAptitude.length >= 2 && (
+                              <div className="mt-4 p-3 bg-purple-50 rounded-lg">
+                                <p className="text-sm text-purple-800">
+                                  <strong>Recommendation:</strong> This student shows strongest potential in{' '}
+                                  <strong>{knecAptitude.slice(0, 2).map(s => s.stream).join(' and ')}</strong>.
+                                  Consider encouraging further development in these areas.
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
                       {groupedResults.map((group, gi) => (
                         <div key={gi} className="bg-white border rounded-lg overflow-hidden">
-                          {/* Group header */}
                           <div className="bg-gradient-to-r from-indigo-500 to-purple-500 px-4 py-3 text-white">
                             <div className="flex justify-between items-start gap-4">
                               <div className="min-w-0">
-                                <h3 className="font-bold text-lg truncate">
-                                  {group.term}
-                                </h3>
+                                <h3 className="font-bold text-lg truncate">{group.term}</h3>
                                 <p className="text-sm text-indigo-100 mt-0.5">
-                                  <span className="inline-block bg-white bg-opacity-20 px-2 py-0.5 rounded text-xs uppercase tracking-wide mr-2">
-                                    {group.examType}
-                                  </span>
-                                  {group.year && (
-                                    <span className="text-xs">
-                                      <i className="fas fa-calendar-alt mr-1" />{group.year}
-                                    </span>
-                                  )}
+                                  <span className="inline-block bg-white bg-opacity-20 px-2 py-0.5 rounded text-xs uppercase tracking-wide mr-2">{group.examType}</span>
+                                  {group.year && <span className="text-xs"><i className="fas fa-calendar-alt mr-1" />{group.year}</span>}
                                 </p>
                                 {group.examDisplayName && (
-                                  <p className="text-xs text-indigo-200 mt-1 truncate">
-                                    <i className="fas fa-file-alt mr-1" />{group.examDisplayName}
-                                  </p>
+                                  <p className="text-xs text-indigo-200 mt-1 truncate"><i className="fas fa-file-alt mr-1" />{group.examDisplayName}</p>
                                 )}
                               </div>
                               <div className="text-right flex-shrink-0">
                                 <p className="text-xs text-indigo-100">Mean Grade</p>
-                                <span className={`inline-block px-3 py-1 rounded-full text-sm font-bold ${getGradeColor(group.meanGrade)}`}>
-                                  {group.meanGrade || '—'}
-                                </span>
+                                <span className={`inline-block px-3 py-1 rounded-full text-sm font-bold ${getGradeColor(group.meanGrade)}`}>{group.meanGrade || '—'}</span>
                               </div>
                             </div>
                           </div>
-
-                          {/* Subject rows */}
                           <table className="w-full">
                             <thead className="bg-gray-50">
                               <tr>
-                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Subject / Unit</th>
+                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">{SUBJECT_LABEL}</th>
                                 <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Marks</th>
                                 <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Grade</th>
                                 <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Points</th>
-                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Remarks</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y">
@@ -7528,12 +7337,9 @@ const StudentModule = ({
                                     {s.isAbsent ? <span className="text-red-500 font-medium">ABSENT</span> : (s.marks ?? '—')}
                                   </td>
                                   <td className="px-4 py-2 text-center">
-                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getGradeColor(s.grade)}`}>
-                                      {s.grade || '—'}
-                                    </span>
+                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getGradeColor(s.grade)}`}>{s.grade || '—'}</span>
                                   </td>
                                   <td className="px-4 py-2 text-center font-mono text-sm">{s.points ?? '—'}</td>
-                                  <td className="px-4 py-2 text-sm text-gray-600">{s.remarks || '—'}</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -7542,25 +7348,25 @@ const StudentModule = ({
                                 <td className="px-4 py-2">Totals</td>
                                 <td className="px-4 py-2 text-center">{group.totalMarks.toFixed(1)}</td>
                                 <td className="px-4 py-2 text-center">
-                                  <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(group.meanGrade)}`}>
-                                    {group.meanGrade || '—'}
-                                  </span>
+                                  <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(group.meanGrade)}`}>{group.meanGrade || '—'}</span>
                                 </td>
                                 <td className="px-4 py-2 text-center">{group.totalPoints}</td>
-                                <td className="px-4 py-2 text-sm text-gray-500">
-                                  Average: {group.average.toFixed(2)}%
+                              </tr>
+                              <tr>
+                                <td colSpan={4} className="px-4 py-2 text-sm text-gray-500 text-right">
+                                  Average: {group.average.toFixed(2)}% • {group.count} subjects
                                 </td>
                               </tr>
                             </tfoot>
                           </table>
                         </div>
                       ))}
-                    </div>
+                    </>
                   )}
                 </div>
               )}
 
-              {/* ==================== FEES TAB ==================== */}
+              {/* FEES TAB */}
               {activeDetailTab === 'fees' && (
                 <div className="space-y-4">
                   <div className="grid grid-cols-3 gap-4">
@@ -7585,7 +7391,6 @@ const StudentModule = ({
                       </button>
                     </div>
                   </div>
-
                   {studentPayments.length === 0 ? (
                     <div className="text-center py-12">
                       <i className="fas fa-receipt text-5xl text-gray-300 mb-4"></i>
@@ -7608,17 +7413,9 @@ const StudentModule = ({
                             <tr key={p.id} className="hover:bg-gray-50">
                               <td className="px-4 py-2">{formatDate(p.date)}</td>
                               <td className="px-4 py-2 font-mono text-sm">{p.receiptNo || '—'}</td>
-                              <td className="px-4 py-2 text-right font-bold text-green-600">
-                                {formatCurrency(p.amount)}
-                              </td>
-                              <td className="px-4 py-2">
-                                <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
-                                  {p.paymentMethod || '—'}
-                                </span>
-                              </td>
-                              <td className="px-4 py-2 text-sm text-gray-500">
-                                {p.transactionId || p.mpesaCode || p.reference || '—'}
-                              </td>
+                              <td className="px-4 py-2 text-right font-bold text-green-600">{formatCurrency(p.amount)}</td>
+                              <td className="px-4 py-2"><span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">{p.paymentMethod || '—'}</span></td>
+                              <td className="px-4 py-2 text-sm text-gray-500">{p.transactionId || p.mpesaCode || p.reference || '—'}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -7628,7 +7425,7 @@ const StudentModule = ({
                 </div>
               )}
 
-              {/* ==================== PARENTS / GUARDIANS ==================== */}
+              {/* PARENTS */}
               {activeDetailTab === 'parents' && (
                 <div>
                   {studentParents.length === 0 ? (
@@ -7655,11 +7452,7 @@ const StudentModule = ({
                                 <span className={`text-xs px-2 py-1 rounded-full ${p.isPrimary ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
                                   {p.isPrimary ? '★ Primary' : 'Guardian'}
                                 </span>
-                                {p.emergencyContact && (
-                                  <span className="text-xs px-2 py-1 rounded-full bg-red-100 text-red-800">
-                                    🚨 Emergency
-                                  </span>
-                                )}
+                                {p.emergencyContact && <span className="text-xs px-2 py-1 rounded-full bg-red-100 text-red-800">🚨 Emergency</span>}
                               </div>
                               <div className="p-4 flex gap-4">
                                 <div className="w-16 h-16 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
@@ -7692,7 +7485,7 @@ const StudentModule = ({
                 </div>
               )}
 
-              {/* ==================== ATTENDANCE ==================== */}
+              {/* ATTENDANCE */}
               {activeDetailTab === 'attendance' && (
                 <div className="space-y-4">
                   {studentAttendance.length === 0 ? (
@@ -7720,22 +7513,6 @@ const StudentModule = ({
                           <p className="text-3xl font-bold text-indigo-600">{attendanceSummary.presentPct}%</p>
                         </div>
                       </div>
-
-                      <div className="bg-white p-4 rounded-lg border">
-                        <div className="flex justify-between text-sm mb-2">
-                          <span className="font-medium text-gray-700">Attendance Overview</span>
-                          <span className="text-gray-500">
-                            {attendanceSummary.byStatus.PRESENT || 0} / {attendanceSummary.total} days present
-                          </span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-3 flex overflow-hidden">
-                          <div className="bg-green-500 h-full" style={{ width: `${(attendanceSummary.byStatus.PRESENT / attendanceSummary.total) * 100 || 0}%` }} title="Present"></div>
-                          <div className="bg-red-500 h-full" style={{ width: `${(attendanceSummary.byStatus.ABSENT / attendanceSummary.total) * 100 || 0}%` }} title="Absent"></div>
-                          <div className="bg-yellow-500 h-full" style={{ width: `${(attendanceSummary.byStatus.LATE / attendanceSummary.total) * 100 || 0}%` }} title="Late"></div>
-                          <div className="bg-blue-500 h-full" style={{ width: `${((attendanceSummary.byStatus.PERMISSION || 0) / attendanceSummary.total) * 100 || 0}%` }} title="Permission"></div>
-                        </div>
-                      </div>
-
                       {attendanceSummary.byMonth.length > 0 && (
                         <div className="bg-white border rounded-lg overflow-hidden">
                           <div className="bg-gray-50 px-4 py-2 border-b">
@@ -7748,7 +7525,6 @@ const StudentModule = ({
                                 <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Present</th>
                                 <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Absent</th>
                                 <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Late</th>
-                                <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Other</th>
                                 <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Total</th>
                               </tr>
                             </thead>
@@ -7761,7 +7537,6 @@ const StudentModule = ({
                                   <td className="px-4 py-2 text-center text-green-600 font-semibold">{m.present}</td>
                                   <td className="px-4 py-2 text-center text-red-600 font-semibold">{m.absent}</td>
                                   <td className="px-4 py-2 text-center text-yellow-600 font-semibold">{m.late}</td>
-                                  <td className="px-4 py-2 text-center text-blue-600 font-semibold">{m.other}</td>
                                   <td className="px-4 py-2 text-center font-semibold">{m.total}</td>
                                 </tr>
                               ))}
@@ -7769,7 +7544,6 @@ const StudentModule = ({
                           </table>
                         </div>
                       )}
-
                       <div className="bg-white border rounded-lg overflow-hidden">
                         <div className="bg-gray-50 px-4 py-2 border-b">
                           <h3 className="font-semibold text-gray-700"><i className="fas fa-list mr-2 text-indigo-600" />Recent Records</h3>
@@ -7798,9 +7572,7 @@ const StudentModule = ({
                                 <tr key={a.id} className="hover:bg-gray-50">
                                   <td className="px-4 py-2">{formatDate(a.date)}</td>
                                   <td className="px-4 py-2">
-                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[a.status] || 'bg-gray-100 text-gray-800'}`}>
-                                      {a.status}
-                                    </span>
+                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[a.status] || 'bg-gray-100 text-gray-800'}`}>{a.status}</span>
                                   </td>
                                   <td className="px-4 py-2 text-sm">{(a.timeIn || '').substring(0, 5) || '—'}</td>
                                   <td className="px-4 py-2 text-sm">{(a.timeOut || '').substring(0, 5) || '—'}</td>
@@ -7825,30 +7597,26 @@ const StudentModule = ({
                 </button>
               )}
               <button onClick={() => setShowDetailsModal(false)}
-                className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
-                Close
-              </button>
+                className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">Close</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ==================== INVOICE MODAL ==================== */}
+      {/* INVOICE MODAL */}
       {showInvoiceModal && selectedStudent && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-auto">
-            <div className="sticky top-0 bg-white z-10 border-b px-6 py-4 flex justify-between items-center">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto p-4 print:bg-white print:p-0">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-auto print:max-h-none print:shadow-none">
+            <div className="sticky top-0 bg-white z-10 border-b px-6 py-4 flex justify-between items-center print:hidden">
               <h2 className="text-2xl font-bold text-gray-800">
                 <i className="fas fa-file-invoice-dollar text-purple-600 mr-2" />
                 Fee Invoice
               </h2>
               <div className="flex gap-2">
-                <button onClick={() => window.print()}
-                  className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
+                <button onClick={() => window.print()} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
                   <i className="fas fa-print mr-2" />Print
                 </button>
-                <button onClick={() => setShowInvoiceModal(false)}
-                  className="text-gray-500 hover:text-gray-700 p-2">
+                <button onClick={() => setShowInvoiceModal(false)} className="text-gray-500 hover:text-gray-700 p-2">
                   <i className="fas fa-times text-xl" />
                 </button>
               </div>
@@ -7860,117 +7628,173 @@ const StudentModule = ({
                 <p className="text-gray-500">Loading invoice…</p>
               </div>
             ) : invoiceData ? (
-              <div className="p-6 space-y-6">
-                <div className="border-b pb-4">
-                  <h3 className="text-2xl font-bold text-indigo-700">
-                    {currentSchool?.name || 'School'}
-                  </h3>
-                  {currentSchool?.motto && <p className="text-sm italic text-gray-600 mt-1">"{currentSchool.motto}"</p>}
-                  <p className="text-sm text-gray-500 mt-2">
-                    {currentSchool?.contact?.address && <span>{currentSchool.contact.address} • </span>}
-                    {currentSchool?.contact?.phone && <span>{currentSchool.contact.phone} • </span>}
-                    {currentSchool?.contact?.email && <span>{currentSchool.contact.email}</span>}
-                  </p>
+              <div className="p-6 space-y-6" id="invoice-print-area">
+                {/* HEADER */}
+                <div className="border-b-2 border-indigo-200 pb-4 flex items-center gap-4">
+                  {invoiceData.school?.logo ? (
+                    <img src={invoiceData.school.logo} alt="School Logo" className="w-20 h-20 rounded-lg object-cover border" />
+                  ) : (
+                    <div className="w-20 h-20 bg-indigo-100 rounded-lg flex items-center justify-center text-indigo-600 text-3xl font-bold">
+                      {invoiceData.school?.name?.charAt(0) || 'S'}
+                    </div>
+                  )}
+                  <div className="flex-1">
+                    <h1 className="text-3xl font-bold text-indigo-800">{invoiceData.school?.name || 'School'}</h1>
+                    {invoiceData.school?.motto && <p className="text-sm italic text-gray-600 mt-1">"{invoiceData.school.motto}"</p>}
+                    <p className="text-xs text-gray-500 mt-2">
+                      {invoiceData.school?.contact?.address && <span>{invoiceData.school.contact.address} • </span>}
+                      {invoiceData.school?.contact?.phone && <span>{invoiceData.school.contact.phone} • </span>}
+                      {invoiceData.school?.contact?.email && <span>{invoiceData.school.contact.email}</span>}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs uppercase tracking-wide text-gray-500">Invoice</p>
+                    <p className="text-sm font-semibold text-gray-700">{new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                    <p className="text-xs text-gray-500 mt-1">Fee Statement</p>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                {/* STUDENT */}
+                <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg">
                   <div>
-                    <p className="text-xs text-gray-500 uppercase tracking-wide">Student</p>
+                    <p className="text-xs uppercase tracking-wide text-gray-500">Student</p>
                     <p className="font-bold text-lg">{invoiceData.student.firstName} {invoiceData.student.lastName}</p>
                     <p className="text-sm text-gray-600 font-mono">{invoiceData.student.admissionNumber}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-xs text-gray-500 uppercase tracking-wide">Class / Program</p>
-                    <p className="font-medium">
-                      {invoiceData.student.courseName ||
-                       invoiceData.student.programName ||
-                       invoiceData.student.className || '—'}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-2">Generated: {new Date().toLocaleDateString()}</p>
+                    <p className="text-xs uppercase tracking-wide text-gray-500">{GROUP_LABEL}</p>
+                    <p className="font-medium">{invoiceData.student.courseName || invoiceData.student.programName || invoiceData.student.className || '—'}</p>
                   </div>
                 </div>
 
-                <div className="space-y-4">
-                  {invoiceData.termStatements && invoiceData.termStatements.length > 0 ? (
-                    invoiceData.termStatements.map((term, ti) => (
-                      <div key={ti} className="border rounded-lg overflow-hidden">
-                        <div className="bg-gradient-to-r from-indigo-500 to-purple-500 px-4 py-2 text-white flex justify-between items-center">
-                          <h4 className="font-bold text-lg">{term.term}</h4>
-                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                            term.isPaid ? 'bg-green-400 bg-opacity-40 text-white' : 'bg-red-400 bg-opacity-40 text-white'
-                          }`}>
-                            {term.isPaid ? '✓ Fully Paid' : 'Balance Due'}
-                          </span>
-                        </div>
-                        <table className="w-full">
-                          <thead className="bg-gray-50">
-                            <tr>
-                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Fee Item</th>
-                              <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
-                              <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Discount</th>
-                              <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Net</th>
-                              <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Paid</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y">
-                            {term.fees.map((fee, fi) => (
-                              <tr key={fi}>
-                                <td className="px-4 py-2">{fee.name}</td>
-                                <td className="px-4 py-2 text-right">{formatCurrency(fee.amount)}</td>
-                                <td className="px-4 py-2 text-right text-purple-600">
-                                  {fee.discount > 0 ? `-${formatCurrency(fee.discount)}` : '—'}
-                                </td>
-                                <td className="px-4 py-2 text-right font-medium">{formatCurrency(fee.net)}</td>
-                                <td className="px-4 py-2 text-right text-green-600">{formatCurrency(fee.paid)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                          <tfoot className="bg-gray-50 font-semibold">
-                            <tr>
-                              <td className="px-4 py-2">Subtotal</td>
-                              <td className="px-4 py-2 text-right">{formatCurrency(term.grossBilled)}</td>
-                              <td className="px-4 py-2 text-right text-purple-600">
-                                {term.discount > 0 ? `-${formatCurrency(term.discount)}` : '—'}
-                              </td>
-                              <td className="px-4 py-2 text-right">{formatCurrency(term.netBilled)}</td>
-                              <td className="px-4 py-2 text-right text-green-600">{formatCurrency(term.paidThisTerm)}</td>
-                            </tr>
-                            {term.broughtForward > 0 && (
-                              <tr className="text-orange-700">
-                                <td colSpan={3} className="px-4 py-1 text-right text-sm">Balance Brought Forward:</td>
-                                <td colSpan={2} className="px-4 py-1 text-right text-sm font-bold">
-                                  {formatCurrency(term.broughtForward)}
-                                </td>
-                              </tr>
-                            )}
-                            <tr className="bg-indigo-50">
-                              <td colSpan={3} className="px-4 py-2 text-right">Total Billed This Term:</td>
-                              <td colSpan={2} className="px-4 py-2 text-right">{formatCurrency(term.billedThisTerm)}</td>
-                            </tr>
-                            <tr className="bg-green-50">
-                              <td colSpan={3} className="px-4 py-2 text-right">Paid This Term:</td>
-                              <td colSpan={2} className="px-4 py-2 text-right text-green-700">-{formatCurrency(term.paidThisTerm)}</td>
-                            </tr>
-                            <tr className={term.balanceCarriedForward > 0 ? 'bg-red-50' : 'bg-green-100'}>
-                              <td colSpan={3} className="px-4 py-2 text-right font-bold">
-                                {term.balanceCarriedForward > 0 ? 'Balance Carried Forward:' : 'Cleared'}
-                              </td>
-                              <td colSpan={2} className={`px-4 py-2 text-right font-bold ${term.balanceCarriedForward > 0 ? 'text-red-700' : 'text-green-700'}`}>
-                                {formatCurrency(term.balanceCarriedForward)}
-                              </td>
-                            </tr>
-                          </tfoot>
-                        </table>
+                {/* TERMS */}
+                {invoiceData.termStatements.length === 0 ? (
+                  <div className="text-center py-12 bg-gray-50 rounded-lg">
+                    <i className="fas fa-inbox text-5xl text-gray-300 mb-3"></i>
+                    <p className="text-gray-500">No fee records found for this student.</p>
+                  </div>
+                ) : (
+                  invoiceData.termStatements.map((term, ti) => (
+                    <div key={ti} className="border-2 rounded-lg overflow-hidden">
+                      <div className={`px-4 py-3 flex justify-between items-center ${term.isPaid ? 'bg-green-500' : 'bg-indigo-600'} text-white`}>
+                        <h3 className="font-bold text-lg">{term.term}</h3>
+                        <span className="px-3 py-1 bg-white bg-opacity-25 rounded-full text-xs font-medium">
+                          {term.isPaid ? '✓ Fully Paid' : 'Balance Due'}
+                        </span>
                       </div>
-                    ))
-                  ) : (
-                    <div className="text-center py-8 bg-gray-50 rounded-lg">
-                      <i className="fas fa-inbox text-4xl text-gray-300 mb-3"></i>
-                      <p className="text-gray-500">No fee records found for this student.</p>
-                    </div>
-                  )}
-                </div>
 
+                      {term.fees.length > 0 && (
+                        <div className="overflow-x-auto">
+                          <table className="w-full">
+                            <thead className="bg-gray-100">
+                              <tr>
+                                <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700 uppercase">Fee Item</th>
+                                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 uppercase">Amount</th>
+                                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 uppercase">Discount</th>
+                                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 uppercase">Net</th>
+                                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 uppercase">Paid</th>
+                                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 uppercase">Balance</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {term.fees.map((fee, fi) => {
+                                const feeBalance = fee.net - fee.paid;
+                                const hasInstallments = fee.installments && fee.installments.length > 1;
+                                return (
+                                  <React.Fragment key={fi}>
+                                    <tr className="border-b">
+                                      <td className="px-4 py-3">
+                                        <div className="font-medium">{fee.name}</div>
+                                        {fee.category && <div className="text-xs text-gray-500">{fee.category}</div>}
+                                      </td>
+                                      <td className="px-4 py-3 text-right">{formatCurrency(fee.amount)}</td>
+                                      <td className="px-4 py-3 text-right text-purple-600">{fee.discount > 0 ? `-${formatCurrency(fee.discount)}` : '—'}</td>
+                                      <td className="px-4 py-3 text-right font-medium">{formatCurrency(fee.net)}</td>
+                                      <td className="px-4 py-3 text-right text-green-600 font-medium">{formatCurrency(fee.paid)}</td>
+                                      <td className={`px-4 py-3 text-right font-bold ${feeBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                        {formatCurrency(Math.max(0, feeBalance))}
+                                      </td>
+                                    </tr>
+                                    {hasInstallments && (
+                                      <tr>
+                                        <td colSpan={6} className="bg-gray-50 px-8 py-2">
+                                          <div className="text-xs text-gray-600 font-medium mb-1">
+                                            <i className="fas fa-list-ul mr-1"></i>Payment Installments:
+                                          </div>
+                                          <div className="space-y-1">
+                                            {fee.installments.map((inst, ii) => (
+                                              <div key={ii} className="flex items-center gap-3 text-xs">
+                                                <span className="text-gray-500 w-32">{new Date(inst.date).toLocaleDateString('en-GB')}</span>
+                                                <span className="font-mono text-gray-600 w-40">{inst.receiptNo || '—'}</span>
+                                                <span className="text-gray-500 w-24">{inst.method || '—'}</span>
+                                                <span className="text-green-700 font-medium">+ {formatCurrency(inst.amount)}</span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </React.Fragment>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      {term.cashOnly.length > 0 && (
+                        <div className="px-4 py-3 bg-yellow-50 border-t">
+                          <p className="text-xs text-yellow-800 font-medium mb-2">
+                            <i className="fas fa-info-circle mr-1"></i>Other payments (no specific fee):
+                          </p>
+                          <div className="space-y-1">
+                            {term.cashOnly.map((p, pi) => (
+                              <div key={pi} className="flex items-center gap-3 text-xs">
+                                <span className="text-gray-500 w-32">{new Date(p.date).toLocaleDateString('en-GB')}</span>
+                                <span className="font-mono text-gray-600 w-40">{p.receiptNo || '—'}</span>
+                                <span className="text-gray-500 w-24">{p.method || '—'}</span>
+                                <span className="text-green-700 font-medium">+ {formatCurrency(p.amount)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="bg-indigo-50 px-4 py-4 space-y-2 border-t-2 border-indigo-200">
+                        {term.broughtForward > 0 && (
+                          <div className="flex justify-between text-sm text-orange-700">
+                            <span className="font-medium">Balance Brought Forward:</span>
+                            <span className="font-bold">{formatCurrency(term.broughtForward)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-700">Subtotal ({TERM_LABEL} Fees):</span>
+                          <span>{formatCurrency(term.grossBilled)}</span>
+                        </div>
+                        {term.discount > 0 && (
+                          <div className="flex justify-between text-sm text-purple-600">
+                            <span>Discounts:</span>
+                            <span>- {formatCurrency(term.discount)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between text-sm font-semibold border-t pt-2">
+                          <span>Total Billed This {TERM_LABEL}:</span>
+                          <span>{formatCurrency(term.billedThisTerm)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm text-green-700">
+                          <span>Paid This {TERM_LABEL}:</span>
+                          <span>- {formatCurrency(term.paidThisTerm)}</span>
+                        </div>
+                        <div className={`flex justify-between text-base font-bold pt-2 border-t-2 ${term.balanceCarriedForward > 0 ? 'text-red-700' : 'text-green-700'}`}>
+                          <span>{term.balanceCarriedForward > 0 ? 'Balance Carried Forward:' : 'Cleared ✓'}</span>
+                          <span>{formatCurrency(term.balanceCarriedForward)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+
+                {/* GRAND TOTALS */}
                 {invoiceData.totals && (
                   <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-lg border-2 border-indigo-200">
                     <h4 className="font-bold text-lg mb-4 text-gray-800">Overall Summary</h4>
@@ -7981,15 +7805,11 @@ const StudentModule = ({
                       </div>
                       <div className="text-center">
                         <p className="text-xs text-gray-500 uppercase">Discounts</p>
-                        <p className="text-xl font-bold text-purple-600">
-                          {formatCurrency(invoiceData.totals.discount)}
-                        </p>
+                        <p className="text-xl font-bold text-purple-600">{formatCurrency(invoiceData.totals.discount)}</p>
                       </div>
                       <div className="text-center">
                         <p className="text-xs text-gray-500 uppercase">Total Paid</p>
-                        <p className="text-xl font-bold text-green-600">
-                          {formatCurrency(invoiceData.totals.paid)}
-                        </p>
+                        <p className="text-xl font-bold text-green-600">{formatCurrency(invoiceData.totals.paid)}</p>
                       </div>
                       <div className="text-center">
                         <p className="text-xs text-gray-500 uppercase">Outstanding</p>
@@ -8001,41 +7821,10 @@ const StudentModule = ({
                   </div>
                 )}
 
-                {studentPayments && studentPayments.length > 0 && (
-                  <div className="border rounded-lg overflow-hidden">
-                    <div className="bg-gray-50 px-4 py-2 border-b">
-                      <h4 className="font-semibold text-gray-700"><i className="fas fa-receipt mr-2 text-green-600" />Payment History</h4>
-                    </div>
-                    <table className="w-full">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Receipt</th>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Method</th>
-                          <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {studentPayments.map(p => (
-                          <tr key={p.id}>
-                            <td className="px-4 py-2">{formatDate(p.date)}</td>
-                            <td className="px-4 py-2 font-mono text-sm">{p.receiptNo || '—'}</td>
-                            <td className="px-4 py-2">{p.paymentMethod || '—'}</td>
-                            <td className="px-4 py-2 text-right font-semibold text-green-600">{formatCurrency(p.amount)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                      <tfoot className="bg-gray-50 font-bold">
-                        <tr>
-                          <td colSpan={3} className="px-4 py-2 text-right">Total Paid:</td>
-                          <td className="px-4 py-2 text-right text-green-700">
-                            {formatCurrency(studentPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0))}
-                          </td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
-                )}
+                <div className="text-center text-xs text-gray-400 pt-4 border-t">
+                  <p>Generated on {new Date().toLocaleString()}</p>
+                  <p className="mt-1">This is a computer-generated statement. For enquiries, contact the school bursar.</p>
+                </div>
               </div>
             ) : (
               <div className="p-12 text-center">
@@ -8046,37 +7835,28 @@ const StudentModule = ({
         </div>
       )}
 
-      {/* ==================== ADD PARENT MODAL ==================== */}
+      {/* ADD PARENT MODAL */}
       {showAddParentModal && selectedStudentForParent && canEdit && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold">Add Guardian for {selectedStudentForParent.firstName}</h3>
-              <button onClick={() => setShowAddParentModal(false)} className="text-gray-500 hover:text-gray-700">
-                <i className="fas fa-times" />
-              </button>
+              <button onClick={() => setShowAddParentModal(false)} className="text-gray-500 hover:text-gray-700"><i className="fas fa-times" /></button>
             </div>
-
             {enableParentPortal && parentUserOptions.length > 0 && (
               <div className="flex gap-4 mb-4">
                 <label className="flex items-center">
-                  <input type="radio" className="mr-2" checked={createNewParent} onChange={() => setCreateNewParent(true)} />
-                  New Guardian
+                  <input type="radio" className="mr-2" checked={createNewParent} onChange={() => setCreateNewParent(true)} />New Guardian
                 </label>
                 <label className="flex items-center">
-                  <input type="radio" className="mr-2" checked={!createNewParent} onChange={() => setCreateNewParent(false)} />
-                  Use Existing
+                  <input type="radio" className="mr-2" checked={!createNewParent} onChange={() => setCreateNewParent(false)} />Use Existing
                 </label>
               </div>
             )}
-
             {!createNewParent ? (
               <SearchableSelect label="Select Existing Parent/Guardian *"
                 value={selectedExistingParent?.userId || ''}
-                onChange={(e) => {
-                  const p = parentUserOptions.find(x => x.value === e.target.value);
-                  setSelectedExistingParent(p || null);
-                }}
+                onChange={(e) => { const p = parentUserOptions.find(x => x.value === e.target.value); setSelectedExistingParent(p || null); }}
                 options={parentUserOptions} placeholder="Search…" required />
             ) : (
               <div className="space-y-4">
@@ -8086,47 +7866,30 @@ const StudentModule = ({
                   <TextInput label="Phone" value={parentForm.phone} onChange={(e) => setParentForm({ ...parentForm, phone: e.target.value })} />
                   <TextInput label="Email" type="email" value={parentForm.email} onChange={(e) => setParentForm({ ...parentForm, email: e.target.value })} />
                 </div>
-
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <SelectField label="Relationship *" value={parentForm.relationship} onChange={(e) => setParentForm({ ...parentForm, relationship: e.target.value })} options={relationshipOptions} />
                   <div className="flex items-center gap-4 pt-5">
-                    <label className="flex items-center text-sm">
-                      <input type="checkbox" className="mr-2" checked={parentForm.isPrimary} onChange={(e) => setParentForm({ ...parentForm, isPrimary: e.target.checked })} />
-                      Primary
-                    </label>
-                    <label className="flex items-center text-sm">
-                      <input type="checkbox" className="mr-2" checked={parentForm.emergencyContact} onChange={(e) => setParentForm({ ...parentForm, emergencyContact: e.target.checked })} />
-                      Emergency
-                    </label>
+                    <label className="flex items-center text-sm"><input type="checkbox" className="mr-2" checked={parentForm.isPrimary} onChange={(e) => setParentForm({ ...parentForm, isPrimary: e.target.checked })} />Primary</label>
+                    <label className="flex items-center text-sm"><input type="checkbox" className="mr-2" checked={parentForm.emergencyContact} onChange={(e) => setParentForm({ ...parentForm, emergencyContact: e.target.checked })} />Emergency</label>
                   </div>
                 </div>
-
                 <label className="flex items-start cursor-pointer">
-                  <input type="checkbox" className="mt-1 mr-2"
-                    checked={parentForm.grantPortalAccess}
+                  <input type="checkbox" className="mt-1 mr-2" checked={parentForm.grantPortalAccess}
                     onChange={(e) => {
                       const checked = e.target.checked;
                       setParentForm({ ...parentForm, grantPortalAccess: checked, password: checked ? parentForm.password : '' });
                       if (!checked) setShowParentPassword(false);
                     }} />
-                  <span className="text-sm">
-                    <span className="font-medium">Grant portal access</span>
-                    <span className="block text-xs text-gray-500 mt-0.5">Requires email and password.</span>
-                  </span>
+                  <span className="text-sm"><span className="font-medium">Grant portal access</span><span className="block text-xs text-gray-500 mt-0.5">Requires email and password.</span></span>
                 </label>
-
                 {parentForm.grantPortalAccess && (
                   <div className="relative max-w-md">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Portal Password <span className="text-red-500">*</span>
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Portal Password <span className="text-red-500">*</span></label>
                     <div className="relative">
-                      <input type={showParentPassword ? 'text' : 'password'}
-                        value={parentForm.password}
+                      <input type={showParentPassword ? 'text' : 'password'} value={parentForm.password}
                         onChange={(e) => setParentForm({ ...parentForm, password: e.target.value })}
                         placeholder="Minimum 6 characters"
-                        className="w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
-                        required />
+                        className="w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white" required />
                       <button type="button" onClick={() => setShowParentPassword(v => !v)}
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700">
                         <i className={`fas fa-${showParentPassword ? 'eye-slash' : 'eye'}`} />
@@ -8136,23 +7899,18 @@ const StudentModule = ({
                 )}
               </div>
             )}
-
             <div className="flex gap-2 mt-6 pt-4 border-t">
-              <button onClick={handleAddParent}
-                disabled={loading || (!createNewParent && !selectedExistingParent)}
+              <button onClick={handleAddParent} disabled={loading || (!createNewParent && !selectedExistingParent)}
                 className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
                 {loading ? 'Adding…' : 'Add Guardian'}
               </button>
-              <button onClick={() => setShowAddParentModal(false)}
-                className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
-                Cancel
-              </button>
+              <button onClick={() => setShowAddParentModal(false)} className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">Cancel</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Delete confirm */}
+      {/* DELETE CONFIRM */}
       {showDeleteConfirm && selectedStudent && canDelete && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
@@ -8161,9 +7919,7 @@ const StudentModule = ({
                 <i className="fas fa-exclamation-triangle text-red-600 text-2xl" />
               </div>
               <h3 className="text-xl font-bold">Delete Student?</h3>
-              <p className="text-gray-600 mt-2">
-                Delete <span className="font-semibold">{selectedStudent.firstName} {selectedStudent.lastName}</span>?
-              </p>
+              <p className="text-gray-600 mt-2">Delete <span className="font-semibold">{selectedStudent.firstName} {selectedStudent.lastName}</span>?</p>
               <p className="text-sm text-red-600 mt-2">This cannot be undone.</p>
             </div>
             <div className="flex gap-2">
@@ -8171,10 +7927,7 @@ const StudentModule = ({
                 className="flex-1 bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 disabled:opacity-50">
                 {loading ? 'Deleting…' : 'Yes, Delete'}
               </button>
-              <button onClick={() => setShowDeleteConfirm(false)}
-                className="flex-1 bg-gray-500 text-white py-2 rounded-lg hover:bg-gray-600">
-                Cancel
-              </button>
+              <button onClick={() => setShowDeleteConfirm(false)} className="flex-1 bg-gray-500 text-white py-2 rounded-lg hover:bg-gray-600">Cancel</button>
             </div>
           </div>
         </div>
@@ -8182,7 +7935,6 @@ const StudentModule = ({
     </div>
   );
 };
-
 // ==================== SUBJECT MODULE WITH MULTI-CLASS SUPPORT ====================
 const SubjectModule = ({ 
   subjects, setSubjects, classes, staff, form, setForm, 
@@ -12403,15 +12155,12 @@ const ExamModule = ({
 };
 
 
-// ==================== COMPLETE FIXED RESULTS MODULE ====================
+// ==================== COMPLETE RESULTS MODULE ====================
 const ResultsModule = ({ 
   exams, setExams, results, students, subjects, classes, courses, programs,
   currentSchool, parents, units, user,
   admissionNumber: propAdmissionNumber 
 }) => {
-  console.log('🎯 ResultsModule initialized');
-  console.log('🏫 School category:', currentSchool?.category);
-  console.log('👤 User role:', user?.role);
 
   // ==================== SCHOOL TYPE DETECTION ====================
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
@@ -12421,11 +12170,6 @@ const ResultsModule = ({
   const isPrimary = schoolCategory === 'ECDE_PRIMARY_JSS';
   const isRegularSchool = !isUniversity && !isTVET;
 
-  // ============================================================
-  //  SENIOR SECONDARY — determine Form vs Grade per class
-  //  "Form 1".."Form 4"      → KENYA_844 grading (A, B+, ...)
-  //  "Grade 10".."Grade 12"  → CBC grading (EE, ME, AE, BE, NI)
-  // ============================================================
   const isCBCSeniorLevel = (levelName) => {
     if (!levelName) return false;
     const s = String(levelName).trim().toLowerCase();
@@ -12437,8 +12181,6 @@ const ResultsModule = ({
     return /^form\s*[1-4]$/.test(s);
   };
 
-  // Given a school category + optional level hint, return which
-  // grading flavor applies. Values: 'CBC' | '844' | 'TVET' | 'UNI' | 'CBC'
   const resolveGradingFlavor = (category, levelHint) => {
     if (category === 'COLLEGE_TVET') return 'TVET';
     if (category === 'UNIVERSITY')    return 'UNI';
@@ -12446,7 +12188,6 @@ const ResultsModule = ({
     if (category === 'SENIOR_SECONDARY') {
       if (levelHint && isCBCSeniorLevel(levelHint)) return 'CBC';
       if (levelHint && isFormLevel(levelHint))     return '844';
-      // Default for Senior Secondary: traditional Form grading
       return '844';
     }
     return 'CBC';
@@ -12480,7 +12221,7 @@ const ResultsModule = ({
   const canPrintAllResults = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || 
                              isSeniorTeacher || isClassTeacher || isDean || isHOD;
 
-  // ==================== SEARCHABLE SELECT ====================
+  // ==================== SEARCHABLE SELECT (KEPT AS-IS) ====================
   const SearchableSelect = ({ 
     label, value, onChange, options = [], placeholder = "Search...", 
     disabled, required, className,
@@ -12656,6 +12397,17 @@ const ResultsModule = ({
   const [filteredUnits, setFilteredUnits] = useState([]);
   const [filteredSubjects, setFilteredSubjects] = useState([]);
   const [filterGrade, setFilterGrade] = useState('');
+
+  // ✅ NEW — Detailed report state
+  const [viewMode, setViewMode] = useState('marks'); // 'marks' | 'report'
+  const [reportClassId, setReportClassId] = useState('');
+  const [reportStudentId, setReportStudentId] = useState('');
+  const [reportExamTypeFilter, setReportExamTypeFilter] = useState(''); // '', 'OPENER', 'MIDTERM', ...
+  const [reportTermFilter, setReportTermFilter] = useState('');
+  const [reportYearFilter, setReportYearFilter] = useState('');
+  const [reportData, setReportData] = useState(null);
+  const [loadingReport, setLoadingReport] = useState(false);
+  const [positionsByExam, setPositionsByExam] = useState({});
   
   const [showMessageModal, setShowMessageModal] = useState(false);
   const [messageType, setMessageType] = useState('SMS');
@@ -12701,25 +12453,39 @@ const ResultsModule = ({
 
   // ============================================================
   //  ✅ GRADE FUNCTIONS
-  //  Empty marks → blank grade (NEVER "Not Yet Competent" / "FAIL")
-  //  Uses `levelHint` (class name) to pick the correct scale.
+  //
+  //  Priority:
+  //   1. currentSchool.gradingConfig.scale  (custom per-school)
+  //   2. Built-in flavor (CBC / 844 / TVET / UNI)
   // ============================================================
   const calculateGrade = (marks, maxMarks = 100, examCategory = null, levelHint = null) => {
-    // ✅ Distinguish empty from 0
     if (marks === '' || marks === null || marks === undefined) {
       return { grade: '', points: 0, remark: '' };
     }
-
     const numericMarks = parseFloat(marks);
-    if (isNaN(numericMarks)) {
-      return { grade: '', points: 0, remark: '' };
-    }
+    if (isNaN(numericMarks)) return { grade: '', points: 0, remark: '' };
 
     const percentage = maxMarks > 0 ? (numericMarks / maxMarks) * 100 : 0;
+
+    // ✅ 1. Custom grading config takes priority
+    if (currentSchool?.gradingConfig?.scale?.length > 0) {
+      const band = currentSchool.gradingConfig.scale.find(
+        b => percentage >= b.min && percentage <= b.max
+      );
+      if (band) {
+        return {
+          grade: band.code || band.grade || '',
+          points: band.points || 0,
+          remark: band.label || band.code || ''
+        };
+      }
+      // fall through to defaults if no band matches
+    }
+
+    // 2. Fallback to built-in flavors
     const category = examCategory || schoolCategory;
     const flavor = resolveGradingFlavor(category, levelHint);
 
-    // ===== TVET — Traditional =====
     if (flavor === 'TVET') {
       if (percentage >= 80) return { grade: 'DISTINCTION', points: 5, remark: 'Excellent' };
       if (percentage >= 65) return { grade: 'CREDIT',      points: 4, remark: 'Very Good' };
@@ -12727,8 +12493,6 @@ const ResultsModule = ({
       if (percentage >= 40) return { grade: 'PASS',        points: 2, remark: 'Satisfactory' };
       return                     { grade: 'FAIL',          points: 1, remark: 'Needs Improvement' };
     }
-
-    // ===== University — A / B / C / D / E only =====
     if (flavor === 'UNI') {
       if (percentage >= 70) return { grade: 'A', points: 5.0, remark: 'Excellent' };
       if (percentage >= 60) return { grade: 'B', points: 4.0, remark: 'Very Good' };
@@ -12736,17 +12500,14 @@ const ResultsModule = ({
       if (percentage >= 40) return { grade: 'D', points: 2.0, remark: 'Fair' };
       return                     { grade: 'E', points: 1.0, remark: 'Poor' };
     }
-
-    // ===== CBC — Primary, JSS, and Grade 10–12 =====
     if (flavor === 'CBC') {
-      if (percentage >= 80) return { grade: 'Exceeding Expectations',   points: 4, remark: 'Exceeding Expectations' };
-      if (percentage >= 65) return { grade: 'Meeting Expectations',     points: 3, remark: 'Meeting Expectations' };
-      if (percentage >= 50) return { grade: 'Approaching Expectations', points: 2, remark: 'Approaching Expectations' };
-      if (percentage >= 30) return { grade: 'Below Expectations',       points: 1, remark: 'Below Expectations' };
-      return                     { grade: 'Needs Improvement',         points: 0, remark: 'Needs Improvement' };
+      if (percentage >= 80) return { grade: 'EE', points: 4, remark: 'Exceeding Expectations' };
+      if (percentage >= 65) return { grade: 'ME', points: 3, remark: 'Meeting Expectations' };
+      if (percentage >= 50) return { grade: 'AE', points: 2, remark: 'Approaching Expectations' };
+      if (percentage >= 30) return { grade: 'BE', points: 1, remark: 'Below Expectations' };
+      return                     { grade: 'NI', points: 0, remark: 'Needs Improvement' };
     }
-
-    // ===== 8-4-4 / Form 1–4 (Traditional Senior Secondary) =====
+    // 844
     if (percentage >= 80) return { grade: 'A',  points: 12, remark: 'Excellent' };
     if (percentage >= 75) return { grade: 'A-', points: 11, remark: 'Very Good' };
     if (percentage >= 70) return { grade: 'B+', points: 10, remark: 'Good' };
@@ -12763,32 +12524,24 @@ const ResultsModule = ({
 
   const getGradeColor = (grade) => {
     if (!grade || grade === '') return 'bg-gray-100 text-gray-500';
-
-    // TVET Traditional
     if (grade === 'DISTINCTION') return 'bg-green-100 text-green-800';
     if (grade === 'CREDIT')      return 'bg-blue-100 text-blue-800';
     if (grade === 'MERIT')       return 'bg-yellow-100 text-yellow-800';
     if (grade === 'PASS')        return 'bg-orange-100 text-orange-800';
     if (grade === 'FAIL')        return 'bg-red-100 text-red-800';
-
-    // CBC
-    if (grade === 'Exceeding Expectations')   return 'bg-green-100 text-green-800';
-    if (grade === 'Meeting Expectations')     return 'bg-blue-100 text-blue-800';
-    if (grade === 'Approaching Expectations') return 'bg-yellow-100 text-yellow-800';
-    if (grade === 'Below Expectations')       return 'bg-orange-100 text-orange-800';
-    if (grade === 'Needs Improvement')        return 'bg-red-100 text-red-800';
-
-    // Letter grades (Form 1–4 / University)
+    if (grade === 'EE' || grade === 'Exceeding Expectations') return 'bg-green-100 text-green-800';
+    if (grade === 'ME' || grade === 'Meeting Expectations')   return 'bg-blue-100 text-blue-800';
+    if (grade === 'AE' || grade === 'Approaching Expectations') return 'bg-yellow-100 text-yellow-800';
+    if (grade === 'BE' || grade === 'Below Expectations')     return 'bg-orange-100 text-orange-800';
+    if (grade === 'NI' || grade === 'Needs Improvement')      return 'bg-red-100 text-red-800';
     if (['A', 'A-'].includes(grade)) return 'bg-green-100 text-green-800';
     if (['B+', 'B', 'B-'].includes(grade)) return 'bg-blue-100 text-blue-800';
     if (['C+', 'C', 'C-'].includes(grade)) return 'bg-yellow-100 text-yellow-800';
     if (['D+', 'D', 'D-'].includes(grade)) return 'bg-orange-100 text-orange-800';
     if (grade === 'E') return 'bg-red-100 text-red-800';
-
     return 'bg-gray-100 text-gray-800';
   };
 
-  // ✅ FIXED: Never fabricate a grade for empty marks
   const displayGrade = (grade, marks) => {
     if (marks === '' || marks === null || marks === undefined) return '—';
     if (!grade || grade === '') return '—';
@@ -12802,8 +12555,18 @@ const ResultsModule = ({
     if (valid.length === 0) return 'N/A';
 
     const avgPoints = valid.reduce((sum, r) => sum + (r.points || 0), 0) / valid.length;
-    const flavor = resolveGradingFlavor(schoolCategory, levelHint);
 
+    // Custom config
+    if (currentSchool?.gradingConfig?.scale?.length > 0) {
+      // Find the band whose points is closest
+      const sorted = [...currentSchool.gradingConfig.scale].sort((a, b) => (b.points || 0) - (a.points || 0));
+      for (const b of sorted) {
+        if (avgPoints >= (b.points || 0)) return b.code || b.grade;
+      }
+      return sorted[sorted.length - 1]?.code || 'N/A';
+    }
+
+    const flavor = resolveGradingFlavor(schoolCategory, levelHint);
     if (flavor === 'TVET') {
       if (avgPoints >= 4.5) return 'DISTINCTION';
       if (avgPoints >= 3.5) return 'CREDIT';
@@ -12819,13 +12582,12 @@ const ResultsModule = ({
       return 'E';
     }
     if (flavor === 'CBC') {
-      if (avgPoints >= 3.5) return 'Exceeding Expectations';
-      if (avgPoints >= 2.5) return 'Meeting Expectations';
-      if (avgPoints >= 1.5) return 'Approaching Expectations';
-      if (avgPoints >= 0.5) return 'Below Expectations';
-      return 'Needs Improvement';
+      if (avgPoints >= 3.5) return 'EE';
+      if (avgPoints >= 2.5) return 'ME';
+      if (avgPoints >= 1.5) return 'AE';
+      if (avgPoints >= 0.5) return 'BE';
+      return 'NI';
     }
-    // 844
     if (avgPoints >= 11.5) return 'A';
     if (avgPoints >= 10.5) return 'A-';
     if (avgPoints >= 9.5)  return 'B+';
@@ -12864,25 +12626,19 @@ const ResultsModule = ({
     return exam?.name || 'Unknown';
   };
 
-  // ==================== HELPER: GET LEVEL HINT FOR AN EXAM ====================
-  // The class name tells us whether to use CBC or 844 grading.
   const getLevelHint = (exam, student, explicitClass = null) => {
-    // 1. Explicit class passed in (from admin view)
     if (explicitClass) {
       const cls = classes?.find(c => c.id === explicitClass);
       if (cls?.name) return cls.name;
     }
-    // 2. Student's class
     if (student?.classId) {
       const cls = classes?.find(c => c.id === student.classId);
       if (cls?.name) return cls.name;
     }
-    // 3. Exam's class
     if (exam?.classId) {
       const cls = classes?.find(c => c.id === exam.classId);
       if (cls?.name) return cls.name;
     }
-    // 4. Exam's attached class object
     if (exam?.class?.name) return exam.class.name;
     if (exam?.Class?.name) return exam.Class.name;
     return null;
@@ -12901,11 +12657,7 @@ const ResultsModule = ({
       const enhancedResults = studentResults.map(result => {
         const exam = exams?.find(e => e.id === result.examId);
         const hasMarks = result.marks !== null && result.marks !== undefined && result.marks !== '';
-
-        // ✅ Resolve which grading scale applies for this specific result
         const levelHint = getLevelHint(exam, studentInfo);
-
-        // ✅ ALWAYS recalculate from marks — never trust the stored grade
         const gradeInfo = hasMarks
           ? calculateGrade(
               result.marks,
@@ -12923,6 +12675,9 @@ const ResultsModule = ({
           itemName: getItemName(result, exam),
           examName: result.examName || result.exam?.name || exam?.name || 'Unknown',
           examDate: result.examDate || result.exam?.date || exam?.date,
+          examType: exam?.type || result.examType || '',
+          examTerm: exam?.term || result.term || '',
+          academicYear: exam?.academicYear || result.academicYear || '',
           levelHint
         };
       });
@@ -12947,8 +12702,6 @@ const ResultsModule = ({
     const totalPoints = valid.reduce((sum, r) => sum + (r.points || 0), 0);
     const totalMarks  = valid.reduce((sum, r) => sum + (parseFloat(r.marks) || 0), 0);
     const average = valid.length > 0 ? (totalMarks / valid.length).toFixed(2) : 0;
-
-    // Use the levelHint from the first result if available
     const levelHint = enhancedResults[0]?.levelHint || null;
 
     return {
@@ -12971,6 +12724,303 @@ const ResultsModule = ({
     return stats;
   };
 
+  // ==================================================================
+  //  ✅ NEW — BUILD DETAILED REPORT DATA
+  //
+  //  Groups results by (term + examType) per subject, then computes:
+  //    - horizontal columns per exam-type variant
+  //    - per-subject average + trend
+  //    - per-term averages
+  //    - class positions
+  //    - KNEC aptitude streams
+  // ==================================================================
+  const KnecStreams = {
+    STEM: ['mathematics', 'maths', 'math', 'physics', 'chemistry', 'biology', 'general science', 'science', 'computer', 'computer studies', 'technical drawing', 'metalwork', 'woodwork', 'electricity', 'electronics'],
+    LANGUAGES: ['english', 'kiswahili', 'literature', 'french', 'german', 'arabic', 'chinese', 'foreign language', 'language'],
+    SOCIAL: ['history', 'geography', 'cre', 'ire', 'social studies', 'citizenship', 'civics', 'government'],
+    ARTS: ['art', 'fine art', 'music', 'drama', 'creative arts', 'theatre'],
+    BUSINESS: ['business', 'business studies', 'commerce', 'accounts', 'accounting', 'economics'],
+    APPLIED: ['agriculture', 'home science', 'home science & technology', 'clothing', 'foods', 'nutrition', 'woodwork', 'metalwork']
+  };
+
+  const classifySubjectStream = (subjectName) => {
+    if (!subjectName) return null;
+    const s = String(subjectName).toLowerCase();
+    for (const [stream, keys] of Object.entries(KnecStreams)) {
+      if (keys.some(k => s.includes(k))) return stream;
+    }
+    return null;
+  };
+
+  const buildDetailedReport = (studentResults, positions) => {
+    // 1. Filter based on current report filters
+    let filtered = studentResults.filter(r => {
+      if (reportExamTypeFilter && r.examType !== reportExamTypeFilter) return false;
+      if (reportTermFilter && r.examTerm !== reportTermFilter) return false;
+      if (reportYearFilter && r.academicYear !== reportYearFilter) return false;
+      return true;
+    });
+
+    // 2. Group by "term + year" — one report card per group
+    const termGroups = new Map();
+
+    filtered.forEach(r => {
+      const term = r.examTerm || 'Unspecified Term';
+      const year = r.academicYear || '';
+      const key = `${term}||${year}`;
+
+      if (!termGroups.has(key)) {
+        termGroups.set(key, {
+          key,
+          term,
+          year,
+          // subjectKey → { subjectName, cells: { examType: {...} }, sumMarks, count }
+          subjects: new Map(),
+          examTypeColumns: new Set()
+        });
+      }
+      const g = termGroups.get(key);
+      const subjectKey = r.itemName || 'Unknown';
+
+      if (!g.subjects.has(subjectKey)) {
+        g.subjects.set(subjectKey, {
+          subjectName: subjectKey,
+          stream: classifySubjectStream(subjectKey),
+          cells: {},
+          sumMarks: 0,
+          count: 0
+        });
+      }
+      const subj = g.subjects.get(subjectKey);
+      const typeKey = r.examType || 'OTHER';
+      g.examTypeColumns.add(typeKey);
+
+      const m = parseFloat(r.marks);
+      if (!isNaN(m)) {
+        subj.cells[typeKey] = {
+          marks: m,
+          grade: r.grade,
+          points: r.points,
+          examId: r.examId,
+          examDate: r.examDate,
+          examName: r.examName
+        };
+        subj.sumMarks += m;
+        subj.count += 1;
+      }
+    });
+
+    // 3. Convert to arrays, compute averages and trends
+    const termCards = [];
+    const allSubjectStats = []; // for aptitude
+
+    for (const g of termGroups.values()) {
+      const subjectList = [];
+      for (const subj of g.subjects.values()) {
+        const avg = subj.count > 0 ? subj.sumMarks / subj.count : 0;
+
+        // Trend: compare chronologically by exam date (fallback: OPENER → MIDTERM → ENDTERM → FINAL)
+        const orderedTypes = ['OPENER', 'MIDTERM', 'ENDTERM', 'MOCK', 'PRE_MOCK', 'FINAL', 'CAT'];
+        const cellsArr = Object.entries(subj.cells)
+          .map(([type, cell]) => ({ type, ...cell }))
+          .filter(c => !isNaN(c.marks))
+          .sort((a, b) => {
+            const da = a.examDate ? new Date(a.examDate).getTime() : 0;
+            const db = b.examDate ? new Date(b.examDate).getTime() : 0;
+            if (da && db && da !== db) return da - db;
+            return orderedTypes.indexOf(a.type) - orderedTypes.indexOf(b.type);
+          });
+
+        let trend = 'flat';
+        if (cellsArr.length >= 2) {
+          const last = cellsArr[cellsArr.length - 1].marks;
+          const prev = cellsArr[cellsArr.length - 2].marks;
+          if (last > prev) trend = 'up';
+          else if (last < prev) trend = 'down';
+        }
+
+        subjectList.push({
+          ...subj,
+          avg,
+          trend,
+          cellsArr
+        });
+
+        // Collect for aptitude
+        allSubjectStats.push({
+          subjectName: subj.subjectName,
+          stream: subj.stream,
+          avg,
+          count: subj.count
+        });
+      }
+
+      // Term average across subjects
+      const validAverages = subjectList.filter(s => s.count > 0).map(s => s.avg);
+      const termAverage = validAverages.length > 0
+        ? validAverages.reduce((a, b) => a + b, 0) / validAverages.length
+        : 0;
+
+      termCards.push({
+        ...g,
+        examTypeColumns: Array.from(g.examTypeColumns).sort((a, b) => {
+          const ordered = ['OPENER', 'MIDTERM', 'ENDTERM', 'MOCK', 'PRE_MOCK', 'FINAL', 'CAT'];
+          return ordered.indexOf(a) - ordered.indexOf(b);
+        }),
+        subjects: subjectList.sort((a, b) => a.subjectName.localeCompare(b.subjectName)),
+        termAverage,
+        termGrade: calculateMeanGrade(
+          subjectList.flatMap(s => s.cellsArr.map(c => ({ marks: c.marks, points: c.points })))
+        )
+      });
+    }
+
+    // Sort cards: most recent first
+    termCards.sort((a, b) => {
+      const an = parseInt(String(a.term).replace(/\D/g, '')) || 0;
+      const bn = parseInt(String(b.term).replace(/\D/g, '')) || 0;
+      if (an !== bn) return bn - an;
+      return (b.year || '').localeCompare(a.year || '');
+    });
+
+    // 4. Overall average
+    const allAvgs = termCards.flatMap(tc => tc.subjects.map(s => s.avg)).filter(v => v > 0);
+    const overallAverage = allAvgs.length > 0 ? allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length : 0;
+
+    // 5. KNEC aptitude — per stream average
+    const streamTotals = {};
+    allSubjectStats.forEach(s => {
+      if (!s.stream) return;
+      if (!streamTotals[s.stream]) streamTotals[s.stream] = { sum: 0, count: 0 };
+      streamTotals[s.stream].sum += s.avg * s.count;
+      streamTotals[s.stream].count += s.count;
+    });
+
+    const streamAverages = Object.entries(streamTotals).map(([stream, t]) => ({
+      stream,
+      avg: t.count > 0 ? t.sum / t.count : 0,
+      count: t.count
+    })).sort((a, b) => b.avg - a.avg);
+
+    const topStreams = streamAverages.slice(0, 2).map(s => s.stream);
+
+    // 6. Position summary — from provided positions map (per exam)
+    //    We'll show position per exam within each subject cell.
+    //    That's done in the UI, not here.
+
+    return {
+      termCards,
+      overallAverage,
+      streamAverages,
+      topStreams,
+      positionMap: positions || {}
+    };
+  };
+
+  // ==================== LOAD DETAILED REPORT ====================
+  const loadDetailedReport = async () => {
+    if (!reportStudentId) { alert('Please select a student'); return; }
+    setLoadingReport(true);
+    setApiError('');
+    try {
+      // 1. Load all results for this student
+      const res = await api.get(`/results?studentId=${reportStudentId}`);
+      const rawResults = res.data.results || [];
+
+      // 2. Enrich with exam metadata + recalculated grades
+      const enriched = rawResults.map(r => {
+        const exam = exams?.find(e => e.id === r.examId);
+        const hasMarks = r.marks !== null && r.marks !== undefined && r.marks !== '';
+        const student = students.find(s => s.id === reportStudentId);
+        const levelHint = getLevelHint(exam, student);
+        const gradeInfo = hasMarks
+          ? calculateGrade(
+              r.marks,
+              exam?.maxMarks || 100,
+              exam?.schoolCategory || schoolCategory,
+              levelHint
+            )
+          : { grade: '', points: 0 };
+        return {
+          ...r,
+          grade: gradeInfo.grade,
+          points: gradeInfo.points,
+          itemName: getItemName(r, exam),
+          examName: exam?.name || r.examName || 'Unknown',
+          examDate: exam?.date || r.examDate,
+          examType: exam?.type || '',
+          examTerm: exam?.term || '',
+          academicYear: exam?.academicYear || '',
+          levelHint
+        };
+      });
+
+      // 3. Fetch positions for each unique exam
+      const uniqueExamIds = [...new Set(enriched.map(r => r.examId).filter(Boolean))];
+      const positions = {};
+      for (const examId of uniqueExamIds) {
+        try {
+          const pRes = await api.get(`/exams/${examId}/positions`);
+          positions[examId] = pRes.data.positions || {};
+        } catch (_) { /* ignore */ }
+      }
+      setPositionsByExam(positions);
+
+      // 4. Build the report
+      const built = buildDetailedReport(enriched, positions);
+      const student = students.find(s => s.id === reportStudentId);
+      setReportData({
+        student,
+        ...built,
+        allEnriched: enriched
+      });
+    } catch (err) {
+      console.error('Failed to load report:', err);
+      setApiError('Failed to load detailed report');
+    } finally {
+      setLoadingReport(false);
+    }
+  };
+
+  // ==================== EXPORT REPORT TO CSV ====================
+  const exportReportCSV = () => {
+    if (!reportData) return;
+    const { student, termCards, overallAverage, streamAverages, topStreams } = reportData;
+
+    const lines = [];
+    lines.push(`Student Report — ${student.firstName} ${student.lastName} (${student.admissionNumber})`);
+    lines.push(`Overall Average: ${overallAverage.toFixed(2)}%`);
+    lines.push(`Likely to Thrive In: ${topStreams.join(', ') || 'N/A'}`);
+    lines.push('');
+
+    // Aptitude block
+    lines.push('KNEC Aptitude Breakdown');
+    lines.push('Stream,Average %,Subjects Count');
+    streamAverages.forEach(s => lines.push(`${s.stream},${s.avg.toFixed(2)},${s.count}`));
+    lines.push('');
+
+    // Terms
+    termCards.forEach(card => {
+      lines.push(`--- ${card.term} ${card.year} ---`);
+      const headers = ['Subject', ...card.examTypeColumns, 'Average', 'Trend'];
+      lines.push(headers.join(','));
+      card.subjects.forEach(s => {
+        const cells = card.examTypeColumns.map(t => s.cells[t]?.marks ?? '');
+        lines.push([s.subjectName, ...cells, s.avg.toFixed(2), s.trend].join(','));
+      });
+      lines.push(`Term Average,${card.termAverage.toFixed(2)},,,,,`);
+      lines.push('');
+    });
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `report_${student.admissionNumber}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
+
   // ==================== STUDENT VIEW SETUP ====================
   React.useEffect(() => {
     if (!isStudent) return;
@@ -12991,7 +13041,6 @@ const ResultsModule = ({
           return;
         }
       }
-
       if (propAdmissionNumber && propAdmissionNumber !== 'null') {
         setAdmissionNumber(propAdmissionNumber);
         const { enhancedResults, studentInfo } = await loadResultsWithAdmission(propAdmissionNumber);
@@ -13005,7 +13054,6 @@ const ResultsModule = ({
           return;
         }
       }
-
       if (user?.id) {
         try {
           const r = await api.get(`/students/by-user/${user.id}`);
@@ -13024,10 +13072,8 @@ const ResultsModule = ({
           }
         } catch (_) {}
       }
-
       setShowAdmissionModal(true);
     };
-
     run();
     return () => { if (!isStudent) hasLoadedStudentData.current = false; };
   }, [isStudent]);
@@ -13086,7 +13132,6 @@ const ResultsModule = ({
     }
   };
 
-  // ==================== STUDENT ADMISSION SUBMIT ====================
   const handleAdmissionSubmit = async () => {
     if (!admissionNumber) { setApiError('Please enter your admission number'); return; }
     setLoadingMyData(true);
@@ -13099,11 +13144,9 @@ const ResultsModule = ({
       }
       const student = studentRes.data.student;
       localStorage.setItem('studentAdmissionNumber', admissionNumber);
-
       if (user?.id && !student.userId) {
         try { await api.patch(`/students/${student.id}`, { userId: user.id }); } catch (_) {}
       }
-
       const { enhancedResults, studentInfo } = await loadResultsWithAdmission(admissionNumber);
       setMyResults(enhancedResults);
       setMyStudentRecord(studentInfo || student);
@@ -13131,6 +13174,24 @@ const ResultsModule = ({
     value: e.id, label: e.name,
     subLabel: `Date: ${new Date(e.date).toLocaleDateString()}`
   }));
+  const getReportStudentOptions = () => (students || [])
+    .filter(s => !reportClassId || s.classId === reportClassId)
+    .map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}`, subLabel: s.admissionNumber }));
+
+  const examTypeOptions = [
+    { value: '', label: 'All Types' },
+    { value: 'OPENER', label: 'Opener' },
+    { value: 'MIDTERM', label: 'Mid-Term' },
+    { value: 'ENDTERM', label: 'End Term' },
+    { value: 'CAT', label: 'CAT' },
+    { value: 'MOCK', label: 'Mock' },
+    { value: 'PRE_MOCK', label: 'Pre-Mock' },
+    { value: 'FINAL', label: 'Final Exam' },
+    { value: 'PRACTICAL', label: 'Practical' },
+    { value: 'PROJECT', label: 'Project' }
+  ];
+
+  const examTypeLabel = (t) => examTypeOptions.find(o => o.value === t)?.label || t;
 
   // ==================== FILTERS ====================
   React.useEffect(() => {
@@ -13181,11 +13242,9 @@ const ResultsModule = ({
       const exam = exams.find(e => e.id === selectedExam);
       if (!exam) { alert('Exam not found'); return; }
 
-      // Determine which grading scale applies for this exam
       const examLevelHint = getLevelHint(exam, null, exam.classId || selectedClass);
       const examFlavor = resolveGradingFlavor(schoolCategory, examLevelHint);
 
-      // ---- Gather students ----
       let studentList = [];
       const selectedStudentIds = exam.selectedStudents || [];
 
@@ -13227,7 +13286,6 @@ const ResultsModule = ({
         return;
       }
 
-      // ---- Fetch existing results ----
       let existingResults = [];
       try {
         const res = await api.get(`/results/exam/${selectedExam}`);
@@ -13247,7 +13305,6 @@ const ResultsModule = ({
         const hasMarks = existing?.marks !== undefined && existing?.marks !== null && existing?.marks !== '';
         const marks = hasMarks ? existing.marks : '';
 
-        // ✅ ALWAYS recalculate grade from marks — never use existing.grade
         const gradeInfo = hasMarks
           ? calculateGrade(marks, exam.maxMarks || 100, exam.schoolCategory || schoolCategory, examLevelHint)
           : { grade: '', points: 0 };
@@ -13297,7 +13354,6 @@ const ResultsModule = ({
 
       const examLevelHint = getLevelHint(exam, null, exam.classId || selectedClass);
 
-      // Fetch existing results once
       let existingByStudentId = {};
       try {
         const existingRes = await api.get(`/results/exam/${selectedExam}`);
@@ -13392,7 +13448,7 @@ const ResultsModule = ({
     }
   };
 
-  // ==================== LOAD STUDENT REPORT ====================
+  // ==================== LOAD STUDENT REPORT (PRINT) ====================
   const loadStudentReport = async (student) => {
     setLoading(true);
     try {
@@ -13649,6 +13705,15 @@ const ResultsModule = ({
   };
 
   // ============================================================
+  //  SHARED TREND ARROW
+  // ============================================================
+  const TrendArrow = ({ trend, size = 'sm' }) => {
+    if (trend === 'up')   return <span className={`text-green-600 ${size === 'lg' ? 'text-xl' : 'text-base'}`} title="Improved">▲</span>;
+    if (trend === 'down') return <span className={`text-red-600 ${size === 'lg' ? 'text-xl' : 'text-base'}`} title="Dropped">▼</span>;
+    return <span className="text-gray-400">■</span>;
+  };
+
+  // ============================================================
   //  STUDENT VIEW RENDER
   // ============================================================
   if (isStudent) {
@@ -13680,8 +13745,7 @@ const ResultsModule = ({
                 </div>
                 {apiError && (
                   <div className="bg-red-50 p-3 rounded-lg text-red-600 text-sm">
-                    <i className="fas fa-exclamation-circle mr-2"></i>
-                    {apiError}
+                    <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
                   </div>
                 )}
                 <button
@@ -13719,7 +13783,6 @@ const ResultsModule = ({
 
         {myStudentRecord ? (
           <div className="space-y-6">
-            {/* Profile banner */}
             <div className={`rounded-xl p-6 text-white ${isTVET ? 'bg-gradient-to-r from-purple-600 to-pink-600' : 'bg-gradient-to-r from-indigo-500 to-purple-600'}`}>
               <div className="flex items-center space-x-4">
                 <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center">
@@ -13730,35 +13793,14 @@ const ResultsModule = ({
                 <div>
                   <h3 className="text-2xl font-bold">{myStudentRecord.firstName} {myStudentRecord.lastName}</h3>
                   <p className="text-indigo-100">Admission: {myStudentRecord.admissionNumber}</p>
-                  <p className="text-indigo-200 text-sm mt-1">
-                    {isTVET ? (
-                      <>
-                        {myStudentRecord.program?.name || programs?.find(p => p.id === myStudentRecord.programId)?.name || 'No Program'}
-                        {myStudentRecord.currentModule && ` • ${myStudentRecord.currentModule}`}
-                        {myStudentRecord.currentYear && ` • Year ${myStudentRecord.currentYear}`}
-                      </>
-                    ) : isUniversity ? (
-                      <>
-                        {myStudentRecord.course?.name || courses?.find(c => c.id === myStudentRecord.courseId)?.name || 'No Course'}
-                        {myStudentRecord.currentYear && ` • Year ${myStudentRecord.currentYear}`}
-                        {myStudentRecord.currentSemester && ` • Sem ${myStudentRecord.currentSemester}`}
-                      </>
-                    ) : (
-                      <>
-                        {myStudentRecord.class?.name || classes?.find(c => c.id === myStudentRecord.classId)?.name || 'No Class'}
-                        {myStudentRecord.currentYear && ` • Year ${myStudentRecord.currentYear}`}
-                      </>
-                    )}
-                  </p>
                 </div>
               </div>
             </div>
 
-            {/* Summary cards */}
             {myResultsSummary && (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="bg-blue-50 p-4 rounded-lg text-center">
-                  <p className="text-sm text-blue-600">Total {isTVET ? 'Modules' : isUniversity ? 'Units' : 'Exams'}</p>
+                  <p className="text-sm text-blue-600">Total Exams</p>
                   <p className="text-2xl font-bold text-blue-700">{myResultsSummary.total}</p>
                 </div>
                 <div className="bg-green-50 p-4 rounded-lg text-center">
@@ -13776,45 +13818,7 @@ const ResultsModule = ({
               </div>
             )}
 
-            {/* Unit performance summary */}
-            {Object.keys(myUnitStats).length > 0 && (
-              <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-                <div className="px-6 py-4 bg-gray-50 border-b">
-                  <h3 className="font-semibold text-lg">
-                    {isTVET ? 'Module Performance' : isUniversity ? 'Unit Performance' : 'Subject Performance'}
-                  </h3>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-3 text-left">{isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject'}</th>
-                        <th className="px-4 py-3 text-left">Marks</th>
-                        <th className="px-4 py-3 text-left">Grade</th>
-                        <th className="px-4 py-3 text-left">Points</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {Object.values(myUnitStats).map((unit, idx) => (
-                        <tr key={idx} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 font-medium">{unit.name}</td>
-                          <td className="px-4 py-3">{unit.marks === '' || unit.marks === null ? '—' : unit.marks}</td>
-                          <td className="px-4 py-3">
-                            <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(unit.grade)}`}>
-                              {displayGrade(unit.grade, unit.marks)}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">{unit.points}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {/* Detailed results */}
-            {myResults.length > 0 ? (
+            {myResults.length > 0 && (
               <div className="bg-white rounded-xl shadow-sm overflow-hidden">
                 <div className="px-6 py-4 bg-gray-50 border-b">
                   <h3 className="font-semibold text-lg">Detailed Results</h3>
@@ -13852,15 +13856,8 @@ const ResultsModule = ({
                   </table>
                 </div>
               </div>
-            ) : (
-              <div className="bg-white p-12 rounded-xl shadow-sm text-center">
-                <i className="fas fa-file-alt text-6xl text-gray-300 mb-4"></i>
-                <p className="text-gray-500 text-lg">No results found for your admission number.</p>
-                <p className="text-sm text-gray-400 mt-2">Results will appear here once published.</p>
-              </div>
             )}
 
-            {/* Print all */}
             {myResults.length > 0 && (
               <div className="flex justify-end">
                 <button
@@ -14034,14 +14031,6 @@ const ResultsModule = ({
             )}
           </div>
         )}
-
-        {showStudentPrintModal && studentReportData && typeof StudentResultsPrintModal !== 'undefined' && (
-          <StudentResultsPrintModal
-            reportData={studentReportData}
-            onClose={() => { setShowStudentPrintModal(false); setStudentReportData(null); }}
-            currentSchool={currentSchool}
-          />
-        )}
       </div>
     );
   }
@@ -14051,18 +14040,275 @@ const ResultsModule = ({
   // ============================================================
   return (
     <div className="space-y-6">
-      {(loading || publishing || sendingMessages) && <div className="h-1 bg-indigo-600 animate-pulse fixed top-0 left-0 w-full z-50" />}
+      {(loading || publishing || sendingMessages || loadingReport) && <div className="h-1 bg-indigo-600 animate-pulse fixed top-0 left-0 w-full z-50" />}
       {apiError && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
           <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
         </div>
       )}
 
-      <h2 className="text-2xl font-bold">
-        {isUniversity ? '📚 Course Results' : isTVET ? '🔧 Program Results' : isSecondary ? '📖 Secondary Results' : isPrimary ? '🎯 Primary Results' : '📊 Results Management'}
-      </h2>
+      <div className="flex flex-wrap justify-between items-center gap-3">
+        <h2 className="text-2xl font-bold">
+          {isUniversity ? '📚 Course Results' : isTVET ? '🔧 Program Results' : isSecondary ? '📖 Secondary Results' : isPrimary ? '🎯 Primary Results' : '📊 Results Management'}
+        </h2>
 
-      {canViewAllResults && (
+        {canViewAllResults && (
+          <div className="flex items-center bg-gray-100 rounded-lg p-1 text-sm">
+            <button
+              onClick={() => setViewMode('marks')}
+              className={`px-4 py-1.5 rounded-md transition-colors ${
+                viewMode === 'marks' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <i className="fas fa-pen mr-1" />Marks Entry
+            </button>
+            <button
+              onClick={() => setViewMode('report')}
+              className={`px-4 py-1.5 rounded-md transition-colors ${
+                viewMode === 'report' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <i className="fas fa-chart-line mr-1" />Detailed Report
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ============================================================ */}
+      {/*  DETAILED REPORT VIEW                                         */}
+      {/* ============================================================ */}
+      {viewMode === 'report' && canViewAllResults && (
+        <>
+          {/* Filters */}
+          <div className="bg-white p-6 rounded-xl shadow-sm">
+            <h3 className="text-lg font-semibold mb-4">🔍 Report Filters</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <SearchableSelect
+                label="Class"
+                value={reportClassId}
+                onChange={(e) => { setReportClassId(e.target.value); setReportStudentId(''); }}
+                options={getClassOptions()}
+                placeholder="All classes"
+              />
+              <SearchableSelect
+                label="Student"
+                value={reportStudentId}
+                onChange={(e) => setReportStudentId(e.target.value)}
+                options={getReportStudentOptions()}
+                placeholder="Select student..."
+                disabled={!reportClassId}
+              />
+              <SearchableSelect
+                label="Exam Type"
+                value={reportExamTypeFilter}
+                onChange={(e) => setReportExamTypeFilter(e.target.value)}
+                options={examTypeOptions}
+                placeholder="All types"
+              />
+              <SearchableSelect
+                label="Term"
+                value={reportTermFilter}
+                onChange={(e) => setReportTermFilter(e.target.value)}
+                options={[
+                  { value: '', label: 'All Terms' },
+                  { value: 'Term 1', label: 'Term 1' },
+                  { value: 'Term 2', label: 'Term 2' },
+                  { value: 'Term 3', label: 'Term 3' }
+                ]}
+                placeholder="All terms"
+              />
+            </div>
+
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={loadDetailedReport}
+                disabled={!reportStudentId || loadingReport}
+                className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {loadingReport ? 'Loading...' : 'Load Report'}
+              </button>
+              {reportData && (
+                <>
+                  <button onClick={() => window.print()}
+                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center">
+                    <i className="fas fa-print mr-2" />Print
+                  </button>
+                  <button onClick={exportReportCSV}
+                    className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 flex items-center">
+                    <i className="fas fa-download mr-2" />CSV
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Report Body */}
+          {reportData && (
+            <div className="space-y-6">
+              {/* Header + Aptitude */}
+              <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+                <div className="bg-gradient-to-r from-indigo-500 to-purple-600 p-6 text-white">
+                  <div className="flex flex-wrap justify-between items-start gap-4">
+                    <div>
+                      <h3 className="text-2xl font-bold">
+                        {reportData.student.firstName} {reportData.student.lastName}
+                      </h3>
+                      <p className="text-indigo-100 font-mono mt-1">
+                        {reportData.student.admissionNumber}
+                      </p>
+                      <p className="text-indigo-200 text-sm mt-1">
+                        {classes.find(c => c.id === reportData.student.classId)?.name || 'No Class'}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm text-indigo-100">Overall Average</p>
+                      <p className="text-4xl font-bold">{reportData.overallAverage.toFixed(1)}%</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* KNEC Aptitude */}
+                {reportData.streamAverages.length > 0 && (
+                  <div className="p-6 border-b">
+                    <h4 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                      <i className="fas fa-brain text-purple-600"></i>
+                      KNEC Aptitude Analysis
+                    </h4>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                      {reportData.streamAverages.map(s => {
+                        const isTop = reportData.topStreams.includes(s.stream);
+                        return (
+                          <div key={s.stream} className={`p-3 rounded-lg border-2 text-center ${
+                            isTop ? 'border-purple-400 bg-purple-50' : 'border-gray-200 bg-gray-50'
+                          }`}>
+                            <p className="text-xs font-medium text-gray-600 uppercase">{s.stream}</p>
+                            <p className={`text-xl font-bold mt-1 ${isTop ? 'text-purple-700' : 'text-gray-700'}`}>
+                              {s.avg.toFixed(0)}%
+                            </p>
+                            {isTop && (
+                              <p className="text-xs text-purple-600 mt-1">⭐ Likely to thrive</p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {reportData.topStreams.length > 0 && (
+                      <div className="mt-4 p-3 bg-purple-50 rounded-lg">
+                        <p className="text-sm text-purple-800">
+                          <strong>Recommendation:</strong> This student shows strongest potential in{' '}
+                          <strong>{reportData.topStreams.join(' and ')}</strong>. 
+                          Consider encouraging further development in these areas.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Term Cards */}
+              {reportData.termCards.length === 0 ? (
+                <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+                  <i className="fas fa-file-alt text-6xl text-gray-300 mb-4"></i>
+                  <p className="text-gray-500">No results match the selected filters.</p>
+                </div>
+              ) : (
+                reportData.termCards.map((card, ci) => (
+                  <div key={ci} className="bg-white rounded-xl shadow-sm overflow-hidden">
+                    {/* Card header */}
+                    <div className="bg-gray-50 px-6 py-4 border-b flex justify-between items-center">
+                      <div>
+                        <h4 className="font-bold text-gray-800 text-lg">
+                          {card.term} {card.year && `(${card.year})`}
+                        </h4>
+                        <p className="text-xs text-gray-500">
+                          {card.subjects.length} subjects • {card.examTypeColumns.length} exam types
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-gray-500">Term Average</p>
+                        <p className="text-2xl font-bold text-indigo-600">{card.termAverage.toFixed(1)}%</p>
+                      </div>
+                    </div>
+
+                    {/* Horizontal table */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Subject</th>
+                            {card.examTypeColumns.map(type => (
+                              <th key={type} className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
+                                {examTypeLabel(type)}
+                              </th>
+                            ))}
+                            <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Average</th>
+                            <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Trend</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {card.subjects.map((s, si) => (
+                            <tr key={si} className="hover:bg-gray-50">
+                              <td className="px-4 py-3 font-medium">
+                                {s.subjectName}
+                                {s.stream && (
+                                  <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 uppercase">
+                                    {s.stream}
+                                  </span>
+                                )}
+                              </td>
+                              {card.examTypeColumns.map(type => {
+                                const cell = s.cells[type];
+                                return (
+                                  <td key={type} className="px-4 py-3 text-center">
+                                    {cell ? (
+                                      <div className="flex flex-col items-center">
+                                        <span className="font-semibold">{cell.marks}</span>
+                                        <span className={`mt-1 px-2 py-0.5 rounded-full text-[10px] ${getGradeColor(cell.grade)}`}>
+                                          {cell.grade || '—'}
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <span className="text-gray-300">—</span>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                              <td className="px-4 py-3 text-center font-bold text-indigo-700">
+                                {s.avg.toFixed(1)}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <TrendArrow trend={s.trend} size="lg" />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot className="bg-gray-50">
+                          <tr>
+                            <td colSpan={card.examTypeColumns.length + 1} className="px-4 py-3 font-semibold text-right">
+                              Term Average
+                            </td>
+                            <td className="px-4 py-3 text-center font-bold text-indigo-700">
+                              {card.termAverage.toFixed(1)}
+                            </td>
+                            <td className="px-4 py-3 text-center text-xs text-gray-500">
+                              Grade: <strong>{card.termGrade}</strong>
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ============================================================ */}
+      {/*  MARKS ENTRY VIEW                                             */}
+      {/* ============================================================ */}
+      {viewMode === 'marks' && canViewAllResults && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">🔍 Filter Results</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -14182,7 +14428,7 @@ const ResultsModule = ({
         </div>
       )}
 
-      {resultEntries.length > 0 && canViewAllResults && (
+      {viewMode === 'marks' && resultEntries.length > 0 && canViewAllResults && (
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="p-4 bg-gray-50 border-b flex flex-wrap gap-3 justify-between items-center">
             <div className="flex items-center space-x-2">
@@ -14214,7 +14460,7 @@ const ResultsModule = ({
                   disabled={loading || !selectedExam}
                   className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center disabled:opacity-50"
                 >
-                  <i className="fas fa-print mr-2"></i>Print All Results
+                  <i className="fas fa-print mr-2"></i>Print All
                 </button>
               )}
             </div>
@@ -14232,7 +14478,6 @@ const ResultsModule = ({
                   <th className="px-4 py-3 text-left">Grade</th>
                   <th className="px-4 py-3 text-left">Points</th>
                   {canAddResults && <th className="px-4 py-3 text-left">Absent</th>}
-                  <th className="px-4 py-3 text-left">Parents</th>
                   <th className="px-4 py-3 text-left">Actions</th>
                 </tr>
               </thead>
@@ -14291,38 +14536,13 @@ const ResultsModule = ({
                         </td>
                       )}
                       <td className="px-4 py-3">
-                        <div className="flex -space-x-1">
-                          {entry.parents?.slice(0, 3).map((p, i) => (
-                            <div key={i} className="w-6 h-6 bg-indigo-100 rounded-full border-2 border-white flex items-center justify-center text-xs font-medium text-indigo-600" title={`${p.User?.firstName} ${p.User?.lastName}`}>
-                              {p.User?.firstName?.charAt(0)}
-                            </div>
-                          ))}
-                          {entry.parents?.length > 3 && (
-                            <div className="w-6 h-6 bg-gray-100 rounded-full border-2 border-white flex items-center justify-center text-xs font-medium text-gray-600">
-                              +{entry.parents.length - 3}
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex space-x-2">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); loadStudentReport(entry); }}
-                            className="text-indigo-600 hover:text-indigo-900 p-2 hover:bg-indigo-50 rounded-lg transition-colors"
-                            title="View Student Report"
-                          >
-                            <i className="fas fa-file-alt"></i>
-                          </button>
-                          {canSendMessages && (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); handleSelectForMessage(entry.studentId, !selectedStudentsForMessage.includes(entry.studentId)); }}
-                              className={`p-2 rounded-lg transition-colors ${selectedStudentsForMessage.includes(entry.studentId) ? 'bg-indigo-100 text-indigo-600' : 'text-gray-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
-                              title="Select for messaging"
-                            >
-                              <i className="fas fa-envelope"></i>
-                            </button>
-                          )}
-                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); loadStudentReport(entry); }}
+                          className="text-indigo-600 hover:text-indigo-900 p-2 hover:bg-indigo-50 rounded-lg transition-colors"
+                          title="View Student Report"
+                        >
+                          <i className="fas fa-file-alt"></i>
+                        </button>
                       </td>
                     </tr>
                   ))
@@ -14460,268 +14680,509 @@ const ResultsModule = ({
     </div>
   );
 };
-
-// ==================== COMPLETELY FIXED PRINT MODAL - NO SUMMARY CARDS ====================
+// ============================================================
+//  STUDENT RESULTS PRINT MODAL — v2 (school name, logo, groups)
+// ============================================================
 const StudentResultsPrintModal = ({ reportData, onClose, currentSchool }) => {
-  
+
+  // ✅ No fake fallback — if name is missing, show generic
+  const schoolName = currentSchool?.name || 'School';
+  const schoolMotto = currentSchool?.motto || '';
+  const schoolLogo = currentSchool?.contact?.logo || '';
+  const schoolPhone = currentSchool?.contact?.phone || '';
+  const schoolEmail = currentSchool?.contact?.email || '';
+  const schoolAddress = currentSchool?.contact?.address || '';
+
+  const studentName = reportData?.student?.name || '—';
+  const admissionNo = reportData?.student?.admissionNumber || '—';
+  const results = reportData?.results || [];
+
+  // Group results by term + examType (fallback: single group)
+  const grouped = useMemo(() => {
+    const map = new Map();
+    results.forEach(r => {
+      const term = r.term || r.examTerm || 'Unspecified Term';
+      const type = (r.examType || 'OTHER').toUpperCase();
+      const key = `${term}||${type}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          key, term, examType: type,
+          subjects: [], totalMarks: 0, totalPoints: 0, count: 0
+        });
+      }
+      const g = map.get(key);
+      g.subjects.push(r);
+      g.totalMarks += parseFloat(r.marks) || 0;
+      g.totalPoints += parseFloat(r.points) || 0;
+      g.count += 1;
+    });
+    return Array.from(map.values()).map(g => ({
+      ...g,
+      average: g.count > 0 ? g.totalMarks / g.count : 0
+    })).sort((a, b) => {
+      const na = parseInt(String(a.term).replace(/\D/g, '')) || 0;
+      const nb = parseInt(String(b.term).replace(/\D/g, '')) || 0;
+      return na - nb;
+    });
+  }, [results]);
+
+  const overallAverage = (() => {
+    if (results.length === 0) return 0;
+    const total = results.reduce((s, r) => s + (parseFloat(r.marks) || 0), 0);
+    return total / results.length;
+  })();
+
+  const overallMeanGrade = (() => {
+    if (results.length === 0) return '—';
+    const totalPoints = results.reduce((s, r) => s + (parseFloat(r.points) || 0), 0);
+    const avgPts = totalPoints / results.length;
+    // Simple mean grade mapping
+    if (avgPts >= 11.5) return 'A';
+    if (avgPts >= 10.5) return 'A-';
+    if (avgPts >= 9.5)  return 'B+';
+    if (avgPts >= 8.5)  return 'B';
+    if (avgPts >= 7.5)  return 'B-';
+    if (avgPts >= 6.5)  return 'C+';
+    if (avgPts >= 5.5)  return 'C';
+    if (avgPts >= 4.5)  return 'C-';
+    if (avgPts >= 3.5)  return 'D+';
+    if (avgPts >= 2.5)  return 'D';
+    if (avgPts >= 1.5)  return 'D-';
+    return 'E';
+  })();
+
   const handlePrint = () => {
     const printWindow = window.open('', '_blank');
-    
-    const schoolName = currentSchool?.name || 'HARVARD UNIVERSITY';
-    const schoolLogo = currentSchool?.contact?.logo || '';
-    
+    const initials = schoolName.charAt(0) || 'S';
+
     printWindow.document.write(`
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Student Results - ${reportData.student.name}</title>
+          <title>Report Card — ${studentName}</title>
           <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { 
-              font-family: 'Arial', sans-serif; 
-              padding: 40px; 
+            body {
+              font-family: 'Georgia', 'Times New Roman', serif;
+              padding: 30px;
               background: white;
-              max-width: 1200px;
+              color: #111;
+              max-width: 1000px;
               margin: 0 auto;
             }
-            .header { 
-              text-align: center; 
-              margin-bottom: 30px; 
-              border-bottom: 2px solid #4f46e5; 
-              padding-bottom: 20px; 
+
+            /* ============ SCHOOL HEADER ============ */
+            .school-header {
+              display: flex;
+              align-items: center;
+              gap: 16px;
+              padding-bottom: 16px;
+              border-bottom: 3px double #4f46e5;
+              margin-bottom: 20px;
             }
-            .school-name { 
-              font-size: 32px; 
-              font-weight: bold; 
-              color: #4f46e5; 
-              margin-bottom: 5px; 
+            .school-logo {
+              width: 80px;
+              height: 80px;
+              border-radius: 50%;
+              background: #4f46e5;
+              color: white;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 36px;
+              font-weight: bold;
+              flex-shrink: 0;
+              overflow: hidden;
+              border: 3px solid #e0e7ff;
+            }
+            .school-logo img {
+              width: 100%;
+              height: 100%;
+              object-fit: cover;
+            }
+            .school-info {
+              flex: 1;
+            }
+            .school-name {
+              font-size: 26px;
+              font-weight: bold;
+              color: #4f46e5;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+            }
+            .school-motto {
+              font-style: italic;
+              color: #555;
+              font-size: 13px;
+              margin-top: 2px;
+            }
+            .school-contact {
+              font-size: 11px;
+              color: #666;
+              margin-top: 6px;
+            }
+
+            /* ============ REPORT TITLE ============ */
+            .report-title {
+              text-align: center;
+              font-size: 20px;
+              font-weight: bold;
+              letter-spacing: 3px;
+              margin: 20px 0;
               text-transform: uppercase;
             }
-            .school-motto { 
-              color: #666; 
-              font-size: 14px; 
-              margin-bottom: 5px; 
-            }
-            .report-title { 
-              font-size: 24px; 
-              font-weight: bold; 
-              margin: 20px 0; 
-              color: #333;
-            }
-            .student-info { 
-              background: #f9fafb; 
-              padding: 20px; 
-              border-radius: 8px; 
-              margin-bottom: 30px; 
+
+            /* ============ STUDENT BLOCK ============ */
+            .student-block {
+              display: grid;
+              grid-template-columns: 2fr 1fr;
+              gap: 20px;
+              background: #f9fafb;
               border: 1px solid #e5e7eb;
+              border-radius: 8px;
+              padding: 16px;
+              margin-bottom: 24px;
             }
-            .info-grid { 
-              display: grid; 
-              grid-template-columns: repeat(2, 1fr); 
-              gap: 20px; 
-            }
-            .label { 
-              color: #666; 
-              font-size: 12px; 
-              text-transform: uppercase; 
-              letter-spacing: 0.5px; 
+            .student-block .label {
+              font-size: 10px;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+              color: #666;
               font-weight: bold;
             }
-            .value { 
-              font-size: 18px; 
-              font-weight: bold; 
-              margin-top: 4px; 
+            .student-block .value {
+              font-size: 18px;
+              font-weight: bold;
               color: #111;
+              margin-top: 4px;
             }
-            table { 
-              width: 100%; 
-              border-collapse: collapse; 
-              margin: 20px 0; 
+            .student-block .sub-value {
+              font-size: 13px;
+              color: #555;
+              margin-top: 4px;
+            }
+
+            /* ============ TERM GROUP ============ */
+            .term-group {
+              margin-bottom: 24px;
+              page-break-inside: avoid;
+            }
+            .term-header {
+              background: #4f46e5;
+              color: white;
+              padding: 10px 16px;
+              border-radius: 6px 6px 0 0;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+            }
+            .term-header h3 {
+              font-size: 16px;
+              font-weight: bold;
+              letter-spacing: 1px;
+            }
+            .term-header .exam-type {
+              background: rgba(255,255,255,0.25);
+              padding: 3px 10px;
+              border-radius: 12px;
+              font-size: 11px;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+            }
+
+            /* ============ SUBJECT TABLE ============ */
+            table {
+              width: 100%;
+              border-collapse: collapse;
               border: 1px solid #e5e7eb;
+              border-top: none;
             }
-            th { 
-              background: #4f46e5; 
-              color: white; 
-              padding: 12px; 
-              text-align: left; 
-              font-size: 14px; 
-              font-weight: 600;
+            thead th {
+              background: #f3f4f6;
+              padding: 8px 12px;
+              text-align: left;
+              font-size: 11px;
+              font-weight: bold;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              color: #555;
+              border-bottom: 1px solid #e5e7eb;
             }
-            td { 
-              padding: 12px; 
-              border-bottom: 1px solid #e5e7eb; 
+            thead th.center { text-align: center; }
+            tbody td {
+              padding: 9px 12px;
+              font-size: 13px;
+              border-bottom: 1px solid #f3f4f6;
             }
-            tr:last-child td {
-              border-bottom: none;
+            tbody tr:last-child td { border-bottom: none; }
+            tbody td.center { text-align: center; }
+            tbody td.bold { font-weight: bold; }
+            tbody td.subject-name { font-weight: 500; }
+
+            .grade-pill {
+              display: inline-block;
+              padding: 2px 10px;
+              border-radius: 12px;
+              font-size: 11px;
+              font-weight: bold;
             }
-            .footer { 
-              margin-top: 60px; 
-              display: grid; 
-              grid-template-columns: 1fr 1fr; 
-              gap: 40px; 
+            .grade-green  { background: #d1fae5; color: #065f46; }
+            .grade-blue   { background: #dbeafe; color: #1e40af; }
+            .grade-yellow { background: #fef3c7; color: #92400e; }
+            .grade-orange { background: #ffedd5; color: #9a3412; }
+            .grade-red    { background: #fee2e2; color: #991b1b; }
+            .grade-gray   { background: #f3f4f6; color: #374151; }
+
+            /* ============ TERM SUMMARY ============ */
+            .term-summary {
+              background: #eef2ff;
+              padding: 10px 16px;
+              display: flex;
+              justify-content: space-between;
+              font-size: 13px;
+              font-weight: bold;
+              border: 1px solid #e5e7eb;
+              border-top: none;
+              border-radius: 0 0 6px 6px;
             }
-            .signature-line { 
-              border-top: 1px solid #333; 
-              padding-top: 8px; 
-              margin-top: 20px; 
-              font-size: 14px;
-              color: #333;
+
+            /* ============ OVERALL BLOCK ============ */
+            .overall-block {
+              display: grid;
+              grid-template-columns: 1fr 1fr 1fr;
+              gap: 12px;
+              background: linear-gradient(to right, #eef2ff, #f5f3ff);
+              border: 2px solid #4f46e5;
+              border-radius: 8px;
+              padding: 18px;
+              margin: 24px 0;
+              text-align: center;
             }
-            .signature-label {
-              font-size: 12px;
+            .overall-block .label {
+              font-size: 10px;
+              text-transform: uppercase;
               color: #666;
-              margin-bottom: 5px;
+              letter-spacing: 1px;
+              font-weight: bold;
             }
-            .stamp { 
-              text-align: right; 
-              margin-top: 30px; 
+            .overall-block .value {
+              font-size: 26px;
+              font-weight: bold;
+              color: #4f46e5;
+              margin-top: 6px;
             }
-            .stamp-box { 
-              border: 2px solid #333; 
-              width: 150px; 
-              height: 80px; 
-              float: right; 
-              text-align: center; 
-              padding-top: 30px; 
-              font-size: 12px;
-              color: #666;
+
+            /* ============ SIGNATURES ============ */
+            .signatures {
+              display: grid;
+              grid-template-columns: 1fr 1fr 1fr;
+              gap: 40px;
+              margin-top: 50px;
+              padding-top: 20px;
             }
-            .generated-date { 
-              text-align: center; 
-              margin-top: 20px; 
-              font-size: 11px; 
-              color: #999; 
-              clear: both;
+            .signature {
+              text-align: center;
             }
-            /* REMOVED ALL SUMMARY CARD STYLES */
+            .signature-line {
+              border-top: 1px solid #333;
+              padding-top: 6px;
+              margin-top: 30px;
+              font-size: 11px;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              color: #555;
+            }
+
+            /* ============ FOOTER ============ */
+            .footer {
+              text-align: center;
+              font-size: 10px;
+              color: #999;
+              margin-top: 30px;
+              padding-top: 15px;
+              border-top: 1px solid #e5e7eb;
+            }
+
+            /* ============ PRINT ============ */
+            @media print {
+              body { padding: 15px; }
+              .school-header { border-bottom: 3px double #4f46e5 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              .term-header { background: #4f46e5 !important; color: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              thead th { background: #f3f4f6 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              .overall-block { background: #eef2ff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              .grade-pill { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              .page-break { page-break-before: always; }
+            }
           </style>
         </head>
         <body>
-          <div class="header">
-            ${schoolLogo ? `<img src="${schoolLogo}" style="max-height: 80px; margin-bottom: 10px;">` : ''}
-            <div class="school-name">${schoolName}</div>
-            <div class="school-motto">${currentSchool?.motto || 'Excellence in Education'}</div>
-            <div class="report-title">STUDENT RESULTS REPORT</div>
-          </div>
-          
-          <div class="student-info">
-            <div class="info-grid">
-              <div>
-                <div class="label">STUDENT NAME</div>
-                <div class="value">${reportData.student.name}</div>
-              </div>
-              <div>
-                <div class="label">ADMISSION NUMBER</div>
-                <div class="value">${reportData.student.admissionNumber}</div>
+
+          <!-- ================= SCHOOL HEADER ================= -->
+          <div class="school-header">
+            <div class="school-logo">
+              ${schoolLogo
+                ? `<img src="${schoolLogo}" alt="${schoolName}" onerror="this.style.display='none'; this.parentElement.textContent='${initials}';">`
+                : initials
+              }
+            </div>
+            <div class="school-info">
+              <div class="school-name">${schoolName}</div>
+              ${schoolMotto ? `<div class="school-motto">"${schoolMotto}"</div>` : ''}
+              <div class="school-contact">
+                ${[schoolAddress, schoolPhone, schoolEmail].filter(Boolean).join(' • ')}
               </div>
             </div>
           </div>
-          
-          <table>
-            <thead>
-              <tr>
-                <th>Exam</th>
-                <th>Subject/Unit</th>
-                <th>Marks</th>
-                <th>Grade</th>
-                <th>Points</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${reportData.results.map(result => `
-                <tr>
-                  <td style="font-weight: 500;">${result.examName || 'MID'}</td>
-                  <td>${result.itemName || result.unitName || result.subjectName || 'N/A'}</td>
-                  <td style="font-weight: bold;">${result.marks}</td>
-                  <td>
-                    <span style="
-                      display: inline-block;
-                      padding: 4px 12px;
-                      border-radius: 20px;
-                      font-size: 12px;
-                      font-weight: bold;
-                      background: ${result.grade === 'A' ? '#d1fae5' : 
-                                  result.grade === 'B' ? '#dbeafe' : 
-                                  result.grade === 'C' ? '#fef3c7' : 
-                                  result.grade === 'D' ? '#ffedd5' : 
-                                  result.grade === 'E' ? '#fee2e2' : '#f3f4f6'};
-                      color: ${result.grade === 'A' ? '#065f46' : 
-                              result.grade === 'B' ? '#1e40af' : 
-                              result.grade === 'C' ? '#92400e' : 
-                              result.grade === 'D' ? '#9a3412' : 
-                              result.grade === 'E' ? '#991b1b' : '#374151'};
-                    ">
-                      ${result.displayGrade || result.grade}
-                    </span>
-                  </td>
-                  <td>${result.points}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-          
-          <!-- NO SUMMARY CARDS - COMPLETELY REMOVED -->
-          
+
+          <!-- ================= TITLE ================= -->
+          <div class="report-title">Student Report Card</div>
+
+          <!-- ================= STUDENT BLOCK ================= -->
+          <div class="student-block">
+            <div>
+              <div class="label">Student Name</div>
+              <div class="value">${studentName}</div>
+            </div>
+            <div style="text-align: right;">
+              <div class="label">Admission Number</div>
+              <div class="value">${admissionNo}</div>
+              ${reportData?.student?.className ? `<div class="sub-value">${reportData.student.className}</div>` : ''}
+            </div>
+          </div>
+
+          <!-- ================= TERM GROUPS ================= -->
+          ${grouped.length === 0 ? `
+            <div style="text-align:center; padding: 40px; color: #999;">
+              No results available to print.
+            </div>
+          ` : grouped.map(g => `
+            <div class="term-group">
+              <div class="term-header">
+                <h3>${g.term}</h3>
+                <span class="exam-type">${g.examType}</span>
+              </div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Subject / Unit</th>
+                    <th class="center">Marks</th>
+                    <th class="center">Grade</th>
+                    <th class="center">Points</th>
+                    <th>Remarks</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${g.subjects.map(s => {
+                    const color = getGradeColorClass(s.grade);
+                    return `
+                      <tr>
+                        <td class="subject-name">${s.itemName || s.unitName || s.subjectName || 'N/A'}</td>
+                        <td class="center bold">${s.isAbsent ? 'ABS' : (s.marks ?? '—')}</td>
+                        <td class="center">
+                          <span class="grade-pill grade-${color}">${s.displayGrade || s.grade || '—'}</span>
+                        </td>
+                        <td class="center">${s.points ?? '—'}</td>
+                        <td>${s.remarks || '—'}</td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+              <div class="term-summary">
+                <span>Term Average: ${g.average.toFixed(1)}%</span>
+                <span>${g.count} subject(s)</span>
+              </div>
+            </div>
+          `).join('')}
+
+          <!-- ================= OVERALL ================= -->
+          <div class="overall-block">
+            <div>
+              <div class="label">Overall Average</div>
+              <div class="value">${overallAverage.toFixed(1)}%</div>
+            </div>
+            <div>
+              <div class="label">Mean Grade</div>
+              <div class="value">${overallMeanGrade}</div>
+            </div>
+            <div>
+              <div class="label">Total Subjects</div>
+              <div class="value">${results.length}</div>
+            </div>
+          </div>
+
+          <!-- ================= SIGNATURES ================= -->
+          <div class="signatures">
+            <div class="signature">
+              <div class="signature-line">Class Teacher</div>
+            </div>
+            <div class="signature">
+              <div class="signature-line">Head of Department</div>
+            </div>
+            <div class="signature">
+              <div class="signature-line">Principal / Head Teacher</div>
+            </div>
+          </div>
+
+          <!-- ================= FOOTER ================= -->
           <div class="footer">
-            <div>
-              <div class="signature-label">Class Teacher's Signature</div>
-              <div class="signature-line"></div>
-              <p style="margin-top: 5px; font-size: 12px; color: #666;">Date: _______________</p>
-            </div>
-            <div>
-              <div class="signature-label">Principal's Signature</div>
-              <div class="signature-line"></div>
-              <p style="margin-top: 5px; font-size: 12px; color: #666;">Date: _______________</p>
-            </div>
+            This is a computer-generated report. For enquiries, contact ${schoolName}.
+            <br>
+            Generated on ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}
           </div>
-          
-          <div class="stamp">
-            <div class="stamp-box">
-              OFFICIAL STAMP
-            </div>
-          </div>
-          
-          <div class="generated-date">
-            Generated on: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}
-          </div>
+
         </body>
       </html>
     `);
-    
+
     printWindow.document.close();
-    setTimeout(() => printWindow.print(), 250);
+    setTimeout(() => printWindow.print(), 300);
+  };
+
+  // Helper — map grade to color class
+  const getGradeColorClass = (grade) => {
+    if (!grade) return 'gray';
+    const g = String(grade).toUpperCase();
+    if (['A', 'A-', 'EE', 'DISTINCTION'].includes(g)) return 'green';
+    if (['B+', 'B', 'B-', 'ME', 'CREDIT'].includes(g)) return 'blue';
+    if (['C+', 'C', 'C-', 'AE', 'MERIT'].includes(g)) return 'yellow';
+    if (['D+', 'D', 'D-', 'BE', 'PASS'].includes(g)) return 'orange';
+    if (['E', 'NI', 'FAIL'].includes(g)) return 'red';
+    return 'gray';
   };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl p-6 max-h-[90vh] overflow-auto">
-        <div className="flex justify-between items-center mb-4 no-print">
-          <h2 className="text-2xl font-bold">Print Results</h2>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-2xl font-bold">Print Report Card</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
             <i className="fas fa-times"></i>
           </button>
         </div>
-        
-        <div className="border rounded-lg p-6 mb-4 bg-gray-50">
-          <p className="text-center text-gray-600">
-            Ready to print results for <span className="font-bold">{reportData.student.name}</span>
+
+        <div className="border rounded-lg p-6 bg-gray-50 mb-4">
+          <p className="text-center text-gray-700">
+            Ready to print report card for
+            <span className="font-bold block mt-1 text-indigo-700">{studentName}</span>
           </p>
-          <p className="text-center text-sm text-gray-500 mt-1">
-            Admission: {reportData.student.admissionNumber} • {reportData.results.length} exam(s)
+          <p className="text-center text-sm text-gray-500 mt-2">
+            Admission: {admissionNo} • {results.length} result(s)
           </p>
+          {currentSchool?.name && (
+            <p className="text-center text-xs text-gray-400 mt-1">
+              from {currentSchool.name}
+            </p>
+          )}
         </div>
-        
-        <div className="flex justify-end space-x-2 no-print">
-          <button
-            onClick={handlePrint}
-            className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 flex items-center"
-          >
-            <i className="fas fa-print mr-2"></i>Print
+
+        <div className="flex justify-end gap-2">
+          <button onClick={handlePrint}
+            className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2">
+            <i className="fas fa-print"></i>Print
           </button>
-          <button
-            onClick={onClose}
-            className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
-          >
+          <button onClick={onClose}
+            className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
             Close
           </button>
         </div>
@@ -14729,197 +15190,685 @@ const StudentResultsPrintModal = ({ reportData, onClose, currentSchool }) => {
     </div>
   );
 };
-// ==================== ALL RESULTS PRINT MODAL ====================
-const AllResultsPrintModal = ({ printData, onClose, currentSchool, isUniversity, isTVET, isRegularSchool }) => {
-  
+
+// ============================================================
+//  ALL RESULTS PRINT MODAL — v2
+//  School header, logo fallback, rankings, grade distribution
+// ============================================================
+const AllResultsPrintModal = ({
+  printData,
+  onClose,
+  currentSchool,
+  isUniversity,
+  isTVET,
+  isRegularSchool
+}) => {
+  // ---- School info (clean fallbacks) ----
+  const schoolName = currentSchool?.name || 'School';
+  const schoolMotto = currentSchool?.motto || '';
+  const schoolLogo = currentSchool?.contact?.logo || '';
+  const schoolPhone = currentSchool?.contact?.phone || '';
+  const schoolEmail = currentSchool?.contact?.email || '';
+  const schoolAddress = currentSchool?.contact?.address || '';
+  const schoolInitials = (schoolName.charAt(0) || 'S').toUpperCase();
+
+  // ---- Exam + results ----
+  const exam = printData?.exam || {};
+  const results = Array.isArray(printData?.results) ? printData.results : [];
+  const summary = printData?.summary || {};
+
+  const examDate = exam.date
+    ? new Date(exam.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+    : '—';
+
+  const itemLabel = isUniversity ? 'Unit' : isTVET ? 'Module' : 'Subject';
+
+  // ============================================================
+  //  RANKING — sort by marks (desc), skip absentees
+  // ============================================================
+  const rankedResults = useMemo(() => {
+    const scored = results
+      .filter(r => !r.isAbsent && r.marks !== '' && r.marks !== null && r.marks !== undefined && !isNaN(parseFloat(r.marks)))
+      .map(r => ({ ...r, _marksNum: parseFloat(r.marks) }))
+      .sort((a, b) => b._marksNum - a._marksNum);
+
+    // Assign ranks with tie handling
+    let rank = 1;
+    let prevMarks = null;
+    const ranked = scored.map((r, idx) => {
+      if (prevMarks !== null && r._marksNum < prevMarks) rank = idx + 1;
+      prevMarks = r._marksNum;
+      return { ...r, _rank: rank };
+    });
+
+    // Absentees go at the end
+    const absentees = results
+      .filter(r => r.isAbsent)
+      .map(r => ({ ...r, _rank: '—' }));
+
+    return [...ranked, ...absentees];
+  }, [results]);
+
+  const totalRanked = rankedResults.filter(r => r._rank !== '—').length;
+
+  // ============================================================
+  //  GRADE DISTRIBUTION — count per grade
+  // ============================================================
+  const gradeDistribution = useMemo(() => {
+    const dist = {};
+    results.forEach(r => {
+      if (r.isAbsent) {
+        dist['ABS'] = (dist['ABS'] || 0) + 1;
+        return;
+      }
+      const g = r.grade || r.displayGrade || '—';
+      dist[g] = (dist[g] || 0) + 1;
+    });
+    return Object.entries(dist).sort((a, b) => b[1] - a[1]);
+  }, [results]);
+
+  // ============================================================
+  //  STATS — highest, lowest, pass rate
+  // ============================================================
+  const stats = useMemo(() => {
+    const scored = results
+      .filter(r => !r.isAbsent && r.marks !== '' && r.marks !== null && !isNaN(parseFloat(r.marks)))
+      .map(r => parseFloat(r.marks));
+
+    if (scored.length === 0) {
+      return { highest: 0, lowest: 0, passRate: 0, passCount: 0, totalScored: 0 };
+    }
+
+    const highest = Math.max(...scored);
+    const lowest = Math.min(...scored);
+    const maxMarks = exam.maxMarks || 100;
+    const passThreshold = maxMarks * 0.5;
+    const passCount = scored.filter(s => s >= passThreshold).length;
+    const passRate = (passCount / scored.length) * 100;
+
+    return { highest, lowest, passRate, passCount, totalScored: scored.length };
+  }, [results, exam.maxMarks]);
+
+  // ============================================================
+  //  GRADE COLOR HELPER
+  // ============================================================
+  const gradeColorClass = (grade) => {
+    if (!grade || grade === '—' || grade === 'ABS') return 'gray';
+    const g = String(grade).toUpperCase();
+    if (['A', 'A-', 'EE', 'DISTINCTION'].includes(g)) return 'green';
+    if (['B+', 'B', 'B-', 'ME', 'CREDIT'].includes(g)) return 'blue';
+    if (['C+', 'C', 'C-', 'AE', 'MERIT'].includes(g)) return 'yellow';
+    if (['D+', 'D', 'D-', 'BE', 'PASS'].includes(g)) return 'orange';
+    if (['E', 'NI', 'FAIL'].includes(g)) return 'red';
+    return 'gray';
+  };
+
+  // ============================================================
+  //  PRINT
+  // ============================================================
   const handlePrint = () => {
     const printWindow = window.open('', '_blank');
-    
-    const schoolName = currentSchool?.name || 'School Name';
-    const schoolLogo = currentSchool?.contact?.logo || '';
-    const examDate = printData.exam.date ? new Date(printData.exam.date).toLocaleDateString() : 'N/A';
-    
-    printWindow.document.write(`
+    if (!printWindow) {
+      alert('Please allow pop-ups to print');
+      return;
+    }
+
+    const html = `
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Exam Results - ${printData.exam.name}</title>
+          <meta charset="utf-8" />
+          <title>Exam Results — ${exam.name || 'Exam'}</title>
           <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: 'Arial', sans-serif; padding: 40px; background: white; }
-            .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #4f46e5; padding-bottom: 20px; }
-            .school-name { font-size: 28px; font-weight: bold; color: #4f46e5; margin-bottom: 5px; }
-            .school-motto { color: #666; font-size: 14px; margin-bottom: 5px; }
-            .report-title { font-size: 24px; font-weight: bold; margin: 20px 0; }
-            .exam-info { background: #f9fafb; padding: 20px; border-radius: 8px; margin-bottom: 30px; }
-            .info-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-            .label { color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-            .value { font-size: 18px; font-weight: bold; margin-top: 4px; }
-            table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 14px; }
-            th { background: #4f46e5; color: white; padding: 12px; text-align: left; font-size: 14px; }
-            td { padding: 10px; border-bottom: 1px solid #ddd; }
-            .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin: 30px 0; }
-            .summary-card { background: #f3f4f6; padding: 15px; border-radius: 8px; text-align: center; }
-            .summary-label { color: #666; font-size: 12px; text-transform: uppercase; }
-            .summary-value { font-size: 24px; font-weight: bold; color: #4f46e5; margin-top: 5px; }
-            .footer { margin-top: 40px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
-            .signature-line { border-top: 1px solid #333; padding-top: 5px; margin-top: 20px; }
-            .stamp { text-align: right; margin-top: 30px; }
-            .stamp-box { border: 2px solid #333; width: 150px; height: 80px; float: right; text-align: center; padding-top: 30px; font-size: 12px; }
-            .generated-date { text-align: center; margin-top: 20px; font-size: 11px; color: #999; }
-            .grade-badge { display: inline-block; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: bold; }
-            .grade-A, .grade-Exceeding { background: #d1fae5; color: #065f46; }
-            .grade-B, .grade-Meeting { background: #dbeafe; color: #1e40af; }
-            .grade-C, .grade-Approaching { background: #fef3c7; color: #92400e; }
-            .grade-D, .grade-Below { background: #ffedd5; color: #9a3412; }
-            .grade-E, .grade-Needs { background: #fee2e2; color: #991b1b; }
+            body {
+              font-family: 'Georgia', 'Times New Roman', serif;
+              padding: 28px;
+              background: white;
+              color: #111;
+              max-width: 1100px;
+              margin: 0 auto;
+            }
+
+            /* ============ SCHOOL HEADER ============ */
+            .school-header {
+              display: flex;
+              align-items: center;
+              gap: 16px;
+              padding-bottom: 16px;
+              border-bottom: 3px double #4f46e5;
+              margin-bottom: 18px;
+            }
+            .school-logo {
+              width: 80px;
+              height: 80px;
+              border-radius: 50%;
+              background: #4f46e5;
+              color: white;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 36px;
+              font-weight: bold;
+              flex-shrink: 0;
+              overflow: hidden;
+              border: 3px solid #e0e7ff;
+            }
+            .school-logo img {
+              width: 100%;
+              height: 100%;
+              object-fit: cover;
+            }
+            .school-info { flex: 1; }
+            .school-name {
+              font-size: 26px;
+              font-weight: bold;
+              color: #4f46e5;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+            }
+            .school-motto {
+              font-style: italic;
+              color: #555;
+              font-size: 13px;
+              margin-top: 2px;
+            }
+            .school-contact {
+              font-size: 11px;
+              color: #666;
+              margin-top: 6px;
+            }
+
+            /* ============ REPORT TITLE ============ */
+            .report-title {
+              text-align: center;
+              font-size: 20px;
+              font-weight: bold;
+              letter-spacing: 3px;
+              margin: 18px 0;
+              text-transform: uppercase;
+            }
+            .report-subtitle {
+              text-align: center;
+              font-size: 13px;
+              color: #666;
+              margin-bottom: 18px;
+            }
+
+            /* ============ EXAM INFO BLOCK ============ */
+            .exam-block {
+              display: grid;
+              grid-template-columns: 2fr 1fr 1fr;
+              gap: 16px;
+              background: #f9fafb;
+              border: 1px solid #e5e7eb;
+              border-radius: 8px;
+              padding: 14px 18px;
+              margin-bottom: 20px;
+            }
+            .exam-block .label {
+              font-size: 10px;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+              color: #666;
+              font-weight: bold;
+            }
+            .exam-block .value {
+              font-size: 16px;
+              font-weight: bold;
+              color: #111;
+              margin-top: 4px;
+            }
+
+            /* ============ STAT CARDS ============ */
+            .stat-grid {
+              display: grid;
+              grid-template-columns: repeat(4, 1fr);
+              gap: 10px;
+              margin-bottom: 20px;
+            }
+            .stat-card {
+              background: #eef2ff;
+              border: 1px solid #c7d2fe;
+              border-radius: 8px;
+              padding: 12px;
+              text-align: center;
+            }
+            .stat-card .label {
+              font-size: 10px;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+              color: #4338ca;
+              font-weight: bold;
+            }
+            .stat-card .value {
+              font-size: 22px;
+              font-weight: bold;
+              color: #1e1b4b;
+              margin-top: 6px;
+            }
+
+            /* ============ GRADE DISTRIBUTION ============ */
+            .grade-dist {
+              background: #fffbeb;
+              border: 1px solid #fde68a;
+              border-radius: 8px;
+              padding: 12px 16px;
+              margin-bottom: 20px;
+            }
+            .grade-dist h4 {
+              font-size: 12px;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+              color: #92400e;
+              margin-bottom: 10px;
+            }
+            .grade-chips {
+              display: flex;
+              flex-wrap: wrap;
+              gap: 8px;
+            }
+            .grade-chip {
+              display: inline-flex;
+              align-items: center;
+              gap: 6px;
+              padding: 4px 12px;
+              border-radius: 16px;
+              font-size: 12px;
+              font-weight: bold;
+              background: white;
+              border: 1px solid #e5e7eb;
+            }
+            .grade-chip .count {
+              background: #1e1b4b;
+              color: white;
+              padding: 1px 7px;
+              border-radius: 10px;
+              font-size: 11px;
+              font-weight: bold;
+            }
+
+            /* ============ RESULTS TABLE ============ */
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              border: 1px solid #e5e7eb;
+            }
+            thead th {
+              background: #4f46e5;
+              color: white;
+              padding: 10px 12px;
+              text-align: left;
+              font-size: 11px;
+              font-weight: bold;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+            }
+            thead th.center { text-align: center; }
+            tbody td {
+              padding: 9px 12px;
+              font-size: 13px;
+              border-bottom: 1px solid #f3f4f6;
+            }
+            tbody tr:nth-child(even) { background: #fafafa; }
+            tbody tr:last-child td { border-bottom: none; }
+            tbody td.center { text-align: center; }
+            tbody td.bold { font-weight: bold; }
+            tbody td.rank {
+              font-weight: bold;
+              color: #4f46e5;
+              text-align: center;
+            }
+            tbody tr.rank-1 { background: #fef3c7 !important; }
+            tbody tr.rank-2 { background: #f3f4f6 !important; }
+            tbody tr.rank-3 { background: #ffedd5 !important; }
+
+            .grade-pill {
+              display: inline-block;
+              padding: 2px 10px;
+              border-radius: 12px;
+              font-size: 11px;
+              font-weight: bold;
+            }
+            .grade-green  { background: #d1fae5; color: #065f46; }
+            .grade-blue   { background: #dbeafe; color: #1e40af; }
+            .grade-yellow { background: #fef3c7; color: #92400e; }
+            .grade-orange { background: #ffedd5; color: #9a3412; }
+            .grade-red    { background: #fee2e2; color: #991b1b; }
+            .grade-gray   { background: #f3f4f6; color: #374151; }
+
+            .absent-pill {
+              background: #fee2e2;
+              color: #991b1b;
+              padding: 2px 10px;
+              border-radius: 12px;
+              font-size: 11px;
+              font-weight: bold;
+            }
+
+            /* ============ SIGNATURES ============ */
+            .signatures {
+              display: grid;
+              grid-template-columns: 1fr 1fr 1fr;
+              gap: 40px;
+              margin-top: 50px;
+              padding-top: 20px;
+            }
+            .signature { text-align: center; }
+            .signature-line {
+              border-top: 1px solid #333;
+              padding-top: 6px;
+              margin-top: 30px;
+              font-size: 11px;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              color: #555;
+            }
+
+            /* ============ FOOTER ============ */
+            .footer {
+              text-align: center;
+              font-size: 10px;
+              color: #999;
+              margin-top: 30px;
+              padding-top: 15px;
+              border-top: 1px solid #e5e7eb;
+            }
+
             @media print {
-              body { padding: 20px; }
-              th { background: #4f46e5 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              body { padding: 12px; }
+              thead th { background: #4f46e5 !important; color: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              .school-header { border-bottom: 3px double #4f46e5 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              .school-logo { background: #4f46e5 !important; color: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              .stat-card { background: #eef2ff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              .grade-dist { background: #fffbeb !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              .grade-pill, .absent-pill { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              tbody tr.rank-1 { background: #fef3c7 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              tbody tr.rank-2 { background: #f3f4f6 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              tbody tr.rank-3 { background: #ffedd5 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              thead { display: table-header-group; }
+              tr { page-break-inside: avoid; }
             }
           </style>
         </head>
         <body>
-          <div class="header">
-            ${schoolLogo ? `<img src="${schoolLogo}" style="max-height: 80px; margin-bottom: 10px;">` : ''}
-            <div class="school-name">${schoolName}</div>
-            <div class="school-motto">${currentSchool?.motto || ''}</div>
-            <div class="report-title">EXAM RESULTS SUMMARY</div>
-          </div>
-          
-          <div class="exam-info">
-            <div class="info-grid">
-              <div>
-                <div class="label">Exam Name</div>
-                <div class="value">${printData.exam.name}</div>
-              </div>
-              <div>
-                <div class="label">Date</div>
-                <div class="value">${examDate}</div>
-              </div>
-              <div>
-                <div class="label">${isUniversity ? 'Unit' : isTVET ? 'Module' : 'Subject'}</div>
-                <div class="value">${printData.exam.itemName}</div>
+
+          <!-- ================= SCHOOL HEADER ================= -->
+          <div class="school-header">
+            <div class="school-logo">
+              ${schoolLogo
+                ? `<img src="${schoolLogo}" alt="${schoolName}"
+                    onerror="this.style.display='none'; this.parentElement.textContent='${schoolInitials}';">`
+                : schoolInitials
+              }
+            </div>
+            <div class="school-info">
+              <div class="school-name">${schoolName}</div>
+              ${schoolMotto ? `<div class="school-motto">"${schoolMotto}"</div>` : ''}
+              <div class="school-contact">
+                ${[schoolAddress, schoolPhone, schoolEmail].filter(Boolean).join(' • ')}
               </div>
             </div>
           </div>
-          
+
+          <!-- ================= TITLE ================= -->
+          <div class="report-title">Examination Results Summary</div>
+          <div class="report-subtitle">Ranked by Marks — Highest to Lowest</div>
+
+          <!-- ================= EXAM INFO ================= -->
+          <div class="exam-block">
+            <div>
+              <div class="label">Examination</div>
+              <div class="value">${exam.name || '—'}</div>
+            </div>
+            <div>
+              <div class="label">${itemLabel}</div>
+              <div class="value">${exam.itemName || '—'}</div>
+            </div>
+            <div>
+              <div class="label">Date</div>
+              <div class="value">${examDate}</div>
+            </div>
+          </div>
+
+          <!-- ================= STAT CARDS ================= -->
+          <div class="stat-grid">
+            <div class="stat-card">
+              <div class="label">Total Students</div>
+              <div class="value">${summary.totalStudents ?? results.length}</div>
+            </div>
+            <div class="stat-card">
+              <div class="label">Average</div>
+              <div class="value">${(parseFloat(summary.average) || 0).toFixed(1)}%</div>
+            </div>
+            <div class="stat-card">
+              <div class="label">Highest</div>
+              <div class="value">${stats.highest}</div>
+            </div>
+            <div class="stat-card">
+              <div class="label">Pass Rate</div>
+              <div class="value">${stats.passRate.toFixed(0)}%</div>
+            </div>
+          </div>
+
+          <!-- ================= GRADE DISTRIBUTION ================= -->
+          ${gradeDistribution.length > 0 ? `
+            <div class="grade-dist">
+              <h4>Grade Distribution</h4>
+              <div class="grade-chips">
+                ${gradeDistribution.map(([grade, count]) => `
+                  <span class="grade-chip">
+                    <span class="grade-pill grade-${gradeColorClass(grade)}">${grade}</span>
+                    <span class="count">${count}</span>
+                  </span>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- ================= RESULTS TABLE ================= -->
           <table>
             <thead>
               <tr>
-                <th>#</th>
-                <th>Admission</th>
+                <th class="center" style="width: 60px;">Rank</th>
+                <th style="width: 130px;">Admission</th>
                 <th>Student Name</th>
-                <th>Marks</th>
-                <th>Grade</th>
-                <th>Points</th>
-                <th>Status</th>
+                <th class="center" style="width: 80px;">Marks</th>
+                <th class="center" style="width: 100px;">Grade</th>
+                <th class="center" style="width: 70px;">Points</th>
               </tr>
             </thead>
             <tbody>
-              ${printData.results.map((result, index) => `
+              ${rankedResults.length === 0 ? `
                 <tr>
-                  <td>${index + 1}</td>
-                  <td>${result.admissionNumber}</td>
-                  <td>${result.studentName}</td>
-                  <td>${result.isAbsent ? 'ABS' : result.marks}</td>
-                  <td>
-                    <span class="grade-badge grade-${result.grade.replace(/[^A-Za-z]/g, '')}">
-                      ${result.displayGrade}
-                    </span>
+                  <td colspan="6" class="center" style="padding: 30px; color: #999;">
+                    No results available.
                   </td>
-                  <td>${result.points}</td>
-                  <td>${result.isAbsent ? 'Absent' : 'Present'}</td>
                 </tr>
-              `).join('')}
+              ` : rankedResults.map(r => {
+                const rankClass = r._rank === 1 ? 'rank-1' : r._rank === 2 ? 'rank-2' : r._rank === 3 ? 'rank-3' : '';
+                const gradeClass = gradeColorClass(r.grade || r.displayGrade);
+                return `
+                  <tr class="${rankClass}">
+                    <td class="rank">${r._rank === '—' ? '—' : `#${r._rank}`}</td>
+                    <td class="bold">${r.admissionNumber || '—'}</td>
+                    <td>${r.studentName || '—'}</td>
+                    <td class="center bold">
+                      ${r.isAbsent
+                        ? '<span class="absent-pill">ABSENT</span>'
+                        : (r.marks ?? '—')}
+                    </td>
+                    <td class="center">
+                      ${r.isAbsent
+                        ? '<span class="absent-pill">—</span>'
+                        : `<span class="grade-pill grade-${gradeClass}">${r.displayGrade || r.grade || '—'}</span>`}
+                    </td>
+                    <td class="center">${r.isAbsent ? '—' : (r.points ?? '—')}</td>
+                  </tr>
+                `;
+              }).join('')}
             </tbody>
           </table>
-          
-          <div class="summary-grid">
-            <div class="summary-card">
-              <div class="summary-label">Total Students</div>
-              <div class="summary-value">${printData.summary.totalStudents}</div>
+
+          <!-- ================= SIGNATURES ================= -->
+          <div class="signatures">
+            <div class="signature">
+              <div class="signature-line">Class Teacher</div>
             </div>
-            <div class="summary-card">
-              <div class="summary-label">Total Marks</div>
-              <div class="summary-value">${printData.summary.totalMarks}</div>
+            <div class="signature">
+              <div class="signature-line">Examinations Officer</div>
             </div>
-            <div class="summary-card">
-              <div class="summary-label">Average</div>
-              <div class="summary-value">${printData.summary.average}%</div>
-            </div>
-            <div class="summary-card">
-              <div class="summary-label">Mean Grade</div>
-              <div class="summary-value">${printData.summary.meanGrade}</div>
+            <div class="signature">
+              <div class="signature-line">Principal / Head Teacher</div>
             </div>
           </div>
-          
+
+          <!-- ================= FOOTER ================= -->
           <div class="footer">
-            <div>
-              <div class="signature-line">Examiner's Signature</div>
-              <p style="margin-top: 5px; font-size: 12px;">Date: _______________</p>
-            </div>
-            <div>
-              <div class="signature-line">Principal's Signature</div>
-              <p style="margin-top: 5px; font-size: 12px;">Date: _______________</p>
-            </div>
+            This is a computer-generated summary. For enquiries, contact ${schoolName}.
+            <br>
+            Generated on ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}
+            <br>
+            Total Ranked: ${totalRanked} of ${results.length}
           </div>
-          
-          <div class="stamp">
-            <div class="stamp-box">
-              OFFICIAL STAMP
-            </div>
-          </div>
-          
-          <div class="generated-date">
-            Generated on: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}
-          </div>
+
         </body>
       </html>
-    `);
-    
+    `;
+
+    printWindow.document.open();
+    printWindow.document.write(html);
     printWindow.document.close();
-    setTimeout(() => printWindow.print(), 250);
+
+    // Wait for images (logo) to load, then print
+    setTimeout(() => {
+      printWindow.focus();
+      printWindow.print();
+    }, 400);
   };
 
+  // ============================================================
+  //  PREVIEW MODAL
+  // ============================================================
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl p-6 max-h-[90vh] overflow-auto">
-        <div className="flex justify-between items-center mb-4 no-print">
-          <h2 className="text-2xl font-bold">Print All Results</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
-            <i className="fas fa-times"></i>
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-auto">
+
+        {/* Header */}
+        <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center z-10">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-800">
+              <i className="fas fa-print text-indigo-600 mr-2"></i>
+              Print All Results
+            </h2>
+            <p className="text-sm text-gray-500 mt-1">
+              {exam.name || 'Exam'} — {results.length} students
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 p-2">
+            <i className="fas fa-times text-xl"></i>
           </button>
         </div>
-        
-        <div className="border rounded-lg p-6 mb-4 bg-gray-50">
-          <p className="text-center text-gray-600">
-            Ready to print all results for <span className="font-bold">{printData.exam.name}</span>
-          </p>
-          <p className="text-center text-sm text-gray-500 mt-1">
-            {printData.exam.itemName} • {printData.summary.totalStudents} students • Average: {printData.summary.average}%
-          </p>
+
+        {/* Preview card */}
+        <div className="p-6 space-y-4">
+
+          {/* School info preview */}
+          <div className="flex items-center gap-4 bg-indigo-50 p-4 rounded-lg border border-indigo-100">
+            {schoolLogo ? (
+              <img
+                src={schoolLogo}
+                alt={schoolName}
+                className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-sm"
+                onError={(e) => {
+                  e.target.style.display = 'none';
+                  e.target.parentElement.querySelector('.logo-fallback')?.style.setProperty('display', 'flex');
+                }}
+              />
+            ) : null}
+            <div
+              className="w-16 h-16 rounded-full bg-indigo-600 text-white flex items-center justify-center text-2xl font-bold border-2 border-white shadow-sm logo-fallback"
+              style={{ display: schoolLogo ? 'none' : 'flex' }}
+            >
+              {schoolInitials}
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-indigo-800">{schoolName}</h3>
+              {schoolMotto && <p className="text-sm italic text-gray-600">"{schoolMotto}"</p>}
+              {(schoolPhone || schoolEmail || schoolAddress) && (
+                <p className="text-xs text-gray-500 mt-1">
+                  {[schoolAddress, schoolPhone, schoolEmail].filter(Boolean).join(' • ')}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Stats preview */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center">
+              <p className="text-[10px] uppercase tracking-wide text-gray-500 font-bold">Total Students</p>
+              <p className="text-xl font-bold text-gray-800 mt-1">{summary.totalStudents ?? results.length}</p>
+            </div>
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center">
+              <p className="text-[10px] uppercase tracking-wide text-gray-500 font-bold">Average</p>
+              <p className="text-xl font-bold text-gray-800 mt-1">{(parseFloat(summary.average) || 0).toFixed(1)}%</p>
+            </div>
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center">
+              <p className="text-[10px] uppercase tracking-wide text-gray-500 font-bold">Highest</p>
+              <p className="text-xl font-bold text-gray-800 mt-1">{stats.highest}</p>
+            </div>
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center">
+              <p className="text-[10px] uppercase tracking-wide text-gray-500 font-bold">Pass Rate</p>
+              <p className="text-xl font-bold text-gray-800 mt-1">{stats.passRate.toFixed(0)}%</p>
+            </div>
+          </div>
+
+          {/* Grade distribution preview */}
+          {gradeDistribution.length > 0 && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+              <p className="text-[10px] uppercase tracking-wide text-yellow-800 font-bold mb-2">Grade Distribution</p>
+              <div className="flex flex-wrap gap-2">
+                {gradeDistribution.map(([grade, count]) => (
+                  <span key={grade} className="inline-flex items-center gap-1.5 bg-white border border-gray-200 px-3 py-1 rounded-full text-xs font-medium">
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      gradeColorClass(grade) === 'green' ? 'bg-green-100 text-green-800' :
+                      gradeColorClass(grade) === 'blue' ? 'bg-blue-100 text-blue-800' :
+                      gradeColorClass(grade) === 'yellow' ? 'bg-yellow-100 text-yellow-800' :
+                      gradeColorClass(grade) === 'orange' ? 'bg-orange-100 text-orange-800' :
+                      gradeColorClass(grade) === 'red' ? 'bg-red-100 text-red-800' :
+                      'bg-gray-100 text-gray-800'
+                    }`}>{grade}</span>
+                    <span className="text-gray-700 font-bold">{count}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Info note */}
+          <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-sm text-indigo-800">
+            <i className="fas fa-info-circle mr-2"></i>
+            Ready to print <strong>{results.length}</strong> result(s) for <strong>{exam.name}</strong>.
+            The printout will include the school header, ranked table, grade distribution, and signatures.
+          </div>
         </div>
-        
-        <div className="flex justify-end space-x-2 no-print">
-          <button
-            onClick={handlePrint}
-            className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 flex items-center"
-          >
-            <i className="fas fa-print mr-2"></i>Print
+
+        {/* Footer actions */}
+        <div className="sticky bottom-0 bg-gray-50 border-t px-6 py-4 flex justify-end gap-2">
+          <button onClick={onClose}
+            className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
+            Cancel
           </button>
-          <button
-            onClick={onClose}
-            className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
-          >
-            Close
+          <button onClick={handlePrint}
+            className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2">
+            <i className="fas fa-print"></i>
+            Print
           </button>
         </div>
       </div>
     </div>
   );
 };
-
 // ==================== TIMETABLE MODULE — MULTI-TYPE (Class / Tuition / Extra / Remedial) ====================
 const TimetableModule = ({
   timetable, setTimetable,
@@ -26948,30 +27897,487 @@ const AccountingModule = ({ payments, expenses, dateRange, setDateRange, showInc
   );
 };
 
-// ==================== OTHER INCOME MODULE WITH SEARCHABLE SELECTS ====================
-const OtherIncomeModule = ({ payments, setPayments, dateRange, setDateRange, user }) => {
+// ============================================================================
+// OtherIncomeModule.jsx
+// Works for ALL school categories: ECDE, Primary, JSS, Secondary, TVET,
+// Special Needs, International, Mixed, Boarding, Day, etc.
+// ============================================================================
+
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import api from '../api'; // adjust to your project's api path
+
+// ============================================================================
+// SEARCHABLE SELECT (defined OUTSIDE — prevents focus loss on re-render)
+// ============================================================================
+const OtherIncomeSearchableSelect = React.memo(({
+  label,
+  value,
+  onChange,
+  options,
+  placeholder,
+  disabled,
+  required,
+  error,
+  className,
+}) => {
+  const [search, setSearch] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef(null);
+  const inputRef = useRef(null);
+  const onChangeRef = useRef(onChange);
+
+  useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
+
+  const filteredOptions = useMemo(() => {
+    if (!search.trim()) return options;
+    const s = search.toLowerCase();
+    return options.filter(opt =>
+      opt.label?.toLowerCase().includes(s) ||
+      opt.subLabel?.toLowerCase().includes(s) ||
+      opt.value?.toString().toLowerCase().includes(s)
+    );
+  }, [options, search]);
+
+  const selectedOption = useMemo(
+    () => options.find(opt => opt.value === value),
+    [options, value]
+  );
+
+  useEffect(() => {
+    if (selectedOption) setSearch(selectedOption.label);
+    else if (!value) setSearch('');
+  }, [selectedOption, value]);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSelect = (selectedValue) => {
+    onChangeRef.current({ target: { value: selectedValue } });
+    const selected = options.find(opt => opt.value === selectedValue);
+    setSearch(selected ? selected.label : '');
+    setIsOpen(false);
+  };
+
+  const handleInputChange = (e) => {
+    setSearch(e.target.value);
+    setIsOpen(true);
+    if (e.target.value === '') onChangeRef.current({ target: { value: '' } });
+  };
+
+  const handleClear = (e) => {
+    e.stopPropagation();
+    onChangeRef.current({ target: { value: '' } });
+    setSearch('');
+    setIsOpen(false);
+    inputRef.current?.focus();
+  };
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      {label && (
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          {label}
+          {required && <span className="text-red-500 ml-1">*</span>}
+        </label>
+      )}
+      <div className="relative">
+        <input
+          ref={inputRef}
+          type="text"
+          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
+            disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
+          } ${error ? 'border-red-400' : 'border-gray-300'} ${className || ''}`}
+          value={search}
+          onChange={handleInputChange}
+          onFocus={() => setIsOpen(true)}
+          placeholder={placeholder || ''}
+          disabled={disabled}
+          autoComplete="off"
+        />
+        {value && !disabled && (
+          <button
+            type="button"
+            onClick={handleClear}
+            className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
+        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+          <svg
+            className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </div>
+      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+      {isOpen && !disabled && (
+        <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
+          {filteredOptions.length > 0 ? (
+            filteredOptions.map((opt) => (
+              <div
+                key={opt.value}
+                className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 ${
+                  opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
+                }`}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handleSelect(opt.value)}
+              >
+                <div className="font-medium">{opt.label}</div>
+                {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+              </div>
+            ))
+          ) : (
+            <div className="px-3 py-4 text-center text-gray-500 text-sm">
+              {search.trim() ? 'No results found' : 'Type to search...'}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
+OtherIncomeSearchableSelect.displayName = 'OtherIncomeSearchableSelect';
+
+// ============================================================================
+// SCHOOL CATEGORY PRESETS
+// Every school category has its own defaults. Override per-school in config.
+// ============================================================================
+const SCHOOL_CATEGORY_PRESETS = {
+  ECDE: {
+    label: 'ECDE (Pre-Primary)',
+    incomeCategories: [
+      'Donation',
+      'Parent Contribution',
+      'Feeding Programme Support',
+      'Learning Materials Donation',
+      'Church/Religious Support',
+      'NGO Support',
+      'Government Capitation',
+      'Fundraising (Harambee)',
+      'Rental Income',
+      'Other'
+    ]
+  },
+  PRIMARY: {
+    label: 'Primary School',
+    incomeCategories: [
+      'Donation',
+      'Grant',
+      'Fundraising (Harambee)',
+      'Alumni Contribution',
+      'Church/Religious Support',
+      'NGO Support',
+      'Government Capitation',
+      'CDF Bursary',
+      'Rental Income',
+      'Interest Income',
+      'Sale of Assets',
+      'Farm/Agricultural Income',
+      'Other'
+    ]
+  },
+  JSS: {
+    label: 'Junior Secondary School',
+    incomeCategories: [
+      'Donation',
+      'Government Capitation',
+      'CDF Bursary',
+      'NG-CDF Support',
+      'County Government Support',
+      'Fundraising (Harambee)',
+      'Alumni Contribution',
+      'NGO Support',
+      'Church/Religious Support',
+      'Rental Income',
+      'Interest Income',
+      'Sale of Assets',
+      'Farm/Agricultural Income',
+      'Other'
+    ]
+  },
+  SECONDARY: {
+    label: 'Secondary School',
+    incomeCategories: [
+      'Donation',
+      'Government Capitation',
+      'CDF Bursary',
+      'NG-CDF Support',
+      'County Bursary',
+      'Fundraising (Harambee)',
+      'Alumni Contribution',
+      'NGO Support',
+      'Church/Religious Support',
+      'Rental Income',
+      'Interest Income',
+      'Sale of Assets',
+      'Farm/Agricultural Income',
+      'Boarding Income',
+      'Other'
+    ]
+  },
+  TVET: {
+    label: 'TVET / Vocational College',
+    incomeCategories: [
+      'Donation',
+      'Government Grant',
+      'HELB Support',
+      'Industry Partnership Income',
+      'Fundraising',
+      'Alumni Contribution',
+      'NGO Support',
+      'Production Unit Income',
+      'Rental Income',
+      'Interest Income',
+      'Sale of Assets',
+      'Short Course Fees',
+      'Other'
+    ]
+  },
+  SPECIAL_NEEDS: {
+    label: 'Special Needs School',
+    incomeCategories: [
+      'Donation',
+      'Government Grant',
+      'NGO Support',
+      'Church/Religious Support',
+      'Foundation Grant',
+      'Parent Contribution',
+      'Fundraising',
+      'Assistive Devices Donation',
+      'Rental Income',
+      'Interest Income',
+      'Other'
+    ]
+  },
+  INTERNATIONAL: {
+    label: 'International School',
+    incomeCategories: [
+      'Donation',
+      'Grant',
+      'Endowment',
+      'Alumni Gift',
+      'Corporate Sponsorship',
+      'Foundation Grant',
+      'Fundraiser',
+      'Rental Income',
+      'Investment Income',
+      'Sale of Assets',
+      'Other'
+    ]
+  },
+  MIXED: {
+    label: 'Mixed (Primary + JSS + Secondary)',
+    incomeCategories: [
+      'Donation',
+      'Government Capitation',
+      'CDF Bursary',
+      'NG-CDF Support',
+      'County Support',
+      'Fundraising (Harambee)',
+      'Alumni Contribution',
+      'NGO Support',
+      'Church/Religious Support',
+      'Rental Income',
+      'Interest Income',
+      'Sale of Assets',
+      'Farm/Agricultural Income',
+      'Boarding Income',
+      'Other'
+    ]
+  }
+};
+
+// ============================================================================
+// COUNTRY PRESETS (currency, locale, phone rules)
+// ============================================================================
+const COUNTRY_PRESETS = {
+  KE: {
+    currency: 'KES',
+    locale: 'en-KE',
+    phoneLabel: 'Phone Number',
+    phonePlaceholder: '0712345678',
+    phonePattern: /^(?:\+?254|0)[17]\d{8}$/
+  },
+  UG: {
+    currency: 'UGX',
+    locale: 'en-UG',
+    phoneLabel: 'Mobile Money Number',
+    phonePlaceholder: '+256700000000',
+    phonePattern: /^(?:\+?256|0)7\d{8}$/
+  },
+  TZ: {
+    currency: 'TZS',
+    locale: 'en-TZ',
+    phoneLabel: 'Mobile Money Number',
+    phonePlaceholder: '+255700000000',
+    phonePattern: /^(?:\+?255|0)[67]\d{8}$/
+  },
+  NG: {
+    currency: 'NGN',
+    locale: 'en-NG',
+    phoneLabel: 'Phone Number',
+    phonePlaceholder: '+2348000000000',
+    phonePattern: /^(?:\+?234|0)[789]\d{9}$/
+  },
+  ZA: {
+    currency: 'ZAR',
+    locale: 'en-ZA',
+    phoneLabel: 'Phone Number',
+    phonePlaceholder: '+27821234567',
+    phonePattern: /^(?:\+?27|0)[678]\d{8}$/
+  },
+  US: {
+    currency: 'USD',
+    locale: 'en-US',
+    phoneLabel: 'Phone',
+    phonePlaceholder: '(555) 123-4567',
+    phonePattern: /^(?:\+?1)?[\s.-]?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}$/
+  },
+  GB: {
+    currency: 'GBP',
+    locale: 'en-GB',
+    phoneLabel: 'Phone',
+    phonePlaceholder: '07123 456789',
+    phonePattern: /^(?:\+?44|0)7\d{9}$/
+  },
+  DEFAULT: {
+    currency: 'KES',
+    locale: 'en-KE',
+    phoneLabel: 'Phone Number',
+    phonePlaceholder: '0712345678',
+    phonePattern: null
+  }
+};
+
+// ============================================================================
+// DEFAULT PAYMENT METHODS
+// ============================================================================
+const DEFAULT_PAYMENT_METHODS = [
+  { value: 'CASH',   label: '💵 Cash',          enabled: true },
+  { value: 'MPESA',  label: '📱 M-Pesa',         enabled: true },
+  { value: 'BANK',   label: '🏦 Bank Transfer',  enabled: true },
+  { value: 'CARD',   label: '💳 Card',           enabled: true },
+  { value: 'CHEQUE', label: '📄 Cheque',         enabled: true },
+  { value: 'OTHER',  label: '📦 Other',          enabled: true }
+];
+
+// ============================================================================
+// BUILD EFFECTIVE CONFIG (school + country + school category)
+// ============================================================================
+function buildConfig(school) {
+  const s = school || {};
+
+  // Country preset
+  const countryKey = (s.country || 'KE').toUpperCase();
+  const countryPreset = COUNTRY_PRESETS[countryKey] || COUNTRY_PRESETS.DEFAULT;
+
+  // School category preset
+  const categoryKey = (s.schoolCategory || 'MIXED').toUpperCase();
+  const categoryPreset =
+    SCHOOL_CATEGORY_PRESETS[categoryKey] ||
+    SCHOOL_CATEGORY_PRESETS.MIXED;
+
+  // Payment methods
+  const paymentMethods = (s.paymentMethods && s.paymentMethods.length > 0)
+    ? s.paymentMethods
+    : DEFAULT_PAYMENT_METHODS;
+
+  // Income categories (school override > category preset > generic fallback)
+  const incomeCategories =
+    (s.incomeCategories && s.incomeCategories.length > 0)
+      ? s.incomeCategories
+      : categoryPreset.incomeCategories;
+
+  // Method labels (short display names)
+  const methodLabels = {
+    CASH: 'Cash',
+    MPESA: countryKey === 'KE' ? 'M-Pesa' : 'Mobile Money',
+    BANK: 'Bank Transfer',
+    CARD: 'Card',
+    CHEQUE: countryKey === 'US' ? 'Check' : 'Cheque',
+    OTHER: 'Other',
+    ...(s.methodLabels || {})
+  };
+
+  return {
+    // School identity
+    schoolId: s.id || s.schoolId || null,
+    schoolName: s.name || s.schoolName || 'School',
+    schoolCategory: categoryKey,
+    schoolCategoryLabel: categoryPreset.label,
+
+    // Country / currency
+    country: countryKey,
+    currency: s.currency || countryPreset.currency,
+    locale: s.locale || countryPreset.locale,
+    phoneLabel: s.phoneLabel || countryPreset.phoneLabel,
+    phonePlaceholder: s.phonePlaceholder || countryPreset.phonePlaceholder,
+    phonePattern: s.phonePattern !== undefined ? s.phonePattern : countryPreset.phonePattern,
+
+    // Payment methods + toggles
+    paymentMethods,
+    enableMpesa:  s.enableMpesa  !== undefined ? s.enableMpesa  : paymentMethods.some(p => p.value === 'MPESA'),
+    enableBank:   s.enableBank   !== undefined ? s.enableBank   : paymentMethods.some(p => p.value === 'BANK'),
+    enableCard:   s.enableCard   !== undefined ? s.enableCard   : paymentMethods.some(p => p.value === 'CARD'),
+    enableCheque: s.enableCheque !== undefined ? s.enableCheque : paymentMethods.some(p => p.value === 'CHEQUE'),
+
+    // Categories + labels
+    incomeCategories,
+    methodLabels
+  };
+}
+
+// ============================================================================
+// OTHER INCOME MODULE
+// ============================================================================
+const OtherIncomeModule = ({
+  payments,
+  setPayments,
+  dateRange,
+  setDateRange,
+  user,
+  school
+}) => {
+  const cfg = useMemo(() => buildConfig(school), [school]);
+
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [incomeList, setIncomeList] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [formErrors, setFormErrors] = useState({});
   const [summary, setSummary] = useState({
     totalIncome: 0,
     byCategory: {},
     byMethod: {}
   });
 
-  // Determine user permissions
-  const canAdd = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
+  // ---- Permissions ----
+  const canAdd = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT', 'BURSAR'].includes(user?.role);
   const canDelete = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
-  const canView = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT', 'DEPUTY_PRINCIPAL'].includes(user?.role);
+  const canView = ['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT', 'DEPUTY_PRINCIPAL', 'BURSAR'].includes(user?.role);
 
-  const [incomeForm, setIncomeForm] = useState({
-    amount: 0,
-    paymentMethod: 'CASH',
+  // ---- Empty form ----
+  const emptyForm = useMemo(() => ({
+    amount: '',
+    paymentMethod: cfg.paymentMethods[0]?.value || 'CASH',
     transactionId: '',
     notes: '',
     date: new Date().toISOString().split('T')[0],
-    incomeCategory: 'Donation',
+    incomeCategory: cfg.incomeCategories[0] || 'Other',
     description: '',
     payer: '',
     mpesaCode: '',
@@ -26981,351 +28387,219 @@ const OtherIncomeModule = ({ payments, setPayments, dateRange, setDateRange, use
     cardLast4: '',
     cardApprovalCode: '',
     chequeNumber: '',
-    chequeBank: ''
-  });
+    chequeBank: '',
+    currency: cfg.currency
+  }), [cfg]);
 
-  // ==================== SEARCHABLE SELECT COMPONENT ====================
-  const SearchableSelect = ({ label, value, onChange, options, placeholder, disabled, required, className }) => {
-    const [search, setSearch] = useState('');
-    const [isOpen, setIsOpen] = useState(false);
-    const dropdownRef = useRef(null);
-    const inputRef = useRef(null);
+  const [incomeForm, setIncomeForm] = useState(emptyForm);
+  useEffect(() => { setIncomeForm(emptyForm); }, [emptyForm]);
 
-    const filteredOptions = useMemo(() => {
-      if (!search.trim()) return options;
-      const searchLower = search.toLowerCase();
-      return options.filter(opt => 
-        opt.label?.toLowerCase().includes(searchLower) ||
-        opt.subLabel?.toLowerCase().includes(searchLower) ||
-        opt.value?.toString().toLowerCase().includes(searchLower)
-      );
-    }, [options, search]);
-
-    const selectedOption = options.find(opt => opt.value === value);
-
-    useEffect(() => {
-      const handleClickOutside = (event) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-          setIsOpen(false);
-          if (selectedOption) {
-            setSearch(selectedOption.label);
-          } else {
-            setSearch('');
-          }
-        }
-      };
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [selectedOption]);
-
-    const handleSelect = (selectedValue) => {
-      onChange({ target: { value: selectedValue } });
-      const selected = options.find(opt => opt.value === selectedValue);
-      setSearch(selected ? selected.label : '');
-      setIsOpen(false);
-      setTimeout(() => {
-        if (inputRef.current) {
-          inputRef.current.focus();
-        }
-      }, 0);
-    };
-
-    const handleInputChange = (e) => {
-      const newValue = e.target.value;
-      setSearch(newValue);
-      setIsOpen(true);
-      if (newValue === '') {
-        onChange({ target: { value: '' } });
-      }
-    };
-
-    const handleFocus = () => {
-      setIsOpen(true);
-      if (selectedOption && !search) {
-        setSearch(selectedOption.label);
-      }
-    };
-
-    const handleBlur = (e) => {
-      const relatedTarget = e.relatedTarget;
-      if (dropdownRef.current && dropdownRef.current.contains(relatedTarget)) {
-        return;
-      }
-      setTimeout(() => {
-        if (document.activeElement !== inputRef.current) {
-          setIsOpen(false);
-          if (selectedOption) {
-            setSearch(selectedOption.label);
-          } else {
-            setSearch('');
-          }
-        }
-      }, 150);
-    };
-
-    const handleClear = (e) => {
-      e.stopPropagation();
-      onChange({ target: { value: '' } });
-      setSearch('');
-      setIsOpen(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
-    };
-
-    return (
-      <div className="relative" ref={dropdownRef}>
-        {label && (
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-        )}
-        <div className="relative">
-          <input
-            ref={inputRef}
-            type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
-            } ${className || ''}`}
-            value={search}
-            onChange={handleInputChange}
-            onFocus={handleFocus}
-            onBlur={handleBlur}
-            placeholder=""
-            disabled={disabled}
-            autoComplete="off"
-          />
-          {value && !disabled && (
-            <button
-              type="button"
-              onClick={handleClear}
-              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-        </div>
-        {isOpen && !disabled && (
-          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-            {filteredOptions.length > 0 ? (
-              filteredOptions.map((opt) => (
-                <div
-                  key={opt.value || Math.random().toString()}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
-                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
-                  }`}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => handleSelect(opt.value)}
-                >
-                  <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
-                </div>
-              ))
-            ) : (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {search.trim() ? 'No results found' : 'Type to search...'}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
+  // ---- Currency formatter (school-aware) ----
+  const formatCurrency = (amount, currencyOverride) => {
+    try {
+      return new Intl.NumberFormat(cfg.locale, {
+        style: 'currency',
+        currency: currencyOverride || cfg.currency,
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2
+      }).format(amount || 0);
+    } catch {
+      return `${currencyOverride || cfg.currency} ${Number(amount || 0).toLocaleString()}`;
+    }
   };
 
-  // ==================== INPUT FIELD ====================
-  const InputField = ({ label, type, value, onChange, placeholder, required, disabled, min, step, textarea, rows, maxLength }) => {
+  // ---- Filter payment methods by school config ----
+  const availablePaymentMethods = useMemo(() => {
+    return cfg.paymentMethods.filter(pm => {
+      if (pm.value === 'MPESA'  && !cfg.enableMpesa)  return false;
+      if (pm.value === 'BANK'   && !cfg.enableBank)   return false;
+      if (pm.value === 'CARD'   && !cfg.enableCard)   return false;
+      if (pm.value === 'CHEQUE' && !cfg.enableCheque) return false;
+      return true;
+    });
+  }, [cfg]);
+
+  // ---- Category options for searchable select ----
+  const categoryOptions = useMemo(
+    () => cfg.incomeCategories.map(c => ({ value: c, label: c })),
+    [cfg.incomeCategories]
+  );
+
+  // ---- InputField ----
+  const InputField = ({
+    label, type, value, onChange, placeholder,
+    required, disabled, min, step, textarea, rows, maxLength, error
+  }) => {
+    const cls = `w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
+      error ? 'border-red-400' : 'border-gray-300'
+    }`;
     if (textarea) {
       return (
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
+            {label}{required && <span className="text-red-500 ml-1">*</span>}
           </label>
           <textarea
             rows={rows || 3}
             value={value || ''}
             onChange={onChange}
             placeholder={placeholder}
-            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+            className={cls}
             disabled={disabled}
           />
+          {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
         </div>
       );
     }
     return (
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
-          {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
+          {label}{required && <span className="text-red-500 ml-1">*</span>}
         </label>
         <input
           type={type || 'text'}
           value={value !== undefined && value !== null ? value : ''}
           onChange={onChange}
           placeholder={placeholder}
-          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+          className={cls}
           disabled={disabled}
           min={min}
           step={step}
           maxLength={maxLength}
         />
+        {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
       </div>
     );
   };
 
-  // ==================== SELECT FIELD ====================
-  const SelectField = ({ label, value, onChange, options, required, disabled }) => (
-    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">
-        {label}
-        {required && <span className="text-red-500 ml-1">*</span>}
-      </label>
-      <select
-        value={value || ''}
-        onChange={onChange}
-        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-        disabled={disabled}
-        required={required}
-      >
-        {options.map(opt => (
-          <option key={opt.value || opt} value={opt.value || opt}>
-            {opt.label || opt}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-
-  // ==================== FORMAT CURRENCY ====================
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-KE', {
-      style: 'currency',
-      currency: 'KES',
-      minimumFractionDigits: 0
-    }).format(amount || 0);
-  };
-
-  // ==================== PAYMENT METHOD OPTIONS ====================
-  const paymentMethodOptions = [
-    { value: 'CASH', label: '💵 Cash' },
-    { value: 'MPESA', label: '📱 M-Pesa' },
-    { value: 'BANK', label: '🏦 Bank Transfer' },
-    { value: 'CARD', label: '💳 Card' },
-    { value: 'CHEQUE', label: '📄 Cheque' }
-  ];
-
-  // ==================== LOAD OTHER INCOME ====================
+  // ============================================================================
+  // LOAD OTHER INCOME
+  // Uses the same /payments endpoint, filtered by isOtherIncome=true
+  // ============================================================================
   const loadOtherIncome = async () => {
     if (!canView) return;
     setLoading(true);
     try {
       const params = { isOtherIncome: true };
+      if (cfg.schoolId) params.schoolId = cfg.schoolId;
       if (dateRange.start && dateRange.end) {
         params.startDate = dateRange.start;
         params.endDate = dateRange.end;
       }
-      
+
       const res = await api.get('/payments', { params });
-      const incomes = res.data.payments || [];
+      const incomes = res.data.payments || res.data.data || [];
       setIncomeList(incomes);
-      
+
       const total = incomes.reduce((sum, inc) => sum + parseFloat(inc.amount || 0), 0);
       const byCategory = {};
       const byMethod = {};
-      
+
       incomes.forEach(inc => {
         const cat = inc.incomeCategory || 'Other';
-        byCategory[cat] = (byCategory[cat] || 0) + parseFloat(inc.amount);
-        byMethod[inc.paymentMethod] = (byMethod[inc.paymentMethod] || 0) + parseFloat(inc.amount);
+        const amt = parseFloat(inc.amount || 0);
+        byCategory[cat] = (byCategory[cat] || 0) + amt;
+        byMethod[inc.paymentMethod] = (byMethod[inc.paymentMethod] || 0) + amt;
       });
-      
+
       setSummary({ totalIncome: total, byCategory, byMethod });
     } catch (error) {
       console.error('Error loading other income:', error);
+      setIncomeList([]);
+      setSummary({ totalIncome: 0, byCategory: {}, byMethod: {} });
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (canView) {
-      loadOtherIncome();
-    }
-  }, [dateRange, canView]);
+    if (canView) loadOtherIncome();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateRange.start, dateRange.end, canView, cfg.schoolId]);
 
-  // ==================== HANDLE SUBMIT ====================
+  // ============================================================================
+  // VALIDATION
+  // ============================================================================
+  const validate = () => {
+    const errs = {};
+    const amt = parseFloat(incomeForm.amount);
+    if (!incomeForm.amount || isNaN(amt) || amt <= 0) {
+      errs.amount = 'Enter a valid amount greater than 0';
+    }
+    if (!incomeForm.date) errs.date = 'Date is required';
+    if (!incomeForm.incomeCategory) errs.incomeCategory = 'Category is required';
+    if (!incomeForm.paymentMethod) errs.paymentMethod = 'Payment method is required';
+
+    if (incomeForm.paymentMethod === 'MPESA') {
+      if (!incomeForm.mpesaPhone) {
+        errs.mpesaPhone = 'Phone number is required';
+      } else if (cfg.phonePattern && !cfg.phonePattern.test(incomeForm.mpesaPhone.trim())) {
+        errs.mpesaPhone = 'Enter a valid phone number';
+      }
+      if (incomeForm.mpesaCode && incomeForm.mpesaCode.length < 4) {
+        errs.mpesaCode = 'Code looks too short';
+      }
+    }
+
+    if (incomeForm.paymentMethod === 'BANK') {
+      if (!incomeForm.bankReference) {
+        errs.bankReference = 'Bank reference is required';
+      }
+    }
+
+    if (incomeForm.paymentMethod === 'CARD') {
+      if (incomeForm.cardLast4 && !/^\d{4}$/.test(incomeForm.cardLast4)) {
+        errs.cardLast4 = 'Must be exactly 4 digits';
+      }
+    }
+
+    if (incomeForm.paymentMethod === 'CHEQUE') {
+      if (!incomeForm.chequeNumber) errs.chequeNumber = 'Cheque number required';
+    }
+
+    setFormErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  // ============================================================================
+  // SUBMIT
+  // ============================================================================
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!canAdd) {
       alert('You do not have permission to record other income');
       return;
     }
-    setLoading(true);
-    
-    try {
-      if (!incomeForm.amount || incomeForm.amount <= 0) {
-        alert('Please enter a valid amount');
-        return;
-      }
+    if (!validate()) return;
 
+    setLoading(true);
+    try {
       const paymentData = {
         ...incomeForm,
         amount: parseFloat(incomeForm.amount),
         isOtherIncome: true,
         feeId: null,
-        studentId: null
+        studentId: null,
+        currency: cfg.currency,
+        country: cfg.country,
+        schoolId: cfg.schoolId,
+        schoolCategory: cfg.schoolCategory
       };
 
-      if (paymentData.paymentMethod !== 'MPESA') {
-        delete paymentData.mpesaCode;
-        delete paymentData.mpesaPhone;
-      }
-      if (paymentData.paymentMethod !== 'BANK') {
-        delete paymentData.bankReference;
-        delete paymentData.bankMessage;
-      }
-      if (paymentData.paymentMethod !== 'CARD') {
-        delete paymentData.cardLast4;
-        delete paymentData.cardApprovalCode;
-      }
-      if (paymentData.paymentMethod !== 'CHEQUE') {
-        delete paymentData.chequeNumber;
-        delete paymentData.chequeBank;
-      }
+      // Remove fields not relevant to the selected payment method
+      const method = paymentData.paymentMethod;
+      if (method !== 'MPESA')  { delete paymentData.mpesaCode; delete paymentData.mpesaPhone; }
+      if (method !== 'BANK')   { delete paymentData.bankReference; delete paymentData.bankMessage; }
+      if (method !== 'CARD')   { delete paymentData.cardLast4; delete paymentData.cardApprovalCode; }
+      if (method !== 'CHEQUE') { delete paymentData.chequeNumber; delete paymentData.chequeBank; }
 
-      const res = await api.post('/payments', paymentData);
-      
-      setIncomeForm({
-        amount: 0,
-        paymentMethod: 'CASH',
-        transactionId: '',
-        notes: '',
-        date: new Date().toISOString().split('T')[0],
-        incomeCategory: 'Donation',
-        description: '',
-        payer: '',
-        mpesaCode: '',
-        mpesaPhone: '',
-        bankReference: '',
-        bankMessage: '',
-        cardLast4: '',
-        cardApprovalCode: '',
-        chequeNumber: '',
-        chequeBank: ''
-      });
-      
+      await api.post('/payments', paymentData);
+
+      setIncomeForm(emptyForm);
+      setFormErrors({});
       setShowForm(false);
       await loadOtherIncome();
       alert('✅ Other income recorded successfully!');
-      
     } catch (error) {
       console.error('Error recording other income:', error);
       alert('❌ Failed to record income: ' + (error.response?.data?.message || error.message));
@@ -27334,14 +28608,16 @@ const OtherIncomeModule = ({ payments, setPayments, dateRange, setDateRange, use
     }
   };
 
-  // ==================== HANDLE DELETE ====================
+  // ============================================================================
+  // DELETE
+  // ============================================================================
   const handleDelete = async (id) => {
     if (!canDelete) {
       alert('You do not have permission to delete income records');
       return;
     }
-    if (!window.confirm('Are you sure you want to delete this income record?')) return;
-    
+    if (!window.confirm('Delete this income record? This cannot be undone.')) return;
+
     setLoading(true);
     try {
       await api.delete(`/payments/${id}`);
@@ -27349,18 +28625,34 @@ const OtherIncomeModule = ({ payments, setPayments, dateRange, setDateRange, use
       alert('✅ Income record deleted');
     } catch (error) {
       console.error('Error deleting income:', error);
-      alert('❌ Failed to delete');
+      alert('❌ Failed to delete: ' + (error.response?.data?.message || error.message));
     } finally {
       setLoading(false);
     }
   };
 
-  const filteredIncomes = incomeList.filter(inc => 
-    inc.incomeCategory?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    inc.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    inc.payer?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // ============================================================================
+  // FILTER + RESET
+  // ============================================================================
+  const clearFilters = () => {
+    setDateRange({ start: '', end: '' });
+    setSearchTerm('');
+  };
 
+  const filteredIncomes = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return incomeList;
+    return incomeList.filter(inc =>
+      inc.incomeCategory?.toLowerCase().includes(term) ||
+      inc.description?.toLowerCase().includes(term) ||
+      inc.payer?.toLowerCase().includes(term) ||
+      inc.paymentMethod?.toLowerCase().includes(term)
+    );
+  }, [incomeList, searchTerm]);
+
+  // ============================================================================
+  // PERMISSION GATE
+  // ============================================================================
   if (!canView) {
     return (
       <div className="bg-white p-8 rounded-xl shadow-sm text-center">
@@ -27370,38 +28662,57 @@ const OtherIncomeModule = ({ payments, setPayments, dateRange, setDateRange, use
     );
   }
 
+  // ============================================================================
+  // RENDER
+  // ============================================================================
   return (
     <div className="space-y-6">
-      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse"></div>}
-      
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold">Other Income (Donations, Grants, etc.)</h2>
+      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
+
+      {/* Header */}
+      <div className="flex flex-wrap justify-between items-center gap-3">
+        <div>
+          <h2 className="text-2xl font-bold">Other Income</h2>
+          <p className="text-sm text-gray-500">
+            {cfg.schoolCategoryLabel} · Donations, grants, fundraising, and non-fee income · {cfg.currency}
+          </p>
+        </div>
         {canAdd && (
           <button
-            onClick={() => setShowForm(!showForm)}
+            onClick={() => {
+              setShowForm(!showForm);
+              setFormErrors({});
+            }}
             className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center"
           >
-            <i className="fas fa-plus-circle mr-2"></i>
-            Record Other Income
+            <i className={`fas ${showForm ? 'fa-times' : 'fa-plus-circle'} mr-2`}></i>
+            {showForm ? 'Cancel' : 'Record Other Income'}
           </button>
         )}
       </div>
 
       {/* Date Filter */}
       <div className="bg-white p-4 rounded-xl shadow-sm">
-        <div className="grid grid-cols-2 gap-4 max-w-md">
-          <InputField
-            label="Start Date"
-            type="date"
-            value={dateRange.start}
-            onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-          />
-          <InputField
-            label="End Date"
-            type="date"
-            value={dateRange.end}
-            onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-          />
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="grid grid-cols-2 gap-4">
+            <InputField
+              label="Start Date"
+              type="date"
+              value={dateRange.start}
+              onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+            />
+            <InputField
+              label="End Date"
+              type="date"
+              value={dateRange.end}
+              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+            />
+          </div>
+          {(dateRange.start || dateRange.end || searchTerm) && (
+            <button onClick={clearFilters} className="text-sm text-indigo-600 hover:underline mb-1">
+              Clear filters
+            </button>
+          )}
         </div>
       </div>
 
@@ -27410,145 +28721,175 @@ const OtherIncomeModule = ({ payments, setPayments, dateRange, setDateRange, use
         <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl p-6 text-white">
           <h3 className="text-lg font-semibold mb-2">Total Other Income</h3>
           <p className="text-3xl font-bold">{formatCurrency(summary.totalIncome)}</p>
+          <p className="text-xs opacity-80 mt-1">{incomeList.length} record(s)</p>
         </div>
+
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="font-semibold mb-2">Top Categories</h3>
-          {Object.entries(summary.byCategory).slice(0, 3).map(([cat, amt]) => (
-            <div key={cat} className="flex justify-between text-sm">
-              <span>{cat}:</span>
-              <span className="font-medium">{formatCurrency(amt)}</span>
-            </div>
-          ))}
+          {Object.keys(summary.byCategory).length === 0 ? (
+            <p className="text-sm text-gray-400">No data</p>
+          ) : (
+            Object.entries(summary.byCategory)
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 5)
+              .map(([cat, amt]) => (
+                <div key={cat} className="flex justify-between text-sm">
+                  <span className="truncate">{cat}:</span>
+                  <span className="font-medium ml-2">{formatCurrency(amt)}</span>
+                </div>
+              ))
+          )}
         </div>
+
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="font-semibold mb-2">Payment Methods</h3>
-          {Object.entries(summary.byMethod).map(([method, amt]) => (
-            <div key={method} className="flex justify-between text-sm">
-              <span>{method}:</span>
-              <span className="font-medium">{formatCurrency(amt)}</span>
-            </div>
-          ))}
+          {Object.keys(summary.byMethod).length === 0 ? (
+            <p className="text-sm text-gray-400">No data</p>
+          ) : (
+            Object.entries(summary.byMethod).map(([method, amt]) => (
+              <div key={method} className="flex justify-between text-sm">
+                <span>{cfg.methodLabels[method] || method}:</span>
+                <span className="font-medium">{formatCurrency(amt)}</span>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
-      {/* Income Form */}
+      {/* Form */}
       {showForm && canAdd && (
         <div className="bg-white p-6 rounded-xl shadow-sm border-2 border-green-100">
           <h3 className="text-lg font-semibold mb-4">Record Other Income</h3>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <InputField
                 label="Date"
                 type="date"
                 value={incomeForm.date}
-                onChange={(e) => setIncomeForm({...incomeForm, date: e.target.value})}
+                onChange={(e) => setIncomeForm({ ...incomeForm, date: e.target.value })}
                 required
+                error={formErrors.date}
               />
-              
-              <InputField
+
+              <OtherIncomeSearchableSelect
                 label="Income Category"
-                value={incomeForm.incomeCategory}
-                onChange={(e) => setIncomeForm({...incomeForm, incomeCategory: e.target.value})}
-                placeholder="e.g., Donation, Grant, Fundraising"
                 required
+                value={incomeForm.incomeCategory}
+                onChange={(e) => setIncomeForm({ ...incomeForm, incomeCategory: e.target.value })}
+                options={categoryOptions}
+                placeholder="Search or select a category"
+                error={formErrors.incomeCategory}
               />
-              
+
               <InputField
                 label="Description"
                 value={incomeForm.description}
-                onChange={(e) => setIncomeForm({...incomeForm, description: e.target.value})}
+                onChange={(e) => setIncomeForm({ ...incomeForm, description: e.target.value })}
                 placeholder="What is this for?"
               />
-              
+
               <InputField
-                label="Payer/Donor"
+                label="Payer / Donor"
                 value={incomeForm.payer}
-                onChange={(e) => setIncomeForm({...incomeForm, payer: e.target.value})}
-                placeholder="Name of donor or organization"
+                onChange={(e) => setIncomeForm({ ...incomeForm, payer: e.target.value })}
+                placeholder="Name of person or organization"
               />
-              
+
               <InputField
-                label="Amount (KES)"
+                label={`Amount (${cfg.currency})`}
                 type="number"
                 value={incomeForm.amount}
-                onChange={(e) => setIncomeForm({...incomeForm, amount: parseFloat(e.target.value)})}
+                onChange={(e) => setIncomeForm({ ...incomeForm, amount: e.target.value })}
                 required
+                min="0"
+                step="0.01"
+                error={formErrors.amount}
               />
-              
-              <SearchableSelect
+
+              <OtherIncomeSearchableSelect
                 label="Payment Method"
+                required
                 value={incomeForm.paymentMethod}
-                onChange={(e) => setIncomeForm({...incomeForm, paymentMethod: e.target.value})}
-                options={paymentMethodOptions}
-                placeholder=""
+                onChange={(e) => setIncomeForm({ ...incomeForm, paymentMethod: e.target.value })}
+                options={availablePaymentMethods}
+                placeholder="Select payment method"
+                error={formErrors.paymentMethod}
               />
             </div>
 
-            {/* Payment Method Specific Fields */}
+            {/* MPESA */}
             {incomeForm.paymentMethod === 'MPESA' && (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <InputField
                   label="M-Pesa Code"
                   value={incomeForm.mpesaCode}
-                  onChange={(e) => setIncomeForm({...incomeForm, mpesaCode: e.target.value})}
+                  onChange={(e) => setIncomeForm({ ...incomeForm, mpesaCode: e.target.value.toUpperCase() })}
                   placeholder="e.g., OK4321ABC"
+                  error={formErrors.mpesaCode}
                 />
                 <InputField
-                  label="Phone Number"
+                  label={cfg.phoneLabel}
                   value={incomeForm.mpesaPhone}
-                  onChange={(e) => setIncomeForm({...incomeForm, mpesaPhone: e.target.value})}
-                  placeholder="0712345678"
+                  onChange={(e) => setIncomeForm({ ...incomeForm, mpesaPhone: e.target.value })}
+                  placeholder={cfg.phonePlaceholder}
+                  error={formErrors.mpesaPhone}
                 />
               </div>
             )}
 
+            {/* BANK */}
             {incomeForm.paymentMethod === 'BANK' && (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <InputField
                   label="Bank Reference"
                   value={incomeForm.bankReference}
-                  onChange={(e) => setIncomeForm({...incomeForm, bankReference: e.target.value})}
+                  onChange={(e) => setIncomeForm({ ...incomeForm, bankReference: e.target.value })}
                   placeholder="Reference number"
+                  error={formErrors.bankReference}
                 />
                 <InputField
                   label="Bank Message"
                   value={incomeForm.bankMessage}
-                  onChange={(e) => setIncomeForm({...incomeForm, bankMessage: e.target.value})}
+                  onChange={(e) => setIncomeForm({ ...incomeForm, bankMessage: e.target.value })}
                   placeholder="Any bank message"
                 />
               </div>
             )}
 
+            {/* CARD */}
             {incomeForm.paymentMethod === 'CARD' && (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <InputField
                   label="Card Last 4"
                   value={incomeForm.cardLast4}
-                  onChange={(e) => setIncomeForm({...incomeForm, cardLast4: e.target.value})}
+                  onChange={(e) => setIncomeForm({ ...incomeForm, cardLast4: e.target.value.replace(/\D/g, '') })}
                   placeholder="Last 4 digits"
                   maxLength="4"
+                  error={formErrors.cardLast4}
                 />
                 <InputField
                   label="Approval Code"
                   value={incomeForm.cardApprovalCode}
-                  onChange={(e) => setIncomeForm({...incomeForm, cardApprovalCode: e.target.value})}
+                  onChange={(e) => setIncomeForm({ ...incomeForm, cardApprovalCode: e.target.value })}
                   placeholder="Approval code"
                 />
               </div>
             )}
 
+            {/* CHEQUE */}
             {incomeForm.paymentMethod === 'CHEQUE' && (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <InputField
-                  label="Cheque Number"
+                  label={cfg.country === 'US' ? 'Check Number' : 'Cheque Number'}
                   value={incomeForm.chequeNumber}
-                  onChange={(e) => setIncomeForm({...incomeForm, chequeNumber: e.target.value})}
-                  placeholder="Cheque number"
+                  onChange={(e) => setIncomeForm({ ...incomeForm, chequeNumber: e.target.value })}
+                  placeholder={cfg.country === 'US' ? 'Check number' : 'Cheque number'}
+                  error={formErrors.chequeNumber}
                 />
                 <InputField
                   label="Bank"
                   value={incomeForm.chequeBank}
-                  onChange={(e) => setIncomeForm({...incomeForm, chequeBank: e.target.value})}
+                  onChange={(e) => setIncomeForm({ ...incomeForm, chequeBank: e.target.value })}
                   placeholder="Bank name"
                 />
               </div>
@@ -27557,28 +28898,31 @@ const OtherIncomeModule = ({ payments, setPayments, dateRange, setDateRange, use
             <InputField
               label="Transaction ID (Optional)"
               value={incomeForm.transactionId}
-              onChange={(e) => setIncomeForm({...incomeForm, transactionId: e.target.value})}
+              onChange={(e) => setIncomeForm({ ...incomeForm, transactionId: e.target.value })}
             />
 
             <InputField
               label="Notes"
               value={incomeForm.notes}
-              onChange={(e) => setIncomeForm({...incomeForm, notes: e.target.value})}
+              onChange={(e) => setIncomeForm({ ...incomeForm, notes: e.target.value })}
               textarea
               rows="2"
             />
 
-            <div className="flex space-x-2">
+            <div className="flex gap-2">
               <button
                 type="submit"
-                className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700"
                 disabled={loading}
+                className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-60"
               >
                 {loading ? 'Saving...' : 'Record Income'}
               </button>
               <button
                 type="button"
-                onClick={() => setShowForm(false)}
+                onClick={() => {
+                  setShowForm(false);
+                  setFormErrors({});
+                }}
                 className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
               >
                 Cancel
@@ -27588,12 +28932,12 @@ const OtherIncomeModule = ({ payments, setPayments, dateRange, setDateRange, use
         </div>
       )}
 
-      {/* Income List */}
+      {/* List */}
       <div className="bg-white rounded-xl shadow-sm overflow-hidden">
         <div className="p-4 border-b">
           <input
             type="text"
-            placeholder="Search by category, description, or payer..."
+            placeholder="Search by category, description, payer, or method..."
             className="w-full px-3 py-2 border rounded-lg"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -27604,37 +28948,47 @@ const OtherIncomeModule = ({ payments, setPayments, dateRange, setDateRange, use
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-3 text-left">Date</th>
-                <th className="px-4 py-3 text-left">Category</th>
-                <th className="px-4 py-3 text-left">Description</th>
-                <th className="px-4 py-3 text-left">Payer/Donor</th>
-                <th className="px-4 py-3 text-left">Amount</th>
-                <th className="px-4 py-3 text-left">Method</th>
-                <th className="px-4 py-3 text-left">Reference</th>
-                {canDelete && <th className="px-4 py-3 text-left">Actions</th>}
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Date</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Category</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Description</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Payer / Donor</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Amount</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Method</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Reference</th>
+                {canDelete && (
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Actions</th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y">
               {filteredIncomes.length === 0 ? (
                 <tr>
-                  <td colSpan={canDelete ? "8" : "7"} className="px-4 py-8 text-center text-gray-500">
-                    No other income records found
+                  <td colSpan={canDelete ? 8 : 7} className="px-4 py-10 text-center text-gray-500">
+                    {incomeList.length === 0
+                      ? 'No other income records yet. Click "Record Other Income" to add one.'
+                      : 'No records match your search.'}
                   </td>
                 </tr>
               ) : (
                 filteredIncomes.map(inc => (
                   <tr key={inc.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-2">{new Date(inc.date).toLocaleDateString()}</td>
+                    <td className="px-4 py-2 text-sm">
+                      {new Date(inc.date).toLocaleDateString(cfg.locale)}
+                    </td>
                     <td className="px-4 py-2">
                       <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
                         {inc.incomeCategory || 'Other'}
                       </span>
                     </td>
-                    <td className="px-4 py-2">{inc.description || '—'}</td>
-                    <td className="px-4 py-2">{inc.payer || '—'}</td>
-                    <td className="px-4 py-2 font-bold text-green-600">{formatCurrency(inc.amount)}</td>
-                    <td className="px-4 py-2">{inc.paymentMethod}</td>
-                    <td className="px-4 py-2 text-xs">
+                    <td className="px-4 py-2 text-sm">{inc.description || '—'}</td>
+                    <td className="px-4 py-2 text-sm">{inc.payer || '—'}</td>
+                    <td className="px-4 py-2 font-bold text-green-600">
+                      {formatCurrency(inc.amount, inc.currency)}
+                    </td>
+                    <td className="px-4 py-2 text-sm">
+                      {cfg.methodLabels[inc.paymentMethod] || inc.paymentMethod}
+                    </td>
+                    <td className="px-4 py-2 text-xs font-mono">
                       {inc.mpesaCode || inc.bankReference || inc.chequeNumber || inc.transactionId || '—'}
                     </td>
                     {canDelete && (
@@ -43025,23 +44379,649 @@ window.location.reload();
     </div>
   );
 };
-// ==================== COMPLETE SETTINGS MODULE ====================
-const SettingsModule = ({ 
-  user, 
-  school, 
-  setSchool, 
-  features, 
-  auditLogs, 
-  dateRange, 
-  setDateRange, 
-  changePasswordForm, 
-  setChangePasswordForm, 
-  handleChangePassword, 
-  loadFeatures, 
-  loadAuditLogs, 
-  toggleFeature 
+
+// ============================================================
+//  SETTINGS MODULE — v5
+//  SearchableSelect restored · Grading System tab added
+// ============================================================
+
+// ============================================================
+//  GRADING SYSTEM EDITOR — universal split for ALL schools
+//  (unchanged from v4)
+// ============================================================
+const GradingSystemEditor = ({ schoolId, schoolCategory, onSaved }) => {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [config, setConfig] = useState(null);
+  const [isCustom, setIsCustom] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const SCAFFOLDS = {
+    ECDE_PRIMARY_JSS: {
+      name: 'CBC (Primary & JSS)',
+      type: 'CBC',
+      rows: [
+        { code: 'EE', label: 'Exceeding Expectations',   color: 'green'  },
+        { code: 'ME', label: 'Meeting Expectations',     color: 'blue'   },
+        { code: 'AE', label: 'Approaching Expectations', color: 'yellow' },
+        { code: 'BE', label: 'Below Expectations',       color: 'orange' },
+        { code: 'NI', label: 'Needs Improvement',        color: 'red'    }
+      ]
+    },
+    SENIOR_SECONDARY: {
+      name: 'KCSE (Form 1–4)',
+      type: '844',
+      rows: [
+        { code: 'A',  label: 'A',  color: 'green'  },
+        { code: 'A-', label: 'A-', color: 'green'  },
+        { code: 'B+', label: 'B+', color: 'blue'   },
+        { code: 'B',  label: 'B',  color: 'blue'   },
+        { code: 'B-', label: 'B-', color: 'blue'   },
+        { code: 'C+', label: 'C+', color: 'yellow' },
+        { code: 'C',  label: 'C',  color: 'yellow' },
+        { code: 'C-', label: 'C-', color: 'yellow' },
+        { code: 'D+', label: 'D+', color: 'orange' },
+        { code: 'D',  label: 'D',  color: 'orange' },
+        { code: 'D-', label: 'D-', color: 'orange' },
+        { code: 'E',  label: 'E',  color: 'red'    }
+      ]
+    },
+    COLLEGE_TVET: {
+      name: 'TVET',
+      type: 'TVET',
+      rows: [
+        { code: '', label: '', color: 'green'  },
+        { code: '', label: '', color: 'blue'   },
+        { code: '', label: '', color: 'yellow' },
+        { code: '', label: '', color: 'orange' },
+        { code: '', label: '', color: 'red'    }
+      ]
+    },
+    UNIVERSITY: {
+      name: 'University',
+      type: 'UNI',
+      rows: [
+        { code: 'A', label: 'A', color: 'green'  },
+        { code: 'B', label: 'B', color: 'blue'   },
+        { code: 'C', label: 'C', color: 'yellow' },
+        { code: 'D', label: 'D', color: 'orange' },
+        { code: 'E', label: 'E', color: 'red'    }
+      ]
+    }
+  };
+
+  const scaffold = SCAFFOLDS[schoolCategory] || SCAFFOLDS.ECDE_PRIMARY_JSS;
+
+  const normalizeScaleToRows = (scale) => {
+    const groups = new Map();
+    const order = [];
+
+    for (const band of scale) {
+      const m = String(band.code || '').match(/^([A-Za-z+\-*]+)(\d+)?$/);
+      const base = m ? m[1] : band.code;
+      const subNum = m && m[2] ? parseInt(m[2], 10) : null;
+
+      if (!groups.has(base)) {
+        groups.set(base, { base, parent: null, subs: [] });
+        order.push(base);
+      }
+      const g = groups.get(base);
+
+      if (subNum === null) g.parent = { ...band };
+      else g.subs.push({ ...band, subNum });
+    }
+
+    return order.map(base => {
+      const g = groups.get(base);
+      const hasSubs = g.subs.length > 0;
+
+      if (hasSubs) {
+        const firstSub = g.subs[0];
+        return {
+          code: base,
+          label: g.parent?.label || base,
+          color: g.parent?.color || firstSub?.color || 'gray',
+          points: g.parent?.points ?? firstSub?.points ?? 0,
+          gpa: g.parent?.gpa ?? firstSub?.gpa,
+          _splitEnabled: true,
+          min: '',
+          max: '',
+          splits: g.subs
+            .sort((a, b) => a.subNum - b.subNum)
+            .map(s => ({
+              code: s.code,
+              label: s.label || s.code,
+              min: s.min ?? '',
+              max: s.max ?? ''
+            }))
+        };
+      }
+
+      const p = g.parent;
+      return {
+        code: p.code,
+        label: p.label || p.code,
+        color: p.color || 'gray',
+        points: p.points ?? 0,
+        gpa: p.gpa,
+        _splitEnabled: false,
+        min: p.min ?? '',
+        max: p.max ?? '',
+        splits: []
+      };
+    });
+  };
+
+  const initializeFromScaffold = () => {
+    setConfig({
+      name: scaffold.name,
+      type: scaffold.type,
+      rows: scaffold.rows.map(r => ({
+        code: r.code,
+        label: r.label,
+        color: r.color,
+        points: 0,
+        min: '',
+        max: '',
+        _splitEnabled: false,
+        splits: []
+      }))
+    });
+  };
+
+  const load = async () => {
+    if (!schoolId) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await api.get(`/schools/${schoolId}/grading-config`);
+      const cfg = res.data.config;
+
+      if (cfg && Array.isArray(cfg.scale) && cfg.scale.length > 0) {
+        setConfig({
+          name: cfg.name || scaffold.name,
+          type: cfg.type || scaffold.type,
+          rows: normalizeScaleToRows(cfg.scale)
+        });
+        setIsCustom(!!res.data.isCustom);
+      } else {
+        initializeFromScaffold();
+        setIsCustom(false);
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to load grading config');
+      initializeFromScaffold();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, [schoolId]);
+
+  const updateRow = (i, patch) => {
+    setConfig(prev => {
+      const rows = [...prev.rows];
+      rows[i] = { ...rows[i], ...patch };
+      return { ...prev, rows };
+    });
+  };
+
+  const removeRow = (i) => {
+    setConfig(prev => ({ ...prev, rows: prev.rows.filter((_, idx) => idx !== i) }));
+  };
+
+  const addRow = () => {
+    setConfig(prev => ({
+      ...prev,
+      rows: [
+        ...prev.rows,
+        { code: '', label: '', color: 'gray', points: 0, min: '', max: '', _splitEnabled: false, splits: [] }
+      ]
+    }));
+  };
+
+  const toggleSplit = (i) => {
+    setConfig(prev => {
+      const rows = [...prev.rows];
+      const row = { ...rows[i] };
+      row._splitEnabled = !row._splitEnabled;
+
+      if (row._splitEnabled && (!row.splits || row.splits.length === 0)) {
+        row.splits = [
+          { code: `${row.code}1`, label: `${row.label || row.code} 1`, min: '', max: '' },
+          { code: `${row.code}2`, label: `${row.label || row.code} 2`, min: '', max: '' }
+        ];
+        row.min = '';
+        row.max = '';
+      }
+      rows[i] = row;
+      return { ...prev, rows };
+    });
+  };
+
+  const updateSplit = (rowIdx, splitIdx, patch) => {
+    setConfig(prev => {
+      const rows = [...prev.rows];
+      const splits = [...(rows[rowIdx].splits || [])];
+      splits[splitIdx] = { ...splits[splitIdx], ...patch };
+      rows[rowIdx] = { ...rows[rowIdx], splits };
+      return { ...prev, rows };
+    });
+  };
+
+  const addSplit = (rowIdx) => {
+    setConfig(prev => {
+      const rows = [...prev.rows];
+      const row = rows[rowIdx];
+      const splits = [...(row.splits || [])];
+      const nextNum = splits.length + 1;
+      splits.push({
+        code: `${row.code}${nextNum}`,
+        label: `${row.label || row.code} ${nextNum}`,
+        min: '',
+        max: ''
+      });
+      rows[rowIdx] = { ...row, splits };
+      return { ...prev, rows };
+    });
+  };
+
+  const removeSplit = (rowIdx, splitIdx) => {
+    setConfig(prev => {
+      const rows = [...prev.rows];
+      const splits = (rows[rowIdx].splits || []).filter((_, i) => i !== splitIdx);
+      rows[rowIdx] = { ...rows[rowIdx], splits };
+      return { ...prev, rows };
+    });
+  };
+
+  const validate = () => {
+    if (!config?.rows || config.rows.length === 0) return 'Add at least one grade';
+    const flat = [];
+
+    for (const row of config.rows) {
+      if (row._splitEnabled) {
+        if (!Array.isArray(row.splits) || row.splits.length < 2) {
+          return `"${row.code || 'Row'}" is split but has fewer than 2 sub-grades`;
+        }
+        for (const s of row.splits) {
+          if (!s.code?.trim()) return `A sub-grade code is missing for "${row.code || 'unnamed'}"`;
+          if (s.min === '' || s.min === null || s.min === undefined) return `"${s.code}": min is empty`;
+          if (s.max === '' || s.max === null || s.max === undefined) return `"${s.code}": max is empty`;
+          const nMin = Number(s.min), nMax = Number(s.max);
+          if (isNaN(nMin) || isNaN(nMax)) return `"${s.code}": min/max must be numbers`;
+          if (nMin > nMax) return `"${s.code}": min (${nMin}) > max (${nMax})`;
+          flat.push({ code: s.code, min: nMin, max: nMax });
+        }
+      } else {
+        if (!row.code?.trim()) return 'Each row needs a grade code';
+        if (row.min === '' || row.min === null || row.min === undefined) return `"${row.code}": min is empty`;
+        if (row.max === '' || row.max === null || row.max === undefined) return `"${row.code}": max is empty`;
+        const nMin = Number(row.min), nMax = Number(row.max);
+        if (isNaN(nMin) || isNaN(nMax)) return `"${row.code}": min/max must be numbers`;
+        if (nMin > nMax) return `"${row.code}": min (${nMin}) > max (${nMax})`;
+        flat.push({ code: row.code, min: nMin, max: nMax });
+      }
+    }
+
+    const sorted = [...flat].sort((a, b) => a.min - b.min);
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i].min <= sorted[i - 1].max) {
+        return `Ranges overlap: "${sorted[i - 1].code}" (${sorted[i - 1].min}–${sorted[i - 1].max}) overlaps "${sorted[i].code}" (${sorted[i].min}–${sorted[i].max})`;
+      }
+    }
+    return null;
+  };
+
+  const save = async () => {
+    const err = validate();
+    if (err) { setError(err); setTimeout(() => setError(''), 6000); return; }
+
+    setSaving(true); setError('');
+    try {
+      const finalScale = [];
+
+      for (const row of config.rows) {
+        if (row._splitEnabled) {
+          for (const s of row.splits) {
+            finalScale.push({
+              code: String(s.code).trim(),
+              label: String(s.label || s.code).trim(),
+              min: Number(s.min),
+              max: Number(s.max),
+              points: row.points ?? 0,
+              gpa: row.gpa,
+              color: row.color || 'gray'
+            });
+          }
+        } else {
+          finalScale.push({
+            code: String(row.code).trim(),
+            label: String(row.label || row.code).trim(),
+            min: Number(row.min),
+            max: Number(row.max),
+            points: row.points ?? 0,
+            gpa: row.gpa,
+            color: row.color || 'gray'
+          });
+        }
+      }
+
+      finalScale.sort((a, b) => b.min - a.min);
+
+      const res = await api.put(`/schools/${schoolId}/grading-config`, {
+        name: config.name,
+        type: config.type,
+        scale: finalScale
+      });
+
+      setIsCustom(true);
+      setMessage('✅ Grading system saved');
+      setTimeout(() => setMessage(''), 3000);
+
+      if (typeof onSaved === 'function') onSaved(res.data.config);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const resetToDefault = async () => {
+    if (!window.confirm('Revert to the system default grading for this school category? Your custom scale will be lost.')) return;
+    setSaving(true);
+    try {
+      await api.delete(`/schools/${schoolId}/grading-config`);
+      await load();
+      setMessage('✅ Reverted to default');
+      setTimeout(() => setMessage(''), 3000);
+    } catch {
+      setError('Failed to reset');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const reloadScaffold = () => {
+    if (!window.confirm('Replace your current rows with the empty scaffold? This clears any unsaved changes.')) return;
+    initializeFromScaffold();
+    setIsCustom(false);
+  };
+
+  if (loading) {
+    return (
+      <div className="bg-white p-12 rounded-xl shadow-sm text-center">
+        <i className="fas fa-spinner fa-spin text-3xl text-indigo-600 mb-3"></i>
+        <p className="text-gray-500">Loading grading system…</p>
+      </div>
+    );
+  }
+
+  if (!config) return null;
+
+  const categoryLabel = {
+    ECDE_PRIMARY_JSS: 'Primary / Junior Secondary',
+    SENIOR_SECONDARY: 'Senior Secondary',
+    COLLEGE_TVET:     'TVET College',
+    UNIVERSITY:       'University'
+  }[schoolCategory] || schoolCategory;
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-xl shadow-sm p-6">
+        <div className="flex flex-wrap justify-between items-start gap-4">
+          <div>
+            <h3 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+              <i className="fas fa-award text-indigo-600"></i>
+              Grading System
+            </h3>
+            <p className="text-sm text-gray-500 mt-1">
+              Category: <span className="font-medium text-gray-700">{categoryLabel}</span>
+              {isCustom && (
+                <span className="ml-2 text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">
+                  Custom
+                </span>
+              )}
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              Enable <strong>Split</strong> on any grade to break it into sub-grades (e.g. ME → ME1 + ME2). Ranges start empty — fill them in yourself.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={reloadScaffold} disabled={saving}
+              className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 text-sm disabled:opacity-50">
+              <i className="fas fa-redo mr-1"></i>Reload Scaffold
+            </button>
+            {isCustom && (
+              <button onClick={resetToDefault} disabled={saving}
+                className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 text-sm disabled:opacity-50">
+                <i className="fas fa-undo mr-1"></i>Reset to Default
+              </button>
+            )}
+            <button onClick={save} disabled={saving}
+              className="bg-indigo-600 text-white px-5 py-2 rounded-lg hover:bg-indigo-700 text-sm disabled:opacity-50 flex items-center gap-2">
+              {saving ? <><i className="fas fa-spinner fa-spin"></i>Saving…</> : <><i className="fas fa-save"></i>Save</>}
+            </button>
+          </div>
+        </div>
+
+        {message && (
+          <div className="mt-4 bg-green-50 border border-green-200 text-green-700 px-4 py-2 rounded-lg text-sm">
+            <i className="fas fa-check-circle mr-2"></i>{message}
+          </div>
+        )}
+        {error && (
+          <div className="mt-4 bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-lg text-sm">
+            <i className="fas fa-exclamation-circle mr-2"></i>{error}
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm p-6">
+        <h4 className="font-semibold text-gray-700 mb-4 flex items-center gap-2">
+          <i className="fas fa-tag text-indigo-600"></i>Basic Info
+        </h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+            <input value={config.name || ''} onChange={(e) => setConfig({ ...config, name: e.target.value })}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+            <select value={config.type || ''} onChange={(e) => setConfig({ ...config, type: e.target.value })}
+              className="w-full px-3 py-2 border rounded-lg">
+              <option value="CBC">CBC</option>
+              <option value="844">8-4-4 (KCSE)</option>
+              <option value="TVET">TVET</option>
+              <option value="UNI">University</option>
+              <option value="CUSTOM">Custom</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm p-6">
+        <div className="flex flex-wrap justify-between items-center mb-4 gap-3">
+          <div>
+            <h4 className="font-semibold text-gray-700 flex items-center gap-2">
+              <i className="fas fa-layer-group text-indigo-600"></i>Grade Bands
+            </h4>
+            <p className="text-xs text-gray-500 mt-1">
+              Fill Min/Max for each grade. Check <strong>Split</strong> to break into sub-grades (parent won't be saved).
+            </p>
+          </div>
+          <button onClick={addRow}
+            className="text-sm bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg hover:bg-indigo-100 border border-indigo-200 flex items-center gap-2">
+            <i className="fas fa-plus"></i>Add Band
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          {config.rows.length === 0 && (
+            <div className="text-center py-12 bg-gray-50 rounded-lg">
+              <i className="fas fa-layer-group text-4xl text-gray-300 mb-3"></i>
+              <p className="text-gray-500">No grade bands yet. Click "Add Band" to start.</p>
+            </div>
+          )}
+
+          {config.rows.map((row, i) => {
+            const splitOn = !!row._splitEnabled;
+            return (
+              <div key={i} className={`rounded-lg border-2 transition-colors ${
+                splitOn ? 'border-purple-300 bg-purple-50/30' : 'border-gray-200 bg-white'
+              }`}>
+                <div className="p-4">
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                    <div className="md:col-span-1">
+                      <label className="block text-[10px] uppercase tracking-wide text-gray-500 mb-1">Color</label>
+                      <select value={row.color || 'gray'} onChange={(e) => updateRow(i, { color: e.target.value })}
+                        className="w-full px-2 py-1.5 border rounded-lg text-xs">
+                        <option value="green">🟢</option>
+                        <option value="blue">🔵</option>
+                        <option value="yellow">🟡</option>
+                        <option value="orange">🟠</option>
+                        <option value="red">🔴</option>
+                        <option value="gray">⚪</option>
+                      </select>
+                    </div>
+
+                    <div className="md:col-span-2">
+                      <label className="block text-[10px] uppercase tracking-wide text-gray-500 mb-1">Grade</label>
+                      <input value={row.code} onChange={(e) => updateRow(i, { code: e.target.value })}
+                        className="w-full px-2 py-1.5 border rounded-lg text-sm font-medium" placeholder="ME" />
+                    </div>
+
+                    <div className="md:col-span-4">
+                      <label className="block text-[10px] uppercase tracking-wide text-gray-500 mb-1">Label</label>
+                      <input value={row.label} onChange={(e) => updateRow(i, { label: e.target.value })}
+                        className="w-full px-2 py-1.5 border rounded-lg text-sm" placeholder="Meeting Expectations" />
+                    </div>
+
+                    {!splitOn && (
+                      <>
+                        <div className="md:col-span-1">
+                          <label className="block text-[10px] uppercase tracking-wide text-gray-500 mb-1">Min %</label>
+                          <input type="number" value={row.min} onChange={(e) => updateRow(i, { min: e.target.value })}
+                            className="w-full px-2 py-1.5 border rounded-lg text-sm" placeholder="0" min="0" max="100" />
+                        </div>
+                        <div className="md:col-span-1">
+                          <label className="block text-[10px] uppercase tracking-wide text-gray-500 mb-1">Max %</label>
+                          <input type="number" value={row.max} onChange={(e) => updateRow(i, { max: e.target.value })}
+                            className="w-full px-2 py-1.5 border rounded-lg text-sm" placeholder="100" min="0" max="100" />
+                        </div>
+                      </>
+                    )}
+
+                    {splitOn && (
+                      <div className="md:col-span-2 text-center">
+                        <span className="text-xs bg-purple-100 text-purple-700 px-3 py-1 rounded-full font-medium">
+                          Split into {row.splits?.length || 0}
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="md:col-span-1">
+                      <label className="block text-[10px] uppercase tracking-wide text-gray-500 mb-1">Points</label>
+                      <input type="number" value={row.points ?? 0}
+                        onChange={(e) => updateRow(i, { points: parseFloat(e.target.value) || 0 })}
+                        className="w-full px-2 py-1.5 border rounded-lg text-sm" step="0.1" />
+                    </div>
+
+                    <div className="md:col-span-2 flex items-center gap-2 justify-end">
+                      <label className="flex items-center gap-1 cursor-pointer">
+                        <input type="checkbox" checked={splitOn}
+                          onChange={() => toggleSplit(i)} className="rounded" />
+                        <span className="text-xs font-medium text-gray-700">Split</span>
+                      </label>
+                      <button onClick={() => removeRow(i)}
+                        className="text-red-500 hover:text-red-700 p-1" title="Remove grade">
+                        <i className="fas fa-trash text-sm"></i>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {splitOn && (
+                  <div className="border-t border-purple-200 bg-purple-50/50 p-4">
+                    <p className="text-xs text-purple-700 mb-3 flex items-center gap-2">
+                      <i className="fas fa-sitemap"></i>
+                      Sub-grades for <strong>{row.code || '(unnamed)'}</strong> — only these are saved
+                    </p>
+
+                    <div className="space-y-2">
+                      {(row.splits || []).map((sub, sIdx) => (
+                        <div key={sIdx} className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end bg-white p-3 rounded-lg border border-purple-100">
+                          <div className="md:col-span-3">
+                            <label className="block text-[10px] uppercase tracking-wide text-gray-500 mb-1">Code</label>
+                            <input value={sub.code} onChange={(e) => updateSplit(i, sIdx, { code: e.target.value })}
+                              className="w-full px-2 py-1.5 border rounded-lg text-sm font-medium" placeholder="ME1" />
+                          </div>
+                          <div className="md:col-span-4">
+                            <label className="block text-[10px] uppercase tracking-wide text-gray-500 mb-1">Label</label>
+                            <input value={sub.label} onChange={(e) => updateSplit(i, sIdx, { label: e.target.value })}
+                              className="w-full px-2 py-1.5 border rounded-lg text-sm" placeholder="Meeting Expectations 1" />
+                          </div>
+                          <div className="md:col-span-2">
+                            <label className="block text-[10px] uppercase tracking-wide text-gray-500 mb-1">Min %</label>
+                            <input type="number" value={sub.min} onChange={(e) => updateSplit(i, sIdx, { min: e.target.value })}
+                              className="w-full px-2 py-1.5 border rounded-lg text-sm" placeholder="0" min="0" max="100" />
+                          </div>
+                          <div className="md:col-span-2">
+                            <label className="block text-[10px] uppercase tracking-wide text-gray-500 mb-1">Max %</label>
+                            <input type="number" value={sub.max} onChange={(e) => updateSplit(i, sIdx, { max: e.target.value })}
+                              className="w-full px-2 py-1.5 border rounded-lg text-sm" placeholder="100" min="0" max="100" />
+                          </div>
+                          <div className="md:col-span-1 flex justify-end">
+                            {(row.splits || []).length > 2 && (
+                              <button onClick={() => removeSplit(i, sIdx)}
+                                className="text-red-500 hover:text-red-700 p-1" title="Remove">
+                                <i className="fas fa-times text-sm"></i>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <button onClick={() => addSplit(i)}
+                      className="mt-3 text-xs bg-purple-100 text-purple-700 px-3 py-1.5 rounded-lg hover:bg-purple-200 flex items-center gap-1">
+                      <i className="fas fa-plus"></i>Add another sub-grade
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
+// ============================================================
+//  SETTINGS MODULE
+// ============================================================
+const SettingsModule = ({
+  user,
+  school,
+  setSchool,
+  features,
+  auditLogs,
+  dateRange,
+  setDateRange,
+  changePasswordForm,
+  setChangePasswordForm,
+  handleChangePassword,
+  loadFeatures,
+  loadAuditLogs,
+  toggleFeature
 }) => {
-  // ==================== STATE ====================
+  // ============================================================
+  //  STATE
+  // ============================================================
   const [activeTab, setActiveTab] = useState('profile');
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
@@ -43057,7 +45037,9 @@ const SettingsModule = ({
   const [testEmailLoading, setTestEmailLoading] = useState(false);
   const [testSMSLoading, setTestSMSLoading] = useState(false);
 
-  // ==================== PERMISSIONS ====================
+  // ============================================================
+  //  PERMISSIONS
+  // ============================================================
   const canViewAudit = user?.role === 'SUPER_ADMIN' || user?.role === 'SCHOOL_ADMIN';
   const canEditSchool = user?.role === 'SUPER_ADMIN' || user?.role === 'SCHOOL_ADMIN';
   const canToggleFeatures = user?.role === 'SUPER_ADMIN' || user?.role === 'SCHOOL_ADMIN';
@@ -43065,12 +45047,15 @@ const SettingsModule = ({
   const canManageNotifications = user?.role === 'SUPER_ADMIN' || user?.role === 'SCHOOL_ADMIN' || user?.role === 'PRINCIPAL';
   const canExportData = user?.role === 'SUPER_ADMIN' || user?.role === 'SCHOOL_ADMIN' || user?.role === 'PRINCIPAL' || user?.role === 'ACCOUNTANT';
 
-  // ✅ Only show unit-registration settings for TVET & University
   const schoolCategory = school?.category || '';
   const showUnitSettings = schoolCategory === 'COLLEGE_TVET' || schoolCategory === 'UNIVERSITY';
 
-  // ==================== SEARCHABLE SELECT ====================
-  const SearchableSelect = ({ label, value, onChange, options, placeholder, disabled, required, className, showClear = true }) => {
+  // ============================================================
+  //  SEARCHABLE SELECT — RESTORED ORIGINAL
+  // ============================================================
+  const SearchableSelect = ({ 
+    label, value, onChange, options, placeholder, disabled, required, className, showClear = true 
+  }) => {
     const [search, setSearch] = useState('');
     const [isOpen, setIsOpen] = useState(false);
     const [isFocused, setIsFocused] = useState(false);
@@ -43204,7 +45189,9 @@ const SettingsModule = ({
     );
   };
 
-  // ==================== INPUT FIELD ====================
+  // ============================================================
+  //  INPUT FIELD
+  // ============================================================
   const InputField = ({ label, type = 'text', value, onChange, required, placeholder, disabled, helperText, rows, textarea }) => {
     if (textarea) {
       return (
@@ -43231,12 +45218,13 @@ const SettingsModule = ({
     );
   };
 
-  // ==================== SCHOOL FORM STATE ====================
-  // ✅ NOTE: All numeric defaults use `??` not `||`, so 0 stays 0.
+  // ============================================================
+  //  SCHOOL FORM STATE
+  // ============================================================
   const [schoolForm, setSchoolForm] = useState({
     name: school?.name || '',
     motto: school?.motto || '',
-    contact: school?.contact || { 
+    contact: school?.contact || {
       email: '', phone: '', address: '', logo: '',
       county: '', constituency: '', ward: '', postalAddress: '', website: ''
     },
@@ -43275,21 +45263,22 @@ const SettingsModule = ({
     endTime: school?.endTime || '17:00',
     lateThreshold: school?.lateThreshold ?? 30,
     earlyDepartureThreshold: school?.earlyDepartureThreshold ?? 30,
-
-    // ✅ Numeric — use `??` so 0 stays 0
     paymentPercentageRequired: school?.paymentPercentageRequired ?? 30,
     requiresPaymentForUnits: school?.requiresPaymentForUnits ?? true,
     unitApprovalRequired: school?.unitApprovalRequired ?? true,
-    
     settings: school?.settings || {
       academicYear: new Date().getFullYear().toString(),
       terms: ['Term 1', 'Term 2', 'Term 3'],
-      gradingSystem: {}, currency: 'KES',
-      timezone: 'Africa/Nairobi', dateFormat: 'DD/MM/YYYY'
+      gradingSystem: {},
+      currency: 'KES',
+      timezone: 'Africa/Nairobi',
+      dateFormat: 'DD/MM/YYYY'
     }
   });
 
-  // ==================== OPTIONS ====================
+  // ============================================================
+  //  OPTIONS
+  // ============================================================
   const currencyOptions = useMemo(() => [
     { value: '', label: '' },
     { value: 'KES', label: 'KES - Kenyan Shilling', subLabel: '🇰🇪 Kenya' },
@@ -43310,7 +45299,7 @@ const SettingsModule = ({
   const smsProviderOptions = useMemo(() => [
     { value: '', label: '' },
     { value: 'NONE', label: '⛔ None', subLabel: 'SMS disabled' },
-    { value: 'AFRICASTALKING', label: '🌍 Africa\'s Talking', subLabel: 'KES 0.40-0.80' },
+    { value: 'AFRICASTALKING', label: "🌍 Africa's Talking", subLabel: 'KES 0.40-0.80' },
     { value: 'CELCOM', label: '📱 Celcom Africa', subLabel: 'KES 0.25' },
     { value: 'SMSLEOPARD', label: '🐆 SMSLeopard', subLabel: 'KES 0.3-0.9' },
     { value: 'ADVANTA', label: '📨 Advanta Africa', subLabel: 'KES 0.30-0.80' },
@@ -43320,36 +45309,23 @@ const SettingsModule = ({
     { value: 'SMSCOUNTRY', label: '📱 SMS Country', subLabel: '~KES 0.60' }
   ], []);
 
-  const routeOptions = useMemo(() => [
-    { value: '', label: '' },
-    { value: 'direct', label: 'Direct (Best Delivery)', subLabel: 'Highest delivery rate' },
-    { value: 'economy', label: 'Economy (Lower Cost)', subLabel: 'Cost-effective' },
-    { value: 'promotional', label: 'Promotional (Bulk)', subLabel: 'For bulk promotions' },
-    { value: 'safaricom', label: '📶 Safaricom', subLabel: 'Safaricom network' },
-    { value: 'airtel', label: '📶 Airtel', subLabel: 'Airtel network' },
-    { value: 'telkom', label: '📶 Telkom', subLabel: 'Telkom network' },
-    { value: 'all', label: '📶 All Networks', subLabel: 'All networks' }
-  ], []);
-
-  // ==================== CHANGE PASSWORD ====================
+  // ============================================================
+  //  CHANGE PASSWORD
+  // ============================================================
   const handleChangePasswordSubmit = async (e) => {
     e.preventDefault();
     if (!localChangePasswordForm.currentPassword) { setError('Current password is required'); setTimeout(() => setError(''), 3000); return; }
     if (!localChangePasswordForm.newPassword) { setError('New password is required'); setTimeout(() => setError(''), 3000); return; }
     if (localChangePasswordForm.newPassword.length < 6) { setError('New password must be at least 6 characters'); setTimeout(() => setError(''), 3000); return; }
     if (localChangePasswordForm.newPassword !== localChangePasswordForm.confirmPassword) { setError('New passwords do not match'); setTimeout(() => setError(''), 3000); return; }
-    
+
     setLoading(true); setError(''); setSuccess('');
     try {
-      const response = await fetchApi('/auth/change-password', {
-        method: 'POST',
-        body: JSON.stringify({
-          currentPassword: localChangePasswordForm.currentPassword,
-          newPassword: localChangePasswordForm.newPassword
-        })
+      const response = await api.post('/auth/change-password', {
+        currentPassword: localChangePasswordForm.currentPassword,
+        newPassword: localChangePasswordForm.newPassword
       });
-      const data = await response.json();
-      if (data.success) {
+      if (response.data.success) {
         setSuccess('Password changed successfully! Please log in again.');
         setTimeout(() => {
           setLocalChangePasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
@@ -43360,15 +45336,16 @@ const SettingsModule = ({
           }, 2000);
         }, 2000);
       } else {
-        setError(data.message || 'Failed to change password');
+        setError(response.data.message || 'Failed to change password');
       }
     } catch (err) {
-      console.error('Change password error:', err);
-      setError(err.message || 'Failed to change password');
+      setError(err.response?.data?.message || err.message || 'Failed to change password');
     } finally { setLoading(false); }
   };
 
-  // ==================== TEST EMAIL ====================
+  // ============================================================
+  //  TEST EMAIL / SMS
+  // ============================================================
   const handleTestEmail = async () => {
     if (!school?.id) { setError('No school selected'); setTimeout(() => setError(''), 3000); return; }
     if (!schoolForm.emailConfig?.enabled) { setError('Please enable email sending first'); setTimeout(() => setError(''), 3000); return; }
@@ -43382,6 +45359,7 @@ const SettingsModule = ({
     else if (provider === 'MAILGUN') isConfigured = !!(schoolForm.emailConfig?.mailgun?.apiKey && schoolForm.emailConfig?.mailgun?.domain && schoolForm.emailConfig?.mailgun?.fromEmail);
     else if (provider === 'AWS_SES') isConfigured = !!(schoolForm.emailConfig?.ses?.accessKeyId && schoolForm.emailConfig?.ses?.secretAccessKey && schoolForm.emailConfig?.ses?.fromEmail);
     if (!isConfigured) { setError(`Please fill in all required ${provider} configuration fields`); setTimeout(() => setError(''), 3000); return; }
+
     setTestEmailLoading(true); setError(''); setSuccess('');
     try {
       const res = await api.post(`/schools/${school.id}/test-email`, { testEmail: user?.email });
@@ -43393,7 +45371,6 @@ const SettingsModule = ({
     } finally { setTestEmailLoading(false); }
   };
 
-  // ==================== TEST SMS ====================
   const handleTestSMS = async () => {
     if (!school?.id) { setError('No school selected'); setTimeout(() => setError(''), 3000); return; }
     if (!schoolForm.smsConfig?.enabled) { setError('Please enable SMS sending first'); setTimeout(() => setError(''), 3000); return; }
@@ -43409,6 +45386,7 @@ const SettingsModule = ({
     else if (provider === 'BULKSMS') isConfigured = !!(schoolForm.smsConfig?.bulksms?.username && schoolForm.smsConfig?.bulksms?.password);
     else if (provider === 'SMSCOUNTRY') isConfigured = !!(schoolForm.smsConfig?.smscountry?.username && schoolForm.smsConfig?.smscountry?.password);
     if (!isConfigured) { setError(`Please fill in all required ${provider} configuration fields`); setTimeout(() => setError(''), 3000); return; }
+
     setTestSMSLoading(true); setError(''); setSuccess('');
     try {
       const res = await api.post(`/schools/${school.id}/test-sms`, { testPhone: user?.phone || '0712345678' });
@@ -43420,7 +45398,9 @@ const SettingsModule = ({
     } finally { setTestSMSLoading(false); }
   };
 
-  // ==================== NOTIFICATIONS ====================
+  // ============================================================
+  //  NOTIFICATIONS
+  // ============================================================
   useEffect(() => { if (canManageNotifications) loadNotifications(); }, []);
 
   const loadNotifications = async () => {
@@ -43442,7 +45422,9 @@ const SettingsModule = ({
     }
   };
 
-  // ==================== LOGO UPLOAD ====================
+  // ============================================================
+  //  LOGO UPLOAD
+  // ============================================================
   const handleLogoUpload = async (e) => {
     if (!canEditSchool) { alert('You do not have permission to upload a logo'); return; }
     const file = e.target.files[0];
@@ -43462,7 +45444,9 @@ const SettingsModule = ({
     } finally { setLoading(false); }
   };
 
-  // ==================== SAVE SCHOOL ====================
+  // ============================================================
+  //  SAVE SCHOOL
+  // ============================================================
   const handleSaveSchool = async () => {
     if (!canEditSchool) { alert('You do not have permission to edit school settings'); return; }
     setLoading(true); setError(''); setSuccess('');
@@ -43512,14 +45496,11 @@ const SettingsModule = ({
         endTime: schoolForm.endTime,
         lateThreshold: schoolForm.lateThreshold,
         earlyDepartureThreshold: schoolForm.earlyDepartureThreshold,
-
-        // ✅ Only send unit-registration settings for TVET / University
         ...(showUnitSettings && {
           paymentPercentageRequired: schoolForm.paymentPercentageRequired,
           requiresPaymentForUnits: schoolForm.requiresPaymentForUnits,
           unitApprovalRequired: schoolForm.unitApprovalRequired
         }),
-
         settings: schoolForm.settings,
         financialSettings: schoolForm.financialSettings
       };
@@ -43535,7 +45516,9 @@ const SettingsModule = ({
     } finally { setLoading(false); }
   };
 
-  // ==================== BACKUP ====================
+  // ============================================================
+  //  BACKUP
+  // ============================================================
   const handleCreateBackup = async () => {
     if (!canManageBackup) { alert('You do not have permission to create backups'); return; }
     setBackupInProgress(true);
@@ -43579,7 +45562,9 @@ const SettingsModule = ({
     } catch (error) { setError('Failed to download backup'); setTimeout(() => setError(''), 3000); }
   };
 
-  // ==================== EXPORT ====================
+  // ============================================================
+  //  EXPORT
+  // ============================================================
   const handleExportData = async (type) => {
     if (!canExportData) return;
     try {
@@ -43596,13 +45581,15 @@ const SettingsModule = ({
     } catch (error) { setError(`Failed to export ${type}`); setTimeout(() => setError(''), 3000); }
   };
 
-  // ==================== RENDER ====================
+  // ============================================================
+  //  RENDER
+  // ============================================================
   return (
     <div className="space-y-6">
       {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
-      
+
       <h2 className="text-2xl font-bold">⚙️ Settings</h2>
-      
+
       {success && (
         <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center justify-between">
           <span><i className="fas fa-check-circle mr-2"></i>{success}</span>
@@ -43627,6 +45614,11 @@ const SettingsModule = ({
         {canEditSchool && (
           <button onClick={() => setActiveTab('school')} className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${activeTab === 'school' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
             <i className="fas fa-school mr-2"></i>School Settings
+          </button>
+        )}
+        {canEditSchool && (
+          <button onClick={() => setActiveTab('grading')} className={`px-4 py-2 whitespace-nowrap font-medium transition-colors ${activeTab === 'grading' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
+            <i className="fas fa-award mr-2"></i>Grading System
           </button>
         )}
         {canEditSchool && (
@@ -43728,11 +45720,24 @@ const SettingsModule = ({
         </div>
       )}
 
+      {/* GRADING SYSTEM */}
+      {activeTab === 'grading' && canEditSchool && (
+        <GradingSystemEditor
+          schoolId={school?.id}
+          schoolCategory={schoolCategory}
+          onSaved={(cfg) => {
+            if (setSchool && school) setSchool({ ...school, gradingConfig: cfg });
+            setSuccess('✅ Grading system saved');
+            setTimeout(() => setSuccess(''), 3000);
+          }}
+        />
+      )}
+
       {/* FINANCIAL SETTINGS */}
       {activeTab === 'financial' && canEditSchool && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">💰 Financial Settings</h3>
-          
+
           <div className="grid grid-cols-2 gap-4">
             <SearchableSelect
               label="Currency"
@@ -43761,7 +45766,6 @@ const SettingsModule = ({
             </div>
           </div>
 
-          {/* ✅ UNIT REGISTRATION SETTINGS — ONLY FOR TVET / UNIVERSITY */}
           {showUnitSettings && (
             <div className="border-t pt-6 mt-6">
               <h4 className="font-medium text-lg mb-3 flex items-center gap-2">
@@ -43815,7 +45819,6 @@ const SettingsModule = ({
                       Students must have paid at least this percentage of their fees before registering units.
                       Set to 0 to allow registration with no payment.
                     </p>
-                    {/* Quick presets */}
                     <div className="flex flex-wrap gap-2 mt-3">
                       {[0, 30, 40, 50, 60, 100].map(pct => (
                         <button
@@ -43858,7 +45861,7 @@ const SettingsModule = ({
       {activeTab === 'communications' && canEditSchool && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-semibold mb-4">📧 Email & SMS Configuration</h3>
-          
+
           <div className="space-y-6">
             {/* EMAIL */}
             <div>
@@ -43962,9 +45965,7 @@ const SettingsModule = ({
                     <div className="grid grid-cols-2 gap-4">
                       <InputField label="API Key" type="password" value={schoolForm.smsConfig?.celcom?.apiKey || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, celcom: { ...schoolForm.smsConfig?.celcom, apiKey: e.target.value } } })} placeholder="Enter API key" disabled={loading} />
                       <InputField label="Sender ID" value={schoolForm.smsConfig?.celcom?.senderId || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, celcom: { ...schoolForm.smsConfig?.celcom, senderId: e.target.value } } })} placeholder="SchoolAid" disabled={loading} />
-                      <SearchableSelect label="Route" value={schoolForm.smsConfig?.celcom?.route || ''}
-                        onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, celcom: { ...schoolForm.smsConfig?.celcom, route: e.target.value } } })}
-                        options={routeOptions} placeholder="Select route..." disabled={loading} />
+                      <InputField label="Route" value={schoolForm.smsConfig?.celcom?.route || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, celcom: { ...schoolForm.smsConfig?.celcom, route: e.target.value } } })} placeholder="direct" disabled={loading} />
                       <InputField label="Callback URL" value={schoolForm.smsConfig?.celcom?.callbackUrl || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, celcom: { ...schoolForm.smsConfig?.celcom, callbackUrl: e.target.value } } })} placeholder="https://your-school.com/sms/callback" disabled={loading} />
                     </div>
                   </div>
@@ -43975,9 +45976,7 @@ const SettingsModule = ({
                     <div className="grid grid-cols-2 gap-4">
                       <InputField label="API Key" type="password" value={schoolForm.smsConfig?.smsleopard?.apiKey || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, smsleopard: { ...schoolForm.smsConfig?.smsleopard, apiKey: e.target.value } } })} placeholder="Enter API key" disabled={loading} />
                       <InputField label="Sender ID" value={schoolForm.smsConfig?.smsleopard?.senderId || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, smsleopard: { ...schoolForm.smsConfig?.smsleopard, senderId: e.target.value } } })} placeholder="SchoolAid" disabled={loading} />
-                      <SearchableSelect label="Route" value={schoolForm.smsConfig?.smsleopard?.route || ''}
-                        onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, smsleopard: { ...schoolForm.smsConfig?.smsleopard, route: e.target.value } } })}
-                        options={routeOptions} placeholder="Select route..." disabled={loading} />
+                      <InputField label="Route" value={schoolForm.smsConfig?.smsleopard?.route || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, smsleopard: { ...schoolForm.smsConfig?.smsleopard, route: e.target.value } } })} placeholder="safaricom" disabled={loading} />
                       <InputField label="User ID" value={schoolForm.smsConfig?.smsleopard?.userId || ''} onChange={(e) => setSchoolForm({ ...schoolForm, smsConfig: { ...schoolForm.smsConfig, smsleopard: { ...schoolForm.smsConfig?.smsleopard, userId: e.target.value } } })} placeholder="Optional" disabled={loading} />
                     </div>
                   </div>
@@ -52829,6 +54828,7 @@ const MODULE_PERMISSIONS = {
 };
 
 
+// ==================== ENHANCED RECEIPT HISTORY MODULE ====================
 const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRange, setDateRange }) => {
   const [filteredPayments, setFilteredPayments] = useState([]);
   const [selectedReceipt, setSelectedReceipt] = useState(null);
@@ -52837,6 +54837,8 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
   const [selectedStudent, setSelectedStudent] = useState('');
   const [loading, setLoading] = useState(false);
   const [totalCollected, setTotalCollected] = useState(0);
+  const [fees, setFees] = useState([]);
+  const [enrichedPayments, setEnrichedPayments] = useState([]);
   const [stats, setStats] = useState({
     today: 0,
     thisWeek: 0,
@@ -52844,7 +54846,13 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
     total: 0
   });
 
+  // ==================== SCHOOL TYPE DETECTION ====================
+  const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
+  const isUniversity = schoolCategory === 'UNIVERSITY';
+  const isTVET = schoolCategory === 'COLLEGE_TVET';
+  const isRegularSchool = !isUniversity && !isTVET;
 
+  // ==================== FORMAT HELPERS ====================
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-KE', { 
       style: 'currency', 
@@ -52854,19 +54862,205 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
     }).format(amount || 0);
   };
 
+  const formatDate = (dateString) => {
+    if (!dateString) return '—';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '—';
+    return date.toLocaleDateString('en-KE', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  };
+
+  const formatDateTime = (dateString) => {
+    if (!dateString) return '—';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '—';
+    return date.toLocaleString('en-KE', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  // ==================== GET STUDENT INFO ====================
+  const getStudent = (studentId) => {
+    return students?.find(s => s.id === studentId);
+  };
+
   const getStudentName = (studentId) => {
-    const student = students?.find(s => s.id === studentId);
+    const student = getStudent(studentId);
     return student ? `${student.firstName} ${student.lastName}` : 'Unknown';
   };
 
   const getStudentAdmission = (studentId) => {
-    const student = students?.find(s => s.id === studentId);
+    const student = getStudent(studentId);
     return student?.admissionNumber || 'N/A';
   };
 
+  const getStudentClass = (studentId) => {
+    const student = getStudent(studentId);
+    if (!student) return 'N/A';
+    
+    // For TVET
+    if (isTVET && student.programId) {
+      const program = currentSchool?.programs?.find(p => p.id === student.programId);
+      return program?.name || student.currentModule || 'N/A';
+    }
+    // For University
+    if (isUniversity && student.courseId) {
+      const course = currentSchool?.courses?.find(c => c.id === student.courseId);
+      return course?.name || 'N/A';
+    }
+    // For regular schools
+    return student.class?.name || student.className || 'N/A';
+  };
+
+  // ==================== GET FEE INFO ====================
+  const getFeeName = (feeId) => {
+    if (!feeId) return 'Fee Payment';
+    const fee = fees?.find(f => f.id === feeId);
+    return fee?.name || 'Fee Payment';
+  };
+
+  // ==================== CALCULATE STUDENT BALANCE ====================
+  const calculateStudentBalance = (studentId) => {
+    const student = getStudent(studentId);
+    if (!student) return { totalFees: 0, totalPaid: 0, balance: 0 };
+
+    // Get applicable fees for this student
+    let applicableFees = [];
+    if (isTVET && student.programId) {
+      applicableFees = fees?.filter(f => f.programId === student.programId) || [];
+    } else if (isUniversity && student.courseId) {
+      applicableFees = fees?.filter(f => f.courseId === student.courseId) || [];
+    } else if (student.classId) {
+      applicableFees = fees?.filter(f => f.classId === student.classId) || [];
+    }
+
+    const totalFees = applicableFees.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
+
+    // Get all payments for this student
+    const studentPayments = payments?.filter(p => p.studentId === studentId) || [];
+    const totalPaid = studentPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+
+    const balance = totalFees - totalPaid;
+
+    return { totalFees, totalPaid, balance };
+  };
+
+  // ==================== CALCULATE RUNNING BALANCE ====================
+  // This calculates the balance AFTER each payment for a student
+  const calculateRunningBalance = (studentId, paymentDate, paymentAmount) => {
+    const student = getStudent(studentId);
+    if (!student) return 0;
+
+    // Get applicable fees
+    let applicableFees = [];
+    if (isTVET && student.programId) {
+      applicableFees = fees?.filter(f => f.programId === student.programId) || [];
+    } else if (isUniversity && student.courseId) {
+      applicableFees = fees?.filter(f => f.courseId === student.courseId) || [];
+    } else if (student.classId) {
+      applicableFees = fees?.filter(f => f.classId === student.classId) || [];
+    }
+
+    const totalFees = applicableFees.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
+
+    // Get all payments for this student UP TO AND INCLUDING this payment
+    const paymentDateObj = new Date(paymentDate);
+    const paymentsUpToThis = payments?.filter(p => {
+      if (p.studentId !== studentId) return false;
+      const pDate = new Date(p.date || p.createdAt);
+      return pDate <= paymentDateObj;
+    }) || [];
+
+    const totalPaidUpToThis = paymentsUpToThis.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+
+    const runningBalance = totalFees - totalPaidUpToThis;
+
+    return runningBalance;
+  };
+
+  // ==================== LOAD FEES ====================
+  const loadFees = async () => {
+    try {
+      const res = await api.get('/fees');
+      setFees(res.data.fees || []);
+    } catch (error) {
+      console.error('Error loading fees:', error);
+      setFees([]);
+    }
+  };
+
+  // ==================== ENRICH PAYMENTS WITH BALANCE INFO ====================
+  const enrichPaymentsWithBalance = (paymentsList) => {
+    return paymentsList.map(payment => {
+      const studentId = payment.studentId;
+      const student = getStudent(studentId);
+      
+      // Get applicable fees
+      let applicableFees = [];
+      if (student) {
+        if (isTVET && student.programId) {
+          applicableFees = fees?.filter(f => f.programId === student.programId) || [];
+        } else if (isUniversity && student.courseId) {
+          applicableFees = fees?.filter(f => f.courseId === student.courseId) || [];
+        } else if (student.classId) {
+          applicableFees = fees?.filter(f => f.classId === student.classId) || [];
+        }
+      }
+
+      const totalFees = applicableFees.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
+
+      // Get all payments for this student up to this payment date
+      const paymentDateObj = new Date(payment.date || payment.createdAt);
+      const paymentsUpToThis = payments?.filter(p => {
+        if (p.studentId !== studentId) return false;
+        const pDate = new Date(p.date || p.createdAt);
+        return pDate <= paymentDateObj;
+      }) || [];
+
+      const totalPaidUpToThis = paymentsUpToThis.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+
+      // Get ALL payments for this student (for final balance)
+      const allStudentPayments = payments?.filter(p => p.studentId === studentId) || [];
+      const totalPaidAll = allStudentPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+
+      const runningBalance = totalFees - totalPaidUpToThis;
+      const currentBalance = totalFees - totalPaidAll;
+
+      return {
+        ...payment,
+        // Student info
+        studentName: student ? `${student.firstName} ${student.lastName}` : 'Unknown',
+        admissionNumber: student?.admissionNumber || 'N/A',
+        className: getStudentClass(studentId),
+        // Fee info
+        feeName: getFeeName(payment.feeId),
+        // Balance info
+        totalFees,
+        totalPaidUpToThis,
+        runningBalance, // Balance after this payment
+        totalPaidAll,
+        currentBalance, // Current total balance
+        isFullyPaid: currentBalance <= 0
+      };
+    });
+  };
+
+  // ==================== LOAD RECEIPTS ====================
   const loadReceipts = async () => {
     setLoading(true);
     try {
+      // First load fees if not loaded
+      if (fees.length === 0) {
+        await loadFees();
+      }
+
       let params = {};
       
       if (dateRange?.start && dateRange?.end) {
@@ -52881,34 +55075,50 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
       const res = await api.get('/payments', { params });
       let receipts = res.data.payments || [];
       
+      // Apply search filter
       if (searchTerm) {
+        const term = searchTerm.toLowerCase();
         receipts = receipts.filter(r => {
-          const student = students?.find(s => s.id === r.studentId);
-          return r.reference?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                 student?.admissionNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                 student?.firstName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                 student?.lastName?.toLowerCase().includes(searchTerm.toLowerCase());
+          const student = getStudent(r.studentId);
+          return r.reference?.toLowerCase().includes(term) ||
+                 r.receiptNo?.toLowerCase().includes(term) ||
+                 student?.admissionNumber?.toLowerCase().includes(term) ||
+                 student?.firstName?.toLowerCase().includes(term) ||
+                 student?.lastName?.toLowerCase().includes(term);
         });
       }
       
-      const sortedReceipts = receipts.sort((a, b) => new Date(b.date) - new Date(a.date));
-      setFilteredPayments(sortedReceipts);
+      // Sort by date (newest first)
+      const sortedReceipts = receipts.sort((a, b) => 
+        new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt)
+      );
       
+      // Enrich with balance info
+      const enriched = enrichPaymentsWithBalance(sortedReceipts);
+      
+      setFilteredPayments(sortedReceipts);
+      setEnrichedPayments(enriched);
+      
+      // Calculate totals
       const total = receipts.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
       setTotalCollected(total);
       
+      // Calculate stats
       const today = new Date().toISOString().split('T')[0];
-      const todayReceipts = receipts.filter(r => r.date === today);
+      const todayReceipts = receipts.filter(r => {
+        const rDate = (r.date || r.createdAt || '').split('T')[0];
+        return rDate === today;
+      });
       const todayTotal = todayReceipts.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
       
       const currentDate = new Date();
       const weekStart = new Date(currentDate);
       weekStart.setDate(currentDate.getDate() - currentDate.getDay());
-      const weekReceipts = receipts.filter(r => new Date(r.date) >= weekStart);
+      const weekReceipts = receipts.filter(r => new Date(r.date || r.createdAt) >= weekStart);
       const weekTotal = weekReceipts.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
       
       const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-      const monthReceipts = receipts.filter(r => new Date(r.date) >= monthStart);
+      const monthReceipts = receipts.filter(r => new Date(r.date || r.createdAt) >= monthStart);
       const monthTotal = monthReceipts.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
       
       setStats({
@@ -52929,154 +55139,690 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
     loadReceipts();
   }, [dateRange, selectedStudent, searchTerm]);
 
+  // ==================== STUDENT OPTIONS ====================
+  const studentOptions = useMemo(() => {
+    const opts = [{ value: '', label: 'All Students' }];
+    (students || []).forEach(s => {
+      opts.push({
+        value: s.id,
+        label: `${s.firstName} ${s.lastName}`,
+        subLabel: s.admissionNumber
+      });
+    });
+    return opts;
+  }, [students]);
+
+  // ==================== PRINT RECEIPT ====================
   const handlePrintReceipt = (receipt) => {
-    const printWindow = window.open('', '_blank');
-    const student = students?.find(s => s.id === receipt.studentId);
+    const enrichedReceipt = enrichedPayments.find(p => p.id === receipt.id) || receipt;
+    const student = getStudent(receipt.studentId);
+    const printWindow = window.open('', '_blank', 'width=800,height=900');
+    
+    const receiptNo = receipt.receiptNo || `RCP-${String(receipt.id).padStart(6, '0')}`;
+    const amountInWords = numberToWords(receipt.amount);
+    const schoolLogo = currentSchool?.contact?.logo || '';
     
     printWindow.document.write(`
       <!DOCTYPE html>
       <html>
-      <head>
-        <title>Receipt ${receipt.reference || receipt.id}</title>
-        <style>
-          body { font-family: Arial, sans-serif; padding: 40px; }
-          .receipt { max-width: 600px; margin: 0 auto; border: 1px solid #ddd; padding: 20px; }
-          .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
-          .title { font-size: 24px; font-weight: bold; }
-          .receipt-no { font-size: 18px; color: #666; margin-top: 5px; }
-          .details { margin: 20px 0; }
-          .row { display: flex; justify-content: space-between; margin: 10px 0; }
-          .total { font-size: 18px; font-weight: bold; border-top: 2px solid #333; padding-top: 10px; margin-top: 10px; }
-          .footer { text-align: center; margin-top: 30px; font-size: 12px; color: #666; border-top: 1px solid #ddd; padding-top: 10px; }
-          table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-          th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
-          .amount { text-align: right; }
-        </style>
-      </head>
-      <body>
-        <div class="receipt">
-          <div class="header">
-            <div class="title">${currentSchool?.name || 'School Management System'}</div>
-            <div class="receipt-no">OFFICIAL PAYMENT RECEIPT</div>
-            <div>Receipt No: RCP-${String(receipt.id).padStart(6, '0')}</div>
+        <head>
+          <title>Receipt ${receiptNo} - ${currentSchool?.name || 'School'}</title>
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+            
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            
+            body {
+              font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+              background: #f5f5f5;
+              padding: 20px;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            
+            .receipt-container {
+              max-width: 700px;
+              margin: 0 auto;
+              background: white;
+              border-radius: 12px;
+              box-shadow: 0 4px 24px rgba(0,0,0,0.1);
+              overflow: hidden;
+            }
+            
+            /* Header */
+            .receipt-header {
+              background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%);
+              color: white;
+              padding: 24px 32px;
+              display: flex;
+              align-items: center;
+              gap: 20px;
+            }
+            
+            .logo-container {
+              width: 70px;
+              height: 70px;
+              background: white;
+              border-radius: 12px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              flex-shrink: 0;
+              overflow: hidden;
+              box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            }
+            
+            .logo-container img {
+              width: 100%;
+              height: 100%;
+              object-fit: contain;
+              padding: 4px;
+            }
+            
+            .logo-placeholder {
+              width: 70px;
+              height: 70px;
+              background: rgba(255,255,255,0.2);
+              border-radius: 12px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              flex-shrink: 0;
+              font-size: 28px;
+              font-weight: 700;
+              color: white;
+              border: 2px dashed rgba(255,255,255,0.4);
+            }
+            
+            .school-info { flex: 1; }
+            
+            .school-name {
+              font-size: 22px;
+              font-weight: 700;
+              letter-spacing: -0.5px;
+              margin-bottom: 4px;
+            }
+            
+            .school-motto {
+              font-size: 12px;
+              opacity: 0.85;
+              font-style: italic;
+              margin-bottom: 6px;
+            }
+            
+            .school-contact {
+              font-size: 11px;
+              opacity: 0.75;
+              display: flex;
+              flex-wrap: wrap;
+              gap: 12px;
+            }
+            
+            /* Receipt Title */
+            .receipt-title-bar {
+              background: #f8fafc;
+              padding: 16px 32px;
+              border-bottom: 1px solid #e2e8f0;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+            }
+            
+            .receipt-title {
+              font-size: 14px;
+              font-weight: 600;
+              color: #1e3a5f;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+            }
+            
+            .receipt-number {
+              font-size: 16px;
+              font-weight: 700;
+              color: #1e3a5f;
+              font-family: 'Courier New', monospace;
+            }
+            
+            /* Body */
+            .receipt-body { padding: 28px 32px; position: relative; }
+            
+            .info-grid {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 16px;
+              margin-bottom: 24px;
+            }
+            
+            .info-item {
+              padding: 12px 16px;
+              background: #f8fafc;
+              border-radius: 8px;
+              border-left: 3px solid #2d5a87;
+            }
+            
+            .info-label {
+              font-size: 10px;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              color: #64748b;
+              font-weight: 600;
+              margin-bottom: 4px;
+            }
+            
+            .info-value {
+              font-size: 14px;
+              font-weight: 600;
+              color: #1e293b;
+            }
+            
+            /* Payment Table */
+            .payment-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin: 24px 0;
+              border-radius: 8px;
+              overflow: hidden;
+              box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            }
+            
+            .payment-table thead {
+              background: #1e3a5f;
+              color: white;
+            }
+            
+            .payment-table th {
+              padding: 12px 16px;
+              text-align: left;
+              font-size: 11px;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              font-weight: 600;
+            }
+            
+            .payment-table th:last-child { text-align: right; }
+            
+            .payment-table td {
+              padding: 14px 16px;
+              border-bottom: 1px solid #e2e8f0;
+              font-size: 14px;
+              color: #334155;
+            }
+            
+            .payment-table td:last-child {
+              text-align: right;
+              font-weight: 600;
+            }
+            
+            .payment-table .total-row {
+              background: #f1f5f9;
+              font-weight: 700;
+            }
+            
+            .payment-table .total-row td {
+              font-size: 16px;
+              color: #1e3a5f;
+            }
+            
+            /* Balance Section */
+            .balance-section {
+              display: grid;
+              grid-template-columns: repeat(3, 1fr);
+              gap: 12px;
+              margin: 24px 0;
+            }
+            
+            .balance-card {
+              padding: 16px;
+              border-radius: 8px;
+              text-align: center;
+            }
+            
+            .balance-card.total { background: #eff6ff; border: 1px solid #bfdbfe; }
+            .balance-card.paid { background: #f0fdf4; border: 1px solid #bbf7d0; }
+            .balance-card.remaining { background: #fef2f2; border: 1px solid #fecaca; }
+            .balance-card.cleared { background: #f0fdf4; border: 1px solid #bbf7d0; }
+            
+            .balance-label {
+              font-size: 10px;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              font-weight: 600;
+              margin-bottom: 6px;
+            }
+            
+            .balance-card.total .balance-label { color: #1d4ed8; }
+            .balance-card.paid .balance-label { color: #15803d; }
+            .balance-card.remaining .balance-label { color: #dc2626; }
+            .balance-card.cleared .balance-label { color: #15803d; }
+            
+            .balance-value {
+              font-size: 20px;
+              font-weight: 700;
+            }
+            
+            .balance-card.total .balance-value { color: #1e40af; }
+            .balance-card.paid .balance-value { color: #166534; }
+            .balance-card.remaining .balance-value { color: #991b1b; }
+            .balance-card.cleared .balance-value { color: #166534; }
+            
+            /* Amount in Words */
+            .amount-words {
+              background: #fef3c7;
+              border: 1px solid #fcd34d;
+              border-radius: 8px;
+              padding: 12px 16px;
+              margin: 20px 0;
+              font-size: 13px;
+              color: #92400e;
+            }
+            
+            /* Footer */
+            .receipt-footer {
+              padding: 20px 32px;
+              background: #f8fafc;
+              border-top: 1px solid #e2e8f0;
+              text-align: center;
+            }
+            
+            .thank-you {
+              font-size: 14px;
+              font-weight: 600;
+              color: #1e3a5f;
+              margin-bottom: 8px;
+            }
+            
+            .footer-note {
+              font-size: 11px;
+              color: #94a3b8;
+              line-height: 1.6;
+            }
+            
+            /* Signature */
+            .signature-section {
+              display: flex;
+              justify-content: space-between;
+              margin-top: 32px;
+              padding-top: 20px;
+              border-top: 1px dashed #cbd5e1;
+            }
+            
+            .signature-line {
+              width: 180px;
+              text-align: center;
+            }
+            
+            .signature-line .line {
+              border-bottom: 1px solid #94a3b8;
+              margin-bottom: 4px;
+              height: 40px;
+            }
+            
+            .signature-line .label {
+              font-size: 10px;
+              color: #64748b;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+            }
+            
+            /* Watermark */
+            .watermark {
+              position: absolute;
+              top: 50%;
+              left: 50%;
+              transform: translate(-50%, -50%) rotate(-30deg);
+              font-size: 80px;
+              font-weight: 700;
+              color: rgba(30, 58, 95, 0.04);
+              pointer-events: none;
+              white-space: nowrap;
+              z-index: 0;
+            }
+            
+            @media print {
+              body { background: white; padding: 0; }
+              .receipt-container { box-shadow: none; border-radius: 0; max-width: 100%; }
+            }
+            
+            @page { size: A4; margin: 10mm; }
+          </style>
+        </head>
+        <body>
+          <div class="receipt-container">
+            <!-- Header -->
+            <div class="receipt-header">
+              ${schoolLogo ? `
+                <div class="logo-container">
+                  <img src="${schoolLogo}" alt="School Logo" />
+                </div>
+              ` : `
+                <div class="logo-placeholder">
+                  ${(currentSchool?.name || 'S').charAt(0)}
+                </div>
+              `}
+              <div class="school-info">
+                <div class="school-name">${currentSchool?.name || 'School Name'}</div>
+                ${currentSchool?.motto ? `<div class="school-motto">"${currentSchool.motto}"</div>` : ''}
+                <div class="school-contact">
+                  ${currentSchool?.contact?.address ? `<span>📍 ${currentSchool.contact.address}</span>` : ''}
+                  ${currentSchool?.contact?.phone ? `<span>📞 ${currentSchool.contact.phone}</span>` : ''}
+                  ${currentSchool?.contact?.email ? `<span>✉️ ${currentSchool.contact.email}</span>` : ''}
+                </div>
+              </div>
+            </div>
+            
+            <!-- Title Bar -->
+            <div class="receipt-title-bar">
+              <div class="receipt-title">Official Payment Receipt</div>
+              <div class="receipt-number">${receiptNo}</div>
+            </div>
+            
+            <!-- Body -->
+            <div class="receipt-body">
+              <div class="watermark">PAID</div>
+              
+              <!-- Student Info -->
+              <div class="info-grid">
+                <div class="info-item">
+                  <div class="info-label">Student Name</div>
+                  <div class="info-value">${student?.firstName || ''} ${student?.lastName || ''}</div>
+                </div>
+                <div class="info-item">
+                  <div class="info-label">Admission Number</div>
+                  <div class="info-value">${student?.admissionNumber || 'N/A'}</div>
+                </div>
+                <div class="info-item">
+                  <div class="info-label">Class / Program</div>
+                  <div class="info-value">${enrichedReceipt.className || 'N/A'}</div>
+                </div>
+                <div class="info-item">
+                  <div class="info-label">Payment Date</div>
+                  <div class="info-value">${formatDate(receipt.date || receipt.createdAt)}</div>
+                </div>
+                <div class="info-item">
+                  <div class="info-label">Payment Method</div>
+                  <div class="info-value">${receipt.paymentMethod || 'Cash'}</div>
+                </div>
+                <div class="info-item">
+                  <div class="info-label">Reference</div>
+                  <div class="info-value">${receipt.reference || receipt.transactionId || '—'}</div>
+                </div>
+              </div>
+              
+              <!-- Payment Details -->
+              <table class="payment-table">
+                <thead>
+                  <tr>
+                    <th>Description</th>
+                    <th style="text-align: right;">Amount (KES)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>${enrichedReceipt.feeName || 'School Fees Payment'}</td>
+                    <td>${formatCurrency(receipt.amount)}</td>
+                  </tr>
+                  <tr class="total-row">
+                    <td><strong>Total Amount Paid</strong></td>
+                    <td><strong>${formatCurrency(receipt.amount)}</strong></td>
+                  </tr>
+                </tbody>
+              </table>
+              
+              <!-- Balance Section -->
+              <div class="balance-section">
+                <div class="balance-card total">
+                  <div class="balance-label">Total Fees</div>
+                  <div class="balance-value">${formatCurrency(enrichedReceipt.totalFees || 0)}</div>
+                </div>
+                <div class="balance-card paid">
+                  <div class="balance-label">Total Paid</div>
+                  <div class="balance-value">${formatCurrency(enrichedReceipt.totalPaidAll || 0)}</div>
+                </div>
+                <div class="balance-card ${enrichedReceipt.currentBalance <= 0 ? 'cleared' : 'remaining'}">
+                  <div class="balance-label">${enrichedReceipt.currentBalance <= 0 ? 'Fully Paid' : 'Balance Remaining'}</div>
+                  <div class="balance-value">${enrichedReceipt.currentBalance <= 0 ? '✓ CLEARED' : formatCurrency(enrichedReceipt.currentBalance)}</div>
+                </div>
+              </div>
+              
+              <!-- Amount in Words -->
+              <div class="amount-words">
+                <strong>Amount in words:</strong> ${amountInWords} Kenya Shillings Only
+              </div>
+              
+              <!-- Notes -->
+              ${receipt.notes ? `
+                <div style="margin: 16px 0; padding: 12px; background: #f1f5f9; border-radius: 8px;">
+                  <div class="info-label">Notes</div>
+                  <div style="font-size: 13px; color: #475569; margin-top: 4px;">${receipt.notes}</div>
+                </div>
+              ` : ''}
+              
+              <!-- Signatures -->
+              <div class="signature-section">
+                <div class="signature-line">
+                  <div class="line"></div>
+                  <div class="label">Received By</div>
+                </div>
+                <div class="signature-line">
+                  <div class="line"></div>
+                  <div class="label">Date</div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Footer -->
+            <div class="receipt-footer">
+              <div class="thank-you">Thank you for your payment!</div>
+              <div class="footer-note">
+                This is a computer-generated receipt and is valid without signature.<br>
+                Printed on: ${formatDateTime(new Date())} | Receipt: ${receiptNo}
+              </div>
+            </div>
           </div>
           
-          <div class="details">
-            <div class="row"><strong>Date:</strong> <span>${new Date(receipt.date).toLocaleDateString()}</span></div>
-            <div class="row"><strong>Student Name:</strong> <span>${student?.firstName} ${student?.lastName}</span></div>
-            <div class="row"><strong>Admission No:</strong> <span>${student?.admissionNumber}</span></div>
-            <div class="row"><strong>Payment Method:</strong> <span>${receipt.paymentMethod}</span></div>
-            ${receipt.reference ? `<div class="row"><strong>Reference:</strong> <span>${receipt.reference}</span></div>` : ''}
-          </div>
-          
-          <table>
-            <thead>
-              <tr><th>Description</th><th class="amount">Amount (KES)</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>School Fees Payment</td><td class="amount">${formatCurrency(receipt.amount)}</td></tr>
-              <tr><td class="total"><strong>Total</strong></td><td class="amount total"><strong>${formatCurrency(receipt.amount)}</strong></td></tr>
-            </tbody>
-          </table>
-          
-          ${receipt.notes ? `<div class="row"><strong>Notes:</strong> <span>${receipt.notes}</span></div>` : ''}
-          
-          <div class="footer">
-            <p>Thank you for your payment!</p>
-            <p>This is a computer-generated receipt. No signature required.</p>
-            <p>Printed on: ${new Date().toLocaleString()}</p>
-          </div>
-        </div>
-        <script>window.print();</script>
-      </body>
+          <script>
+            window.onload = function() {
+              setTimeout(function() { window.print(); }, 300);
+            }
+          </script>
+        </body>
       </html>
     `);
     printWindow.document.close();
   };
 
+  // ==================== NUMBER TO WORDS ====================
+  const numberToWords = (num) => {
+    if (!num || num === 0) return 'Zero';
+    
+    const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
+      'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+    const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+    
+    const numToWords = (n) => {
+      if (n < 20) return ones[n];
+      if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '');
+      if (n < 1000) return ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' + numToWords(n % 100) : '');
+      if (n < 1000000) return numToWords(Math.floor(n / 1000)) + ' Thousand' + (n % 1000 ? ' ' + numToWords(n % 1000) : '');
+      if (n < 1000000000) return numToWords(Math.floor(n / 1000000)) + ' Million' + (n % 1000000 ? ' ' + numToWords(n % 1000000) : '');
+      return numToWords(Math.floor(n / 1000000000)) + ' Billion' + (n % 1000000000 ? ' ' + numToWords(n % 1000000000) : '');
+    };
+    
+    return numToWords(Math.floor(num));
+  };
+
+  // ==================== RECEIPT VIEW MODAL ====================
   const ReceiptViewModal = ({ receipt, onClose }) => {
-    const student = students?.find(s => s.id === receipt.studentId);
+    const enriched = enrichedPayments.find(p => p.id === receipt.id) || receipt;
+    const student = getStudent(receipt.studentId);
+    const receiptNo = receipt.receiptNo || `RCP-${String(receipt.id).padStart(6, '0')}`;
+    const amountInWords = numberToWords(receipt.amount);
     
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-          <div className="p-6">
-            <div className="text-center mb-6">
-              <h2 className="text-2xl font-bold">{currentSchool?.name || 'School Management System'}</h2>
-              <p className="text-gray-600">Official Payment Receipt</p>
-              <div className="border-t-2 border-gray-300 my-4"></div>
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+          {/* Modal Header */}
+          <div className="bg-gradient-to-r from-slate-800 to-slate-700 px-6 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-white/10 rounded-lg flex items-center justify-center">
+                <i className="fas fa-receipt text-white"></i>
+              </div>
+              <div>
+                <h3 className="text-white font-semibold">Receipt Preview</h3>
+                <p className="text-white/60 text-xs">{receiptNo}</p>
+              </div>
+            </div>
+            <button 
+              onClick={onClose}
+              className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
+            >
+              <i className="fas fa-times"></i>
+            </button>
+          </div>
+          
+          {/* Modal Body */}
+          <div className="flex-1 overflow-y-auto p-6">
+            {/* School Header */}
+            <div className="flex items-center gap-4 mb-6 pb-6 border-b border-gray-200">
+              {currentSchool?.contact?.logo ? (
+                <img 
+                  src={currentSchool.contact.logo} 
+                  alt={currentSchool.name}
+                  className="w-16 h-16 object-contain rounded-lg border border-gray-200 p-1"
+                />
+              ) : (
+                <div className="w-16 h-16 bg-gradient-to-br from-slate-700 to-slate-800 rounded-lg flex items-center justify-center text-white text-2xl font-bold">
+                  {currentSchool?.name?.charAt(0) || 'S'}
+                </div>
+              )}
+              <div>
+                <h2 className="text-xl font-bold text-slate-800">{currentSchool?.name || 'School Name'}</h2>
+                {currentSchool?.motto && (
+                  <p className="text-sm text-slate-500 italic">"{currentSchool.motto}"</p>
+                )}
+                <div className="flex flex-wrap gap-3 mt-1 text-xs text-slate-400">
+                  {currentSchool?.contact?.address && <span>📍 {currentSchool.contact.address}</span>}
+                  {currentSchool?.contact?.phone && <span>📞 {currentSchool.contact.phone}</span>}
+                </div>
+              </div>
             </div>
             
+            {/* Receipt Info Grid */}
             <div className="grid grid-cols-2 gap-4 mb-6">
-              <div>
-                <p className="text-sm text-gray-600">Receipt No:</p>
-                <p className="font-bold text-lg">RCP-{String(receipt.id).padStart(6, '0')}</p>
+              <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Receipt Number</p>
+                <p className="font-mono font-bold text-slate-800">{receiptNo}</p>
               </div>
-              <div>
-                <p className="text-sm text-gray-600">Date:</p>
-                <p className="font-bold">{new Date(receipt.date).toLocaleDateString()}</p>
+              <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Date</p>
+                <p className="font-semibold text-slate-800">{formatDate(receipt.date || receipt.createdAt)}</p>
               </div>
-              <div>
-                <p className="text-sm text-gray-600">Student Name:</p>
-                <p className="font-bold">{student?.firstName} {student?.lastName}</p>
+              <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Student Name</p>
+                <p className="font-semibold text-slate-800">{student?.firstName} {student?.lastName}</p>
               </div>
-              <div>
-                <p className="text-sm text-gray-600">Admission No:</p>
-                <p className="font-bold">{student?.admissionNumber}</p>
+              <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Admission No</p>
+                <p className="font-mono font-semibold text-slate-800">{student?.admissionNumber || 'N/A'}</p>
               </div>
             </div>
             
-            <div className="border rounded-lg mb-6">
+            {/* Payment Table */}
+            <div className="border border-gray-200 rounded-xl overflow-hidden mb-6">
               <table className="w-full">
-                <thead className="bg-gray-50">
+                <thead className="bg-slate-800 text-white">
                   <tr>
-                    <th className="px-4 py-2 text-left">Description</th>
-                    <th className="px-4 py-2 text-right">Amount (KES)</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Description</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide">Amount (KES)</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr className="border-t">
-                    <td className="px-4 py-2">School Fees Payment</td>
-                    <td className="px-4 py-2 text-right font-bold">{formatCurrency(receipt.amount)}</td>
+                  <tr className="border-b border-gray-100">
+                    <td className="px-4 py-3 text-sm text-slate-600">{enriched.feeName || 'School Fees Payment'}</td>
+                    <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">{formatCurrency(receipt.amount)}</td>
                   </tr>
-                  <tr className="border-t bg-gray-50">
-                    <td className="px-4 py-2 font-bold">Total</td>
-                    <td className="px-4 py-2 text-right font-bold">{formatCurrency(receipt.amount)}</td>
+                  <tr className="bg-slate-50">
+                    <td className="px-4 py-3 font-bold text-slate-800">Total Amount Paid</td>
+                    <td className="px-4 py-3 text-right font-bold text-lg text-slate-800">{formatCurrency(receipt.amount)}</td>
                   </tr>
                 </tbody>
               </table>
             </div>
             
+            {/* Balance Section */}
+            <div className="grid grid-cols-3 gap-3 mb-6">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
+                <p className="text-xs text-blue-600 uppercase tracking-wide font-semibold mb-1">Total Fees</p>
+                <p className="text-lg font-bold text-blue-800">{formatCurrency(enriched.totalFees || 0)}</p>
+              </div>
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+                <p className="text-xs text-green-600 uppercase tracking-wide font-semibold mb-1">Total Paid</p>
+                <p className="text-lg font-bold text-green-800">{formatCurrency(enriched.totalPaidAll || 0)}</p>
+              </div>
+              <div className={`${enriched.currentBalance <= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'} border rounded-lg p-4 text-center`}>
+                <p className={`text-xs ${enriched.currentBalance <= 0 ? 'text-green-600' : 'text-red-600'} uppercase tracking-wide font-semibold mb-1`}>
+                  {enriched.currentBalance <= 0 ? 'Fully Paid' : 'Balance Remaining'}
+                </p>
+                <p className={`text-lg font-bold ${enriched.currentBalance <= 0 ? 'text-green-800' : 'text-red-800'}`}>
+                  {enriched.currentBalance <= 0 ? '✓ CLEARED' : formatCurrency(enriched.currentBalance)}
+                </p>
+              </div>
+            </div>
+            
+            {/* Amount in Words */}
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-6">
+              <p className="text-xs text-amber-700">
+                <strong>Amount in words:</strong> {amountInWords} Kenya Shillings Only
+              </p>
+            </div>
+            
+            {/* Payment Method & Reference */}
             <div className="grid grid-cols-2 gap-4 mb-6">
               <div>
-                <p className="text-sm text-gray-600">Payment Method:</p>
-                <p className="font-semibold">{receipt.paymentMethod}</p>
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Payment Method</p>
+                <span className="inline-flex items-center px-3 py-1 bg-slate-100 rounded-full text-sm font-medium text-slate-700">
+                  <i className="fas fa-credit-card mr-2 text-slate-400"></i>
+                  {receipt.paymentMethod || 'Cash'}
+                </span>
               </div>
-              {receipt.reference && (
+              {(receipt.reference || receipt.transactionId) && (
                 <div>
-                  <p className="text-sm text-gray-600">Reference:</p>
-                  <p className="font-semibold">{receipt.reference}</p>
+                  <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Reference</p>
+                  <span className="font-mono text-sm text-slate-700">{receipt.reference || receipt.transactionId}</span>
                 </div>
               )}
             </div>
             
+            {/* Notes */}
             {receipt.notes && (
-              <div className="mb-6">
-                <p className="text-sm text-gray-600">Notes:</p>
-                <p className="text-sm">{receipt.notes}</p>
+              <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 mb-6">
+                <p className="text-xs text-blue-600 uppercase tracking-wide mb-1">Notes</p>
+                <p className="text-sm text-blue-800">{receipt.notes}</p>
               </div>
             )}
             
-            <div className="text-center text-sm text-gray-500 mt-6 pt-4 border-t">
-              <p>Thank you for your payment!</p>
+            {/* Footer */}
+            <div className="text-center pt-4 border-t border-dashed border-gray-200">
+              <p className="text-sm font-medium text-slate-600">Thank you for your payment!</p>
+              <p className="text-xs text-slate-400 mt-1">
+                This is a computer-generated receipt. No signature required.
+              </p>
             </div>
           </div>
           
-          <div className="flex space-x-3 p-6 border-t bg-gray-50">
-            <button onClick={() => handlePrintReceipt(receipt)} className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700">
-              <i className="fas fa-print mr-2"></i>Print Receipt
+          {/* Modal Footer */}
+          <div className="flex gap-3 p-4 bg-slate-50 border-t border-gray-200">
+            <button 
+              onClick={() => handlePrintReceipt(receipt)} 
+              className="flex-1 bg-slate-800 text-white py-2.5 px-4 rounded-lg hover:bg-slate-900 transition-colors flex items-center justify-center gap-2 font-medium"
+            >
+              <i className="fas fa-print"></i>
+              Print Receipt
             </button>
-            <button onClick={onClose} className="flex-1 bg-gray-500 text-white py-2 rounded-lg hover:bg-gray-600">
+            <button 
+              onClick={onClose} 
+              className="flex-1 bg-white text-slate-700 py-2.5 px-4 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors font-medium"
+            >
               Close
             </button>
           </div>
@@ -53085,6 +55831,7 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
     );
   };
 
+  // ==================== RENDER ====================
   return (
     <div className="space-y-6">
       {showReceiptModal && selectedReceipt && (
@@ -53093,32 +55840,44 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
       
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-xl p-4 text-white">
-          <p className="text-sm opacity-90">Today's Collection</p>
+        <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-5 text-white shadow-lg shadow-blue-500/20">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm opacity-90">Today's Collection</p>
+            <i className="fas fa-calendar-day opacity-60"></i>
+          </div>
           <p className="text-2xl font-bold">{formatCurrency(stats.today)}</p>
         </div>
-        <div className="bg-gradient-to-r from-green-500 to-green-600 rounded-xl p-4 text-white">
-          <p className="text-sm opacity-90">This Week</p>
+        <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl p-5 text-white shadow-lg shadow-emerald-500/20">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm opacity-90">This Week</p>
+            <i className="fas fa-calendar-week opacity-60"></i>
+          </div>
           <p className="text-2xl font-bold">{formatCurrency(stats.thisWeek)}</p>
         </div>
-        <div className="bg-gradient-to-r from-purple-500 to-purple-600 rounded-xl p-4 text-white">
-          <p className="text-sm opacity-90">This Month</p>
+        <div className="bg-gradient-to-br from-violet-500 to-violet-600 rounded-xl p-5 text-white shadow-lg shadow-violet-500/20">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm opacity-90">This Month</p>
+            <i className="fas fa-calendar-alt opacity-60"></i>
+          </div>
           <p className="text-2xl font-bold">{formatCurrency(stats.thisMonth)}</p>
         </div>
-        <div className="bg-gradient-to-r from-indigo-500 to-indigo-600 rounded-xl p-4 text-white">
-          <p className="text-sm opacity-90">Total Collected</p>
+        <div className="bg-gradient-to-br from-slate-700 to-slate-800 rounded-xl p-5 text-white shadow-lg shadow-slate-500/20">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm opacity-90">Total Collected</p>
+            <i className="fas fa-chart-line opacity-60"></i>
+          </div>
           <p className="text-2xl font-bold">{formatCurrency(stats.total)}</p>
         </div>
       </div>
       
       {/* Filters */}
-      <div className="bg-white rounded-xl shadow-sm p-6">
+      <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
             <input
               type="date"
-              className="w-full px-3 py-2 border rounded-lg"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-slate-500"
               value={dateRange?.start || ''}
               onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
             />
@@ -53127,7 +55886,7 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
             <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
             <input
               type="date"
-              className="w-full px-3 py-2 border rounded-lg"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-slate-500"
               value={dateRange?.end || ''}
               onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
             />
@@ -53137,7 +55896,7 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
             <input
               type="text"
               placeholder="Search by student or reference..."
-              className="w-full px-3 py-2 border rounded-lg"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-slate-500"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -53145,87 +55904,133 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
           <div className="flex items-end">
             <button
               onClick={loadReceipts}
-              className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
+              className="w-full bg-slate-800 text-white px-4 py-2 rounded-lg hover:bg-slate-900 transition-colors flex items-center justify-center gap-2"
             >
-              <i className="fas fa-search mr-2"></i>Search
+              <i className="fas fa-search"></i>
+              Search
             </button>
           </div>
         </div>
       </div>
       
       {/* Receipts Table */}
-      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-        <div className="px-6 py-4 bg-gray-50 border-b">
-          <h2 className="text-xl font-semibold">Receipt History</h2>
-          <p className="text-sm text-gray-600">Total: {filteredPayments.length} receipts</p>
+      <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100">
+        <div className="px-6 py-4 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-semibold text-slate-800">Receipt History</h2>
+            <p className="text-sm text-gray-600">Total: {filteredPayments.length} receipts</p>
+          </div>
+          <div className="text-sm text-gray-500">
+            <i className="fas fa-info-circle mr-1"></i>
+            Click receipt icon to preview
+          </div>
         </div>
         
         {loading ? (
           <div className="flex justify-center py-12">
-            <i className="fas fa-spinner fa-spin text-3xl text-indigo-600"></i>
+            <div className="flex flex-col items-center gap-3">
+              <i className="fas fa-spinner fa-spin text-3xl text-slate-600"></i>
+              <p className="text-sm text-gray-500">Loading receipts...</p>
+            </div>
           </div>
-        ) : filteredPayments.length > 0 ? (
+        ) : enrichedPayments.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Receipt No</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Student</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Admission</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Method</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reference</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Receipt No</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Student</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Admission</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Balance Before</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Balance After</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
-                {filteredPayments.map(payment => (
-                  <tr key={payment.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 font-mono text-sm">RCP-{String(payment.id).padStart(6, '0')}</td>
-                    <td className="px-6 py-4 text-sm">{new Date(payment.date).toLocaleDateString()}</td>
-                    <td className="px-6 py-4 text-sm font-medium">{getStudentName(payment.studentId)}</td>
-                    <td className="px-6 py-4 text-sm font-mono">{getStudentAdmission(payment.studentId)}</td>
-                    <td className="px-6 py-4 text-sm font-semibold text-green-600">{formatCurrency(payment.amount)}</td>
-                    <td className="px-6 py-4 text-sm">
-                      <span className="px-2 py-1 bg-gray-100 rounded-full text-xs">{payment.paymentMethod}</span>
-                    </td>
-                    <td className="px-6 py-4 text-sm font-mono">{payment.reference || '—'}</td>
-                    <td className="px-6 py-4">
-                      <button
-                        onClick={() => {
-                          setSelectedReceipt(payment);
-                          setShowReceiptModal(true);
-                        }}
-                        className="text-indigo-600 hover:text-indigo-900 mr-3"
-                        title="View Receipt"
-                      >
-                        <i className="fas fa-receipt"></i>
-                      </button>
-                      <button
-                        onClick={() => handlePrintReceipt(payment)}
-                        className="text-green-600 hover:text-green-900"
-                        title="Print Receipt"
-                      >
-                        <i className="fas fa-print"></i>
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+              <tbody className="divide-y divide-gray-100">
+                {enrichedPayments.map(payment => {
+                  const balanceBefore = payment.runningBalance + (parseFloat(payment.amount) || 0);
+                  const balanceAfter = payment.runningBalance;
+                  const isCleared = payment.currentBalance <= 0;
+                  
+                  return (
+                    <tr key={payment.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-4 py-4 font-mono text-sm font-medium text-slate-700">
+                        {payment.receiptNo || `RCP-${String(payment.id).padStart(6, '0')}`}
+                      </td>
+                      <td className="px-4 py-4 text-sm text-gray-600">
+                        {formatDate(payment.date || payment.createdAt)}
+                      </td>
+                      <td className="px-4 py-4 text-sm font-medium text-slate-800">
+                        {payment.studentName}
+                      </td>
+                      <td className="px-4 py-4 text-sm font-mono text-gray-600">
+                        {payment.admissionNumber}
+                      </td>
+                      <td className="px-4 py-4 text-sm font-semibold text-emerald-600 text-right">
+                        {formatCurrency(payment.amount)}
+                      </td>
+                      <td className="px-4 py-4 text-sm text-gray-600 text-right">
+                        {formatCurrency(Math.max(0, balanceBefore))}
+                      </td>
+                      <td className={`px-4 py-4 text-sm font-semibold text-right ${
+                        balanceAfter <= 0 ? 'text-emerald-600' : 'text-red-600'
+                      }`}>
+                        {balanceAfter <= 0 ? '✓ Cleared' : formatCurrency(balanceAfter)}
+                      </td>
+                      <td className="px-4 py-4">
+                        <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+                          isCleared 
+                            ? 'bg-emerald-100 text-emerald-700' 
+                            : 'bg-amber-100 text-amber-700'
+                        }`}>
+                          {isCleared ? '✓ Fully Paid' : 'Partial'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              setSelectedReceipt(payment);
+                              setShowReceiptModal(true);
+                            }}
+                            className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors"
+                            title="View Receipt"
+                          >
+                            <i className="fas fa-receipt text-sm"></i>
+                          </button>
+                          <button
+                            onClick={() => handlePrintReceipt(payment)}
+                            className="w-8 h-8 rounded-lg bg-emerald-50 hover:bg-emerald-100 flex items-center justify-center text-emerald-600 transition-colors"
+                            title="Print Receipt"
+                          >
+                            <i className="fas fa-print text-sm"></i>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         ) : (
-          <div className="text-center py-12 text-gray-500">
-            <i className="fas fa-receipt text-5xl mb-3"></i>
-            <p>No receipts found</p>
-            <p className="text-sm">Try adjusting your search filters</p>
+          <div className="text-center py-16">
+            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <i className="fas fa-receipt text-2xl text-gray-400"></i>
+            </div>
+            <h3 className="text-lg font-medium text-gray-800 mb-1">No receipts found</h3>
+            <p className="text-sm text-gray-500">Try adjusting your search filters</p>
           </div>
         )}
       </div>
     </div>
   );
 };
+
+
 // ==================== FEE COLLECTION MODULE (with discounts) ====================
 const FeeCollectionModule = ({
   students = [],
@@ -53281,12 +56086,46 @@ const FeeCollectionModule = ({
       style: 'currency', currency: 'KES', minimumFractionDigits: 0, maximumFractionDigits: 0
     }).format(amount || 0);
 
+  const formatDate = (dateString) => {
+    if (!dateString) return '—';
+    const d = new Date(dateString);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('en-KE', { year: 'numeric', month: 'short', day: 'numeric' });
+  };
+
+  const formatDateTime = (dateString) => {
+    if (!dateString) return '—';
+    const d = new Date(dateString);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleString('en-KE', {
+      year: 'numeric', month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    });
+  };
+
   const schoolCategory = currentSchool?.category || 'SENIOR_SECONDARY';
   const isUniversity = schoolCategory === 'UNIVERSITY';
   const isTVET = schoolCategory === 'COLLEGE_TVET';
   const isRegularSchool = !isUniversity && !isTVET;
 
   const canGrantDiscount = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(user?.role);
+
+  // ==================== NUMBER TO WORDS ====================
+  const numberToWords = (num) => {
+    if (!num || num === 0) return 'Zero';
+    const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
+      'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+    const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+    const numToWords = (n) => {
+      if (n < 20) return ones[n];
+      if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '');
+      if (n < 1000) return ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' + numToWords(n % 100) : '');
+      if (n < 1000000) return numToWords(Math.floor(n / 1000)) + ' Thousand' + (n % 1000 ? ' ' + numToWords(n % 1000) : '');
+      if (n < 1000000000) return numToWords(Math.floor(n / 1000000)) + ' Million' + (n % 1000000 ? ' ' + numToWords(n % 1000000) : '');
+      return numToWords(Math.floor(n / 1000000000)) + ' Billion' + (n % 1000000000 ? ' ' + numToWords(n % 1000000000) : '');
+    };
+    return numToWords(Math.floor(num));
+  };
 
   // ==================== SEARCHABLE SELECT ====================
   const SearchableSelect = ({
@@ -53454,11 +56293,11 @@ const FeeCollectionModule = ({
   }, [studentOptions, searchTerm]);
 
   const paymentMethodOptions = useMemo(() => [
-    { value: 'CASH', label: 'Cash' },
-    { value: 'MPESA', label: 'M-Pesa' },
-    { value: 'BANK', label: 'Bank Transfer' },
-    { value: 'CHEQUE', label: 'Cheque' },
-    { value: 'CARD', label: 'Card' }
+    { value: 'CASH', label: '💵 Cash' },
+    { value: 'MPESA', label: '📱 M-Pesa' },
+    { value: 'BANK', label: '🏦 Bank Transfer' },
+    { value: 'CHEQUE', label: '📄 Cheque' },
+    { value: 'CARD', label: '💳 Card' }
   ], []);
 
   const feeOptions = useMemo(() => {
@@ -53594,7 +56433,7 @@ const FeeCollectionModule = ({
     }
   };
 
-  // ==================== SUBMIT PAYMENT (uses api axios instance, not localhost) ====================
+  // ==================== SUBMIT PAYMENT ====================
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!selectedStudent) { setApiError('Please select a student'); return; }
@@ -53620,21 +56459,29 @@ const FeeCollectionModule = ({
         admissionNumber: student?.admissionNumber || null
       };
 
-      // ✅ Uses shared `api` instance (respects base URL from config)
       const res = await api.post('/payments', paymentData);
       const data = res.data;
 
       if (data.success) {
+        // ✅ Rich receipt object with balance + student + fee info
         const receipt = {
           id: data.payment.id,
+          receiptNo: data.payment.receiptNo || `RCP-${String(data.payment.id).padStart(6, '0')}`,
           receiptNumber: data.payment.receiptNo || `RCP-${String(data.payment.id).padStart(6, '0')}`,
           student,
+          studentName: student ? `${student.firstName} ${student.lastName}` : 'Unknown',
+          admissionNumber: student?.admissionNumber || 'N/A',
           amount: parseFloat(amount),
           paymentMethod,
           date: paymentDate,
           reference: reference || data.payment.transactionId,
           notes,
-          balanceAfter: outstandingBalance - parseFloat(amount),
+          // ✅ Balance info
+          totalFees: feeStructure.reduce((s, f) => s + (parseFloat(f.amount) || 0), 0),
+          totalDiscounts: totalDiscounts,
+          totalPaid: totalPaid + parseFloat(amount),
+          balanceBefore: outstandingBalance,
+          balanceAfter: Math.max(0, outstandingBalance - parseFloat(amount)),
           collectedBy: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'System'
         };
         setLastReceipt(receipt);
@@ -53642,7 +56489,6 @@ const FeeCollectionModule = ({
         setAmount(''); setReference(''); setNotes(''); setPaymentMethod('CASH');
         await loadStudentFeeInfo(selectedStudent);
         if (setPayments) setPayments(prev => [data.payment, ...prev]);
-        alert('✅ Payment recorded successfully!');
       } else {
         throw new Error(data.message || 'Payment failed');
       }
@@ -53727,6 +56573,504 @@ const FeeCollectionModule = ({
     } finally {
       setLoading(false);
     }
+  };
+
+  // ==================== PRINT RECEIPT ====================
+  const handlePrintReceipt = (receipt) => {
+    const printWindow = window.open('', '_blank', 'width=800,height=900');
+    const schoolLogo = currentSchool?.contact?.logo || '';
+    const receiptNo = receipt.receiptNo || receipt.receiptNumber || `RCP-${String(receipt.id).padStart(6, '0')}`;
+    const amountInWords = numberToWords(receipt.amount);
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Receipt ${receiptNo} - ${currentSchool?.name || 'School'}</title>
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+              font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+              background: #f5f5f5; padding: 20px;
+              -webkit-print-color-adjust: exact; print-color-adjust: exact;
+            }
+            .receipt-container {
+              max-width: 700px; margin: 0 auto; background: white;
+              border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.1); overflow: hidden;
+            }
+            .receipt-header {
+              background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%);
+              color: white; padding: 24px 32px;
+              display: flex; align-items: center; gap: 20px;
+            }
+            .logo-container {
+              width: 70px; height: 70px; background: white; border-radius: 12px;
+              display: flex; align-items: center; justify-content: center;
+              flex-shrink: 0; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            }
+            .logo-container img { width: 100%; height: 100%; object-fit: contain; padding: 4px; }
+            .logo-placeholder {
+              width: 70px; height: 70px; background: rgba(255,255,255,0.2);
+              border-radius: 12px; display: flex; align-items: center; justify-content: center;
+              flex-shrink: 0; font-size: 28px; font-weight: 700; color: white;
+              border: 2px dashed rgba(255,255,255,0.4);
+            }
+            .school-info { flex: 1; }
+            .school-name { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 4px; }
+            .school-motto { font-size: 12px; opacity: 0.85; font-style: italic; margin-bottom: 6px; }
+            .school-contact { font-size: 11px; opacity: 0.75; display: flex; flex-wrap: wrap; gap: 12px; }
+            .receipt-title-bar {
+              background: #f8fafc; padding: 16px 32px; border-bottom: 1px solid #e2e8f0;
+              display: flex; justify-content: space-between; align-items: center;
+            }
+            .receipt-title {
+              font-size: 14px; font-weight: 600; color: #1e3a5f;
+              text-transform: uppercase; letter-spacing: 1px;
+            }
+            .receipt-number {
+              font-size: 16px; font-weight: 700; color: #1e3a5f;
+              font-family: 'Courier New', monospace;
+            }
+            .receipt-body { padding: 28px 32px; position: relative; }
+            .info-grid {
+              display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px;
+            }
+            .info-item {
+              padding: 12px 16px; background: #f8fafc; border-radius: 8px;
+              border-left: 3px solid #2d5a87;
+            }
+            .info-label {
+              font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+              color: #64748b; font-weight: 600; margin-bottom: 4px;
+            }
+            .info-value { font-size: 14px; font-weight: 600; color: #1e293b; }
+            .payment-table {
+              width: 100%; border-collapse: collapse; margin: 24px 0;
+              border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            }
+            .payment-table thead { background: #1e3a5f; color: white; }
+            .payment-table th {
+              padding: 12px 16px; text-align: left; font-size: 11px;
+              text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
+            }
+            .payment-table th:last-child { text-align: right; }
+            .payment-table td {
+              padding: 14px 16px; border-bottom: 1px solid #e2e8f0;
+              font-size: 14px; color: #334155;
+            }
+            .payment-table td:last-child { text-align: right; font-weight: 600; }
+            .payment-table .total-row { background: #f1f5f9; font-weight: 700; }
+            .payment-table .total-row td { font-size: 16px; color: #1e3a5f; }
+            .balance-section {
+              display: grid; grid-template-columns: repeat(3, 1fr);
+              gap: 12px; margin: 24px 0;
+            }
+            .balance-card { padding: 16px; border-radius: 8px; text-align: center; }
+            .balance-card.total { background: #eff6ff; border: 1px solid #bfdbfe; }
+            .balance-card.paid { background: #f0fdf4; border: 1px solid #bbf7d0; }
+            .balance-card.remaining { background: #fef2f2; border: 1px solid #fecaca; }
+            .balance-card.cleared { background: #f0fdf4; border: 1px solid #bbf7d0; }
+            .balance-label {
+              font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+              font-weight: 600; margin-bottom: 6px;
+            }
+            .balance-card.total .balance-label { color: #1d4ed8; }
+            .balance-card.paid .balance-label { color: #15803d; }
+            .balance-card.remaining .balance-label { color: #dc2626; }
+            .balance-card.cleared .balance-label { color: #15803d; }
+            .balance-value { font-size: 20px; font-weight: 700; }
+            .balance-card.total .balance-value { color: #1e40af; }
+            .balance-card.paid .balance-value { color: #166534; }
+            .balance-card.remaining .balance-value { color: #991b1b; }
+            .balance-card.cleared .balance-value { color: #166534; }
+            .amount-words {
+              background: #fef3c7; border: 1px solid #fcd34d;
+              border-radius: 8px; padding: 12px 16px; margin: 20px 0;
+              font-size: 13px; color: #92400e;
+            }
+            .receipt-footer {
+              padding: 20px 32px; background: #f8fafc;
+              border-top: 1px solid #e2e8f0; text-align: center;
+            }
+            .thank-you { font-size: 14px; font-weight: 600; color: #1e3a5f; margin-bottom: 8px; }
+            .footer-note { font-size: 11px; color: #94a3b8; line-height: 1.6; }
+            .signature-section {
+              display: flex; justify-content: space-between;
+              margin-top: 32px; padding-top: 20px; border-top: 1px dashed #cbd5e1;
+            }
+            .signature-line { width: 180px; text-align: center; }
+            .signature-line .line {
+              border-bottom: 1px solid #94a3b8; margin-bottom: 4px; height: 40px;
+            }
+            .signature-line .label {
+              font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;
+            }
+            .watermark {
+              position: absolute; top: 50%; left: 50%;
+              transform: translate(-50%, -50%) rotate(-30deg);
+              font-size: 80px; font-weight: 700; color: rgba(30, 58, 95, 0.04);
+              pointer-events: none; white-space: nowrap; z-index: 0;
+            }
+            @media print {
+              body { background: white; padding: 0; }
+              .receipt-container { box-shadow: none; border-radius: 0; max-width: 100%; }
+            }
+            @page { size: A4; margin: 10mm; }
+          </style>
+        </head>
+        <body>
+          <div class="receipt-container">
+            <div class="receipt-header">
+              ${schoolLogo ? `
+                <div class="logo-container"><img src="${schoolLogo}" alt="Logo" /></div>
+              ` : `
+                <div class="logo-placeholder">${(currentSchool?.name || 'S').charAt(0)}</div>
+              `}
+              <div class="school-info">
+                <div class="school-name">${currentSchool?.name || 'School Name'}</div>
+                ${currentSchool?.motto ? `<div class="school-motto">"${currentSchool.motto}"</div>` : ''}
+                <div class="school-contact">
+                  ${currentSchool?.contact?.address ? `<span>📍 ${currentSchool.contact.address}</span>` : ''}
+                  ${currentSchool?.contact?.phone ? `<span>📞 ${currentSchool.contact.phone}</span>` : ''}
+                  ${currentSchool?.contact?.email ? `<span>✉️ ${currentSchool.contact.email}</span>` : ''}
+                </div>
+              </div>
+            </div>
+
+            <div class="receipt-title-bar">
+              <div class="receipt-title">Official Payment Receipt</div>
+              <div class="receipt-number">${receiptNo}</div>
+            </div>
+
+            <div class="receipt-body">
+              <div class="watermark">PAID</div>
+
+              <div class="info-grid">
+                <div class="info-item">
+                  <div class="info-label">Student Name</div>
+                  <div class="info-value">${receipt.studentName}</div>
+                </div>
+                <div class="info-item">
+                  <div class="info-label">Admission Number</div>
+                  <div class="info-value">${receipt.admissionNumber}</div>
+                </div>
+                <div class="info-item">
+                  <div class="info-label">Payment Date</div>
+                  <div class="info-value">${formatDate(receipt.date)}</div>
+                </div>
+                <div class="info-item">
+                  <div class="info-label">Payment Method</div>
+                  <div class="info-value">${receipt.paymentMethod}</div>
+                </div>
+                ${receipt.reference ? `
+                  <div class="info-item" style="grid-column: span 2;">
+                    <div class="info-label">Reference</div>
+                    <div class="info-value" style="font-family: 'Courier New', monospace; font-size: 13px;">${receipt.reference}</div>
+                  </div>
+                ` : ''}
+              </div>
+
+              <table class="payment-table">
+                <thead>
+                  <tr>
+                    <th>Description</th>
+                    <th style="text-align: right;">Amount (KES)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>School Fees Payment</td>
+                    <td>${formatCurrency(receipt.amount)}</td>
+                  </tr>
+                  <tr class="total-row">
+                    <td><strong>Total Amount Paid</strong></td>
+                    <td><strong>${formatCurrency(receipt.amount)}</strong></td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div class="balance-section">
+                <div class="balance-card total">
+                  <div class="balance-label">Total Fees</div>
+                  <div class="balance-value">${formatCurrency(receipt.totalFees || 0)}</div>
+                </div>
+                <div class="balance-card paid">
+                  <div class="balance-label">Total Paid</div>
+                  <div class="balance-value">${formatCurrency(receipt.totalPaid || 0)}</div>
+                </div>
+                <div class="balance-card ${(receipt.balanceAfter || 0) <= 0 ? 'cleared' : 'remaining'}">
+                  <div class="balance-label">${(receipt.balanceAfter || 0) <= 0 ? 'Fully Paid' : 'Balance Remaining'}</div>
+                  <div class="balance-value">${(receipt.balanceAfter || 0) <= 0 ? '✓ CLEARED' : formatCurrency(receipt.balanceAfter)}</div>
+                </div>
+              </div>
+
+              <div class="amount-words">
+                <strong>Amount in words:</strong> ${amountInWords} Kenya Shillings Only
+              </div>
+
+              ${receipt.notes ? `
+                <div style="margin: 16px 0; padding: 12px; background: #f1f5f9; border-radius: 8px;">
+                  <div class="info-label">Notes</div>
+                  <div style="font-size: 13px; color: #475569; margin-top: 4px;">${receipt.notes}</div>
+                </div>
+              ` : ''}
+
+              <div class="signature-section">
+                <div class="signature-line">
+                  <div class="line"></div>
+                  <div class="label">Received By</div>
+                </div>
+                <div class="signature-line">
+                  <div class="line"></div>
+                  <div class="label">Date</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="receipt-footer">
+              <div class="thank-you">Thank you for your payment!</div>
+              <div class="footer-note">
+                This is a computer-generated receipt and is valid without signature.<br>
+                Printed on: ${formatDateTime(new Date())} | Receipt: ${receiptNo}
+              </div>
+            </div>
+          </div>
+          <script>window.onload = function() { setTimeout(function() { window.print(); }, 300); }</script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
+  // ==================== ENHANCED RECEIPT MODAL ====================
+  const ReceiptModal = ({ receipt, onClose, students, user, school }) => {
+    const amountInWords = numberToWords(receipt.amount);
+    const receiptNo = receipt.receiptNo || receipt.receiptNumber || `RCP-${String(receipt.id).padStart(6, '0')}`;
+    const isCleared = (receipt.balanceAfter || 0) <= 0;
+
+    return (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-hidden flex flex-col">
+          {/* ============ MODAL HEADER ============ */}
+          <div className="bg-gradient-to-r from-slate-800 to-slate-700 px-6 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-white/10 rounded-lg flex items-center justify-center">
+                <i className="fas fa-receipt text-white"></i>
+              </div>
+              <div>
+                <h3 className="text-white font-semibold">Payment Receipt</h3>
+                <p className="text-white/60 text-xs font-mono">{receiptNo}</p>
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
+            >
+              <i className="fas fa-times"></i>
+            </button>
+          </div>
+
+          {/* ============ MODAL BODY ============ */}
+          <div className="flex-1 overflow-y-auto p-6">
+            {/* --- School Header --- */}
+            <div className="flex items-center gap-4 mb-6 pb-6 border-b border-gray-200">
+              {school?.contact?.logo ? (
+                <img
+                  src={school.contact.logo}
+                  alt={school.name}
+                  className="w-16 h-16 object-contain rounded-lg border border-gray-200 p-1"
+                />
+              ) : (
+                <div className="w-16 h-16 bg-gradient-to-br from-slate-700 to-slate-800 rounded-lg flex items-center justify-center text-white text-2xl font-bold">
+                  {school?.name?.charAt(0) || 'S'}
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <h2 className="text-xl font-bold text-slate-800 truncate">
+                  {school?.name || 'School Name'}
+                </h2>
+                {school?.motto && (
+                  <p className="text-sm text-slate-500 italic truncate">"{school.motto}"</p>
+                )}
+                <div className="flex flex-wrap gap-3 mt-1 text-xs text-slate-400">
+                  {school?.contact?.address && <span>📍 {school.contact.address}</span>}
+                  {school?.contact?.phone && <span>📞 {school.contact.phone}</span>}
+                </div>
+              </div>
+            </div>
+
+            {/* --- Receipt Info Grid --- */}
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Receipt Number</p>
+                <p className="font-mono font-bold text-slate-800 text-sm">{receiptNo}</p>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Date</p>
+                <p className="font-semibold text-slate-800 text-sm">{formatDate(receipt.date)}</p>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Student Name</p>
+                <p className="font-semibold text-slate-800 text-sm truncate">{receipt.studentName}</p>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Admission No</p>
+                <p className="font-mono font-semibold text-slate-800 text-sm">{receipt.admissionNumber}</p>
+              </div>
+            </div>
+
+            {/* --- Payment Table --- */}
+            <div className="border border-gray-200 rounded-xl overflow-hidden mb-6">
+              <table className="w-full">
+                <thead className="bg-slate-800 text-white">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">Description</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide">Amount (KES)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b border-gray-100">
+                    <td className="px-4 py-3 text-sm text-slate-600">School Fees Payment</td>
+                    <td className="px-4 py-3 text-sm text-right font-semibold text-slate-800">
+                      {formatCurrency(receipt.amount)}
+                    </td>
+                  </tr>
+                  <tr className="bg-slate-50">
+                    <td className="px-4 py-3 font-bold text-slate-800">Total Amount Paid</td>
+                    <td className="px-4 py-3 text-right font-bold text-lg text-slate-800">
+                      {formatCurrency(receipt.amount)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            {/* --- ✅ Balance Section (3 cards) --- */}
+            <div className="grid grid-cols-3 gap-3 mb-6">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
+                <p className="text-xs text-blue-600 uppercase tracking-wide font-semibold mb-1">
+                  Total Fees
+                </p>
+                <p className="text-lg font-bold text-blue-800">
+                  {formatCurrency(receipt.totalFees || 0)}
+                </p>
+              </div>
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+                <p className="text-xs text-green-600 uppercase tracking-wide font-semibold mb-1">
+                  Total Paid
+                </p>
+                <p className="text-lg font-bold text-green-800">
+                  {formatCurrency(receipt.totalPaid || 0)}
+                </p>
+              </div>
+              <div className={`${isCleared ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'} border rounded-lg p-4 text-center`}>
+                <p className={`text-xs ${isCleared ? 'text-green-600' : 'text-red-600'} uppercase tracking-wide font-semibold mb-1`}>
+                  {isCleared ? 'Fully Paid' : 'Balance Remaining'}
+                </p>
+                <p className={`text-lg font-bold ${isCleared ? 'text-green-800' : 'text-red-800'}`}>
+                  {isCleared ? '✓ CLEARED' : formatCurrency(receipt.balanceAfter || 0)}
+                </p>
+              </div>
+            </div>
+
+            {/* --- Balance Change Summary --- */}
+            {receipt.balanceBefore !== undefined && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-6">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-amber-700">
+                    <i className="fas fa-arrow-right mr-1"></i>
+                    Balance Before: <strong>{formatCurrency(receipt.balanceBefore)}</strong>
+                  </span>
+                  <i className="fas fa-arrow-right text-amber-400"></i>
+                  <span className="text-amber-700">
+                    Balance After: <strong>{formatCurrency(receipt.balanceAfter || 0)}</strong>
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* --- Amount in Words --- */}
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-6">
+              <p className="text-xs text-amber-700">
+                <strong>Amount in words:</strong> {amountInWords} Kenya Shillings Only
+              </p>
+            </div>
+
+            {/* --- Payment Method & Reference --- */}
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div>
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Payment Method</p>
+                <span className="inline-flex items-center px-3 py-1 bg-slate-100 rounded-full text-sm font-medium text-slate-700">
+                  <i className="fas fa-credit-card mr-2 text-slate-400"></i>
+                  {receipt.paymentMethod}
+                </span>
+              </div>
+              {receipt.reference && (
+                <div>
+                  <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Reference</p>
+                  <span className="font-mono text-sm text-slate-700 break-all">{receipt.reference}</span>
+                </div>
+              )}
+            </div>
+
+            {/* --- Notes --- */}
+            {receipt.notes && (
+              <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 mb-6">
+                <p className="text-xs text-blue-600 uppercase tracking-wide mb-1">Notes</p>
+                <p className="text-sm text-blue-800">{receipt.notes}</p>
+              </div>
+            )}
+
+            {/* --- Collected By --- */}
+            {receipt.collectedBy && (
+              <div className="text-xs text-slate-500 text-center mb-2">
+                <i className="fas fa-user-tie mr-1"></i>
+                Collected by: <strong>{receipt.collectedBy}</strong>
+              </div>
+            )}
+
+            {/* --- Footer --- */}
+            <div className="text-center pt-4 border-t border-dashed border-gray-200">
+              <p className="text-sm font-medium text-slate-600">Thank you for your payment!</p>
+              <p className="text-xs text-slate-400 mt-1">
+                This is a computer-generated receipt. No signature required.
+              </p>
+            </div>
+          </div>
+
+          {/* ============ MODAL FOOTER ============ */}
+          <div className="flex gap-3 p-4 bg-slate-50 border-t border-gray-200">
+            <button
+              onClick={() => handlePrintReceipt(receipt)}
+              className="flex-1 bg-slate-800 text-white py-2.5 px-4 rounded-lg hover:bg-slate-900 transition-colors flex items-center justify-center gap-2 font-medium"
+            >
+              <i className="fas fa-print"></i>
+              Print Receipt
+            </button>
+            <button
+              onClick={onClose}
+              className="flex-1 bg-white text-slate-700 py-2.5 px-4 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors font-medium"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ==================== PAYMENT METHOD BADGE HELPER ====================
+  const getPaymentMethodStyle = (method) => {
+    const m = String(method || '').toUpperCase();
+    const map = {
+      CASH:   { icon: 'fa-money-bill-wave', bg: 'bg-emerald-50',  text: 'text-emerald-700', border: 'border-emerald-200' },
+      MPESA:  { icon: 'fa-mobile-alt',      bg: 'bg-green-50',    text: 'text-green-700',   border: 'border-green-200' },
+      BANK:   { icon: 'fa-university',      bg: 'bg-blue-50',     text: 'text-blue-700',    border: 'border-blue-200' },
+      CHEQUE: { icon: 'fa-file-invoice',    bg: 'bg-amber-50',    text: 'text-amber-700',   border: 'border-amber-200' },
+      CARD:   { icon: 'fa-credit-card',     bg: 'bg-purple-50',   text: 'text-purple-700',  border: 'border-purple-200' }
+    };
+    return map[m] || { icon: 'fa-money-bill', bg: 'bg-gray-50', text: 'text-gray-700', border: 'border-gray-200' };
   };
 
   // ==================== RENDER ====================
@@ -53855,7 +57199,7 @@ const FeeCollectionModule = ({
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Payment form */}
+        {/* ==================== PAYMENT FORM ==================== */}
         <div className="bg-white rounded-xl shadow-sm p-6">
           <h2 className="text-2xl font-bold mb-4">Fee Collection</h2>
 
@@ -54039,34 +57383,123 @@ const FeeCollectionModule = ({
           </form>
         </div>
 
-        {/* Recent payments */}
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-2xl font-bold mb-4">Recent Payments</h2>
-          {recentPayments.length > 0 ? (
-            <div className="space-y-3">
-              {recentPayments.map(p => (
-                <div key={p.id} className="border rounded-lg p-4 hover:bg-gray-50">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <p className="font-semibold text-green-600">{formatCurrency(p.amount)}</p>
-                      <p className="text-sm text-gray-600">{p.paymentMethod}</p>
-                      {p.transactionId && (
-                        <p className="text-xs text-gray-500">Ref: {p.transactionId}</p>
-                      )}
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm">{new Date(p.date).toLocaleDateString()}</p>
-                      <p className="text-xs text-gray-500">Receipt: {p.receiptNo || 'N/A'}</p>
-                    </div>
-                  </div>
-                  {p.notes && <p className="text-xs text-gray-500 mt-2">{p.notes}</p>}
+        {/* ==================== ✅ ENHANCED RECENT PAYMENTS ==================== */}
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+          <div className="px-6 py-4 bg-gradient-to-r from-slate-50 to-gray-50 border-b border-gray-100">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
+                  <i className="fas fa-receipt text-emerald-600"></i>
                 </div>
-              ))}
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800">Recent Payments</h2>
+                  <p className="text-xs text-gray-500">
+                    {studentDetails
+                      ? `Last payments for ${studentDetails.firstName}`
+                      : 'Select a student to view their recent payments'}
+                  </p>
+                </div>
+              </div>
+              {recentPayments.length > 0 && (
+                <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full">
+                  {recentPayments.length} payment{recentPayments.length !== 1 ? 's' : ''}
+                </span>
+              )}
             </div>
-          ) : (
-            <div className="text-center py-8 text-gray-500">
-              <i className="fas fa-receipt text-4xl mb-2"></i>
-              <p>No recent payments</p>
+          </div>
+
+          <div className="p-4">
+            {recentPayments.length > 0 ? (
+              <div className="space-y-3">
+                {recentPayments.map((p, idx) => {
+                  const method = getPaymentMethodStyle(p.paymentMethod);
+                  return (
+                    <div
+                      key={p.id}
+                      className="group border border-gray-100 rounded-xl p-4 hover:border-indigo-200 hover:shadow-md transition-all bg-white"
+                    >
+                      {/* Top Row: Amount + Date */}
+                      <div className="flex items-start justify-between gap-3 mb-3">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-10 h-10 ${method.bg} ${method.border} border rounded-xl flex items-center justify-center`}>
+                            <i className={`fas ${method.icon} ${method.text}`}></i>
+                          </div>
+                          <div>
+                            <p className="text-lg font-bold text-emerald-600 leading-tight">
+                              {formatCurrency(p.amount)}
+                            </p>
+                            <p className={`text-xs font-medium ${method.text} uppercase tracking-wide`}>
+                              {p.paymentMethod || 'Cash'}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs text-gray-400 uppercase tracking-wide">Date</p>
+                          <p className="text-sm font-medium text-slate-700">
+                            {formatDate(p.date || p.createdAt)}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Divider */}
+                      <div className="h-px bg-gray-100 mb-3"></div>
+
+                      {/* Bottom Row: Receipt + Reference + Notes */}
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                        {p.receiptNo && (
+                          <span className="flex items-center gap-1 text-slate-600">
+                            <i className="fas fa-hashtag text-slate-400"></i>
+                            <span className="font-mono font-medium">{p.receiptNo}</span>
+                          </span>
+                        )}
+                        {p.transactionId && (
+                          <span className="flex items-center gap-1 text-slate-500">
+                            <i className="fas fa-tag text-slate-400"></i>
+                            <span className="font-mono truncate max-w-[120px]">{p.transactionId}</span>
+                          </span>
+                        )}
+                        {p.notes && (
+                          <span className="flex items-center gap-1 text-slate-500 italic">
+                            <i className="fas fa-comment text-slate-400"></i>
+                            <span className="truncate max-w-[160px]">{p.notes}</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                  <i className="fas fa-receipt text-2xl text-gray-400"></i>
+                </div>
+                <p className="text-sm font-medium text-gray-600">
+                  {studentDetails ? 'No recent payments' : 'No student selected'}
+                </p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {studentDetails
+                    ? 'Payments will appear here once recorded'
+                    : 'Select a student to view their payment history'}
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Summary Footer */}
+          {recentPayments.length > 0 && (
+            <div className="px-6 py-3 bg-gradient-to-r from-slate-50 to-gray-50 border-t border-gray-100">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-500">
+                  <i className="fas fa-chart-line mr-1"></i>
+                  Showing last {recentPayments.length} payment{recentPayments.length !== 1 ? 's' : ''}
+                </span>
+                <span className="font-semibold text-slate-700">
+                  Subtotal: {formatCurrency(
+                    recentPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
+                  )}
+                </span>
+              </div>
             </div>
           )}
         </div>
@@ -54074,8 +57507,6 @@ const FeeCollectionModule = ({
     </div>
   );
 };
-
-
 
 
 const StudentArrivalModule = ({ 
