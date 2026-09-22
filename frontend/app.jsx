@@ -10146,252 +10146,137 @@ const CourseUnitsModule = ({
   );
 };
 
-const ExamModule = ({ 
-  exams, setExams, 
-  classes, subjects, students, 
-  results, setResults, 
-  handleCreate, handleUpdate, handleDelete, 
-  currentSchool, courses, programs, units, user 
+
+// ============================================================================
+//  EXAM MODULE — v4 (Model A: ExamSession + Papers)
+//
+//  One "Exam Session" (e.g. "END TERM 1") contains many "Papers",
+//  one per subject. Users create the session once and pick all subjects
+//  in a single flow. Papers render as sub-rows in the exams table.
+//
+//  · Session-level create / edit / delete
+//  · Multi-subject paper selection with per-paper date / time / hall
+//  · Searchable selects, teaching-staff invigilators, conflict detection
+//  · Bulk results entry, single result entry
+//  · Print exams list (grouped by session), print mark sheet
+// ============================================================================
+const ExamModule = ({
+  exams, setExams,
+  classes, subjects, students,
+  results, setResults,
+  handleCreate, handleUpdate, handleDelete,
+  currentSchool, courses, programs, units, user
 }) => {
-  console.log('📝 ExamModule initialized');
+  console.log('📝 ExamModule v4 initialized');
+
+  const SearchableSelect = StudentSearchableSelect;
 
   // ============================================================
-  // SEARCHABLE SELECT COMPONENT
-  // ============================================================
-  const SearchableSelect = ({ 
-    label, value, onChange, options = [], placeholder = "",
-    disabled, required, className,
-    noOptionsMessage = "No results found",
-    emptyMessage = "No options available"
-  }) => {
-    const [search, setSearch] = useState('');
-    const [isOpen, setIsOpen] = useState(false);
-    const [isFocused, setIsFocused] = useState(false);
-    const dropdownRef = useRef(null);
-
-    const filteredOptions = useMemo(() => {
-      if (!options || options.length === 0) return [];
-      if (!search.trim()) return options;
-      const searchLower = search.toLowerCase();
-      return options.filter(opt => {
-        if (!opt) return false;
-        const label = opt.label?.toLowerCase() || '';
-        const subLabel = opt.subLabel?.toLowerCase() || '';
-        const valueStr = opt.value?.toString().toLowerCase() || '';
-        return label.includes(searchLower) || subLabel.includes(searchLower) || valueStr.includes(searchLower);
-      });
-    }, [options, search]);
-
-    const selectedOption = useMemo(() => {
-      if (!options || options.length === 0) return null;
-      if (!value && value !== 0) return null;
-      return options.find(opt => opt.value === value) || null;
-    }, [options, value]);
-
-    useEffect(() => {
-      const handleClickOutside = (event) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-          setIsOpen(false); setIsFocused(false);
-        }
-      };
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
-
-    useEffect(() => { if (!isOpen) setSearch(''); }, [isOpen]);
-
-    const handleSelect = (selectedValue) => {
-      onChange({ target: { value: selectedValue } });
-      setSearch(''); setIsOpen(false); setIsFocused(false);
-    };
-    const handleInputChange = (e) => {
-      setSearch(e.target.value); setIsOpen(true); setIsFocused(true);
-    };
-    const handleFocus = () => {
-      if (disabled) return;
-      setIsFocused(true); setIsOpen(true);
-      if (selectedOption) setSearch(selectedOption.label);
-    };
-    const handleClear = (e) => {
-      e.stopPropagation();
-      onChange({ target: { value: '' } });
-      setSearch(''); setIsOpen(false); setIsFocused(false);
-    };
-
-    let displayValue = '';
-    if (isFocused) displayValue = search;
-    else if (selectedOption) displayValue = selectedOption.label;
-    const showPlaceholder = !displayValue && placeholder;
-
-    return (
-      <div className="relative" ref={dropdownRef}>
-        {label && (
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}{required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-        )}
-        <div className="relative">
-          <input
-            type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-pointer'
-            } ${className || ''}`}
-            value={displayValue}
-            onChange={handleInputChange}
-            onFocus={handleFocus}
-            onBlur={() => {
-              setTimeout(() => {
-                if (!dropdownRef.current?.contains(document.activeElement)) {
-                  setIsOpen(false); setIsFocused(false);
-                  if (!selectedOption) setSearch('');
-                }
-              }, 200);
-            }}
-            placeholder={showPlaceholder ? placeholder : ''}
-            disabled={disabled}
-            autoComplete="off"
-          />
-          {value && !disabled && (
-            <button type="button" onClick={handleClear}
-              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
-                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-        </div>
-        {isOpen && !disabled && (
-          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-            {options && options.length === 0 ? (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">{emptyMessage}</div>
-            ) : filteredOptions.length > 0 ? (
-              filteredOptions.map((opt) => (
-                <div
-                  key={opt.value || opt.key || Math.random().toString()}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
-                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
-                  } ${opt.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  onClick={() => { if (!opt.disabled) handleSelect(opt.value); }}
-                  onMouseDown={(e) => e.preventDefault()}
-                >
-                  <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
-                </div>
-              ))
-            ) : (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {search ? `No results for "${search}"` : noOptionsMessage}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // ============================================================
-  // STATE DECLARATIONS
-  // ============================================================
-  const [showExamForm, setShowExamForm] = useState(false);
-  const [showResultForm, setShowResultForm] = useState(false);
-  const [showBulkResultForm, setShowBulkResultForm] = useState(false);
-  const [selectedExam, setSelectedExam] = useState(null);
-  const [selectedExamForResults, setSelectedExamForResults] = useState(null);
-  
-  const [selectedClass, setSelectedClass] = useState('');
-  const [selectedCourse, setSelectedCourse] = useState('');
-  const [selectedProgram, setSelectedProgram] = useState('');
-  const [selectedYear, setSelectedYear] = useState('');
-  const [selectedSemester, setSelectedSemester] = useState('');
-  const [selectedModule, setSelectedModule] = useState('');
-  const [selectedUnit, setSelectedUnit] = useState('');
-  const [selectedSubject, setSelectedSubject] = useState('');
-  const [selectedExamName, setSelectedExamName] = useState('');
-  
-  const [examNameOption, setExamNameOption] = useState('select');
-  const [customExamName, setCustomExamName] = useState('');
-  const [availableExamNames, setAvailableExamNames] = useState([]);
-  
-  const [filteredUnitsForFilters, setFilteredUnitsForFilters] = useState([]);
-  const [filteredUnitsForForm, setFilteredUnitsForForm] = useState([]);
-  const [filteredSubjectsForFilters, setFilteredSubjectsForFilters] = useState([]);
-  const [filteredSubjectsForForm, setFilteredSubjectsForForm] = useState([]);
-  
-  const [teachingStaff, setTeachingStaff] = useState([]);
-  const [loadingStaff, setLoadingStaff] = useState(false);
-  const [staffLoadError, setStaffLoadError] = useState('');
-  const [invigilatorConflicts, setInvigilatorConflicts] = useState([]);
-  
-  const [loading, setLoading] = useState(false);
-  const [savingResults, setSavingResults] = useState(false);
-  const [apiError, setApiError] = useState('');
-
-  const [examForm, setExamForm] = useState({
-    name: '', type: '', classId: '', term: '',
-    academicYear: new Date().getFullYear().toString(), 
-    date: new Date().toISOString().split('T')[0], 
-    maxMarks: 100,
-    examHall: '', invigilator: '', invigilatorId: '',
-    startTime: '', endTime: '',
-    courseId: '', programId: '',
-    departmentId: '', facultyId: '', semester: '',
-    year: '', module: '', unitId: '', subjectId: '',
-    schoolCategory: currentSchool?.category || 'SENIOR_SECONDARY'
-  });
-
-  const [resultForm, setResultForm] = useState({
-    studentId: '', examId: '', marks: '', isAbsent: false, remarks: ''
-  });
-
-  const [bulkResults, setBulkResults] = useState([]);
-  const [resultSearch, setResultSearch] = useState('');
-  const [filterGrade, setFilterGrade] = useState('');
-  const [selectedStudentsForMessage, setSelectedStudentsForMessage] = useState([]);
-  const [selectAllForMessage, setSelectAllForMessage] = useState(false);
-
-  // ============================================================
-  // SCHOOL TYPE DETECTION
+  // SCHOOL TYPE
   // ============================================================
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
   const isUniversity = schoolCategory === 'UNIVERSITY';
-  const isTVET = schoolCategory === 'COLLEGE_TVET';
-  const isSecondary = schoolCategory === 'SENIOR_SECONDARY';
-  const isPrimary = schoolCategory === 'ECDE_PRIMARY_JSS';
+  const isTVET       = schoolCategory === 'COLLEGE_TVET';
+  const isSecondary  = schoolCategory === 'SENIOR_SECONDARY';
+  const isPrimary    = schoolCategory === 'ECDE_PRIMARY_JSS';
   const isRegularSchool = !isUniversity && !isTVET;
 
   // ============================================================
-  // ROLE PERMISSIONS
+  // ROLE
   // ============================================================
-  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
-  const isSchoolAdmin = user?.role === 'SCHOOL_ADMIN';
-  const isPrincipal = user?.role === 'PRINCIPAL';
+  const isSuperAdmin      = user?.role === 'SUPER_ADMIN';
+  const isSchoolAdmin     = user?.role === 'SCHOOL_ADMIN';
+  const isPrincipal       = user?.role === 'PRINCIPAL';
   const isDeputyPrincipal = user?.role === 'DEPUTY_PRINCIPAL';
-  const isSeniorTeacher = user?.role === 'SENIOR_TEACHER';
-  const isClassTeacher = user?.role === 'CLASS_TEACHER';
-  const isSubjectTeacher = user?.role === 'SUBJECT_TEACHER';
-  
-  const canCreateExams = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || isSeniorTeacher;
-  const canEditExams = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || isSeniorTeacher;
-  const canDeleteExams = isSuperAdmin || isSchoolAdmin || isPrincipal;
-  const canAddResults = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || isSeniorTeacher || isClassTeacher || isSubjectTeacher;
-  const canPublishResults = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal;
+  const isSeniorTeacher   = user?.role === 'SENIOR_TEACHER';
+
+  const canCreateSessions = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || isSeniorTeacher;
+  const canEditSessions   = canCreateSessions;
+  const canDeleteSessions = isSuperAdmin || isSchoolAdmin || isPrincipal;
 
   // ============================================================
-  // TEACHING STAFF FETCHING
+  // STATE — sessions list + filters
+  // ============================================================
+  const [sessions, setSessions]             = useState([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+  const [expandedSessions, setExpandedSessions] = useState(new Set());  // ids of sessions whose papers are expanded
+
+  const [selectedSessionType, setSelectedSessionType] = useState('');
+  const [selectedExamName, setSelectedExamName]       = useState('');
+  const [selectedClass, setSelectedClass]             = useState('');
+  const [selectedCourse, setSelectedCourse]           = useState('');
+  const [selectedProgram, setSelectedProgram]         = useState('');
+  const [selectedYear, setSelectedYear]               = useState('');
+  const [selectedSemester, setSelectedSemester]       = useState('');
+  const [selectedModule, setSelectedModule]           = useState('');
+  const [selectedUnit, setSelectedUnit]               = useState('');
+  const [selectedSubject, setSelectedSubject]         = useState('');
+
+  // ============================================================
+  // STATE — session form (create/edit)
+  // ============================================================
+  const [showSessionForm, setShowSessionForm]       = useState(false);
+  const [editingSession, setEditingSession]         = useState(null);       // null = create
+  const [sessionPapers, setSessionPapers]           = useState([]);         // per-paper overrides
+
+  const [sessionForm, setSessionForm] = useState({
+    name: '',
+    type: '',
+    term: '',
+    academicYear: new Date().getFullYear().toString(),
+    startDate: new Date().toISOString().split('T')[0],
+    endDate: '',
+    maxMarks: 100,
+    notes: '',
+    // scope
+    classId: '',
+    courseId: '',
+    programId: '',
+    year: '',
+    semester: '',
+    module: ''
+  });
+
+  // ============================================================
+  // STATE — teaching staff (invigilators)
+  // ============================================================
+  const [teachingStaff, setTeachingStaff] = useState([]);
+  const [loadingStaff, setLoadingStaff]   = useState(false);
+  const [staffLoadError, setStaffLoadError] = useState('');
+
+  // ============================================================
+  // STATE — single result modal
+  // ============================================================
+  const [showResultForm, setShowResultForm]       = useState(false);
+  const [selectedExamForResults, setSelectedExamForResults] = useState(null);  // paper exam id
+  const [resultForm, setResultForm] = useState({
+    studentId: '', examId: '', marks: '', isAbsent: false, remarks: ''
+  });
+  const [savingResults, setSavingResults] = useState(false);
+
+  // ============================================================
+  // STATE — bulk results
+  // ============================================================
+  const [showBulkResultForm, setShowBulkResultForm] = useState(false);
+  const [bulkResults, setBulkResults]               = useState([]);
+  const [resultSearch, setResultSearch]             = useState('');
+  const [filterGrade, setFilterGrade]               = useState('');
+  const [selectedStudentsForMessage, setSelectedStudentsForMessage] = useState([]);
+  const [selectAllForMessage, setSelectAllForMessage] = useState(false);
+
+  const [loading, setLoading] = useState(false);
+  const [apiError, setApiError] = useState('');
+
+  // ============================================================
+  // HELPERS — staff display
   // ============================================================
   const extractStaffArray = (payload) => {
     if (!payload) return [];
     if (Array.isArray(payload)) return payload;
     return (
-      payload.staff || payload.Staff || payload.staffMembers || payload.staff_members ||
-      payload.teachers || payload.Teachers || payload.employees || payload.Employees ||
-      payload.data?.staff || payload.data?.staffMembers || payload.data?.teachers || payload.data?.employees ||
+      payload.staff || payload.Staff || payload.staffMembers ||
+      payload.teachers || payload.employees ||
+      payload.data?.staff || payload.data?.teachers || payload.data?.employees ||
       (Array.isArray(payload.data) ? payload.data : null) ||
       payload.results || payload.items || []
     );
@@ -10401,80 +10286,50 @@ const ExamModule = ({
     if (!s) return false;
     const candidates = [
       s.staffType, s.staff_type, s.type, s.role, s.category,
-      s.staffCategory, s.staff_category, s.position, s.designation,
       s.jobTitle, s.job_title,
-      s.StaffType?.name, s.Role?.name, s.StaffCategory?.name,
-      s.User?.role, s.user?.role,
+      s.User?.role, s.user?.role
     ].filter(Boolean).map(v => String(v).toUpperCase().replace(/[\s-]+/g, '_'));
 
     if (candidates.length === 0) return false;
-
-    const TEACHING_MARKERS = ['TEACH', 'TUTOR', 'LECTURER', 'INSTRUCTOR', 'TRAINER', 'FACILITATOR', 'PROFESSOR'];
-    const NON_TEACHING_MARKERS = [
-      'NON_TEACHING', 'NONTEACHING', 'SUPPORT_STAFF',
-      'ADMIN', 'ACCOUNTANT', 'BURSAR', 'SECRETARY',
-      'DRIVER', 'SECURITY', 'CLEANER', 'COOK', 'LIBRARIAN',
-      'STUDENT', 'PARENT', 'GUARDIAN',
-      'SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL',
-    ];
-
-    if (candidates.some(c => NON_TEACHING_MARKERS.some(m => c.includes(m)))) return false;
-    return candidates.some(c => TEACHING_MARKERS.some(m => c.includes(m)));
+    const TEACHING = ['TEACH', 'TUTOR', 'LECTURER', 'INSTRUCTOR', 'TRAINER', 'PROFESSOR'];
+    const NON_TEACHING = ['NON_TEACHING', 'SUPPORT_STAFF', 'ADMIN', 'ACCOUNTANT', 'BURSAR',
+                          'SECRETARY', 'DRIVER', 'SECURITY', 'CLEANER', 'COOK', 'LIBRARIAN',
+                          'STUDENT', 'PARENT'];
+    if (candidates.some(c => NON_TEACHING.some(m => c.includes(m)))) return false;
+    return candidates.some(c => TEACHING.some(m => c.includes(m)));
   };
 
   const getStaffDisplayName = (s) => {
     if (!s) return 'Unknown';
-    const u = s.User || s.user || s.account || {};
+    const u = s.User || s.user || {};
     const first = u.firstName || u.first_name || s.firstName || s.first_name || '';
     const last = u.lastName || u.last_name || s.lastName || s.last_name || '';
-    const full = `${first} ${last}`.trim();
-    return full || s.name || s.fullName || s.displayName || u.name || u.email || s.email || `Staff ${s.id}`;
+    return `${first} ${last}`.trim() || s.name || u.email || `Staff ${s.id}`;
   };
 
-  const getStaffSubLabel = (s) => {
-    if (!s) return '';
-    return (
-      s.department?.name || s.Department?.name || s.department ||
-      s.subject?.name || s.Subject?.name ||
-      s.staffType || s.type || s.role || ''
-    );
-  };
+  const getStaffSubLabel = (s) =>
+    s?.department?.name || s?.Department?.name || s?.department ||
+    s?.staffType || s?.type || s?.role || 'Teaching Staff';
 
   const fetchTeachingStaff = async () => {
-    setLoadingStaff(true);
-    setStaffLoadError('');
-    const schoolId = currentSchool?.id;
+    setLoadingStaff(true); setStaffLoadError('');
     const endpoints = [];
-    if (schoolId) {
-      endpoints.push(`/staff?schoolId=${schoolId}`);
-      endpoints.push(`/schools/${schoolId}/staff`);
+    if (currentSchool?.id) {
+      endpoints.push(`/staff?schoolId=${currentSchool.id}`);
+      endpoints.push(`/schools/${currentSchool.id}/staff`);
     }
     endpoints.push('/staff');
 
     let rawStaff = [];
-    let lastError = null;
-
     for (const url of endpoints) {
       try {
         const res = await api.get(url);
         const arr = extractStaffArray(res.data);
         if (arr.length > 0) { rawStaff = arr; break; }
-      } catch (err) {
-        lastError = err;
-      }
-    }
-
-    if (rawStaff.length === 0) {
-      setStaffLoadError(lastError?.response?.data?.message || lastError?.message || 'No staff records found for this school.');
-      setTeachingStaff([]); setLoadingStaff(false); return;
+      } catch (_) { /* try next */ }
     }
 
     const teaching = rawStaff.filter(isTeachingStaff);
-    if (teaching.length === 0) {
-      setStaffLoadError(`Found ${rawStaff.length} staff record(s) but none matched a teaching role.`);
-      setTeachingStaff([]); setLoadingStaff(false); return;
-    }
-
     const seen = new Set();
     const deduped = teaching.filter(s => {
       const key = s?.id ?? s?.staffId ?? s?.userId;
@@ -10482,255 +10337,115 @@ const ExamModule = ({
       if (seen.has(key)) return false;
       seen.add(key); return true;
     });
-
     setTeachingStaff(deduped);
+    if (deduped.length === 0 && rawStaff.length === 0) {
+      setStaffLoadError('No staff records found for this school.');
+    }
     setLoadingStaff(false);
   };
 
   useEffect(() => { fetchTeachingStaff(); }, [currentSchool?.id]);
 
   // ============================================================
-  // CHECK INVIGILATOR CONFLICTS
+  // HELPERS — lookups
   // ============================================================
-  const checkInvigilatorConflicts = async (invigilatorId, date, startTime, endTime, currentExamId = null) => {
-    if (!invigilatorId || !date || !startTime || !endTime) return [];
-    try {
-      const allExams = exams || [];
-      const conflicts = allExams.filter(exam => {
-        if (currentExamId && exam.id === currentExamId) return false;
-        if (exam.invigilatorId !== invigilatorId) return false;
-        if (exam.date !== date) return false;
-        const examStart = exam.startTime;
-        const examEnd = exam.endTime;
-        if (!examStart || !examEnd) return false;
-        const newStartNum = parseInt(startTime.replace(':', ''));
-        const newEndNum = parseInt(endTime.replace(':', ''));
-        const examStartNum = parseInt(examStart.replace(':', ''));
-        const examEndNum = parseInt(examEnd.replace(':', ''));
-        return (newStartNum < examEndNum && newEndNum > examStartNum);
-      });
-      setInvigilatorConflicts(conflicts);
-      return conflicts;
-    } catch (error) {
-      console.error('Error checking invigilator conflicts:', error);
-      return [];
-    }
+  const getClassName     = (id) => classes?.find(c => c.id === id)?.name || 'N/A';
+  const getSubjectName   = (id) => subjects?.find(s => s.id === id)?.name || 'N/A';
+  const getUnitName      = (id) => units?.find(u => u.id === id)?.name || 'N/A';
+  const getCourseName    = (id) => courses?.find(c => c.id === id)?.name || 'N/A';
+  const getProgramName   = (id) => programs?.find(p => p.id === id)?.name || 'N/A';
+  const getStaffName     = (id) => {
+    if (!id) return '—';
+    const s = teachingStaff.find(x => x.id === id);
+    return s ? getStaffDisplayName(s) : '—';
   };
 
-  useEffect(() => {
-    if (examForm.invigilatorId && examForm.date && examForm.startTime && examForm.endTime) {
-      checkInvigilatorConflicts(examForm.invigilatorId, examForm.date, examForm.startTime, examForm.endTime, selectedExam?.id);
-    } else { setInvigilatorConflicts([]); }
-  }, [examForm.invigilatorId, examForm.date, examForm.startTime, examForm.endTime, selectedExam]);
+  const classOptions = useMemo(
+    () => (classes || []).map(c => ({ value: c.id, label: c.name, subLabel: c.capacity ? `Cap ${c.capacity}` : '' })),
+    [classes]
+  );
+  const courseOptions = useMemo(
+    () => (courses || []).map(c => ({ value: c.id, label: c.name, subLabel: c.code || '' })),
+    [courses]
+  );
+  const programOptions = useMemo(
+    () => (programs || []).map(p => ({ value: p.id, label: p.name, subLabel: p.code || '' })),
+    [programs]
+  );
+  const invigilatorOptions = useMemo(
+    () => teachingStaff.map(s => ({ value: s.id, label: getStaffDisplayName(s), subLabel: getStaffSubLabel(s) })),
+    [teachingStaff]
+  );
 
-  // ============================================================
-  // OPTIONS FOR SEARCHABLE SELECTS
-  // ============================================================
-  const courseOptions = useMemo(() => {
-    if (!courses || courses.length === 0) return [];
-    return courses.map(c => ({ value: c.id, label: c.name, subLabel: c.code || '' }));
-  }, [courses]);
-
-  const programOptions = useMemo(() => {
-    if (!programs || programs.length === 0) return [];
-    return programs.map(p => ({ value: p.id, label: p.name, subLabel: p.code || '' }));
-  }, [programs]);
-
-  const classOptions = useMemo(() => {
-    if (!classes || classes.length === 0) return [];
-    return classes.map(c => ({ value: c.id, label: c.name, subLabel: `Capacity: ${c.capacity || 'N/A'}` }));
-  }, [classes]);
-
-  const examNameFilterOptions = useMemo(() => {
-    if (!exams || exams.length === 0) return [];
-    const names = [...new Set(exams.map(e => e.name).filter(Boolean))].sort();
-    return names.map(name => ({
-      value: name,
-      label: name,
-      subLabel: `${exams.filter(e => e.name === name).length} exam(s)`
-    }));
-  }, [exams]);
-
-  const getUnitOptionsForFilters = useCallback(() => {
-    if (!filteredUnitsForFilters || filteredUnitsForFilters.length === 0) return [];
-    return filteredUnitsForFilters.map(u => ({ 
-      value: u.id, label: u.name,
-      subLabel: isUniversity ? `Semester: ${u.semester || 'N/A'}` : `Module: ${u.module || 'N/A'}`
-    }));
-  }, [filteredUnitsForFilters, isUniversity]);
-
-  const getUnitOptionsForForm = useCallback(() => {
-    if (!filteredUnitsForForm || filteredUnitsForForm.length === 0) return [];
-    return filteredUnitsForForm.map(u => ({ 
-      value: u.id, label: u.name,
-      subLabel: isUniversity ? `Semester: ${u.semester || 'N/A'}` : `Module: ${u.module || 'N/A'}`
-    }));
-  }, [filteredUnitsForForm, isUniversity]);
-
-  const getSubjectOptionsForFilters = useCallback(() => {
-    if (!filteredSubjectsForFilters || filteredSubjectsForFilters.length === 0) return [];
-    return filteredSubjectsForFilters.map(s => ({ value: s.id, label: s.name, subLabel: `Code: ${s.code || 'N/A'}` }));
-  }, [filteredSubjectsForFilters]);
-
-  const getSubjectOptionsForForm = useCallback(() => {
-    if (!filteredSubjectsForForm || filteredSubjectsForForm.length === 0) return [];
-    return filteredSubjectsForForm.map(s => ({ value: s.id, label: s.name, subLabel: `Code: ${s.code || 'N/A'}` }));
-  }, [filteredSubjectsForForm]);
-
-  const getInvigilatorOptions = useCallback(() => {
-    if (!teachingStaff || teachingStaff.length === 0) return [];
-    return teachingStaff.map(s => ({
-      value: s.id, label: getStaffDisplayName(s), subLabel: getStaffSubLabel(s) || 'Teaching Staff'
-    }));
-  }, [teachingStaff]);
-
-  const getExamNameOptions = useCallback(() => {
-    if (!availableExamNames || availableExamNames.length === 0) return [];
-    return availableExamNames.map(name => ({ 
-      value: name, label: name,
-      subLabel: `Used in ${exams?.filter(e => e.name === name).length || 0} exam(s)`
-    }));
-  }, [availableExamNames, exams]);
-
-  // ============================================================
-  // FILTER UNITS
-  // ============================================================
-  useEffect(() => {
-    if (isUniversity && selectedCourse && units && units.length > 0) {
-      setFilteredUnitsForFilters(units.filter(u => u.courseId === selectedCourse));
-    } else if (isTVET && selectedProgram && units && units.length > 0) {
-      setFilteredUnitsForFilters(units.filter(u => u.programId === selectedProgram));
-    } else { setFilteredUnitsForFilters([]); }
-  }, [selectedCourse, selectedProgram, units, isUniversity, isTVET]);
-
-  useEffect(() => {
-    if (isUniversity && examForm.courseId && units && units.length > 0) {
-      setFilteredUnitsForForm(units.filter(u => u.courseId === examForm.courseId));
-    } else if (isTVET && examForm.programId && units && units.length > 0) {
-      setFilteredUnitsForForm(units.filter(u => u.programId === examForm.programId));
-    } else { setFilteredUnitsForForm([]); }
-  }, [examForm.courseId, examForm.programId, units, isUniversity, isTVET]);
-
-  // ============================================================
-  // SUBJECT FILTERING
-  // ============================================================
-  useEffect(() => {
-    if (!isRegularSchool || !subjects || subjects.length === 0) { setFilteredSubjectsForFilters([]); return; }
-    if (!selectedClass) { setFilteredSubjectsForFilters([]); return; }
-    const filtered = subjects.filter(s => {
-      if (!s) return false;
-      const subjectClassId = s.classId ?? s.class_id ?? s.ClassId ?? s.classID ?? s.class?.id ?? s.Class?.id;
-      if (subjectClassId === undefined || subjectClassId === null) return false;
-      return String(subjectClassId) === String(selectedClass);
+  // Subject options scoped to the currently selected class
+  const subjectsForSelectedClass = useMemo(() => {
+    if (!isRegularSchool || !sessionForm.classId || !subjects) return [];
+    return subjects.filter(s => {
+      const cid = s.classId ?? s.class_id ?? s.Class?.id;
+      return cid && String(cid) === String(sessionForm.classId);
     });
-    setFilteredSubjectsForFilters(filtered);
-  }, [selectedClass, subjects, isRegularSchool]);
+  }, [subjects, sessionForm.classId, isRegularSchool]);
 
-  useEffect(() => {
-    if (!isRegularSchool || !subjects || subjects.length === 0) { setFilteredSubjectsForForm([]); return; }
-    if (!examForm.classId) { setFilteredSubjectsForForm([]); return; }
-    const filtered = subjects.filter(s => {
-      if (!s) return false;
-      const subjectClassId = s.classId ?? s.class_id ?? s.ClassId ?? s.classID ?? s.class?.id ?? s.Class?.id;
-      if (subjectClassId === undefined || subjectClassId === null) return false;
-      return String(subjectClassId) === String(examForm.classId);
-    });
-    setFilteredSubjectsForForm(filtered);
-  }, [examForm.classId, subjects, isRegularSchool]);
-
-  // ============================================================
-  // LOAD EXISTING EXAM NAMES
-  // ============================================================
-  useEffect(() => {
-    if (exams && exams.length > 0) {
-      const names = [...new Set(exams.map(e => e.name))].sort();
-      setAvailableExamNames(names);
+  // Unit options scoped to the currently selected course / program
+  const unitsForSelectedScope = useMemo(() => {
+    if (!units) return [];
+    if (isUniversity && sessionForm.courseId) {
+      return units.filter(u => u.courseId === sessionForm.courseId);
     }
-  }, [exams]);
+    if (isTVET && sessionForm.programId) {
+      return units.filter(u => u.programId === sessionForm.programId);
+    }
+    return [];
+  }, [units, sessionForm.courseId, sessionForm.programId, isUniversity, isTVET]);
 
   // ============================================================
-  // HELPER FUNCTIONS
-  // ============================================================
-  const getCourseName = (courseId) => {
-    if (!courseId) return 'N/A';
-    return courses?.find(c => c.id === courseId)?.name || 'N/A';
-  };
-  const getProgramName = (programId) => {
-    if (!programId) return 'N/A';
-    return programs?.find(p => p.id === programId)?.name || 'N/A';
-  };
-  const getUnitName = (unitId) => {
-    if (!unitId) return 'N/A';
-    return units?.find(u => u.id === unitId)?.name || 'N/A';
-  };
-  const getClassName = (classId) => {
-    if (!classId) return 'N/A';
-    return classes?.find(c => c.id === classId)?.name || 'N/A';
-  };
-  const getSubjectName = (subjectId) => {
-    if (!subjectId) return 'N/A';
-    return subjects?.find(s => s.id === subjectId)?.name || 'N/A';
-  };
-  const getStaffName = (staffId) => {
-    if (!staffId) return 'N/A';
-    const staff = teachingStaff.find(s => s.id === staffId);
-    if (!staff) return 'Unknown';
-    return getStaffDisplayName(staff);
-  };
-
-  // ============================================================
-  // ✅ GRADE CALCULATION — Empty marks → blank grade (never fabricate)
+  // GRADE CALC (unchanged from original)
   // ============================================================
   const calculateGrade = (marks, maxMarks = 100, examCategory = null) => {
-    // ✅ Distinguish empty from 0
-    if (marks === '' || marks === null || marks === undefined) {
-      return { grade: '', points: 0, remark: '' };
-    }
-    const numericMarks = parseFloat(marks);
-    if (isNaN(numericMarks)) {
-      return { grade: '', points: 0, remark: '' };
-    }
-    const percentage = maxMarks > 0 ? (numericMarks / maxMarks) * 100 : 0;
-    const category = examCategory || schoolCategory;
-    
-    if (category === 'UNIVERSITY') {
-      if (percentage >= 70) return { grade: 'A', points: 5.0, remark: 'Excellent' };
-      if (percentage >= 60) return { grade: 'B', points: 4.0, remark: 'Very Good' };
-      if (percentage >= 50) return { grade: 'C', points: 3.0, remark: 'Good' };
-      if (percentage >= 40) return { grade: 'D', points: 2.0, remark: 'Fair' };
+    if (marks === '' || marks === null || marks === undefined) return { grade: '', points: 0, remark: '' };
+    const n = parseFloat(marks);
+    if (isNaN(n)) return { grade: '', points: 0, remark: '' };
+    const pct = maxMarks > 0 ? (n / maxMarks) * 100 : 0;
+    const cat = examCategory || schoolCategory;
+
+    if (cat === 'UNIVERSITY') {
+      if (pct >= 70) return { grade: 'A', points: 5.0, remark: 'Excellent' };
+      if (pct >= 60) return { grade: 'B', points: 4.0, remark: 'Very Good' };
+      if (pct >= 50) return { grade: 'C', points: 3.0, remark: 'Good' };
+      if (pct >= 40) return { grade: 'D', points: 2.0, remark: 'Fair' };
       return { grade: 'E', points: 1.0, remark: 'Poor' };
-    } 
-    if (category === 'COLLEGE_TVET') {
-      if (percentage >= 80) return { grade: 'DISTINCTION', points: 5, remark: 'Distinction' };
-      if (percentage >= 65) return { grade: 'CREDIT', points: 4, remark: 'Credit' };
-      if (percentage >= 50) return { grade: 'MERIT', points: 3, remark: 'Merit' };
-      if (percentage >= 40) return { grade: 'PASS', points: 2, remark: 'Pass' };
+    }
+    if (cat === 'COLLEGE_TVET') {
+      if (pct >= 80) return { grade: 'DISTINCTION', points: 5, remark: 'Distinction' };
+      if (pct >= 65) return { grade: 'CREDIT', points: 4, remark: 'Credit' };
+      if (pct >= 50) return { grade: 'MERIT', points: 3, remark: 'Merit' };
+      if (pct >= 40) return { grade: 'PASS', points: 2, remark: 'Pass' };
       return { grade: 'FAIL', points: 1, remark: 'Fail' };
     }
-    if (category === 'ECDE_PRIMARY_JSS') {
-      if (percentage >= 80) return { grade: 'Exceeding Expectations', points: 4, remark: 'Exceeding Expectations' };
-      if (percentage >= 65) return { grade: 'Meeting Expectations', points: 3, remark: 'Meeting Expectations' };
-      if (percentage >= 50) return { grade: 'Approaching Expectations', points: 2, remark: 'Approaching Expectations' };
-      if (percentage >= 30) return { grade: 'Below Expectations', points: 1, remark: 'Below Expectations' };
+    if (cat === 'ECDE_PRIMARY_JSS') {
+      if (pct >= 80) return { grade: 'Exceeding Expectations', points: 4, remark: 'Exceeding Expectations' };
+      if (pct >= 65) return { grade: 'Meeting Expectations', points: 3, remark: 'Meeting Expectations' };
+      if (pct >= 50) return { grade: 'Approaching Expectations', points: 2, remark: 'Approaching Expectations' };
+      if (pct >= 30) return { grade: 'Below Expectations', points: 1, remark: 'Below Expectations' };
       return { grade: 'Needs Improvement', points: 0, remark: 'Needs Improvement' };
     }
-    // SENIOR_SECONDARY (Form 1–4) — traditional grading
-    if (percentage >= 80) return { grade: 'A', points: 12, remark: 'Excellent' };
-    if (percentage >= 75) return { grade: 'A-', points: 11, remark: 'Very Good' };
-    if (percentage >= 70) return { grade: 'B+', points: 10, remark: 'Good' };
-    if (percentage >= 65) return { grade: 'B', points: 9, remark: 'Above Average' };
-    if (percentage >= 60) return { grade: 'B-', points: 8, remark: 'Average' };
-    if (percentage >= 55) return { grade: 'C+', points: 7, remark: 'Below Average' };
-    if (percentage >= 50) return { grade: 'C', points: 6, remark: 'Fair' };
-    if (percentage >= 45) return { grade: 'C-', points: 5, remark: 'Below Expectations' };
-    if (percentage >= 40) return { grade: 'D+', points: 4, remark: 'Needs Improvement' };
-    if (percentage >= 35) return { grade: 'D', points: 3, remark: 'Poor' };
-    if (percentage >= 30) return { grade: 'D-', points: 2, remark: 'Very Poor' };
+    // Senior Secondary (8-4-4)
+    if (pct >= 80) return { grade: 'A', points: 12, remark: 'Excellent' };
+    if (pct >= 75) return { grade: 'A-', points: 11, remark: 'Very Good' };
+    if (pct >= 70) return { grade: 'B+', points: 10, remark: 'Good' };
+    if (pct >= 65) return { grade: 'B', points: 9, remark: 'Above Average' };
+    if (pct >= 60) return { grade: 'B-', points: 8, remark: 'Average' };
+    if (pct >= 55) return { grade: 'C+', points: 7, remark: 'Below Average' };
+    if (pct >= 50) return { grade: 'C', points: 6, remark: 'Fair' };
+    if (pct >= 45) return { grade: 'C-', points: 5, remark: 'Below Expectations' };
+    if (pct >= 40) return { grade: 'D+', points: 4, remark: 'Needs Improvement' };
+    if (pct >= 35) return { grade: 'D', points: 3, remark: 'Poor' };
+    if (pct >= 30) return { grade: 'D-', points: 2, remark: 'Very Poor' };
     return { grade: 'E', points: 1, remark: 'Needs Intervention' };
   };
 
   const getGradeColor = (grade) => {
-    if (!grade || grade === '') return 'bg-gray-100 text-gray-500';
+    if (!grade) return 'bg-gray-100 text-gray-500';
     if (['A', 'A-', 'Exceeding Expectations', 'DISTINCTION'].includes(grade)) return 'bg-green-100 text-green-800';
     if (['B+', 'B', 'B-', 'Meeting Expectations', 'CREDIT'].includes(grade)) return 'bg-blue-100 text-blue-800';
     if (['C+', 'C', 'C-', 'Approaching Expectations', 'MERIT'].includes(grade)) return 'bg-yellow-100 text-yellow-800';
@@ -10740,353 +10455,415 @@ const ExamModule = ({
   };
 
   // ============================================================
-  // FILTERED EXAMS
+  // LOAD SESSIONS
   // ============================================================
-  const filteredExams = useMemo(() => {
-    let filtered = exams || [];
+  const loadSessions = async () => {
+    setLoadingSessions(true);
+    try {
+      const res = await api.get('/exam-sessions');
+      setSessions(res.data.sessions || []);
+    } catch (err) {
+      console.error('❌ Load sessions:', err);
+      setApiError('Failed to load exam sessions: ' + (err.response?.data?.message || err.message));
+    } finally {
+      setLoadingSessions(false);
+    }
+  };
+
+  useEffect(() => { loadSessions(); }, []);
+
+  // ============================================================
+  // FILTER SESSIONS
+  // ============================================================
+  const filteredSessions = useMemo(() => {
+    let list = sessions || [];
+
     if (selectedExamName) {
-      filtered = filtered.filter(e => e.name === selectedExamName);
+      const q = selectedExamName.toLowerCase();
+      list = list.filter(s => String(s.name || '').toLowerCase().includes(q));
     }
-    if (isUniversity) {
-      if (selectedCourse) filtered = filtered.filter(e => e.courseId === selectedCourse);
-      if (selectedYear) filtered = filtered.filter(e => e.year === parseInt(selectedYear));
-      if (selectedSemester) filtered = filtered.filter(e => e.semester === parseInt(selectedSemester));
-      if (selectedUnit) filtered = filtered.filter(e => e.unitId === selectedUnit);
-    } else if (isTVET) {
-      if (selectedProgram) filtered = filtered.filter(e => e.programId === selectedProgram);
-      if (selectedYear) filtered = filtered.filter(e => e.year === parseInt(selectedYear));
-      if (selectedModule) filtered = filtered.filter(e => e.module === parseInt(selectedModule));
-      if (selectedUnit) filtered = filtered.filter(e => e.unitId === selectedUnit);
-    } else {
-      if (selectedClass) filtered = filtered.filter(e => e.classId === selectedClass);
-      if (selectedSubject) filtered = filtered.filter(e => e.subjectId === selectedSubject);
+    if (selectedSessionType) {
+      list = list.filter(s => s.type === selectedSessionType);
     }
-    return filtered;
-  }, [exams, selectedExamName, selectedCourse, selectedProgram, selectedYear, selectedSemester, selectedModule, selectedUnit, selectedClass, selectedSubject, isUniversity, isTVET]);
+    if (isUniversity && selectedCourse) {
+      list = list.filter(s => s.courseId === selectedCourse);
+    }
+    if (isTVET && selectedProgram) {
+      list = list.filter(s => s.programId === selectedProgram);
+    }
+    if (isRegularSchool && selectedClass) {
+      list = list.filter(s => s.classId === selectedClass);
+    }
+    if (selectedYear) {
+      list = list.filter(s => String(s.year) === String(selectedYear));
+    }
+    if (selectedSemester) {
+      list = list.filter(s => String(s.semester) === String(selectedSemester));
+    }
+    if (selectedModule) {
+      list = list.filter(s => String(s.module) === String(selectedModule));
+    }
+    return list;
+  }, [
+    sessions, selectedExamName, selectedSessionType,
+    selectedCourse, selectedProgram, selectedClass,
+    selectedYear, selectedSemester, selectedModule,
+    isUniversity, isTVET, isRegularSchool
+  ]);
 
   // ============================================================
-  // REFRESH EXAMS
+  // EXPAND / COLLAPSE SESSION PAPERS
   // ============================================================
-  const refreshExams = async () => {
-    try {
-      setLoading(true);
-      setApiError('');
-      const res = await api.get('/exams');
-      if (res.data.exams) setExams(res.data.exams);
-    } catch (error) {
-      console.error('Error refreshing exams:', error);
-      setApiError('Failed to load exams. Please check your connection.');
-    } finally { setLoading(false); }
+  const toggleSession = (sessionId) => {
+    setExpandedSessions(prev => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
   };
 
   // ============================================================
-  // HANDLE EXAM SUBMIT
+  // OPEN CREATE MODAL
   // ============================================================
-  const handleExamSubmit = async (e) => {
-    e.preventDefault();
-    if (!canCreateExams) { alert('You do not have permission to create exams'); return; }
-    
-    if (isUniversity) {
-      if (!examForm.courseId) { alert('Please select a course'); return; }
-      if (!examForm.unitId) { alert('Please select a unit'); return; }
-      if (!examForm.type) { alert('Please select exam type'); return; }
-    } else if (isTVET) {
-      if (!examForm.programId) { alert('Please select a program'); return; }
-      if (!examForm.unitId) { alert('Please select a unit/module'); return; }
-      if (!examForm.type) { alert('Please select exam type'); return; }
-    } else {
-      if (!examForm.classId) { alert('Please select a class'); return; }
-      if (!examForm.subjectId) { alert('Please select a subject'); return; }
-    }
-    
-    if (examNameOption === 'new' && !customExamName) { alert('Please enter a new exam name'); return; }
+  const openCreateSession = () => {
+    const defaultType = isUniversity ? 'FINAL' : isTVET ? 'PRACTICAL' : 'ENDTERM';
+    const defaultTerm =
+      isUniversity ? 'Semester 1' :
+      isTVET       ? 'Term 1' :
+                     'Term 1';
 
-    if (examForm.invigilatorId) {
-      const conflicts = await checkInvigilatorConflicts(examForm.invigilatorId, examForm.date, examForm.startTime, examForm.endTime, selectedExam?.id);
-      if (conflicts.length > 0) {
-        const conflictNames = conflicts.map(c => c.name).join(', ');
-        if (!window.confirm(`Warning: This invigilator is already assigned to: ${conflictNames} at this time. Continue anyway?`)) return;
-      }
-    }
-    
-    let examData;
-    const selectedInvigilator = teachingStaff.find(s => s.id === examForm.invigilatorId);
-    const invigilatorName = selectedInvigilator ? getStaffDisplayName(selectedInvigilator) : examForm.invigilator;
-    
-    if (isUniversity) {
-      examData = {
-        name: examNameOption === 'new' ? customExamName : examForm.name,
-        type: examForm.type, courseId: examForm.courseId, unitId: examForm.unitId,
-        year: examForm.year ? parseInt(examForm.year) : null,
-        semester: examForm.semester ? parseInt(examForm.semester) : null,
-        date: examForm.date, startTime: examForm.startTime || null, endTime: examForm.endTime || null,
-        maxMarks: examForm.maxMarks ? parseInt(examForm.maxMarks) : 100,
-        examHall: examForm.examHall || null,
-        invigilator: invigilatorName, invigilatorId: examForm.invigilatorId || null,
-        academicYear: examForm.academicYear,
-        term: examForm.semester ? `Semester ${examForm.semester}` : null,
-        schoolId: currentSchool?.id
-      };
-    } else if (isTVET) {
-      examData = {
-        name: examNameOption === 'new' ? customExamName : examForm.name,
-        type: examForm.type, programId: examForm.programId, unitId: examForm.unitId,
-        year: examForm.year ? parseInt(examForm.year) : null,
-        module: examForm.module ? parseInt(examForm.module) : null,
-        date: examForm.date, startTime: examForm.startTime || null, endTime: examForm.endTime || null,
-        maxMarks: examForm.maxMarks ? parseInt(examForm.maxMarks) : 100,
-        examHall: examForm.examHall || null,
-        invigilator: invigilatorName, invigilatorId: examForm.invigilatorId || null,
-        academicYear: examForm.academicYear,
-        term: examForm.module ? `Module ${examForm.module}` : null,
-        schoolId: currentSchool?.id
-      };
-    } else {
-      examData = {
-        name: examNameOption === 'new' ? customExamName : examForm.name,
-        type: examForm.type, classId: examForm.classId, subjectId: examForm.subjectId,
-        date: examForm.date, startTime: examForm.startTime || null, endTime: examForm.endTime || null,
-        maxMarks: examForm.maxMarks ? parseInt(examForm.maxMarks) : 100,
-        examHall: examForm.examHall || null,
-        invigilator: invigilatorName, invigilatorId: examForm.invigilatorId || null,
-        academicYear: examForm.academicYear,
-        term: examForm.term || 'Term 1',
-        schoolId: currentSchool?.id
-      };
-    }
-    
-    try {
-      let response;
-      if (selectedExam) {
-        if (!canEditExams) { alert('You do not have permission to edit exams'); return; }
-        response = await api.put(`/exams/${selectedExam.id}`, examData);
-      } else {
-        response = await api.post('/exams', examData);
-      }
-      
-      if (response.data.success) {
-        alert('✅ Exam saved successfully!');
-        setShowExamForm(false);
-        setSelectedExam(null);
-        setCustomExamName('');
-        setExamNameOption('select');
-        setInvigilatorConflicts([]);
-        refreshExams();
-      } else {
-        alert('❌ Failed to save exam: ' + (response.data.message || 'Unknown error'));
-      }
-    } catch (error) {
-      console.error('Error saving exam:', error);
-      alert('❌ Failed to save exam: ' + (error.response?.data?.message || error.message));
-    }
-  };
-
-  // ============================================================
-  // SINGLE RESULT HANDLER
-  // ============================================================
-  const handleSingleResultSubmit = async (e) => {
-    e.preventDefault();
-    if (!canAddResults) { alert('You do not have permission to add results'); return; }
-    if (!resultForm.studentId || !resultForm.examId) { alert('Please select a student and exam'); return; }
-
-    setSavingResults(true);
+    setSessionForm({
+      name: '',
+      type: defaultType,
+      term: defaultTerm,
+      academicYear: new Date().getFullYear().toString(),
+      startDate: new Date().toISOString().split('T')[0],
+      endDate: '',
+      maxMarks: 100,
+      notes: '',
+      classId: '', courseId: '', programId: '',
+      year: '', semester: '', module: ''
+    });
+    setSessionPapers([]);
+    setEditingSession(null);
     setApiError('');
-    
-    try {
-      const exam = exams.find(e => e.id === resultForm.examId);
-      if (!exam) throw new Error('Exam not found. Please refresh and try again.');
-      
-      const marks = resultForm.isAbsent ? 0 : parseFloat(resultForm.marks) || 0;
-      if (!resultForm.isAbsent && (marks < 0 || marks > exam.maxMarks)) {
-        alert(`Marks must be between 0 and ${exam.maxMarks}`);
-        setSavingResults(false);
-        return;
-      }
-      
-      const { grade, points } = calculateGrade(marks, exam.maxMarks, exam.schoolCategory);
-      const resultData = {
-        studentId: resultForm.studentId, examId: resultForm.examId,
-        ...(isUniversity || isTVET ? { unitId: exam.unitId } : { subjectId: exam.subjectId }),
-        marks, grade, points,
-        isAbsent: resultForm.isAbsent || false,
-        remarks: resultForm.remarks || ''
-      };
-      
-      let existingResult = null;
-      try {
-        const existingResults = await api.get(`/results?examId=${resultForm.examId}&studentId=${resultForm.studentId}`);
-        if (existingResults.data.results?.length > 0) existingResult = existingResults.data.results[0];
-      } catch (err) { }
-      
-      let response;
-      if (existingResult) response = await api.put(`/results/${existingResult.id}`, resultData);
-      else response = await api.post('/results', resultData);
-      
-      if (setResults && response.data.result) {
-        const newResult = response.data.result;
-        if (existingResult) setResults(results.map(r => r.id === existingResult.id ? newResult : r));
-        else setResults([...results, newResult]);
-      }
-      
-      alert('✅ Result saved successfully!');
-      setShowResultForm(false);
-      setResultForm({ studentId: '', examId: '', marks: '', isAbsent: false, remarks: '' });
-      refreshExams();
-    } catch (error) {
-      console.error('❌ Error saving result:', error);
-      alert('❌ Failed to save result: ' + (error.response?.data?.message || error.message || 'Unknown error'));
-      setApiError(error.response?.data?.message || error.message);
-    } finally { setSavingResults(false); }
+    setShowSessionForm(true);
   };
 
   // ============================================================
-  // ✅ LOAD STUDENTS FOR BULK RESULTS — FIXED
+  // OPEN EDIT MODAL
   // ============================================================
-  // Fixed issues:
-  //  1. Use `params` object instead of string interpolation so URL
-  //     is encoded correctly.
-  //  2. Filter students by school (in case backend returns other
-  //     schools' students).
-  //  3. Prefer exam.selectedStudents if present (that's who the teacher
-  //     picked when creating the exam).
-  //  4. Detect if exam has no assigned class/course/program and tell
-  //     the user clearly.
-  //  5. Guard against duplicate/empty student lists.
-  //  6. Show a clear error instead of silently leaving the modal closed.
+  const openEditSession = (session) => {
+    setSessionForm({
+      name: session.name || '',
+      type: session.type || '',
+      term: session.term || '',
+      academicYear: session.academicYear || new Date().getFullYear().toString(),
+      startDate: session.startDate || '',
+      endDate: session.endDate || '',
+      maxMarks: session.maxMarks || 100,
+      notes: session.notes || '',
+      classId: session.classId || '',
+      courseId: session.courseId || '',
+      programId: session.programId || '',
+      year: session.year?.toString() || '',
+      semester: session.semester?.toString() || '',
+      module: session.module?.toString() || ''
+    });
+
+    // Preload existing papers
+    setSessionPapers((session.papers || []).map(p => ({
+      id: p.id,                            // existing exam row id
+      subjectId: p.subjectId || '',
+      unitId: p.unitId || '',
+      date: p.date ? new Date(p.date).toISOString().split('T')[0] : '',
+      startTime: p.startTime || '',
+      endTime: p.endTime || '',
+      examHall: p.examHall || '',
+      invigilatorId: p.invigilatorId || '',
+      maxMarks: p.maxMarks || 100,
+      isExisting: true
+    })));
+
+    setEditingSession(session);
+    setApiError('');
+    setShowSessionForm(true);
+  };
+
+  // ============================================================
+  // PAPER PICKER LOGIC
+  // ============================================================
+  // All the subject/unit IDs that are currently in sessionPapers
+  const paperSubjectIds = useMemo(() => sessionPapers.map(p => p.subjectId).filter(Boolean), [sessionPapers]);
+  const paperUnitIds    = useMemo(() => sessionPapers.map(p => p.unitId).filter(Boolean),    [sessionPapers]);
+
+  // Toggle a subject (regular schools)
+  const toggleSubject = (subject) => {
+    setSessionPapers(prev => {
+      const exists = prev.find(p => p.subjectId === subject.id);
+      if (exists) {
+        // Remove
+        return prev.filter(p => p.subjectId !== subject.id);
+      }
+      // Add with defaults from the session form
+      return [...prev, {
+        subjectId: subject.id,
+        unitId: '',
+        date: sessionForm.startDate || new Date().toISOString().split('T')[0],
+        startTime: '',
+        endTime: '',
+        examHall: '',
+        invigilatorId: '',
+        maxMarks: sessionForm.maxMarks || 100,
+        isExisting: false
+      }];
+    });
+  };
+
+  // Toggle a unit (University / TVET)
+  const toggleUnit = (unit) => {
+    setSessionPapers(prev => {
+      const exists = prev.find(p => p.unitId === unit.id);
+      if (exists) return prev.filter(p => p.unitId !== unit.id);
+      return [...prev, {
+        subjectId: '',
+        unitId: unit.id,
+        date: sessionForm.startDate || new Date().toISOString().split('T')[0],
+        startTime: '',
+        endTime: '',
+        examHall: '',
+        invigilatorId: '',
+        maxMarks: sessionForm.maxMarks || 100,
+        isExisting: false
+      }];
+    });
+  };
+
+  const updatePaper = (key, patch) => {
+    setSessionPapers(prev => prev.map(p =>
+      (p.subjectId && p.subjectId === key) || (p.unitId && p.unitId === key)
+        ? { ...p, ...patch }
+        : p
+    ));
+  };
+
+  const removePaper = (key) => {
+    setSessionPapers(prev => prev.filter(p =>
+      !((p.subjectId && p.subjectId === key) || (p.unitId && p.unitId === key))
+    ));
+  };
+
+  // ============================================================
+  // SUBMIT SESSION
+  // ============================================================
+  const handleSessionSubmit = async (e) => {
+    e.preventDefault();
+    if (!canCreateSessions) { alert('You do not have permission'); return; }
+
+    if (!sessionForm.name?.trim()) { alert('Exam name is required'); return; }
+    if (!sessionForm.type) { alert('Exam type is required'); return; }
+
+    if (isRegularSchool && !sessionForm.classId) { alert('Class is required'); return; }
+    if (isUniversity && !sessionForm.courseId)   { alert('Course is required'); return; }
+    if (isTVET && !sessionForm.programId)        { alert('Program is required'); return; }
+
+    if (sessionPapers.length === 0) {
+      alert('Please select at least one subject/unit to add as a paper');
+      return;
+    }
+
+    for (const paper of sessionPapers) {
+      const label = paper.subjectId
+        ? subjects.find(s => s.id === paper.subjectId)?.name
+        : units.find(u => u.id === paper.unitId)?.name;
+      if (!paper.date) { alert(`Paper "${label}": date is required`); return; }
+    }
+
+    setLoading(true);
+    setApiError('');
+    try {
+      const payload = {
+        name: sessionForm.name.trim(),
+        type: sessionForm.type,
+        term: sessionForm.term || null,
+        academicYear: sessionForm.academicYear || null,
+        startDate: sessionForm.startDate || null,
+        endDate: sessionForm.endDate || null,
+        maxMarks: Number(sessionForm.maxMarks) || 100,
+        notes: sessionForm.notes || null,
+        classId: sessionForm.classId || null,
+        courseId: sessionForm.courseId || null,
+        programId: sessionForm.programId || null,
+        year: sessionForm.year ? parseInt(sessionForm.year, 10) : null,
+        semester: sessionForm.semester ? parseInt(sessionForm.semester, 10) : null,
+        module: sessionForm.module ? parseInt(sessionForm.module, 10) : null,
+        papers: sessionPapers.map(p => ({
+          subjectId: p.subjectId || null,
+          unitId: p.unitId || null,
+          date: p.date,
+          startTime: p.startTime || null,
+          endTime: p.endTime || null,
+          examHall: p.examHall || null,
+          invigilatorId: p.invigilatorId || null,
+          invigilator: p.invigilatorId ? getStaffName(p.invigilatorId) : null,
+          maxMarks: Number(p.maxMarks) || Number(sessionForm.maxMarks) || 100
+        }))
+      };
+
+      if (editingSession) {
+        // Editing: for now, only metadata is updated via PATCH.
+        // Papers are managed separately (see below).
+        await api.patch(`/exam-sessions/${editingSession.id}`, {
+          name: payload.name,
+          type: payload.type,
+          term: payload.term,
+          academicYear: payload.academicYear,
+          startDate: payload.startDate,
+          endDate: payload.endDate,
+          maxMarks: payload.maxMarks,
+          notes: payload.notes
+        });
+
+        // Sync papers: for each existing paper in the form, PUT the exam row.
+        // For new papers, POST them with sessionId set.
+        for (const paper of sessionPapers) {
+          const data = {
+            sessionId: editingSession.id,
+            name: payload.name,
+            type: payload.type,
+            term: payload.term,
+            academicYear: payload.academicYear,
+            classId: payload.classId,
+            courseId: payload.courseId,
+            programId: payload.programId,
+            year: payload.year,
+            semester: payload.semester,
+            module: payload.module,
+            subjectId: paper.subjectId || null,
+            unitId: paper.unitId || null,
+            date: paper.date,
+            startTime: paper.startTime || null,
+            endTime: paper.endTime || null,
+            examHall: paper.examHall || null,
+            invigilatorId: paper.invigilatorId || null,
+            invigilator: paper.invigilatorId ? getStaffName(paper.invigilatorId) : null,
+            maxMarks: Number(paper.maxMarks) || 100
+          };
+          if (paper.id) await api.put(`/exams/${paper.id}`, data);
+          else         await api.post('/exams', data);
+        }
+
+        // Delete papers that were removed from the form
+        const keptIds = new Set(sessionPapers.filter(p => p.id).map(p => p.id));
+        const removed = (editingSession.papers || []).filter(p => !keptIds.has(p.id));
+        for (const r of removed) {
+          try { await api.delete(`/exams/${r.id}`); } catch (_) {}
+        }
+      } else {
+        await api.post('/exam-sessions', payload);
+      }
+
+      alert(editingSession ? '✅ Exam session updated' : '✅ Exam session created');
+      setShowSessionForm(false);
+      setEditingSession(null);
+      setSessionPapers([]);
+      await loadSessions();
+
+      // Refresh legacy exams list too, so other modules (Results) stay in sync
+      try {
+        const r = await api.get('/exams');
+        if (r.data.exams) setExams(r.data.exams);
+      } catch (_) {}
+    } catch (err) {
+      console.error('❌ Save session:', err);
+      setApiError(err.response?.data?.message || err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ============================================================
+  // DELETE SESSION
+  // ============================================================
+  const handleDeleteSession = async (session) => {
+    if (!canDeleteSessions) { alert('You do not have permission'); return; }
+    if (!window.confirm(`Delete exam session "${session.name}" and all its ${session.papers?.length || 0} paper(s)? This cannot be undone.`)) return;
+    setLoading(true);
+    try {
+      await api.delete(`/exam-sessions/${session.id}`);
+      await loadSessions();
+      try {
+        const r = await api.get('/exams');
+        if (r.data.exams) setExams(r.data.exams);
+      } catch (_) {}
+      alert('✅ Session deleted');
+    } catch (err) {
+      alert('❌ Failed: ' + (err.response?.data?.message || err.message));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ============================================================
+  // BULK RESULTS
   // ============================================================
   const loadStudentsForBulkResults = async (examId) => {
-    if (!examId) {
-      alert('No exam selected.');
-      return;
-    }
-    if (!canAddResults) {
-      alert('You do not have permission to add results.');
-      return;
-    }
-
+    if (!examId) return;
     setLoading(true);
     setApiError('');
     setSelectedExamForResults(examId);
 
     try {
       const exam = exams.find(e => e.id === examId);
-      if (!exam) {
-        alert('Exam not found. Please refresh the page and try again.');
-        setLoading(false);
-        return;
-      }
+      if (!exam) { alert('Exam not found'); return; }
 
-      // ---- Determine which student set to load ----
       let studentList = [];
 
-      // Strategy 1: If exam has explicitly selected students, use those.
-      const selectedStudentIds = Array.isArray(exam.selectedStudents) ? exam.selectedStudents : [];
-      if (selectedStudentIds.length > 0) {
-        try {
-          const res = await api.get('/students', {
-            params: { ids: selectedStudentIds.join(',') }
-          });
-          studentList = res.data.students || [];
-        } catch (err) {
-          console.warn('Could not load selected students, falling back to scope:', err.message);
-        }
-      }
-
-      // Strategy 2: Load by exam scope (class / course / program)
-      if (studentList.length === 0) {
-        const params = {};
-
-        if (isUniversity) {
-          if (!exam.courseId) {
-            alert('This exam has no course assigned. Please edit the exam first.');
-            setLoading(false);
-            return;
-          }
-          params.courseId = exam.courseId;
-          if (exam.year) params.year = exam.year;
-        } else if (isTVET) {
-          if (!exam.programId) {
-            alert('This exam has no program assigned. Please edit the exam first.');
-            setLoading(false);
-            return;
-          }
-          params.programId = exam.programId;
-          if (exam.module) params.module = exam.module;
-          if (exam.year) params.year = exam.year;
-        } else {
-          if (!exam.classId) {
-            alert('This exam has no class assigned. Please edit the exam first.');
-            setLoading(false);
-            return;
-          }
-          params.classId = exam.classId;
-        }
-
-        // ✅ Use `params` object (not string interpolation) so URL is encoded correctly
-        const res = await api.get('/students', { params });
-        studentList = res.data.students || [];
-      }
-
-      // ---- Always filter to this school (defensive) ----
-      if (currentSchool?.id) {
-        studentList = studentList.filter(s => 
-          !s.schoolId || s.schoolId === currentSchool.id
-        );
-      }
-
-      // ---- Additional in-memory filters (some backends ignore query params) ----
+      // Load by exam scope
+      const params = {};
       if (isUniversity && exam.courseId) {
-        studentList = studentList.filter(s => !s.courseId || s.courseId === exam.courseId);
-        if (exam.year) {
-          studentList = studentList.filter(s => !s.currentYear || s.currentYear === exam.year);
-        }
+        params.courseId = exam.courseId;
+        if (exam.year) params.year = exam.year;
       } else if (isTVET && exam.programId) {
-        studentList = studentList.filter(s => !s.programId || s.programId === exam.programId);
-        if (exam.module) {
-          const moduleLabel = `Module ${exam.module}`;
-          studentList = studentList.filter(s => !s.currentModule || s.currentModule === moduleLabel);
-        }
+        params.programId = exam.programId;
+        if (exam.module) params.module = exam.module;
+        if (exam.year) params.year = exam.year;
       } else if (exam.classId) {
-        studentList = studentList.filter(s => !s.classId || s.classId === exam.classId);
+        params.classId = exam.classId;
       }
 
-      // ---- Final sanity check ----
-      if (studentList.length === 0) {
-        alert('No students found for this exam. Please make sure students are assigned to the class/course/program.');
-        setLoading(false);
-        setSelectedExamForResults(null);
-        return;
+      const res = await api.get('/students', { params });
+      studentList = res.data.students || [];
+
+      // Filter to this school
+      if (currentSchool?.id) {
+        studentList = studentList.filter(s => !s.schoolId || s.schoolId === currentSchool.id);
       }
 
-      // ---- Fetch existing results for this exam ----
+      if (studentList.length === 0) { alert('No students found for this exam'); return; }
+
+      // Load existing results
       let existingResults = [];
       try {
-        const res = await api.get(`/results/exam/${examId}`);
-        existingResults = res.data.results || [];
-      } catch (err) {
-        console.warn('No existing results for this exam yet:', err.message);
-      }
+        const r = await api.get(`/results/exam/${examId}`);
+        existingResults = r.data.results || [];
+      } catch (_) {}
 
-      // ---- Resolve item name (unit or subject) ----
-      let itemName = '';
-      if (isUniversity || isTVET) {
-        itemName = units?.find(u => u.id === exam.unitId)?.name || 'Unknown Unit';
-      } else {
-        itemName = subjects?.find(s => s.id === exam.subjectId)?.name || 'Unknown Subject';
-      }
+      const itemName = (isUniversity || isTVET)
+        ? units?.find(u => u.id === exam.unitId)?.name || 'Unknown Unit'
+        : subjects?.find(s => s.id === exam.subjectId)?.name || 'Unknown Subject';
 
-      // ---- Build bulk result rows ----
-      const bulkData = studentList.map(student => {
-        const existing = existingResults.find(r => r.studentId === student.id);
+      const bulk = studentList.map(st => {
+        const existing = existingResults.find(r => r.studentId === st.id);
         const hasMarks = existing?.marks !== undefined && existing?.marks !== null && existing?.marks !== '';
         const gradeInfo = hasMarks
           ? calculateGrade(existing.marks, exam.maxMarks, exam.schoolCategory)
           : { grade: '', points: 0 };
-
         return {
-          studentId: student.id,
-          studentName: `${student.firstName || ''} ${student.lastName || ''}`.trim() || 'Unknown',
-          admissionNumber: student.admissionNumber || '—',
+          studentId: st.id,
+          studentName: `${st.firstName || ''} ${st.lastName || ''}`.trim() || 'Unknown',
+          admissionNumber: st.admissionNumber || '—',
           unitId: exam.unitId,
           subjectId: exam.subjectId,
           unitName: itemName,
@@ -11099,22 +10876,16 @@ const ExamModule = ({
         };
       });
 
-      console.log(`📊 Bulk Results: loaded ${bulkData.length} students for exam "${exam.name}"`);
-      setBulkResults(bulkData);
+      setBulkResults(bulk);
       setShowBulkResultForm(true);
-    } catch (error) {
-      console.error('❌ Error loading students for bulk results:', error);
-      const msg = error.response?.data?.message || error.message || 'Unknown error';
-      alert('Failed to load students: ' + msg);
-      setApiError(msg);
+    } catch (err) {
+      console.error('❌ Bulk load:', err);
+      setApiError(err.response?.data?.message || err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // ============================================================
-  // BULK RESULTS HANDLERS
-  // ============================================================
   const handleMarkChange = (studentId, value) => {
     setBulkResults(prev => prev.map(e => e.studentId === studentId ? { ...e, marks: value } : e));
   };
@@ -11122,46 +10893,39 @@ const ExamModule = ({
     setBulkResults(prev => prev.map(e => e.studentId === studentId ? { ...e, isAbsent: checked, marks: checked ? 0 : e.marks } : e));
   };
   const handleGradeBlur = (studentId, marks) => {
-    if (marks !== '' && marks !== null && marks !== undefined) {
-      const exam = exams.find(e => e.id === selectedExamForResults);
-      const { grade, points } = calculateGrade(marks, exam?.maxMarks, exam?.schoolCategory);
-      setBulkResults(prev => prev.map(e => e.studentId === studentId ? { ...e, grade, points } : e));
-    } else {
+    if (marks === '' || marks === null || marks === undefined) {
       setBulkResults(prev => prev.map(e => e.studentId === studentId ? { ...e, grade: '', points: 0 } : e));
+      return;
     }
+    const exam = exams.find(e => e.id === selectedExamForResults);
+    const { grade, points } = calculateGrade(marks, exam?.maxMarks, exam?.schoolCategory);
+    setBulkResults(prev => prev.map(e => e.studentId === studentId ? { ...e, grade, points } : e));
   };
 
   const saveBulkResults = async () => {
-    if (!canAddResults) { alert('You do not have permission to add results'); return; }
     const hasResults = bulkResults.some(e => e.marks !== '' || e.isAbsent);
-    if (!hasResults) { alert('No results to save. Please enter marks or mark students as absent.'); return; }
-    
+    if (!hasResults) { alert('No results to save'); return; }
     setLoading(true);
-    let savedCount = 0, errorCount = 0;
-    const errors = [];
-    
     try {
       const exam = exams.find(e => e.id === selectedExamForResults);
-      if (!exam) { alert('Exam not found. Please refresh and try again.'); setLoading(false); return; }
-      
-      // ✅ Fetch existing results ONCE before the loop
+      if (!exam) throw new Error('Exam not found');
+
       let existingByStudentId = {};
       try {
-        const existingRes = await api.get(`/results/exam/${selectedExamForResults}`);
-        (existingRes.data?.results || []).forEach(r => { existingByStudentId[r.studentId] = r; });
+        const r = await api.get(`/results/exam/${selectedExamForResults}`);
+        (r.data?.results || []).forEach(x => { existingByStudentId[x.studentId] = x; });
       } catch (_) {}
+
+      let savedCount = 0, errorCount = 0;
+      const errors = [];
 
       for (const entry of bulkResults) {
         if (entry.marks === '' && !entry.isAbsent) continue;
         const marks = entry.isAbsent ? 0 : parseFloat(entry.marks) || 0;
-        if (!entry.isAbsent && (marks < 0 || marks > exam.maxMarks)) {
-          errors.push(`${entry.studentName}: Marks must be between 0 and ${exam.maxMarks}`);
-          errorCount++;
-          continue;
-        }
         const { grade, points } = calculateGrade(marks, exam.maxMarks, exam.schoolCategory);
-        const resultData = {
-          studentId: entry.studentId, examId: selectedExamForResults,
+        const data = {
+          studentId: entry.studentId,
+          examId: selectedExamForResults,
           ...(isUniversity || isTVET ? { unitId: exam.unitId } : { subjectId: exam.subjectId }),
           marks, grade, points,
           isAbsent: entry.isAbsent || false,
@@ -11169,54 +10933,45 @@ const ExamModule = ({
         };
         try {
           const existing = entry.resultId ? { id: entry.resultId } : existingByStudentId[entry.studentId];
-          if (existing?.id) await api.put(`/results/${existing.id}`, resultData);
-          else await api.post('/results', resultData);
+          if (existing?.id) await api.put(`/results/${existing.id}`, data);
+          else await api.post('/results', data);
           savedCount++;
         } catch (err) {
           errors.push(`${entry.studentName}: ${err.response?.data?.message || err.message}`);
           errorCount++;
         }
       }
-      
-      let message = `✅ ${savedCount} results saved successfully.`;
-      if (errorCount > 0) message += `\n❌ ${errorCount} errors occurred:\n${errors.join('\n')}`;
-      alert(message);
-      
+
+      let msg = `✅ ${savedCount} results saved.`;
+      if (errorCount > 0) msg += `\n❌ ${errorCount} errors:\n${errors.join('\n')}`;
+      alert(msg);
+
       if (savedCount > 0) {
-        await refreshExams();
         setShowBulkResultForm(false);
         setBulkResults([]);
         setSelectedExamForResults(null);
         setResultSearch('');
         setFilterGrade('');
       }
-    } catch (error) {
-      console.error('❌ Error saving bulk results:', error);
-      alert('❌ Failed to save results: ' + (error.response?.data?.message || error.message));
-    } finally { setLoading(false); }
+    } catch (err) {
+      alert('❌ ' + (err.response?.data?.message || err.message));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSelectAllForMessage = (checked) => {
     setSelectAllForMessage(checked);
-    if (checked) setSelectedStudentsForMessage(bulkResults.map(s => s.studentId));
-    else setSelectedStudentsForMessage([]);
+    setSelectedStudentsForMessage(checked ? bulkResults.map(s => s.studentId) : []);
   };
   const handleSelectForMessage = (studentId, checked) => {
-    if (checked) setSelectedStudentsForMessage([...selectedStudentsForMessage, studentId]);
-    else {
-      setSelectedStudentsForMessage(selectedStudentsForMessage.filter(id => id !== studentId));
-      setSelectAllForMessage(false);
-    }
+    setSelectedStudentsForMessage(prev =>
+      checked ? [...prev, studentId] : prev.filter(id => id !== studentId)
+    );
+    setSelectAllForMessage(false);
   };
 
-  const handleDeleteExam = (examId) => {
-    if (!canDeleteExams) { alert('You do not have permission to delete exams'); return; }
-    if (window.confirm('Delete this exam?')) handleDelete('/exams', examId, setExams, exams);
-  };
-
-  useEffect(() => { refreshExams(); }, []);
-
-  const filteredBulkResults = bulkResults.filter(entry => 
+  const filteredBulkResults = bulkResults.filter(entry =>
     entry.studentName?.toLowerCase().includes(resultSearch.toLowerCase()) ||
     entry.admissionNumber?.toLowerCase().includes(resultSearch.toLowerCase())
   ).filter(entry => !filterGrade || entry.grade === filterGrade);
@@ -11224,323 +10979,211 @@ const ExamModule = ({
   const uniqueGrades = [...new Set(bulkResults.map(e => e.grade).filter(Boolean))];
 
   // ============================================================
-  // PRINT HELPERS
+  // SINGLE RESULT MODAL
   // ============================================================
-  const openPrintWindow = (html) => {
-    const w = window.open('', '_blank', 'width=1200,height=800');
-    if (!w) { alert('Please allow pop-ups to print.'); return; }
-    w.document.open();
-    w.document.write(html);
-    w.document.close();
-    w.onload = () => setTimeout(() => { w.focus(); w.print(); }, 300);
-    setTimeout(() => { try { w.focus(); w.print(); } catch (e) {} }, 800);
-  };
-
-  const escapeHtml = (str) => {
-    if (str === null || str === undefined) return '';
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  };
-
-  const getPrintHeadline = () => {
-    if (selectedExamName) return `${selectedExamName} Examinations`;
-    return 'Examination Schedule';
+  const handleSingleResultSubmit = async (e) => {
+    e.preventDefault();
+    if (!resultForm.studentId || !resultForm.examId) { alert('Student and exam required'); return; }
+    setSavingResults(true);
+    try {
+      const exam = exams.find(e => e.id === resultForm.examId);
+      if (!exam) throw new Error('Exam not found');
+      const marks = resultForm.isAbsent ? 0 : parseFloat(resultForm.marks) || 0;
+      const { grade, points } = calculateGrade(marks, exam.maxMarks, exam.schoolCategory);
+      const data = {
+        studentId: resultForm.studentId,
+        examId: resultForm.examId,
+        ...(isUniversity || isTVET ? { unitId: exam.unitId } : { subjectId: exam.subjectId }),
+        marks, grade, points,
+        isAbsent: resultForm.isAbsent || false,
+        remarks: resultForm.remarks || ''
+      };
+      let existing = null;
+      try {
+        const r = await api.get(`/results?examId=${resultForm.examId}&studentId=${resultForm.studentId}`);
+        if (r.data.results?.length > 0) existing = r.data.results[0];
+      } catch (_) {}
+      if (existing) await api.put(`/results/${existing.id}`, data);
+      else          await api.post('/results', data);
+      alert('✅ Result saved');
+      setShowResultForm(false);
+      setResultForm({ studentId: '', examId: '', marks: '', isAbsent: false, remarks: '' });
+    } catch (err) {
+      alert('❌ ' + (err.response?.data?.message || err.message));
+    } finally {
+      setSavingResults(false);
+    }
   };
 
   // ============================================================
-  // PRINT EXAMS LIST
+  // PRINT EXAMS — grouped by session
   // ============================================================
   const handlePrintExams = () => {
-    if (!filteredExams || filteredExams.length === 0) {
-      alert('No exams to print. Adjust your filters first.');
-      return;
-    }
+    if (filteredSessions.length === 0) { alert('No sessions to print'); return; }
 
     const schoolName = currentSchool?.name || 'School';
-    const schoolLogo = currentSchool?.contact?.logo || currentSchool?.branding?.logo || currentSchool?.logo || '';
-    const headline = getPrintHeadline();
+    const schoolLogo = currentSchool?.contact?.logo || '';
 
-    const filterBits = [];
-    if (selectedExamName) filterBits.push(`Exam: ${selectedExamName}`);
-    if (isUniversity && selectedCourse) filterBits.push(`Course: ${getCourseName(selectedCourse)}`);
-    if (isTVET && selectedProgram) filterBits.push(`Program: ${getProgramName(selectedProgram)}`);
-    if (isRegularSchool && selectedClass) filterBits.push(`Class: ${getClassName(selectedClass)}`);
-    if (selectedYear) filterBits.push(`Year ${selectedYear}`);
-    if (selectedSemester) filterBits.push(`Semester ${selectedSemester}`);
-    if (selectedModule) filterBits.push(`Module ${selectedModule}`);
-    if (selectedUnit) filterBits.push(`Unit: ${getUnitName(selectedUnit)}`);
-    if (selectedSubject) filterBits.push(`Subject: ${getSubjectName(selectedSubject)}`);
+    const escapeHtml = (s) => String(s ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-    const headerHtml = `
-      <div class="print-header">
-        ${schoolLogo ? `<img src="${schoolLogo}" alt="Logo" class="print-logo" />` : ''}
-        <div class="print-title-block">
-          <h1 class="print-school-name">${escapeHtml(schoolName)}</h1>
-          <h2 class="print-doc-title">${escapeHtml(headline)}</h2>
-          <p class="print-generated">Generated on ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
-        </div>
-      </div>
-    `;
-    const filterHtml = filterBits.length
-      ? `<p class="print-filters">${filterBits.map(escapeHtml).join(' &nbsp;•&nbsp; ')}</p>`
-      : '';
+    const sessionBlocks = filteredSessions.map(session => {
+      const scope =
+        isUniversity ? getCourseName(session.courseId) :
+        isTVET       ? getProgramName(session.programId) :
+                       getClassName(session.classId);
 
-    const rows = filteredExams.map((exam, i) => {
-      const paper = isUniversity || isTVET ? getUnitName(exam.unitId) : getSubjectName(exam.subjectId);
-      const scope = isUniversity
-        ? `${getCourseName(exam.courseId)} • Y${exam.year || '?'} S${exam.semester || '?'}`
-        : isTVET
-          ? `${getProgramName(exam.programId)} • Y${exam.year || '?'} M${exam.module || '?'}`
-          : `${getClassName(exam.classId)} • ${exam.term || 'Term 1'}`;
-      const time = exam.startTime && exam.endTime
-        ? `${String(exam.startTime).substring(0, 5)} – ${String(exam.endTime).substring(0, 5)}`
-        : '—';
-      const date = exam.date ? new Date(exam.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
-
-      return `
-        <tr>
+      const papers = session.papers || [];
+      const rows = papers.map((p, i) => {
+        const paperName = (isUniversity || isTVET)
+          ? getUnitName(p.unitId)
+          : getSubjectName(p.subjectId);
+        const time = p.startTime && p.endTime
+          ? `${String(p.startTime).substring(0, 5)} – ${String(p.endTime).substring(0, 5)}`
+          : '—';
+        const date = p.date ? new Date(p.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+        return `<tr>
           <td class="num">${i + 1}</td>
-          <td>${escapeHtml(paper)}</td>
-          <td>${escapeHtml(scope)}</td>
+          <td>${escapeHtml(paperName)}</td>
           <td>${escapeHtml(date)}</td>
           <td>${escapeHtml(time)}</td>
-          <td>${escapeHtml(exam.examHall || '—')}</td>
-          <td>${escapeHtml(exam.invigilator || '—')}</td>
-          <td>${escapeHtml(exam.type || '—')}</td>
-        </tr>
+          <td>${escapeHtml(p.examHall || '—')}</td>
+          <td>${escapeHtml(getStaffName(p.invigilatorId))}</td>
+        </tr>`;
+      }).join('');
+
+      return `
+        <div class="session-block">
+          <div class="session-header">
+            <div>
+              <h3>${escapeHtml(session.name)}</h3>
+              <p class="session-meta">
+                ${escapeHtml(session.type || '')} • ${escapeHtml(session.term || '')} ${session.academicYear ? '• ' + escapeHtml(session.academicYear) : ''}
+                ${scope ? ' • ' + escapeHtml(scope) : ''}
+              </p>
+            </div>
+            <div class="session-badge">${papers.length} paper(s)</div>
+          </div>
+          <table>
+            <thead><tr>
+              <th>#</th>
+              <th>${isUniversity || isTVET ? 'Unit' : 'Subject'}</th>
+              <th>Date</th>
+              <th>Time</th>
+              <th>Hall</th>
+              <th>Invigilator</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
       `;
     }).join('');
 
-    const footerHtml = `
-      <div class="print-footer">
-        <div class="signature-line"><span>Prepared by: __________________________</span></div>
-        <div class="signature-line"><span>Approved by (Principal/Dean): __________________________</span></div>
-      </div>
-    `;
+    const html = `<!DOCTYPE html><html><head><title>${escapeHtml(schoolName)} — Exam Schedule</title>
+      <style>
+        @page { size: A4 portrait; margin: 12mm; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; color: #1f2937; padding: 12px; }
+        .print-header { display: flex; align-items: center; gap: 16px; border-bottom: 3px double #4f46e5; padding-bottom: 12px; margin-bottom: 20px; }
+        .print-logo { width: 72px; height: 72px; object-fit: contain; border-radius: 8px; border: 1px solid #e5e7eb; padding: 4px; }
+        .print-title-block { flex: 1; text-align: center; }
+        .print-school-name { font-size: 22px; font-weight: 800; color: #4f46e5; text-transform: uppercase; margin: 0 0 4px 0; }
+        .print-doc-title { font-size: 15px; font-weight: 600; margin: 0; }
+        .session-block { margin-bottom: 24px; page-break-inside: avoid; }
+        .session-header { display: flex; justify-content: space-between; background: #eef2ff; padding: 10px 14px; border-radius: 6px 6px 0 0; border: 1px solid #c7d2fe; }
+        .session-header h3 { margin: 0 0 4px 0; color: #4338ca; }
+        .session-meta { font-size: 11px; color: #4b5563; margin: 0; }
+        .session-badge { font-size: 11px; background: #4338ca; color: white; padding: 3px 10px; border-radius: 20px; height: fit-content; }
+        table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        th { background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; font-size: 10px; text-transform: uppercase; }
+        td { border: 1px solid #e5e7eb; padding: 6px 8px; }
+        .num { text-align: center; width: 32px; color: #6b7280; }
+        tr:nth-child(even) td { background: #fafaff; }
+      </style></head><body>
+        <div class="print-header">
+          ${schoolLogo ? `<img src="${schoolLogo}" class="print-logo" alt="Logo"/>` : ''}
+          <div class="print-title-block">
+            <h1 class="print-school-name">${escapeHtml(schoolName)}</h1>
+            <h2 class="print-doc-title">Examination Timetable</h2>
+            <p style="font-size:11px;color:#6b7280;margin:4px 0 0 0;">
+              Generated ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}
+            </p>
+          </div>
+        </div>
+        ${sessionBlocks}
+      </body></html>`;
 
-    const html = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>${escapeHtml(schoolName)} — ${escapeHtml(headline)}</title>
-          <meta charset="UTF-8" />
-          <style>
-            @page { size: A4 landscape; margin: 12mm; }
-            * { box-sizing: border-box; }
-            body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; color: #1f2937; margin: 0; padding: 12px; background: #fff; }
-            .print-header { display: flex; align-items: center; gap: 16px; border-bottom: 3px double #4f46e5; padding-bottom: 12px; margin-bottom: 16px; }
-            .print-logo { width: 72px; height: 72px; object-fit: contain; border-radius: 8px; border: 1px solid #e5e7eb; padding: 4px; background: #fff; }
-            .print-title-block { flex: 1; text-align: center; }
-            .print-school-name { font-size: 22px; font-weight: 800; color: #4f46e5; text-transform: uppercase; letter-spacing: 1.2px; margin: 0 0 4px 0; }
-            .print-doc-title { font-size: 15px; font-weight: 600; color: #374151; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.8px; }
-            .print-generated { font-size: 11px; color: #6b7280; margin: 0; }
-            .print-filters { text-align: center; font-size: 12px; color: #4b5563; background: #eef2ff; padding: 6px 10px; border-radius: 6px; margin: 0 0 14px 0; }
-            table { width: 100%; border-collapse: collapse; font-size: 11px; }
-            th { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; padding: 8px 6px; text-align: left; font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
-            td { border: 1px solid #e5e7eb; padding: 6px; vertical-align: top; }
-            tr:nth-child(even) td { background: #fafaff; }
-            .num { text-align: center; font-weight: 700; color: #6b7280; width: 32px; }
-            .print-footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; gap: 32px; font-size: 11px; color: #4b5563; }
-            .signature-line { flex: 1; padding-top: 24px; }
-            @media print { body { padding: 0; } tr { page-break-inside: avoid; } thead { display: table-header-group; } }
-          </style>
-        </head>
-        <body>
-          ${headerHtml}
-          ${filterHtml}
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>${isUniversity || isTVET ? 'Unit' : 'Subject'}</th>
-                <th>${isUniversity ? 'Course' : isTVET ? 'Program' : 'Class'}</th>
-                <th>Date</th>
-                <th>Time</th>
-                <th>Hall</th>
-                <th>Invigilator</th>
-                <th>Type</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
-          <p class="print-generated" style="text-align:right;margin-top:10px;">Total: ${filteredExams.length} exam(s)</p>
-          ${footerHtml}
-        </body>
-      </html>
-    `;
-
-    openPrintWindow(html);
+    const w = window.open('', '_blank', 'width=1200,height=800');
+    if (!w) { alert('Please allow pop-ups'); return; }
+    w.document.open(); w.document.write(html); w.document.close();
+    w.onload = () => setTimeout(() => w.print(), 300);
   };
 
   // ============================================================
-  // PRINT RESULTS SHEET
+  // PRINT RESULTS (single exam paper)
   // ============================================================
   const handlePrintResults = () => {
-    if (!selectedExamForResults) { alert('No exam selected.'); return; }
-    if (!bulkResults || bulkResults.length === 0) { alert('No students to print.'); return; }
-
+    if (!selectedExamForResults) return;
     const exam = exams.find(e => e.id === selectedExamForResults);
-    if (!exam) { alert('Exam not found.'); return; }
+    if (!exam) return;
 
     const schoolName = currentSchool?.name || 'School';
-    const schoolLogo = currentSchool?.contact?.logo || currentSchool?.branding?.logo || currentSchool?.logo || '';
-    const paper = isUniversity || isTVET ? getUnitName(exam.unitId) : getSubjectName(exam.subjectId);
-
-    const scope = isUniversity
-      ? `${getCourseName(exam.courseId)} • Year ${exam.year || '?'} • Semester ${exam.semester || '?'}`
-      : isTVET
-        ? `${getProgramName(exam.programId)} • Year ${exam.year || '?'} • Module ${exam.module || '?'}`
-        : `${getClassName(exam.classId)} • ${exam.term || 'Term 1'}`;
-
+    const schoolLogo = currentSchool?.contact?.logo || '';
+    const paperName = (isUniversity || isTVET) ? getUnitName(exam.unitId) : getSubjectName(exam.subjectId);
     const rowsToPrint = filteredBulkResults;
 
-    const rows = rowsToPrint.map((entry, i) => {
-      const marksDisplay = entry.isAbsent ? 'ABS' : (entry.marks === '' || entry.marks === null ? '—' : entry.marks);
-      const gradeClass = (() => {
-        const g = entry.grade || '';
-        if (['A', 'A-', 'Exceeding Expectations', 'DISTINCTION'].includes(g)) return 'grade-pass';
-        if (['E', 'Needs Improvement', 'FAIL'].includes(g)) return 'grade-fail';
-        if (['D+', 'D', 'D-', 'Below Expectations', 'PASS'].includes(g)) return 'grade-warn';
-        return 'grade-mid';
-      })();
+    const escapeHtml = (s) => String(s ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-      return `
-        <tr>
-          <td class="num">${i + 1}</td>
-          <td class="mono">${escapeHtml(entry.admissionNumber || '—')}</td>
-          <td>${escapeHtml(entry.studentName)}</td>
-          <td class="center ${entry.isAbsent ? 'absent' : ''}">${escapeHtml(String(marksDisplay))}</td>
-          <td class="center"><span class="grade ${gradeClass}">${escapeHtml(entry.grade || '—')}</span></td>
-          <td class="center">${entry.points !== undefined && entry.points !== null ? Number(entry.points).toFixed(1) : '—'}</td>
-        </tr>
-      `;
+    const rows = rowsToPrint.map((e, i) => {
+      const marks = e.isAbsent ? 'ABS' : (e.marks === '' || e.marks === null ? '—' : e.marks);
+      return `<tr>
+        <td class="num">${i + 1}</td>
+        <td class="mono">${escapeHtml(e.admissionNumber)}</td>
+        <td>${escapeHtml(e.studentName)}</td>
+        <td class="center ${e.isAbsent ? 'absent' : ''}">${escapeHtml(String(marks))}</td>
+        <td class="center">${escapeHtml(e.grade || '—')}</td>
+        <td class="center">${e.points != null ? Number(e.points).toFixed(1) : '—'}</td>
+      </tr>`;
     }).join('');
 
-    const present = rowsToPrint.filter(e => !e.isAbsent && e.marks !== '' && e.marks !== null).length;
-    const absent = rowsToPrint.filter(e => e.isAbsent).length;
-    const numericMarks = rowsToPrint
-      .filter(e => !e.isAbsent && e.marks !== '' && e.marks !== null)
-      .map(e => parseFloat(e.marks))
-      .filter(n => Number.isFinite(n));
-    const avg = numericMarks.length > 0
-      ? (numericMarks.reduce((a, b) => a + b, 0) / numericMarks.length).toFixed(2)
-      : '—';
-    const highest = numericMarks.length > 0 ? Math.max(...numericMarks) : '—';
-    const lowest = numericMarks.length > 0 ? Math.min(...numericMarks) : '—';
-
-    const headerHtml = `
-      <div class="print-header">
-        ${schoolLogo ? `<img src="${schoolLogo}" alt="Logo" class="print-logo" />` : ''}
-        <div class="print-title-block">
-          <h1 class="print-school-name">${escapeHtml(schoolName)}</h1>
-          <h2 class="print-doc-title">${escapeHtml(exam.name)} — Mark Sheet</h2>
-          <p class="print-generated">
-            ${escapeHtml(paper)} &nbsp;•&nbsp; ${escapeHtml(scope)}
-          </p>
+    const html = `<!DOCTYPE html><html><head><title>${escapeHtml(schoolName)} — Mark Sheet</title>
+      <style>
+        @page { size: A4 portrait; margin: 12mm; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; padding: 12px; }
+        .print-header { display: flex; align-items: center; gap: 16px; border-bottom: 3px double #4f46e5; padding-bottom: 12px; margin-bottom: 12px; }
+        .print-logo { width: 72px; height: 72px; object-fit: contain; border-radius: 8px; border: 1px solid #e5e7eb; padding: 4px; }
+        .print-title-block { flex: 1; text-align: center; }
+        .print-school-name { font-size: 22px; font-weight: 800; color: #4f46e5; margin: 0 0 4px 0; }
+        .print-doc-title { font-size: 15px; font-weight: 600; margin: 0; }
+        table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 8px; }
+        th { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; padding: 6px 8px; text-align: left; font-size: 10px; text-transform: uppercase; }
+        td { border: 1px solid #e5e7eb; padding: 6px 8px; }
+        .num { text-align: center; width: 32px; color: #6b7280; }
+        .mono { font-family: monospace; }
+        .center { text-align: center; }
+        .absent { color: #b91c1c; font-weight: 700; }
+      </style></head><body>
+        <div class="print-header">
+          ${schoolLogo ? `<img src="${schoolLogo}" class="print-logo" alt="Logo"/>` : ''}
+          <div class="print-title-block">
+            <h1 class="print-school-name">${escapeHtml(schoolName)}</h1>
+            <h2 class="print-doc-title">${escapeHtml(exam.name)} — ${escapeHtml(paperName)}</h2>
+          </div>
         </div>
-      </div>
-    `;
+        <table>
+          <thead><tr>
+            <th>#</th><th>Admission</th><th>Student</th><th>Marks</th><th>Grade</th><th>Points</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </body></html>`;
 
-    const metaHtml = `
-      <div class="meta">
-        <span><strong>Exam Type:</strong> ${escapeHtml(exam.type || '—')}</span>
-        <span><strong>Date:</strong> ${exam.date ? new Date(exam.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</span>
-        <span><strong>Time:</strong> ${exam.startTime && exam.endTime ? `${String(exam.startTime).substring(0,5)} – ${String(exam.endTime).substring(0,5)}` : '—'}</span>
-        <span><strong>Max Marks:</strong> ${exam.maxMarks || 100}</span>
-        <span><strong>Hall:</strong> ${escapeHtml(exam.examHall || '—')}</span>
-        <span><strong>Invigilator:</strong> ${escapeHtml(exam.invigilator || '—')}</span>
-      </div>
-    `;
-
-    const summaryHtml = `
-      <div class="summary">
-        <div class="stat"><span class="stat-label">Students</span><span class="stat-value">${rowsToPrint.length}</span></div>
-        <div class="stat"><span class="stat-label">Present</span><span class="stat-value">${present}</span></div>
-        <div class="stat"><span class="stat-label">Absent</span><span class="stat-value">${absent}</span></div>
-        <div class="stat"><span class="stat-label">Average</span><span class="stat-value">${avg}</span></div>
-        <div class="stat"><span class="stat-label">Highest</span><span class="stat-value">${highest}</span></div>
-        <div class="stat"><span class="stat-label">Lowest</span><span class="stat-value">${lowest}</span></div>
-      </div>
-    `;
-
-    const footerHtml = `
-      <div class="print-footer">
-        <div class="signature-line"><span>Class Teacher / Lecturer: __________________________</span></div>
-        <div class="signature-line"><span>HOD / Dean: __________________________</span></div>
-        <div class="signature-line"><span>Principal: __________________________</span></div>
-      </div>
-    `;
-
-    const html = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>${escapeHtml(schoolName)} — ${escapeHtml(exam.name)} Mark Sheet</title>
-          <meta charset="UTF-8" />
-          <style>
-            @page { size: A4 portrait; margin: 14mm; }
-            * { box-sizing: border-box; }
-            body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; color: #1f2937; margin: 0; padding: 12px; background: #fff; }
-            .print-header { display: flex; align-items: center; gap: 16px; border-bottom: 3px double #4f46e5; padding-bottom: 12px; margin-bottom: 12px; }
-            .print-logo { width: 72px; height: 72px; object-fit: contain; border-radius: 8px; border: 1px solid #e5e7eb; padding: 4px; background: #fff; }
-            .print-title-block { flex: 1; text-align: center; }
-            .print-school-name { font-size: 22px; font-weight: 800; color: #4f46e5; text-transform: uppercase; letter-spacing: 1.2px; margin: 0 0 4px 0; }
-            .print-doc-title { font-size: 15px; font-weight: 600; color: #374151; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.8px; }
-            .print-generated { font-size: 11px; color: #6b7280; margin: 0; }
-            .meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 18px; font-size: 11px; background: #f9fafb; padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; border: 1px solid #e5e7eb; }
-            .meta span { color: #374151; }
-            .summary { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 14px; }
-            .stat { background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 6px; padding: 8px; text-align: center; }
-            .stat-label { display: block; font-size: 9px; text-transform: uppercase; letter-spacing: 0.6px; color: #4338ca; font-weight: 700; }
-            .stat-value { display: block; font-size: 16px; font-weight: 800; color: #1e1b4b; margin-top: 2px; }
-            table { width: 100%; border-collapse: collapse; font-size: 11px; }
-            th { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; padding: 8px 6px; text-align: left; font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
-            td { border: 1px solid #e5e7eb; padding: 6px; vertical-align: middle; }
-            tr:nth-child(even) td { background: #fafaff; }
-            .num { text-align: center; font-weight: 700; color: #6b7280; width: 32px; }
-            .mono { font-family: 'Courier New', monospace; }
-            .center { text-align: center; }
-            .absent { color: #b91c1c; font-weight: 700; }
-            .grade { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 20px; font-weight: 700; letter-spacing: 0.3px; }
-            .grade-pass { background: #dcfce7; color: #166534; }
-            .grade-mid { background: #dbeafe; color: #1e40af; }
-            .grade-warn { background: #fef3c7; color: #92400e; }
-            .grade-fail { background: #fee2e2; color: #991b1b; }
-            .print-footer { margin-top: 28px; padding-top: 16px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; gap: 24px; font-size: 11px; color: #4b5563; }
-            .signature-line { flex: 1; padding-top: 24px; }
-            @media print { body { padding: 0; } tr { page-break-inside: avoid; } thead { display: table-header-group; } }
-          </style>
-        </head>
-        <body>
-          ${headerHtml}
-          ${metaHtml}
-          ${summaryHtml}
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Admission No.</th>
-                <th>Student Name</th>
-                <th>Marks</th>
-                <th>Grade</th>
-                <th>Points</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
-          <p class="print-generated" style="text-align:right;margin-top:10px;">
-            Printed on ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}
-          </p>
-          ${footerHtml}
-        </body>
-      </html>
-    `;
-
-    openPrintWindow(html);
+    const w = window.open('', '_blank', 'width=1000,height=800');
+    if (!w) { alert('Please allow pop-ups'); return; }
+    w.document.open(); w.document.write(html); w.document.close();
+    w.onload = () => setTimeout(() => w.print(), 300);
   };
 
   // ============================================================
@@ -11548,244 +11191,330 @@ const ExamModule = ({
   // ============================================================
   return (
     <div className="space-y-6">
-      {(loading || savingResults || loadingStaff) && (
+      {(loading || loadingSessions || loadingStaff || savingResults) && (
         <div className="h-1 bg-indigo-600 animate-pulse fixed top-0 left-0 w-full z-50" />
       )}
-      
+
       {apiError && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
           <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
+          <button onClick={() => setApiError('')} className="float-right text-red-500 hover:text-red-700"><i className="fas fa-times" /></button>
         </div>
       )}
 
-      {staffLoadError && !loadingStaff && (
+      {staffLoadError && (
         <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg flex justify-between items-center">
-          <div>
-            <i className="fas fa-exclamation-triangle mr-2"></i>
-            {staffLoadError}
-            <span className="text-xs ml-2 text-yellow-700">(Invigilator list may be incomplete.)</span>
-          </div>
-          <button onClick={fetchTeachingStaff}
-            className="text-xs bg-yellow-600 text-white px-3 py-1 rounded hover:bg-yellow-700">
-            Retry
-          </button>
+          <span><i className="fas fa-exclamation-triangle mr-2"></i>{staffLoadError}</span>
+          <button onClick={fetchTeachingStaff} className="text-xs bg-yellow-600 text-white px-3 py-1 rounded">Retry</button>
         </div>
       )}
-      
-      {invigilatorConflicts.length > 0 && (
-        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg">
-          <div className="flex items-start">
-            <i className="fas fa-exclamation-triangle mr-2 mt-1"></i>
-            <div>
-              <p className="font-medium">Invigilator Conflict Detected</p>
-              <p className="text-sm">This invigilator is already assigned to:</p>
-              <ul className="list-disc list-inside text-sm mt-1">
-                {invigilatorConflicts.map(conflict => (
-                  <li key={conflict.id}>
-                    {conflict.name} at {conflict.startTime?.substring(0,5)}-{conflict.endTime?.substring(0,5)} in {conflict.examHall || 'Unknown Hall'}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </div>
-      )}
-      
+
       {/* Header */}
-      <div className="flex justify-between items-center flex-wrap gap-2">
-        <h2 className="text-2xl font-bold text-gray-800">
-          {isUniversity ? '📚 Course Exam Management' : 
-           isTVET ? '🔧 Program Exam Management' : 
-           isSecondary ? '📖 Secondary Exam Management' : 
-           '🎯 Primary Assessment Management'}
-        </h2>
-        
+      <div className="flex justify-between items-center flex-wrap gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800">
+            {isUniversity ? '📚 Course Exam Sessions'
+              : isTVET ? '🔧 Program Exam Sessions'
+              : isSecondary ? '📖 Secondary Exam Sessions'
+              : '🎯 Primary Assessment Sessions'}
+          </h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Each session contains multiple subject papers, grouped under one exam event.
+          </p>
+        </div>
         <div className="flex flex-wrap gap-2">
-          <button onClick={refreshExams} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center gap-2">
+          <button onClick={loadSessions}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center gap-2">
             <i className="fas fa-sync-alt"></i>Refresh
           </button>
-          
-          <button
-            onClick={handlePrintExams}
-            disabled={filteredExams.length === 0}
-            className="bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-            title="Print the currently filtered exams"
-          >
-            <i className="fas fa-print"></i>Print Exams
+          <button onClick={handlePrintExams} disabled={filteredSessions.length === 0}
+            className="bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-800 disabled:opacity-50 flex items-center gap-2">
+            <i className="fas fa-print"></i>Print Timetable
           </button>
-          
-          {canCreateExams && (
-            <button
-              onClick={() => {
-                setExamForm({
-                  name: '', type: isUniversity ? 'MIDTERM' : (isTVET ? 'PRACTICAL' : 'OPENER'),
-                  classId: '', term: isUniversity ? 'Semester 1' : (isTVET ? 'Module 1' : 'Term 1'),
-                  academicYear: new Date().getFullYear().toString(),
-                  date: new Date().toISOString().split('T')[0], maxMarks: 100,
-                  examHall: '', invigilator: '', invigilatorId: '',
-                  startTime: '', endTime: '', courseId: '', programId: '',
-                  departmentId: '', facultyId: '', semester: '', year: '', module: '',
-                  unitId: '', subjectId: '',
-                  schoolCategory: currentSchool?.category || 'SENIOR_SECONDARY'
-                });
-                setExamNameOption('select');
-                setCustomExamName('');
-                setSelectedExam(null);
-                setInvigilatorConflicts([]);
-                setShowExamForm(true);
-              }}
-              className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2"
-            >
-              <i className="fas fa-plus"></i>
-              {isUniversity ? 'Create Course Exam' : isTVET ? 'Create Program Exam' : 'Create Exam'}
+          {canCreateSessions && (
+            <button onClick={openCreateSession}
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2">
+              <i className="fas fa-plus"></i>Create Exam Session
             </button>
           )}
         </div>
       </div>
 
-      {/* Filters Section */}
-      <div className="bg-white p-6 rounded-xl shadow-sm">
-        <h3 className="text-lg font-semibold mb-4">🔍 Filter Exams</h3>
+      {/* Filters */}
+      <div className="bg-white p-6 rounded-xl shadow-sm border">
+        <h3 className="text-lg font-semibold mb-4">🔍 Filter Sessions</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <SearchableSelect
-            label="Exam Name / Term"
+            label="Exam Name"
             value={selectedExamName}
             onChange={(e) => setSelectedExamName(e.target.value)}
-            options={examNameFilterOptions}
+            options={[...new Set((sessions || []).map(s => s.name))].map(n => ({ value: n, label: n }))}
             placeholder="All exam names"
             emptyMessage="No exam names yet"
           />
 
-          {isUniversity && (<>
-            <SearchableSelect label="Course" value={selectedCourse}
-              onChange={(e) => { setSelectedCourse(e.target.value); setSelectedUnit(''); setSelectedSemester(''); }}
-              options={courseOptions} placeholder="Search course..." emptyMessage="No courses available" />
-            <SearchableSelect label="Year" value={selectedYear}
+          <SearchableSelect
+            label="Exam Type"
+            value={selectedSessionType}
+            onChange={(e) => setSelectedSessionType(e.target.value)}
+            options={[
+              { value: 'OPENER', label: 'Opener' },
+              { value: 'MIDTERM', label: 'Mid-Term' },
+              { value: 'ENDTERM', label: 'End Term' },
+              { value: 'CAT', label: 'CAT' },
+              { value: 'MOCK', label: 'Mock' },
+              { value: 'PRE_MOCK', label: 'Pre-Mock' },
+              { value: 'PRACTICAL', label: 'Practical' },
+              { value: 'PROJECT', label: 'Project' },
+              { value: 'FINAL', label: 'Final' }
+            ]}
+            placeholder="All types"
+          />
+
+          {isRegularSchool && (
+            <SearchableSelect
+              label="Class"
+              value={selectedClass}
+              onChange={(e) => setSelectedClass(e.target.value)}
+              options={classOptions}
+              placeholder="All classes"
+            />
+          )}
+          {isUniversity && (
+            <SearchableSelect
+              label="Course"
+              value={selectedCourse}
+              onChange={(e) => setSelectedCourse(e.target.value)}
+              options={courseOptions}
+              placeholder="All courses"
+            />
+          )}
+          {isTVET && (
+            <SearchableSelect
+              label="Program"
+              value={selectedProgram}
+              onChange={(e) => setSelectedProgram(e.target.value)}
+              options={programOptions}
+              placeholder="All programs"
+            />
+          )}
+
+          {isUniversity && (
+            <SearchableSelect
+              label="Year"
+              value={selectedYear}
               onChange={(e) => setSelectedYear(e.target.value)}
-              options={[{ value: '1', label: 'Year 1' }, { value: '2', label: 'Year 2' }, { value: '3', label: 'Year 3' }, { value: '4', label: 'Year 4' }]}
-              placeholder="All Years" emptyMessage="No years available" />
-            <SearchableSelect label="Semester" value={selectedSemester}
+              options={[1, 2, 3, 4, 5, 6].map(y => ({ value: String(y), label: `Year ${y}` }))}
+              placeholder="All years"
+            />
+          )}
+          {isUniversity && (
+            <SearchableSelect
+              label="Semester"
+              value={selectedSemester}
               onChange={(e) => setSelectedSemester(e.target.value)}
-              options={[{ value: '1', label: 'Semester 1' }, { value: '2', label: 'Semester 2' }]}
-              placeholder="All Semesters" emptyMessage="No semesters available" />
-          </>)}
-          {isTVET && (<>
-            <SearchableSelect label="Program" value={selectedProgram}
-              onChange={(e) => { setSelectedProgram(e.target.value); setSelectedUnit(''); setSelectedModule(''); }}
-              options={programOptions} placeholder="Search program..." emptyMessage="No programs available" />
-            <SearchableSelect label="Year" value={selectedYear}
-              onChange={(e) => setSelectedYear(e.target.value)}
-              options={[{ value: '1', label: 'Year 1' }, { value: '2', label: 'Year 2' }, { value: '3', label: 'Year 3' }]}
-              placeholder="All Years" emptyMessage="No years available" />
-            <SearchableSelect label="Module" value={selectedModule}
+              options={[1, 2, 3].map(s => ({ value: String(s), label: `Semester ${s}` }))}
+              placeholder="All semesters"
+            />
+          )}
+          {isTVET && (
+            <SearchableSelect
+              label="Module"
+              value={selectedModule}
               onChange={(e) => setSelectedModule(e.target.value)}
-              options={[{ value: '1', label: 'Module 1' }, { value: '2', label: 'Module 2' }, { value: '3', label: 'Module 3' }, { value: '4', label: 'Module 4' }]}
-              placeholder="All Modules" emptyMessage="No modules available" />
-          </>)}
-          {isRegularSchool && (<>
-            <SearchableSelect label="Class" value={selectedClass}
-              onChange={(e) => { setSelectedClass(e.target.value); setSelectedSubject(''); }}
-              options={classOptions} placeholder="Search class..." emptyMessage="No classes available" />
-            <SearchableSelect label="Subject" value={selectedSubject}
-              onChange={(e) => setSelectedSubject(e.target.value)}
-              options={getSubjectOptionsForFilters()} placeholder="Search subject..." emptyMessage="No subjects available"
-              disabled={!selectedClass} />
-          </>)}
-          {(isUniversity || isTVET) && (
-            <SearchableSelect label={isUniversity ? "Unit" : "Module"} value={selectedUnit}
-              onChange={(e) => setSelectedUnit(e.target.value)}
-              options={getUnitOptionsForFilters()}
-              placeholder={`Search ${isUniversity ? 'unit' : 'module'}...`}
-              emptyMessage={`No ${isUniversity ? 'units' : 'modules'} available`} />
+              options={[1, 2, 3, 4].map(m => ({ value: String(m), label: `Module ${m}` }))}
+              placeholder="All modules"
+            />
           )}
         </div>
-        
         <div className="mt-4 flex justify-between items-center">
           <p className="text-sm text-gray-500">
-            Found <span className="font-bold text-indigo-600">{filteredExams.length}</span> exam(s)
-            {selectedExamName && (
-              <span className="ml-2 text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full">
-                Headline will be: <strong>{getPrintHeadline()}</strong>
-              </span>
-            )}
+            <strong className="text-indigo-600">{filteredSessions.length}</strong> session(s),
+            <strong className="text-indigo-600 ml-1">{filteredSessions.reduce((s, x) => s + (x.papers?.length || 0), 0)}</strong> paper(s)
           </p>
-          <div className="flex gap-3">
-            {(selectedExamName || selectedCourse || selectedProgram || selectedClass || selectedSubject || selectedUnit || selectedYear || selectedSemester || selectedModule) && (
-              <button
-                onClick={() => {
-                  setSelectedExamName('');
-                  setSelectedCourse(''); setSelectedProgram(''); setSelectedClass('');
-                  setSelectedSubject(''); setSelectedUnit(''); setSelectedYear('');
-                  setSelectedSemester(''); setSelectedModule('');
-                }}
-                className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
-              >
-                Clear all filters
-              </button>
-            )}
-            {filteredExams.length > 0 && (
-              <button
-                onClick={handlePrintExams}
-                className="text-sm text-slate-700 hover:text-slate-900 font-medium flex items-center gap-1"
-              >
-                <i className="fas fa-print"></i> Print this list
-              </button>
-            )}
-          </div>
+          <button
+            onClick={() => {
+              setSelectedExamName(''); setSelectedSessionType('');
+              setSelectedCourse(''); setSelectedProgram(''); setSelectedClass('');
+              setSelectedYear(''); setSelectedSemester(''); setSelectedModule('');
+            }}
+            className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+          >
+            Clear all filters
+          </button>
         </div>
       </div>
 
-      {/* Exam Form Modal */}
-      {showExamForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
-          <div className="bg-white p-6 rounded-xl shadow-sm max-w-4xl w-full max-h-[90vh] overflow-auto">
-            <h3 className="text-xl font-bold mb-4">
-              {selectedExam ? '✏️ Edit' : '➕ Create'} {isUniversity ? 'Course Exam' : isTVET ? 'Program Exam' : 'Exam'}
-            </h3>
-            
-            {invigilatorConflicts.length > 0 && (
-              <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <p className="text-sm font-medium text-yellow-800">⚠️ Invigilator Conflict Warning</p>
-                <p className="text-xs text-yellow-700 mt-1">
-                  This invigilator is already assigned to {invigilatorConflicts.length} other exam(s) at this time.
-                </p>
-              </div>
-            )}
-            
-            <form onSubmit={handleExamSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <div className="flex space-x-4 mb-2">
-                    <label className="flex items-center">
-                      <input type="radio" checked={examNameOption === 'select'}
-                        onChange={() => { setExamNameOption('select'); setCustomExamName(''); }} className="mr-2" />
-                      Select Existing Exam
-                    </label>
-                    <label className="flex items-center">
-                      <input type="radio" checked={examNameOption === 'new'}
-                        onChange={() => { setExamNameOption('new'); setExamForm({...examForm, name: ''}); }} className="mr-2" />
-                      Create New Exam Name
-                    </label>
-                  </div>
+      {/* SESSIONS TABLE */}
+      <div className="bg-white rounded-xl shadow-sm overflow-hidden border">
+        <table className="w-full">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-10"></th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Exam Name</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Term</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                {isUniversity ? 'Course' : isTVET ? 'Program' : 'Class'}
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Papers</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {filteredSessions.length === 0 ? (
+              <tr>
+                <td colSpan={8} className="px-4 py-12 text-center text-gray-500">
+                  <i className="fas fa-inbox text-4xl text-gray-300 mb-2 block"></i>
+                  No exam sessions found.
+                </td>
+              </tr>
+            ) : filteredSessions.map(session => {
+              const isExpanded = expandedSessions.has(session.id);
+              const papers = session.papers || [];
+              return (
+                <React.Fragment key={session.id}>
+                  <tr className="hover:bg-gray-50">
+                    <td className="px-4 py-3">
+                      <button onClick={() => toggleSession(session.id)}
+                        className="text-gray-500 hover:text-indigo-600">
+                        <i className={`fas fa-chevron-${isExpanded ? 'down' : 'right'}`}></i>
+                      </button>
+                    </td>
+                    <td className="px-4 py-3 font-medium">{session.name}</td>
+                    <td className="px-4 py-3">
+                      <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">{session.type}</span>
+                    </td>
+                    <td className="px-4 py-3 text-sm">{session.term || '—'}</td>
+                    <td className="px-4 py-3 text-sm">
+                      {isUniversity ? getCourseName(session.courseId)
+                        : isTVET ? getProgramName(session.programId)
+                        : getClassName(session.classId)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="px-2 py-1 bg-indigo-100 text-indigo-800 rounded-full text-xs font-medium">
+                        {papers.length} paper{papers.length === 1 ? '' : 's'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-1 rounded-full text-xs ${
+                        session.isPublished ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+                      }`}>
+                        {session.isPublished ? 'Published' : 'Draft'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex flex-wrap gap-1 justify-end">
+                        {canEditSessions && (
+                          <button onClick={() => openEditSession(session)}
+                            className="text-xs px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100"
+                            title="Edit session">
+                            Edit
+                          </button>
+                        )}
+                        {canDeleteSessions && (
+                          <button onClick={() => handleDeleteSession(session)}
+                            className="text-xs px-3 py-1.5 bg-red-50 text-red-700 rounded hover:bg-red-100"
+                            title="Delete session">
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
 
-                  {examNameOption === 'select' ? (
-                    <SearchableSelect label="Exam Name" value={examForm.name}
-                      onChange={(e) => setExamForm({...examForm, name: e.target.value})}
-                      options={getExamNameOptions()}
-                      placeholder="Search or select exam name..."
-                      emptyMessage="No existing exam names found" required />
-                  ) : (
-                    <input type="text" value={customExamName}
-                      onChange={(e) => { setCustomExamName(e.target.value); setExamForm({...examForm, name: e.target.value}); }}
-                      placeholder="Enter new exam name (e.g., END OF TERM 1 2024)"
-                      className="w-full px-3 py-2 border rounded-lg" required />
-                  )}
+                  {/* Expanded: papers sub-rows */}
+                  {isExpanded && papers.map(paper => {
+                    const paperName = (isUniversity || isTVET)
+                      ? getUnitName(paper.unitId)
+                      : getSubjectName(paper.subjectId);
+                    return (
+                      <tr key={paper.id} className="bg-slate-50/40 border-l-4 border-indigo-300">
+                        <td></td>
+                        <td className="px-4 py-2 text-sm pl-10 text-gray-600">
+                          <i className="fas fa-file-alt mr-2 text-indigo-400"></i>
+                          {paperName}
+                        </td>
+                        <td className="px-4 py-2 text-sm text-gray-500">
+                          {paper.date ? new Date(paper.date).toLocaleDateString() : '—'}
+                        </td>
+                        <td className="px-4 py-2 text-sm text-gray-500">
+                          {paper.startTime && paper.endTime
+                            ? `${String(paper.startTime).substring(0,5)}-${String(paper.endTime).substring(0,5)}`
+                            : '—'}
+                        </td>
+                        <td className="px-4 py-2 text-sm text-gray-500">
+                          <i className="fas fa-map-marker-alt mr-1"></i>
+                          {paper.examHall || '—'}
+                        </td>
+                        <td className="px-4 py-2 text-sm text-gray-500">
+                          <i className="fas fa-user-tie mr-1"></i>
+                          {getStaffName(paper.invigilatorId)}
+                        </td>
+                        <td></td>
+                        <td className="px-4 py-2 text-right">
+                          <button
+                            onClick={() => {
+                              setResultForm({ ...resultForm, examId: paper.id });
+                              setShowResultForm(true);
+                            }}
+                            className="text-xs px-2 py-1 bg-green-50 text-green-700 rounded hover:bg-green-100 mr-1"
+                          >
+                            + Result
+                          </button>
+                          <button
+                            onClick={() => loadStudentsForBulkResults(paper.id)}
+                            className="text-xs px-2 py-1 bg-purple-50 text-purple-700 rounded hover:bg-purple-100"
+                          >
+                            Bulk
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* ============================================================ */}
+      {/* SESSION FORM MODAL */}
+      {/* ============================================================ */}
+      {showSessionForm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-5xl w-full max-h-[92vh] overflow-auto">
+            <div className="sticky top-0 bg-white z-10 border-b px-6 py-4 flex justify-between items-center">
+              <h3 className="text-xl font-bold">
+                {editingSession ? '✏️ Edit Exam Session' : '➕ Create Exam Session'}
+              </h3>
+              <button onClick={() => setShowSessionForm(false)} className="text-gray-500 hover:text-gray-700 text-xl">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+
+            <form onSubmit={handleSessionSubmit} className="p-6 space-y-5">
+              {/* Session-level fields */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium mb-1">Exam Name *</label>
+                  <input type="text"
+                    value={sessionForm.name}
+                    onChange={(e) => setSessionForm({ ...sessionForm, name: e.target.value })}
+                    placeholder='e.g. "END TERM 1 2026"'
+                    className="w-full px-3 py-2 border rounded-lg"
+                    required />
+                  <p className="text-xs text-gray-500 mt-1">
+                    All subject papers you add below will be grouped under this name.
+                  </p>
                 </div>
 
-                <div className="col-span-2 md:col-span-1">
+                <div>
                   <label className="block text-sm font-medium mb-1">Exam Type *</label>
-                  <select value={examForm.type}
-                    onChange={(e) => setExamForm({...examForm, type: e.target.value})}
+                  <select value={sessionForm.type}
+                    onChange={(e) => setSessionForm({ ...sessionForm, type: e.target.value })}
                     className="w-full px-3 py-2 border rounded-lg" required>
                     <option value="">-- Select Type --</option>
                     {isUniversity && (<>
@@ -11794,14 +11523,10 @@ const ExamModule = ({
                       <option value="QUIZ">Quiz</option>
                       <option value="ASSIGNMENT">Assignment</option>
                       <option value="PROJECT">Project</option>
-                      <option value="PRACTICAL">Practical</option>
-                      <option value="LAB">Lab</option>
                     </>)}
                     {isTVET && (<>
                       <option value="PRACTICAL">Practical</option>
                       <option value="PROJECT">Project</option>
-                      <option value="ASSIGNMENT">Assignment</option>
-                      <option value="QUIZ">Quiz</option>
                       <option value="CAT">CAT</option>
                       <option value="MIDTERM">Midterm</option>
                       <option value="FINAL">Final Exam</option>
@@ -11812,145 +11537,274 @@ const ExamModule = ({
                       <option value="ENDTERM">End Term Exam</option>
                       <option value="CAT">Continuous Assessment</option>
                       <option value="MOCK">Mock Exam</option>
-                      <option value="PRACTICAL">Practical</option>
                     </>)}
                   </select>
                 </div>
 
-                <div className="col-span-2 md:col-span-1">
-                  <label className="block text-sm font-medium mb-1">Date *</label>
-                  <input type="date" value={examForm.date}
-                    onChange={(e) => setExamForm({...examForm, date: e.target.value})}
-                    className="w-full px-3 py-2 border rounded-lg" required />
+                <div>
+                  <label className="block text-sm font-medium mb-1">Term</label>
+                  <select value={sessionForm.term}
+                    onChange={(e) => setSessionForm({ ...sessionForm, term: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-lg">
+                    <option value="">-- Select --</option>
+                    {isUniversity ? (<>
+                      <option value="Semester 1">Semester 1</option>
+                      <option value="Semester 2">Semester 2</option>
+                    </>) : (<>
+                      <option value="Term 1">Term 1</option>
+                      <option value="Term 2">Term 2</option>
+                      <option value="Term 3">Term 3</option>
+                    </>)}
+                  </select>
                 </div>
 
-                {isUniversity && (
-                  <div className="col-span-2">
-                    <SearchableSelect label="Course *" value={examForm.courseId}
-                      onChange={(e) => setExamForm({...examForm, courseId: e.target.value, unitId: ''})}
-                      options={courseOptions} placeholder="Search course..."
-                      emptyMessage="No courses available" required />
-                  </div>
-                )}
-                {isTVET && (
-                  <div className="col-span-2">
-                    <SearchableSelect label="Program *" value={examForm.programId}
-                      onChange={(e) => setExamForm({...examForm, programId: e.target.value, unitId: ''})}
-                      options={programOptions} placeholder="Search program..."
-                      emptyMessage="No programs available" required />
-                  </div>
-                )}
-                {isRegularSchool && (
-                  <div className="col-span-2 md:col-span-1">
-                    <SearchableSelect label="Class *" value={examForm.classId}
-                      onChange={(e) => setExamForm({...examForm, classId: e.target.value, subjectId: ''})}
-                      options={classOptions} placeholder="Search class..."
-                      emptyMessage="No classes available" required />
-                  </div>
-                )}
-
-                {(isUniversity || isTVET) && (
-                  <div className="col-span-2">
-                    <SearchableSelect label={isUniversity ? "Unit *" : "Module *"} value={examForm.unitId}
-                      onChange={(e) => setExamForm({...examForm, unitId: e.target.value})}
-                      options={getUnitOptionsForForm()}
-                      placeholder={`Search ${isUniversity ? 'unit' : 'module'}...`}
-                      emptyMessage={`No ${isUniversity ? 'units' : 'modules'} available`}
-                      required disabled={(!examForm.courseId && !examForm.programId)} />
-                  </div>
-                )}
-
-                {isRegularSchool && (
-                  <div className="col-span-2 md:col-span-1">
-                    <SearchableSelect label="Subject *" value={examForm.subjectId}
-                      onChange={(e) => setExamForm({...examForm, subjectId: e.target.value})}
-                      options={getSubjectOptionsForForm()} placeholder="Search subject..."
-                      emptyMessage={!examForm.classId ? "Select a class first" : "No subjects available for this class"}
-                      required disabled={!examForm.classId} />
-                  </div>
-                )}
-
                 <div>
-                  <label className="block text-sm font-medium mb-1">Start Time</label>
-                  <input type="time" value={examForm.startTime}
-                    onChange={(e) => setExamForm({...examForm, startTime: e.target.value})}
-                    className="w-full px-3 py-2 border rounded-lg" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">End Time</label>
-                  <input type="time" value={examForm.endTime}
-                    onChange={(e) => setExamForm({...examForm, endTime: e.target.value})}
+                  <label className="block text-sm font-medium mb-1">Academic Year</label>
+                  <input type="text" value={sessionForm.academicYear}
+                    onChange={(e) => setSessionForm({ ...sessionForm, academicYear: e.target.value })}
                     className="w-full px-3 py-2 border rounded-lg" />
                 </div>
 
-                {isUniversity && (<>
-                  <SearchableSelect label="Year" value={examForm.year}
-                    onChange={(e) => setExamForm({...examForm, year: e.target.value})}
-                    options={[{ value: '1', label: 'Year 1' }, { value: '2', label: 'Year 2' }, { value: '3', label: 'Year 3' }, { value: '4', label: 'Year 4' }]}
-                    placeholder="Select Year..." emptyMessage="No years available" />
-                  <SearchableSelect label="Semester" value={examForm.semester}
-                    onChange={(e) => setExamForm({...examForm, semester: e.target.value})}
-                    options={[{ value: '1', label: 'Semester 1' }, { value: '2', label: 'Semester 2' }]}
-                    placeholder="Select Semester..." emptyMessage="No semesters available" />
-                </>)}
-                {isTVET && (<>
-                  <SearchableSelect label="Year" value={examForm.year}
-                    onChange={(e) => setExamForm({...examForm, year: e.target.value})}
-                    options={[{ value: '1', label: 'Year 1' }, { value: '2', label: 'Year 2' }, { value: '3', label: 'Year 3' }]}
-                    placeholder="Select Year..." emptyMessage="No years available" />
-                  <SearchableSelect label="Module Level" value={examForm.module}
-                    onChange={(e) => setExamForm({...examForm, module: e.target.value})}
-                    options={[{ value: '1', label: 'Module 1' }, { value: '2', label: 'Module 2' }, { value: '3', label: 'Module 3' }, { value: '4', label: 'Module 4' }]}
-                    placeholder="Select Module..." emptyMessage="No modules available" />
-                </>)}
-                {isRegularSchool && (
-                  <SearchableSelect label="Term" value={examForm.term}
-                    onChange={(e) => setExamForm({...examForm, term: e.target.value})}
-                    options={[{ value: 'Term 1', label: 'Term 1' }, { value: 'Term 2', label: 'Term 2' }, { value: 'Term 3', label: 'Term 3' }]}
-                    placeholder="Select Term..." emptyMessage="No terms available" />
-                )}
-
                 <div>
-                  <label className="block text-sm font-medium mb-1">Max Marks</label>
-                  <input type="number" value={examForm.maxMarks}
-                    onChange={(e) => setExamForm({...examForm, maxMarks: e.target.value === '' ? '' : parseInt(e.target.value)})}
-                    className="w-full px-3 py-2 border rounded-lg"
-                    placeholder="Enter max marks" min="1" max="500" />
+                  <label className="block text-sm font-medium mb-1">Start Date</label>
+                  <input type="date" value={sessionForm.startDate}
+                    onChange={(e) => setSessionForm({ ...sessionForm, startDate: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-lg" />
                 </div>
-
                 <div>
-                  <label className="block text-sm font-medium mb-1">Exam Hall</label>
-                  <input type="text" value={examForm.examHall}
-                    onChange={(e) => setExamForm({...examForm, examHall: e.target.value})}
-                    className="w-full px-3 py-2 border rounded-lg"
-                    placeholder={isTVET ? "e.g., Workshop A" : "e.g., Hall 1"} />
-                </div>
-
-                <div className="col-span-2">
-                  <SearchableSelect
-                    label="Invigilator"
-                    value={examForm.invigilatorId}
-                    onChange={(e) => setExamForm({...examForm, invigilatorId: e.target.value})}
-                    options={getInvigilatorOptions()}
-                    placeholder={loadingStaff ? "Loading teaching staff..." : teachingStaff.length === 0 ? "No teaching staff available" : "Select invigilator..."}
-                    emptyMessage={loadingStaff ? "Loading..." : staffLoadError ? "Could not load teaching staff — click Retry above" : "No teaching staff found in this school"}
-                  />
-                  {examForm.invigilatorId && (
-                    <p className="text-xs text-gray-500 mt-1">Selected: {getStaffName(examForm.invigilatorId)}</p>
-                  )}
+                  <label className="block text-sm font-medium mb-1">End Date</label>
+                  <input type="date" value={sessionForm.endDate}
+                    onChange={(e) => setSessionForm({ ...sessionForm, endDate: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-lg" />
                 </div>
               </div>
 
-              <div className="flex justify-end space-x-2 pt-4 border-t">
-                <button type="button"
-                  onClick={() => { setShowExamForm(false); setSelectedExam(null); setInvigilatorConflicts([]); }}
-                  className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">
+              {/* Scope */}
+              {isRegularSchool && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <SearchableSelect
+                    label="Class *"
+                    value={sessionForm.classId}
+                    onChange={(e) => {
+                      setSessionForm({ ...sessionForm, classId: e.target.value });
+                      setSessionPapers([]);   // reset papers when class changes
+                    }}
+                    options={classOptions}
+                    placeholder="Select class..."
+                    required
+                  />
+                </div>
+              )}
+              {isUniversity && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <SearchableSelect
+                    label="Course *"
+                    value={sessionForm.courseId}
+                    onChange={(e) => { setSessionForm({ ...sessionForm, courseId: e.target.value }); setSessionPapers([]); }}
+                    options={courseOptions}
+                    placeholder="Select course..."
+                    required
+                  />
+                  <SearchableSelect label="Year"
+                    value={sessionForm.year}
+                    onChange={(e) => setSessionForm({ ...sessionForm, year: e.target.value })}
+                    options={[1,2,3,4,5,6].map(y => ({ value: String(y), label: `Year ${y}` }))}
+                    placeholder="Select year" />
+                  <SearchableSelect label="Semester"
+                    value={sessionForm.semester}
+                    onChange={(e) => setSessionForm({ ...sessionForm, semester: e.target.value })}
+                    options={[1,2,3].map(s => ({ value: String(s), label: `Semester ${s}` }))}
+                    placeholder="Select semester" />
+                </div>
+              )}
+              {isTVET && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <SearchableSelect
+                    label="Program *"
+                    value={sessionForm.programId}
+                    onChange={(e) => { setSessionForm({ ...sessionForm, programId: e.target.value }); setSessionPapers([]); }}
+                    options={programOptions}
+                    placeholder="Select program..."
+                    required
+                  />
+                  <SearchableSelect label="Year"
+                    value={sessionForm.year}
+                    onChange={(e) => setSessionForm({ ...sessionForm, year: e.target.value })}
+                    options={[1,2,3].map(y => ({ value: String(y), label: `Year ${y}` }))}
+                    placeholder="Select year" />
+                  <SearchableSelect label="Module"
+                    value={sessionForm.module}
+                    onChange={(e) => setSessionForm({ ...sessionForm, module: e.target.value })}
+                    options={[1,2,3,4].map(m => ({ value: String(m), label: `Module ${m}` }))}
+                    placeholder="Select module" />
+                </div>
+              )}
+
+              {/* Papers picker */}
+              <div className="border-2 border-indigo-200 bg-indigo-50/50 rounded-xl p-5">
+                <div className="flex justify-between items-center mb-3">
+                  <div>
+                    <h4 className="font-bold text-indigo-700 text-lg">
+                      📝 Papers ({sessionPapers.length})
+                    </h4>
+                    <p className="text-xs text-indigo-600">
+                      Select all {isRegularSchool ? 'subjects' : 'units'} for this exam, then set date/time/hall per paper.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Subject / unit picker */}
+                <div className="bg-white rounded-lg p-4 border border-indigo-100 mb-4">
+                  <p className="text-sm font-medium text-gray-700 mb-2">
+                    Available {isRegularSchool ? 'Subjects' : 'Units'}:
+                  </p>
+                  {isRegularSchool && !sessionForm.classId && (
+                    <p className="text-sm text-amber-600 italic">Select a class above first.</p>
+                  )}
+                  {isRegularSchool && sessionForm.classId && subjectsForSelectedClass.length === 0 && (
+                    <p className="text-sm text-red-500 italic">No subjects found for this class.</p>
+                  )}
+                  {isRegularSchool && sessionForm.classId && subjectsForSelectedClass.length > 0 && (
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                      {subjectsForSelectedClass.map(subj => {
+                        const isSelected = paperSubjectIds.includes(subj.id);
+                        return (
+                          <button type="button" key={subj.id}
+                            onClick={() => toggleSubject(subj)}
+                            className={`text-sm text-left px-3 py-2 rounded-lg border-2 transition-all ${
+                              isSelected
+                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                : 'bg-white text-gray-700 border-gray-200 hover:border-indigo-300'
+                            }`}>
+                            <i className={`fas fa-${isSelected ? 'check-circle' : 'circle'} mr-2`}></i>
+                            {subj.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {(isUniversity || isTVET) && (
+                    <>
+                      {!sessionForm.courseId && !sessionForm.programId && (
+                        <p className="text-sm text-amber-600 italic">Select a course/program above first.</p>
+                      )}
+                      {(sessionForm.courseId || sessionForm.programId) && unitsForSelectedScope.length === 0 && (
+                        <p className="text-sm text-red-500 italic">No units found for the selected scope.</p>
+                      )}
+                      {(sessionForm.courseId || sessionForm.programId) && unitsForSelectedScope.length > 0 && (
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                          {unitsForSelectedScope.map(u => {
+                            const isSelected = paperUnitIds.includes(u.id);
+                            return (
+                              <button type="button" key={u.id}
+                                onClick={() => toggleUnit(u)}
+                                className={`text-sm text-left px-3 py-2 rounded-lg border-2 transition-all ${
+                                  isSelected
+                                    ? 'bg-indigo-600 text-white border-indigo-600'
+                                    : 'bg-white text-gray-700 border-gray-200 hover:border-indigo-300'
+                                }`}>
+                                <i className={`fas fa-${isSelected ? 'check-circle' : 'circle'} mr-2`}></i>
+                                {u.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                {/* Per-paper details */}
+                {sessionPapers.length > 0 && (
+                  <div className="space-y-3">
+                    <p className="text-sm font-medium text-indigo-700">Paper Details:</p>
+                    {sessionPapers.map((paper, idx) => {
+                      const paperKey = paper.subjectId || paper.unitId;
+                      const paperName = paper.subjectId
+                        ? subjectsForSelectedClass.find(s => s.id === paper.subjectId)?.name
+                        : unitsForSelectedScope.find(u => u.id === paper.unitId)?.name;
+                      return (
+                        <div key={paperKey} className="bg-white border border-indigo-200 rounded-lg p-3">
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="font-semibold text-sm text-indigo-700">
+                              <i className="fas fa-file-alt mr-2"></i>
+                              {paperName}
+                            </span>
+                            <button type="button"
+                              onClick={() => removePaper(paperKey)}
+                              className="text-xs text-red-500 hover:text-red-700">
+                              <i className="fas fa-trash mr-1"></i>Remove
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                            <div>
+                              <label className="text-xs text-gray-500 block mb-0.5">Date *</label>
+                              <input type="date" value={paper.date || ''}
+                                onChange={(e) => updatePaper(paperKey, { date: e.target.value })}
+                                className="w-full px-2 py-1 text-sm border rounded" required />
+                            </div>
+                            <div>
+                              <label className="text-xs text-gray-500 block mb-0.5">Start</label>
+                              <input type="time" value={paper.startTime || ''}
+                                onChange={(e) => updatePaper(paperKey, { startTime: e.target.value })}
+                                className="w-full px-2 py-1 text-sm border rounded" />
+                            </div>
+                            <div>
+                              <label className="text-xs text-gray-500 block mb-0.5">End</label>
+                              <input type="time" value={paper.endTime || ''}
+                                onChange={(e) => updatePaper(paperKey, { endTime: e.target.value })}
+                                className="w-full px-2 py-1 text-sm border rounded" />
+                            </div>
+                            <div>
+                              <label className="text-xs text-gray-500 block mb-0.5">Hall</label>
+                              <input type="text" value={paper.examHall || ''}
+                                onChange={(e) => updatePaper(paperKey, { examHall: e.target.value })}
+                                placeholder="Hall A"
+                                className="w-full px-2 py-1 text-sm border rounded" />
+                            </div>
+                            <div>
+                              <label className="text-xs text-gray-500 block mb-0.5">Max Marks</label>
+                              <input type="number" value={paper.maxMarks || 100}
+                                onChange={(e) => updatePaper(paperKey, { maxMarks: e.target.value })}
+                                className="w-full px-2 py-1 text-sm border rounded" min="1" />
+                            </div>
+                            <div className="md:col-span-5">
+                              <label className="text-xs text-gray-500 block mb-0.5">Invigilator</label>
+                              <SearchableSelect
+                                value={paper.invigilatorId || ''}
+                                onChange={(e) => updatePaper(paperKey, { invigilatorId: e.target.value })}
+                                options={invigilatorOptions}
+                                placeholder={loadingStaff ? 'Loading staff...' : 'Select invigilator'}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Notes (optional)</label>
+                <textarea value={sessionForm.notes}
+                  onChange={(e) => setSessionForm({ ...sessionForm, notes: e.target.value })}
+                  rows="2"
+                  className="w-full px-3 py-2 border rounded-lg"
+                  placeholder="Any additional information about this exam session" />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t">
+                <button type="button" onClick={() => setShowSessionForm(false)}
+                  className="bg-gray-500 text-white px-5 py-2 rounded-lg hover:bg-gray-600">
                   Cancel
                 </button>
-                <button type="submit"
-                  className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
-                  disabled={invigilatorConflicts.length > 0}>
-                  {invigilatorConflicts.length > 0 ? '⚠️ Conflicts Exist' : (selectedExam ? 'Update Exam' : 'Create Exam')}
+                <button type="submit" disabled={loading}
+                  className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2">
+                  {loading
+                    ? <><i className="fas fa-spinner fa-spin"></i>Saving...</>
+                    : <><i className="fas fa-save"></i>{editingSession ? 'Update Session' : 'Create Session'}</>}
                 </button>
               </div>
             </form>
@@ -11958,58 +11812,55 @@ const ExamModule = ({
         </div>
       )}
 
-      {/* Single Result Modal */}
+      {/* SINGLE RESULT MODAL */}
       {showResultForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-xl shadow-sm max-w-md w-full">
-            <h3 className="text-xl font-bold mb-4">➕ Add Single Result</h3>
-            {apiError && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-                <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
-              </div>
-            )}
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">Add Single Result</h3>
+              <button onClick={() => setShowResultForm(false)} className="text-gray-500"><i className="fas fa-times" /></button>
+            </div>
             <form onSubmit={handleSingleResultSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Exam</label>
-                <input type="text" value={exams.find(e => e.id === resultForm.examId)?.name || 'Select an exam first'}
-                  className="w-full px-3 py-2 bg-gray-100 border rounded-lg" disabled />
+                <input type="text" disabled
+                  value={exams.find(e => e.id === resultForm.examId)?.name || ''}
+                  className="w-full px-3 py-2 bg-gray-100 border rounded-lg" />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Student *</label>
-                <SearchableSelect label="" value={resultForm.studentId}
-                  onChange={(e) => setResultForm({...resultForm, studentId: e.target.value})}
-                  options={students.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}`, subLabel: s.admissionNumber }))}
-                  placeholder="Search students..." emptyMessage="No students available" required />
+                <SearchableSelect
+                  value={resultForm.studentId}
+                  onChange={(e) => setResultForm({ ...resultForm, studentId: e.target.value })}
+                  options={(students || []).map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}`, subLabel: s.admissionNumber }))}
+                  placeholder="Search student..."
+                  required
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Marks</label>
                 <input type="number" value={resultForm.marks}
-                  onChange={(e) => setResultForm({...resultForm, marks: e.target.value})}
-                  className="w-full px-3 py-2 border rounded-lg" min="0"
-                  max={exams.find(e => e.id === resultForm.examId)?.maxMarks || 100}
-                  disabled={resultForm.isAbsent} step="0.5" />
+                  onChange={(e) => setResultForm({ ...resultForm, marks: e.target.value })}
+                  disabled={resultForm.isAbsent}
+                  className="w-full px-3 py-2 border rounded-lg" min="0" />
               </div>
-              <div className="flex items-center space-x-2">
-                <input type="checkbox" id="isAbsent" checked={resultForm.isAbsent}
-                  onChange={(e) => setResultForm({...resultForm, isAbsent: e.target.checked, marks: ''})}
-                  className="rounded" />
-                <label htmlFor="isAbsent" className="text-sm">Student was absent</label>
-              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={resultForm.isAbsent}
+                  onChange={(e) => setResultForm({ ...resultForm, isAbsent: e.target.checked, marks: '' })} />
+                Student was absent
+              </label>
               <div>
                 <label className="block text-sm font-medium mb-1">Remarks</label>
-                <textarea value={resultForm.remarks}
-                  onChange={(e) => setResultForm({...resultForm, remarks: e.target.value})}
-                  className="w-full px-3 py-2 border rounded-lg" rows="2"
-                  placeholder="Optional remarks..." />
+                <textarea rows="2" value={resultForm.remarks}
+                  onChange={(e) => setResultForm({ ...resultForm, remarks: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg" />
               </div>
-              <div className="flex justify-end space-x-2 pt-4 border-t">
-                <button type="button"
-                  onClick={() => { setShowResultForm(false); setResultForm({ studentId: '', examId: '', marks: '', isAbsent: false, remarks: '' }); setApiError(''); }}
-                  className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">Cancel</button>
+              <div className="flex justify-end gap-2 pt-4 border-t">
+                <button type="button" onClick={() => setShowResultForm(false)}
+                  className="bg-gray-500 text-white px-4 py-2 rounded-lg">Cancel</button>
                 <button type="submit" disabled={savingResults}
-                  className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
-                  {savingResults ? (<><i className="fas fa-spinner fa-spin mr-2"></i>Saving...</>) 
-                                 : (<><i className="fas fa-save mr-2"></i>Save Result</>)}
+                  className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50">
+                  {savingResults ? 'Saving...' : 'Save'}
                 </button>
               </div>
             </form>
@@ -12017,77 +11868,72 @@ const ExamModule = ({
         </div>
       )}
 
-      {/* Bulk Results Modal */}
+      {/* BULK RESULTS MODAL */}
       {showBulkResultForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto">
-          <div className="bg-white p-6 rounded-xl shadow-sm max-w-6xl w-full max-h-[90vh] overflow-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold">📊 Bulk Results Entry</h3>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-6xl w-full max-h-[90vh] overflow-auto">
+            <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center">
+              <h3 className="text-xl font-bold">Bulk Results Entry</h3>
               <div className="flex gap-2">
-                <button
-                  onClick={handlePrintResults}
-                  disabled={bulkResults.length === 0}
-                  className="bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                  title="Print mark sheet for this exam"
-                >
-                  <i className="fas fa-print"></i>Print Results
+                <button onClick={handlePrintResults}
+                  className="bg-slate-700 text-white px-4 py-2 rounded-lg hover:bg-slate-800 flex items-center gap-2">
+                  <i className="fas fa-print"></i>Print Mark Sheet
                 </button>
-                <button onClick={() => setShowBulkResultForm(false)} className="text-gray-500 hover:text-gray-700 text-xl px-2">
+                <button onClick={() => setShowBulkResultForm(false)}
+                  className="text-gray-500 hover:text-gray-700 text-xl px-2">
                   <i className="fas fa-times"></i>
                 </button>
               </div>
             </div>
-            <div className="mb-4 flex flex-wrap gap-3">
-              <input type="text" placeholder="Search students..." value={resultSearch}
-                onChange={(e) => setResultSearch(e.target.value)}
-                className="flex-1 px-3 py-2 border rounded-lg" />
-              {uniqueGrades.length > 0 && (
-                <select value={filterGrade} onChange={(e) => setFilterGrade(e.target.value)}
-                  className="px-3 py-2 border rounded-lg">
-                  <option value="">All Grades</option>
-                  {uniqueGrades.map(g => (<option key={g} value={g}>{g}</option>))}
-                </select>
-              )}
-              <label className="flex items-center space-x-2">
-                <input type="checkbox" checked={selectAllForMessage}
-                  onChange={(e) => handleSelectAllForMessage(e.target.checked)} className="rounded" />
-                <span>Select All ({filteredBulkResults.length})</span>
-              </label>
-            </div>
-            <div className="overflow-x-auto border rounded-lg">
-              <table className="w-full">
-                <thead className="bg-gray-50 sticky top-0">
-                  <tr>
-                    <th className="px-4 py-2 w-10"></th>
-                    <th className="px-4 py-2 text-left">Admission</th>
-                    <th className="px-4 py-2 text-left">Student</th>
-                    <th className="px-4 py-2 text-left">{isUniversity || isTVET ? 'Unit/Module' : 'Subject'}</th>
-                    <th className="px-4 py-2 text-left">Marks</th>
-                    <th className="px-4 py-2 text-left">Grade</th>
-                    <th className="px-4 py-2 text-left">Points</th>
-                    <th className="px-4 py-2 text-left">Absent</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {filteredBulkResults.length === 0 ? (
-                    <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-500">No students found</td></tr>
-                  ) : (
-                    filteredBulkResults.map((entry) => (
+
+            <div className="p-6">
+              <div className="mb-4 flex flex-wrap gap-3">
+                <input type="text" placeholder="Search students..." value={resultSearch}
+                  onChange={(e) => setResultSearch(e.target.value)}
+                  className="flex-1 px-3 py-2 border rounded-lg" />
+                {uniqueGrades.length > 0 && (
+                  <select value={filterGrade} onChange={(e) => setFilterGrade(e.target.value)}
+                    className="px-3 py-2 border rounded-lg">
+                    <option value="">All Grades</option>
+                    {uniqueGrades.map(g => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                )}
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={selectAllForMessage}
+                    onChange={(e) => handleSelectAllForMessage(e.target.checked)} />
+                  Select All ({filteredBulkResults.length})
+                </label>
+              </div>
+
+              <div className="overflow-x-auto border rounded-lg">
+                <table className="w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-2 w-10"></th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Admission</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Student</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Marks</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Grade</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Points</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Absent</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {filteredBulkResults.map(entry => (
                       <tr key={entry.studentId} className="hover:bg-gray-50">
                         <td className="px-4 py-2">
-                          <input type="checkbox" checked={selectedStudentsForMessage.includes(entry.studentId)}
-                            onChange={(e) => handleSelectForMessage(entry.studentId, e.target.checked)}
-                            className="rounded" />
+                          <input type="checkbox"
+                            checked={selectedStudentsForMessage.includes(entry.studentId)}
+                            onChange={(e) => handleSelectForMessage(entry.studentId, e.target.checked)} />
                         </td>
-                        <td className="px-4 py-2 font-mono">{entry.admissionNumber}</td>
+                        <td className="px-4 py-2 font-mono text-xs">{entry.admissionNumber}</td>
                         <td className="px-4 py-2">{entry.studentName}</td>
-                        <td className="px-4 py-2">{entry.unitName}</td>
                         <td className="px-4 py-2">
                           <input type="number" value={entry.marks}
                             onChange={(e) => handleMarkChange(entry.studentId, e.target.value)}
                             onBlur={(e) => handleGradeBlur(entry.studentId, e.target.value)}
-                            className="w-20 px-2 py-1 border rounded" disabled={entry.isAbsent} min="0"
-                            max={exams.find(e => e.id === selectedExamForResults)?.maxMarks || 100} />
+                            disabled={entry.isAbsent}
+                            className="w-20 px-2 py-1 border rounded" />
                         </td>
                         <td className="px-4 py-2">
                           <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(entry.grade)}`}>
@@ -12097,202 +11943,39 @@ const ExamModule = ({
                         <td className="px-4 py-2">{(entry.points || 0).toFixed(1)}</td>
                         <td className="px-4 py-2">
                           <input type="checkbox" checked={entry.isAbsent}
-                            onChange={(e) => handleAbsentChange(entry.studentId, e.target.checked)}
-                            className="rounded" />
+                            onChange={(e) => handleAbsentChange(entry.studentId, e.target.checked)} />
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-            <div className="mt-4 flex justify-end space-x-2">
-              <button onClick={() => setShowBulkResultForm(false)}
-                className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">Cancel</button>
-              <button onClick={saveBulkResults} disabled={loading}
-                className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
-                {loading ? (<><i className="fas fa-spinner fa-spin mr-2"></i>Saving...</>) 
-                         : (<><i className="fas fa-save mr-2"></i>Save All Results</>)}
-              </button>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-4 flex justify-end gap-2">
+                <button onClick={() => setShowBulkResultForm(false)}
+                  className="bg-gray-500 text-white px-4 py-2 rounded-lg">Cancel</button>
+                <button onClick={saveBulkResults} disabled={loading}
+                  className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50">
+                  {loading ? 'Saving...' : 'Save All Results'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
-
-      {/* Exams Table */}
-      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                {isUniversity && (<>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Course</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Year/Sem</th>
-                </>)}
-                {isTVET && (<>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Program</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit/Module</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Year/Module</th>
-                </>)}
-                {isRegularSchool && (<>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Class</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Subject</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Term</th>
-                </>)}
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Hall</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Invigilator</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {filteredExams.length === 0 ? (
-                <tr>
-                  <td colSpan={13} className="px-4 py-8 text-center text-gray-500">
-                    <i className="fas fa-file-alt text-4xl mb-2"></i>
-                    <p>No exams created yet.</p>
-                    {canCreateExams && (
-                      <button onClick={() => setShowExamForm(true)}
-                        className="mt-2 text-indigo-600 hover:text-indigo-800">
-                        Click here to create your first exam
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ) : (
-                filteredExams.map((exam) => {
-                  const programName = isTVET && exam.programId
-                    ? (programs?.find(p => p.id === exam.programId)?.name || 'Unknown Program')
-                    : 'N/A';
-                  return (
-                    <tr key={exam.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium">{exam.name}</td>
-                      <td className="px-4 py-3">
-                        <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">{exam.type}</span>
-                      </td>
-                      {isUniversity && (<>
-                        <td className="px-4 py-3">{getCourseName(exam.courseId)}</td>
-                        <td className="px-4 py-3">{getUnitName(exam.unitId)}</td>
-                        <td className="px-4 py-3">Y{exam.year || '?'} S{exam.semester || '?'}</td>
-                      </>)}
-                      {isTVET && (<>
-                        <td className="px-4 py-3">{programName}</td>
-                        <td className="px-4 py-3">{getUnitName(exam.unitId)}</td>
-                        <td className="px-4 py-3">Y{exam.year || '?'} M{exam.module || '?'}</td>
-                      </>)}
-                      {isRegularSchool && (<>
-                        <td className="px-4 py-3">{getClassName(exam.classId)}</td>
-                        <td className="px-4 py-3">{getSubjectName(exam.subjectId)}</td>
-                        <td className="px-4 py-3">{exam.term || 'Term 1'}</td>
-                      </>)}
-                      <td className="px-4 py-3">{new Date(exam.date).toLocaleDateString()}</td>
-                      <td className="px-4 py-3">
-                        {exam.startTime && exam.endTime
-                          ? `${exam.startTime.substring(0,5)}-${exam.endTime.substring(0,5)}`
-                          : '—'}
-                      </td>
-                      <td className="px-4 py-3">{exam.examHall || '—'}</td>
-                      <td className="px-4 py-3">{exam.invigilator || '—'}</td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-1 rounded-full text-xs ${
-                          exam.isPublished ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
-                        }`}>
-                          {exam.isPublished ? 'Published' : 'Draft'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap gap-2">
-                          {canEditExams && (
-                            <button
-                              onClick={() => {
-                                setExamForm({
-                                  name: exam.name, type: exam.type,
-                                  classId: exam.classId || '', subjectId: exam.subjectId || '',
-                                  courseId: exam.courseId || '', programId: exam.programId || '',
-                                  unitId: exam.unitId || '',
-                                  year: exam.year?.toString() || '',
-                                  semester: exam.semester?.toString() || '',
-                                  module: exam.module?.toString() || '',
-                                  term: exam.term || '',
-                                  academicYear: exam.academicYear || new Date().getFullYear().toString(),
-                                  date: exam.date ? new Date(exam.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-                                  maxMarks: exam.maxMarks || 100,
-                                  startTime: exam.startTime || '', endTime: exam.endTime || '',
-                                  examHall: exam.examHall || '',
-                                  invigilator: exam.invigilator || '',
-                                  invigilatorId: exam.invigilatorId || '',
-                                  schoolCategory: exam.schoolCategory
-                                });
-                                setExamNameOption('select');
-                                setCustomExamName('');
-                                setSelectedExam(exam);
-                                setShowExamForm(true);
-                              }}
-                              className="text-xs px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-md hover:bg-indigo-100 transition-colors font-medium whitespace-nowrap"
-                              title="Edit Exam">
-                              Edit
-                            </button>
-                          )}
-                          {canAddResults && (<>
-                            <button
-                              onClick={() => { setResultForm({...resultForm, examId: exam.id}); setShowResultForm(true); }}
-                              className="text-xs px-3 py-1.5 bg-green-50 text-green-700 rounded-md hover:bg-green-100 transition-colors font-medium whitespace-nowrap"
-                              title="Add Single Result">
-                              Add Result
-                            </button>
-                            <button onClick={() => loadStudentsForBulkResults(exam.id)}
-                              className="text-xs px-3 py-1.5 bg-purple-50 text-purple-700 rounded-md hover:bg-purple-100 transition-colors font-medium whitespace-nowrap"
-                              title="Bulk Results Entry">
-                              Bulk Entry
-                            </button>
-                          </>)}
-                          {canPublishResults && (
-                            <button
-                              onClick={() => {
-                                if (window.confirm('Publish these results?')) {
-                                  handleUpdate('/exams', exam.id, { ...exam, isPublished: true }, setExams, exams);
-                                }
-                              }}
-                              className={`text-xs px-3 py-1.5 rounded-md font-medium transition-colors whitespace-nowrap ${
-                                exam.isPublished
-                                  ? 'bg-green-50 text-green-700 hover:bg-green-100'
-                                  : 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100'
-                              }`}
-                              title={exam.isPublished ? 'Published' : 'Publish'}>
-                              {exam.isPublished ? 'Published' : 'Publish'}
-                            </button>
-                          )}
-                          {canDeleteExams && (
-                            <button onClick={() => handleDeleteExam(exam.id)}
-                              className="text-xs px-3 py-1.5 bg-red-50 text-red-700 rounded-md hover:bg-red-100 transition-colors font-medium whitespace-nowrap"
-                              title="Delete Exam">
-                              Delete
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
     </div>
   );
 };
 
-
 // ============================================================================
-//  RESULTS MODULE — v3
-//  · Termly filter  · Class matrix view  · KNEC at bottom
-//  · Print-scoped  · Permission-aware  · Modern UI
+//  RESULTS MODULE — v4
+//
+//  · Session-aware: reports and matrices work on exam names / sessions
+//  · Termly class matrix: students × subjects, per-term, with exam-type filter
+//  · Detailed student report with school header + signature block
+//  · KNEC aptitude analysis
+//  · Marks entry, single result, bulk entry
+//  · Print-scoped: only the report area prints
 // ============================================================================
 const ResultsModule = ({
   exams, setExams, results, students, subjects, classes, courses, programs,
@@ -12300,7 +11983,9 @@ const ResultsModule = ({
   admissionNumber: propAdmissionNumber
 }) => {
 
-  // ==================== SCHOOL TYPE ====================
+  // ============================================================
+  // SCHOOL TYPE
+  // ============================================================
   const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
   const isUniversity   = schoolCategory === 'UNIVERSITY';
   const isTVET         = schoolCategory === 'COLLEGE_TVET';
@@ -12323,232 +12008,120 @@ const ResultsModule = ({
     return 'CBC';
   };
 
-  // ==================== ROLE ====================
-  const isSuperAdmin     = user?.role === 'SUPER_ADMIN';
-  const isSchoolAdmin    = user?.role === 'SCHOOL_ADMIN';
-  const isPrincipal      = user?.role === 'PRINCIPAL';
-  const isDeputyPrincipal= user?.role === 'DEPUTY_PRINCIPAL';
-  const isSeniorTeacher  = user?.role === 'SENIOR_TEACHER';
-  const isClassTeacher   = user?.role === 'CLASS_TEACHER';
-  const isSubjectTeacher = user?.role === 'SUBJECT_TEACHER';
-  const isLecturer       = ['LECTURER','SENIOR_LECTURER','PROFESSOR'].includes(user?.role);
-  const isInstructor     = ['INSTRUCTOR','TRAINER'].includes(user?.role);
-  const isDean           = user?.role === 'DEAN';
-  const isHOD            = user?.role === 'HOD';
-  const isStudent        = user?.role === 'STUDENT';
-  const isParent         = user?.role === 'PARENT';
+  // ============================================================
+  // ROLE
+  // ============================================================
+  const isSuperAdmin      = user?.role === 'SUPER_ADMIN';
+  const isSchoolAdmin     = user?.role === 'SCHOOL_ADMIN';
+  const isPrincipal       = user?.role === 'PRINCIPAL';
+  const isDeputyPrincipal = user?.role === 'DEPUTY_PRINCIPAL';
+  const isSeniorTeacher   = user?.role === 'SENIOR_TEACHER';
+  const isClassTeacher    = user?.role === 'CLASS_TEACHER';
+  const isSubjectTeacher  = user?.role === 'SUBJECT_TEACHER';
+  const isLecturer        = ['LECTURER','SENIOR_LECTURER','PROFESSOR'].includes(user?.role);
+  const isInstructor      = ['INSTRUCTOR','TRAINER'].includes(user?.role);
+  const isDean            = user?.role === 'DEAN';
+  const isHOD             = user?.role === 'HOD';
+  const isStudent         = user?.role === 'STUDENT';
+  const isParent          = user?.role === 'PARENT';
 
-  const canAddResults = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal ||
-    isSeniorTeacher || isClassTeacher || isSubjectTeacher || isLecturer || isInstructor || isDean || isHOD;
-  const canPublishResults = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || isDean;
-  const canSendMessages   = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal ||
-    isSeniorTeacher || isClassTeacher || isDean || isHOD;
-  const canViewAllResults = canAddResults;
-  const canPrintAllResults = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal ||
-    isSeniorTeacher || isClassTeacher || isDean || isHOD;
-  const canViewClassMatrix = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal ||
-    isSeniorTeacher || isClassTeacher || isDean || isHOD;
+  const canAddResults      = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal ||
+                             isSeniorTeacher || isClassTeacher || isSubjectTeacher ||
+                             isLecturer || isInstructor || isDean || isHOD;
+  const canPublishResults  = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || isDean;
+  const canSendMessages    = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal ||
+                             isSeniorTeacher || isClassTeacher || isDean || isHOD;
+  const canViewAllResults  = canAddResults;
+  const canPrintAllResults = canAddResults;
+  const canViewClassMatrix = canAddResults;
 
-  // ==================== SEARCHABLE SELECT ====================
-  const SearchableSelect = ({
-    label, value, onChange, options = [], placeholder = 'Search...',
-    disabled, required, className, emptyMessage = 'No options available'
-  }) => {
-    const [search, setSearch] = useState('');
-    const [isOpen, setIsOpen] = useState(false);
-    const [isFocused, setIsFocused] = useState(false);
-    const dropdownRef = useRef(null);
+  const SearchableSelect = StudentSearchableSelect;
 
-    const filteredOptions = useMemo(() => {
-      if (!options?.length) return [];
-      if (!search.trim()) return options;
-      const s = search.toLowerCase();
-      return options.filter(o =>
-        o.label?.toLowerCase().includes(s) ||
-        o.subLabel?.toLowerCase().includes(s) ||
-        String(o.value ?? '').toLowerCase().includes(s)
-      );
-    }, [options, search]);
+  // ============================================================
+  // STATE — top-level view
+  // ============================================================
+  const [viewMode, setViewMode] = useState('marks'); // 'marks' | 'report' | 'class-matrix' | 'term-matrix'
 
-    const selectedOption = useMemo(() => {
-      if (!value && value !== 0) return null;
-      return options.find(o => o.value === value) || null;
-    }, [options, value]);
-
-    useEffect(() => {
-      const h = (e) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-          setIsOpen(false); setIsFocused(false);
-        }
-      };
-      document.addEventListener('mousedown', h);
-      return () => document.removeEventListener('mousedown', h);
-    }, []);
-
-    useEffect(() => { if (!isOpen) setSearch(''); }, [isOpen]);
-
-    const handleSelect = (v) => {
-      onChange({ target: { value: v } });
-      setSearch(''); setIsOpen(false); setIsFocused(false);
-    };
-    const handleChange = (e) => {
-      const v = e.target.value;
-      setSearch(v); setIsOpen(true); setIsFocused(true);
-      if (v === '') onChange({ target: { value: '' } });
-    };
-    const handleFocus = () => {
-      if (disabled) return;
-      setIsFocused(true); setIsOpen(true);
-      if (selectedOption) setSearch(selectedOption.label);
-    };
-    const handleBlur = () => {
-      setTimeout(() => {
-        if (!dropdownRef.current?.contains(document.activeElement)) {
-          setIsOpen(false); setIsFocused(false);
-          if (!selectedOption) setSearch('');
-        }
-      }, 200);
-    };
-    const handleClear = (e) => {
-      e.stopPropagation();
-      onChange({ target: { value: '' } });
-      setSearch(''); setIsOpen(false); setIsFocused(false);
-    };
-
-    const displayValue = isFocused ? search : (selectedOption ? selectedOption.label : '');
-
-    return (
-      <div className="relative" ref={dropdownRef}>
-        {label && (
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}{required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-        )}
-        <div className="relative">
-          <input
-            type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'
-            } ${className || ''}`}
-            value={displayValue}
-            onChange={handleChange}
-            onFocus={handleFocus}
-            onBlur={handleBlur}
-            placeholder={placeholder}
-            disabled={disabled}
-            autoComplete="off"
-          />
-          {value && !disabled && (
-            <button type="button" onClick={handleClear}
-              className="absolute right-8 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
-                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-        </div>
-        {isOpen && !disabled && (
-          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-            {!options?.length ? (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">{emptyMessage}</div>
-            ) : filteredOptions.length > 0 ? (
-              filteredOptions.map(o => (
-                <div key={o.value}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 ${
-                    o.value === value ? 'bg-indigo-50 text-indigo-700' : ''
-                  }`}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => handleSelect(o.value)}>
-                  <div className="font-medium">{o.label}</div>
-                  {o.subLabel && <div className="text-xs text-gray-500">{o.subLabel}</div>}
-                </div>
-              ))
-            ) : (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                No results for "{search}"
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // ==================== STATE ====================
-  const [selectedExam, setSelectedExam] = useState('');
-  const [selectedClass, setSelectedClass] = useState('');
-  const [selectedCourse, setSelectedCourse] = useState('');
-  const [selectedProgram, setSelectedProgram] = useState('');
-  const [selectedSubject, setSelectedSubject] = useState('');
-  const [selectedUnit, setSelectedUnit] = useState('');
-  const [selectedYear, setSelectedYear] = useState('');
+  // ============================================================
+  // STATE — marks entry
+  // ============================================================
+  const [selectedExam, setSelectedExam]         = useState('');
+  const [selectedClass, setSelectedClass]       = useState('');
+  const [selectedCourse, setSelectedCourse]     = useState('');
+  const [selectedProgram, setSelectedProgram]   = useState('');
+  const [selectedSubject, setSelectedSubject]   = useState('');
+  const [selectedUnit, setSelectedUnit]         = useState('');
+  const [selectedYear, setSelectedYear]         = useState('');
   const [selectedSemester, setSelectedSemester] = useState('');
-  const [selectedModule, setSelectedModule] = useState('');
-  const [resultEntries, setResultEntries] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [publishing, setPublishing] = useState(false);
-  const [studentSearch, setStudentSearch] = useState('');
-  const [filteredUnits, setFilteredUnits] = useState([]);
+  const [selectedModule, setSelectedModule]     = useState('');
+  const [resultEntries, setResultEntries]       = useState([]);
+  const [studentSearch, setStudentSearch]       = useState('');
+  const [filterGrade, setFilterGrade]           = useState('');
+  const [filteredUnits, setFilteredUnits]       = useState([]);
   const [filteredSubjects, setFilteredSubjects] = useState([]);
-  const [filterGrade, setFilterGrade] = useState('');
 
-  // ---- View mode ----
-  const [viewMode, setViewMode] = useState('marks'); // 'marks' | 'report' | 'class-matrix'
-
-  // ---- Detailed Report state ----
-  const [reportClassId, setReportClassId] = useState('');
-  const [reportStudentId, setReportStudentId] = useState('');
-  const [reportTermFilter, setReportTermFilter] = useState('');     // '' | 'Term 1' | 'Term 2' | 'Term 3'
-  const [reportYearFilter, setReportYearFilter] = useState('');
-  const [reportExamTypeFilter, setReportExamTypeFilter] = useState(''); // only used when term is empty
-  const [reportData, setReportData] = useState(null);
-  const [loadingReport, setLoadingReport] = useState(false);
-
-  // ---- Class Matrix state ----
-  const [matrixClassId, setMatrixClassId] = useState('');
-  const [matrixExamId, setMatrixExamId] = useState('');
-  const [matrixData, setMatrixData] = useState(null);
-  const [loadingMatrix, setLoadingMatrix] = useState(false);
-
-  // ---- Messaging / print modals ----
-  const [showMessageModal, setShowMessageModal] = useState(false);
-  const [messageType, setMessageType] = useState('SMS');
-  const [messageTemplate, setMessageTemplate] = useState('');
-  const [sendingMessages, setSendingMessages] = useState(false);
-  const [messageLog, setMessageLog] = useState([]);
   const [selectedStudentsForMessage, setSelectedStudentsForMessage] = useState([]);
-  const [selectAllForMessage, setSelectAllForMessage] = useState(false);
+  const [selectAllForMessage, setSelectAllForMessage]               = useState(false);
+  const [showMessageModal, setShowMessageModal]                     = useState(false);
+  const [messageType, setMessageType]                               = useState('SMS');
+  const [messageTemplate, setMessageTemplate]                       = useState('');
+  const [sendingMessages, setSendingMessages]                       = useState(false);
+  const [messageLog, setMessageLog]                                 = useState([]);
 
-  const [showPrintModal, setShowPrintModal] = useState(false);
-  const [selectedStudentForReport, setSelectedStudentForReport] = useState(null);
-  const [studentReportData, setStudentReportData] = useState(null);
-  const [allResultsPrintData, setAllResultsPrintData] = useState(null);
-  const [showAllResultsPrintModal, setShowAllResultsPrintModal] = useState(false);
+  // ============================================================
+  // STATE — detailed report (per student)
+  // ============================================================
+  const [reportClassId, setReportClassId]               = useState('');
+  const [reportStudentId, setReportStudentId]           = useState('');
+  const [reportTermFilter, setReportTermFilter]         = useState('');
+  const [reportYearFilter, setReportYearFilter]         = useState('');
+  const [reportExamTypeFilter, setReportExamTypeFilter] = useState('');
+  const [reportSessionFilter, setReportSessionFilter]   = useState('');  // exam name (session)
+  const [reportData, setReportData]                     = useState(null);
+  const [loadingReport, setLoadingReport]               = useState(false);
 
-  // ---- Student/Parent state ----
-  const [myResults, setMyResults] = useState([]);
-  const [myStudentRecord, setMyStudentRecord] = useState(null);
-  const [loadingMyData, setLoadingMyData] = useState(false);
+  // ============================================================
+  // STATE — class matrix (single exam)
+  // ============================================================
+  const [matrixClassId, setMatrixClassId]       = useState('');
+  const [matrixExamId, setMatrixExamId]         = useState('');
+  const [matrixData, setMatrixData]             = useState(null);
+  const [loadingMatrix, setLoadingMatrix]       = useState(false);
+
+  // ============================================================
+  // STATE — ✅ NEW termly class matrix
+  // ============================================================
+  const [termMatrixClassId, setTermMatrixClassId]     = useState('');
+  const [termMatrixTerm, setTermMatrixTerm]           = useState('Term 1');
+  const [termMatrixExamType, setTermMatrixExamType]   = useState('');   // '' = all types
+  const [termMatrixSession, setTermMatrixSession]     = useState('');   // '' = any exam name
+  const [termMatrixData, setTermMatrixData]           = useState(null);
+  const [loadingTermMatrix, setLoadingTermMatrix]     = useState(false);
+
+  // ============================================================
+  // STATE — student / parent view
+  // ============================================================
+  const [myResults, setMyResults]               = useState([]);
+  const [myStudentRecord, setMyStudentRecord]   = useState(null);
+  const [loadingMyData, setLoadingMyData]       = useState(false);
   const [showAdmissionModal, setShowAdmissionModal] = useState(false);
-  const [admissionNumber, setAdmissionNumber] = useState(propAdmissionNumber || '');
-  const [showStudentPrintModal, setShowStudentPrintModal] = useState(false);
-  const [apiError, setApiError] = useState('');
+  const [admissionNumber, setAdmissionNumber]   = useState(propAdmissionNumber || '');
+  const [apiError, setApiError]                 = useState('');
   const [myResultsSummary, setMyResultsSummary] = useState(null);
-  const [myChildren, setMyChildren] = useState([]);
-  const [selectedChild, setSelectedChild] = useState(null);
-  const [childResults, setChildResults] = useState([]);
-  const [loadingChildren, setLoadingChildren] = useState(false);
 
-  const hasLoadedStudentData = useRef(false);
+  const [myChildren, setMyChildren]             = useState([]);
+  const [selectedChild, setSelectedChild]       = useState(null);
+  const [childResults, setChildResults]         = useState([]);
+  const [loadingChildren, setLoadingChildren]   = useState(false);
+
+  const hasLoadedStudentData  = useRef(false);
   const hasLoadedChildrenData = useRef(false);
 
-  // ==================== HELPERS ====================
+  const [loading, setLoading] = useState(false);
+
+  // ============================================================
+  // HELPERS
+  // ============================================================
   const resolveStudentId = (id) => {
     if (!id) return null;
     if (students.some(s => s.id === id)) return id;
@@ -12559,7 +12132,22 @@ const ResultsModule = ({
     return null;
   };
 
-  // ==================== GRADE LOGIC ====================
+  const getClassName   = (id) => classes?.find(c => c.id === id)?.name || '—';
+  const getSubjectName = (id) => subjects?.find(s => s.id === id)?.name || '—';
+  const getUnitName    = (id) => units?.find(u => u.id === id)?.name || '—';
+  const getCourseName  = (id) => courses?.find(c => c.id === id)?.name || '—';
+  const getProgramName = (id) => programs?.find(p => p.id === id)?.name || '—';
+
+  const formatDate = (value) => {
+    if (!value) return '—';
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  // ============================================================
+  // GRADE LOGIC
+  // ============================================================
   const calculateGrade = (marks, maxMarks = 100, examCategory = null, levelHint = null) => {
     if (marks === '' || marks === null || marks === undefined) return { grade: '', points: 0, remark: '' };
     const numeric = parseFloat(marks);
@@ -12568,13 +12156,11 @@ const ResultsModule = ({
 
     if (currentSchool?.gradingConfig?.scale?.length > 0) {
       const band = currentSchool.gradingConfig.scale.find(b => percentage >= b.min && percentage <= b.max);
-      if (band) {
-        return {
-          grade: band.code || band.grade || '',
-          points: band.points || 0,
-          remark: band.label || band.code || ''
-        };
-      }
+      if (band) return {
+        grade: band.code || band.grade || '',
+        points: band.points || 0,
+        remark: band.label || band.code || ''
+      };
     }
 
     const category = examCategory || schoolCategory;
@@ -12721,7 +12307,9 @@ const ResultsModule = ({
     return null;
   };
 
-  // ==================== LOAD RESULTS FOR STUDENT ====================
+  // ============================================================
+  // LOAD RESULTS
+  // ============================================================
   const loadResultsWithAdmission = async (admNumber) => {
     if (!admNumber) return { enhancedResults: [], studentInfo: null };
     setLoadingMyData(true);
@@ -12783,14 +12371,16 @@ const ResultsModule = ({
     };
   };
 
-  // ==================== KNEC STREAM ====================
+  // ============================================================
+  // KNEC streams
+  // ============================================================
   const KnecStreams = {
     STEM: ['mathematics','maths','math','physics','chemistry','biology','general science','science','computer','computer studies','technical drawing','metalwork','woodwork','electricity','electronics'],
     LANGUAGES: ['english','kiswahili','literature','french','german','arabic','chinese','foreign language','language'],
     SOCIAL: ['history','geography','cre','ire','social studies','citizenship','civics','government'],
     ARTS: ['art','fine art','music','drama','creative arts','theatre'],
     BUSINESS: ['business','business studies','commerce','accounts','accounting','economics'],
-    APPLIED: ['agriculture','home science','home science & technology','clothing','foods','nutrition','woodwork','metalwork']
+    APPLIED: ['agriculture','home science','home science & technology','clothing','foods','nutrition']
   };
   const classifySubjectStream = (name) => {
     if (!name) return null;
@@ -12801,30 +12391,22 @@ const ResultsModule = ({
     return null;
   };
 
-  // ==================================================================
-  //  ✅ DETAILED REPORT BUILDER
-  //
-  //  Term-aware: when reportTermFilter is set, we include ALL exam types
-  //  within that term and render them as side-by-side columns.
-  //  When no term is set, group by (term + exam type) as before.
-  // ==================================================================
+  // ============================================================
+  // DETAILED REPORT BUILDER (single student, term-scoped)
+  // ============================================================
   const buildDetailedReport = (studentResults) => {
     const filtered = studentResults.filter(r => {
       if (reportTermFilter && r.examTerm !== reportTermFilter) return false;
       if (reportYearFilter && r.academicYear !== reportYearFilter) return false;
       if (!reportTermFilter && reportExamTypeFilter && r.examType !== reportExamTypeFilter) return false;
+      if (reportSessionFilter && r.examName !== reportSessionFilter) return false;
       return true;
     });
 
-    // --- Group key depends on whether we have a term filter ---
     const termGroups = new Map();
 
     filtered.forEach(r => {
-      // When term filter is active → all rows go into ONE group
-      // Otherwise → group by (term + year)
-      let key;
-      let termLabel;
-      let yearLabel;
+      let key, termLabel, yearLabel;
 
       if (reportTermFilter) {
         key = reportTermFilter;
@@ -12930,7 +12512,6 @@ const ResultsModule = ({
     const allAvgs = termCards.flatMap(tc => tc.subjects.map(s => s.avg)).filter(v => v > 0);
     const overallAverage = allAvgs.length > 0 ? allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length : 0;
 
-    // KNEC aptitude streams
     const streamTotals = {};
     termCards.forEach(card => {
       card.subjects.forEach(s => {
@@ -12994,13 +12575,9 @@ const ResultsModule = ({
     }
   };
 
-  // ==================================================================
-  //  ✅ CLASS MATRIX BUILDER
-  //
-  //  Produces a grid:
-  //      Student rows × Subject columns
-  //  Each cell has { marks, grade, position } for the selected exam.
-  // ==================================================================
+  // ============================================================
+  // CLASS MATRIX BUILDER (single exam)
+  // ============================================================
   const buildClassMatrix = async () => {
     if (!matrixClassId) { alert('Please select a class'); return; }
     if (!matrixExamId)  { alert('Please select an exam'); return; }
@@ -13011,34 +12588,20 @@ const ResultsModule = ({
       const exam = exams.find(e => e.id === matrixExamId);
       if (!exam) { alert('Exam not found'); return; }
 
-      // Fetch results for this exam
       let examResults = [];
       try {
         const r = await api.get(`/results/exam/${matrixExamId}`);
         examResults = r.data.results || [];
-      } catch (_) { /* no results */ }
+      } catch (_) {}
 
-      // Fetch students for this class
       let studentList = [];
       try {
         const s = await api.get('/students', { params: { classId: matrixClassId } });
         studentList = s.data.students || [];
-      } catch (_) { /* nothing */ }
+      } catch (_) {}
 
-      if (studentList.length === 0) {
-        alert('No students found in this class');
-        setLoadingMatrix(false);
-        return;
-      }
+      if (studentList.length === 0) { alert('No students found'); return; }
 
-      // Get all subjects for this exam's class
-      const examItemName = getItemName({}, exam);
-
-      // Build a matrix: student × exam results
-      // Each result row for the same exam = one subject cell
-      // (In this app, each exam has ONE subject/unit; so a class matrix across
-      //  exams is what we really want — but user asked per selected exam.
-      //  So we treat the selected exam as the sole "column" and show rank in class.)
       const levelHint = getLevelHint(exam, null, matrixClassId);
 
       const rows = studentList.map(st => {
@@ -13057,16 +12620,14 @@ const ResultsModule = ({
           grade: gradeInfo.grade,
           points: gradeInfo.points,
           isAbsent: result?.isAbsent || false,
-          position: null // will compute below
+          position: null
         };
       });
 
-      // Compute positions (dense rank on marks)
       const scored = rows
         .filter(r => typeof r.marks === 'number' && !r.isAbsent)
         .sort((a, b) => b.marks - a.marks);
-      let rank = 1;
-      let prev = null;
+      let rank = 1, prev = null;
       scored.forEach((r, i) => {
         if (prev !== null && r.marks < prev) rank = i + 1;
         prev = r.marks;
@@ -13083,7 +12644,7 @@ const ResultsModule = ({
 
       setMatrixData({
         exam,
-        itemName: examItemName,
+        itemName: getItemName({}, exam),
         rows,
         average,
         highest,
@@ -13101,7 +12662,164 @@ const ResultsModule = ({
     }
   };
 
-  // ==================== STUDENT/PARENT LOADERS ====================
+  // ============================================================
+  // ✅ TERMLY CLASS MATRIX BUILDER
+  //
+  // Rows: students in selected class
+  // Cols: all subjects
+  // Cells: student's average for that subject across all exams in
+  //        the selected term (or matching exam type / session)
+  // ============================================================
+  const buildTermMatrix = async () => {
+    if (!termMatrixClassId) { alert('Please select a class'); return; }
+    if (!termMatrixTerm)    { alert('Please select a term'); return; }
+
+    setLoadingTermMatrix(true);
+    setTermMatrixData(null);
+    try {
+      // 1. Class subjects
+      const classSubjects = (subjects || []).filter(s => s.classId === termMatrixClassId);
+      if (classSubjects.length === 0) { alert('No subjects for this class'); return; }
+
+      // 2. Class students
+      let studentList = (students || []).filter(s => s.classId === termMatrixClassId);
+      if (studentList.length === 0) {
+        try {
+          const r = await api.get('/students', { params: { classId: termMatrixClassId } });
+          studentList = r.data.students || [];
+        } catch (_) {}
+      }
+      if (studentList.length === 0) { alert('No students in this class'); return; }
+
+      // 3. Exams in this class + term (+ optional exam type + session name)
+      const termExams = (exams || []).filter(e => {
+        if (e.classId !== termMatrixClassId) return false;
+        if (String(e.term || '').toLowerCase() !== String(termMatrixTerm).toLowerCase()) return false;
+        if (termMatrixExamType && e.type !== termMatrixExamType) return false;
+        if (termMatrixSession && e.name !== termMatrixSession) return false;
+        return true;
+      });
+      if (termExams.length === 0) {
+        alert(`No exams found for ${termMatrixTerm}${termMatrixExamType ? ' · ' + termMatrixExamType : ''}`);
+        return;
+      }
+
+      // 4. Fetch all results across those exams
+      const allResults = [];
+      for (const exam of termExams) {
+        try {
+          const r = await api.get(`/results/exam/${exam.id}`);
+          const rows = r.data.results || [];
+          rows.forEach(row => allResults.push({ ...row, __exam: exam }));
+        } catch (_) {}
+      }
+
+      const classObj = classes.find(c => c.id === termMatrixClassId);
+
+      // 5. Group results by studentId → subjectId
+      const byStudent = new Map();
+      allResults.forEach(r => {
+        if (!byStudent.has(r.studentId)) byStudent.set(r.studentId, new Map());
+        const subjMap = byStudent.get(r.studentId);
+        const subjKey = r.subjectId || r.unitId || r.__exam?.subjectId;
+        if (!subjKey) return;
+        if (!subjMap.has(subjKey)) subjMap.set(subjKey, []);
+        subjMap.get(subjKey).push({
+          marks: parseFloat(r.marks),
+          grade: r.grade,
+          points: r.points,
+          examType: r.__exam?.type,
+          examName: r.__exam?.name,
+          isAbsent: r.isAbsent
+        });
+      });
+
+      // 6. Build rows
+      const rows = studentList.map(st => {
+        const subjMap = byStudent.get(st.id) || new Map();
+        const cells = classSubjects.map(subj => {
+          const entries = (subjMap.get(subj.id) || []).filter(e => !isNaN(e.marks));
+          if (entries.length === 0) {
+            return { subjectId: subj.id, subjectName: subj.name, marks: null, grade: '', points: 0, breakdown: [] };
+          }
+          const avg = entries.reduce((s, e) => s + e.marks, 0) / entries.length;
+          const levelHint = classObj?.name;
+          const gi = calculateGrade(avg, 100, schoolCategory, levelHint);
+          return {
+            subjectId: subj.id,
+            subjectName: subj.name,
+            marks: Number(avg.toFixed(1)),
+            grade: gi.grade,
+            points: gi.points,
+            breakdown: entries
+          };
+        });
+
+        const validCells = cells.filter(c => c.marks !== null);
+        const totalMarks = validCells.reduce((s, c) => s + c.marks, 0);
+        const totalPoints = validCells.reduce((s, c) => s + (c.points || 0), 0);
+        const average = validCells.length > 0 ? totalMarks / validCells.length : 0;
+        const meanGrade = calculateMeanGrade(
+          cells.map(c => ({ marks: c.marks, points: c.points })),
+          classObj?.name
+        );
+
+        return {
+          studentId: st.id,
+          admissionNumber: st.admissionNumber,
+          studentName: `${st.firstName} ${st.lastName}`,
+          cells,
+          totalMarks,
+          totalPoints,
+          average,
+          meanGrade,
+          scoredSubjects: validCells.length
+        };
+      });
+
+      // 7. Positions
+      const ranked = [...rows]
+        .filter(r => r.scoredSubjects > 0)
+        .sort((a, b) => b.average - a.average);
+      let rank = 1, prev = null;
+      ranked.forEach((r, i) => {
+        if (prev !== null && r.average < prev) rank = i + 1;
+        prev = r.average;
+        r.position = rank;
+      });
+
+      // 8. Class summary
+      const validRows = rows.filter(r => r.scoredSubjects > 0);
+      const classAverage = validRows.length > 0
+        ? validRows.reduce((s, r) => s + r.average, 0) / validRows.length
+        : 0;
+      const passThreshold = 50;
+      const passCount = validRows.filter(r => r.average >= passThreshold).length;
+      const passRate = validRows.length > 0 ? (passCount / validRows.length) * 100 : 0;
+
+      setTermMatrixData({
+        className: classObj?.name || 'Class',
+        term: termMatrixTerm,
+        examType: termMatrixExamType || 'All Exam Types',
+        sessionName: termMatrixSession || '',
+        subjects: classSubjects.map(s => ({ id: s.id, name: s.name })),
+        rows: rows.sort((a, b) => a.studentName.localeCompare(b.studentName)),
+        classAverage,
+        passRate,
+        passCount,
+        totalScored: validRows.length
+      });
+    } catch (err) {
+      console.error('Term matrix build error:', err);
+      alert('Failed: ' + (err.response?.data?.message || err.message));
+    } finally {
+      setLoadingTermMatrix(false);
+    }
+  };
+
+  // ============================================================
+  // STUDENT/PARENT LOADERS
+  // ============================================================
   React.useEffect(() => {
     if (!isStudent) return;
     if (hasLoadedStudentData.current) return;
@@ -13176,7 +12894,7 @@ const ResultsModule = ({
   };
 
   const handleAdmissionSubmit = async () => {
-    if (!admissionNumber) { setApiError('Please enter your admission number'); return; }
+    if (!admissionNumber) { setApiError('Enter your admission number'); return; }
     setLoadingMyData(true);
     setApiError('');
     try {
@@ -13197,7 +12915,9 @@ const ResultsModule = ({
     }
   };
 
-  // ==================== FILTERS ====================
+  // ============================================================
+  // FILTERS
+  // ============================================================
   React.useEffect(() => {
     if (isUniversity && selectedCourse && units) {
       setFilteredUnits(units.filter(u => u.courseId === selectedCourse));
@@ -13237,7 +12957,9 @@ const ResultsModule = ({
   }, [exams, selectedCourse, selectedProgram, selectedYear, selectedSemester,
       selectedModule, selectedUnit, selectedClass, selectedSubject, isUniversity, isTVET]);
 
-  // ==================== OPTIONS ====================
+  // ============================================================
+  // OPTIONS
+  // ============================================================
   const getProgramOptions = () => (programs || []).map(p => ({ value: p.id, label: p.name, subLabel: p.code || '' }));
   const getCourseOptions  = () => (courses  || []).map(c => ({ value: c.id, label: c.name, subLabel: c.code || '' }));
   const getClassOptions   = () => (classes  || []).map(c => ({ value: c.id, label: c.name, subLabel: c.capacity ? `Cap: ${c.capacity}` : '' }));
@@ -13262,35 +12984,22 @@ const ResultsModule = ({
     { value: 'CAT', label: 'CAT' },
     { value: 'MOCK', label: 'Mock' },
     { value: 'PRE_MOCK', label: 'Pre-Mock' },
-    { value: 'FINAL', label: 'Final Exam' },
-    { value: 'PRACTICAL', label: 'Practical' },
-    { value: 'PROJECT', label: 'Project' }
+    { value: 'FINAL', label: 'Final Exam' }
   ];
   const examTypeLabel = (t) => examTypeOptions.find(o => o.value === t)?.label || t;
 
   const termOptions = [
-    { value: '', label: 'All Terms (grouped by term)' },
+    { value: '', label: 'All Terms' },
     { value: 'Term 1', label: 'Term 1' },
     { value: 'Term 2', label: 'Term 2' },
     { value: 'Term 3', label: 'Term 3' },
     { value: 'Semester 1', label: 'Semester 1' },
-    { value: 'Semester 2', label: 'Semester 2' },
-    { value: 'Module 1', label: 'Module 1' },
-    { value: 'Module 2', label: 'Module 2' }
+    { value: 'Semester 2', label: 'Semester 2' }
   ];
 
-  // ==================== TREND ====================
-  const TrendArrow = ({ trend, size = 'sm' }) => {
-    if (trend === 'up')   return <span className={`text-green-600 font-bold ${size === 'lg' ? 'text-lg' : ''}`} title="Improved">▲</span>;
-    if (trend === 'down') return <span className={`text-red-600 font-bold ${size === 'lg' ? 'text-lg' : ''}`} title="Dropped">▼</span>;
-    return <span className="text-gray-300 text-xs" title="Stable">●</span>;
-  };
-
-  // ==================================================================
-  //  ✅ PRINT-ONLY stylesheet — injected once
-  //     Only elements with class="results-print-area" will print.
-  //     Everything else is hidden.
-  // ==================================================================
+  // ============================================================
+  // PRINT — stylesheet injected once
+  // ============================================================
   React.useEffect(() => {
     const id = '__results_print_style__';
     if (document.getElementById(id)) return;
@@ -13298,45 +13007,22 @@ const ResultsModule = ({
     style.id = id;
     style.innerHTML = `
       @media print {
-        /* Hide absolutely everything */
         body * { visibility: hidden !important; }
-
-        /* Show only the report/matrix print area */
-        .results-print-area,
-        .results-print-area * { visibility: visible !important; }
-
-        /* Reset layout for the print area */
+        .results-print-area, .results-print-area * { visibility: visible !important; }
         .results-print-area {
           position: absolute !important;
-          left: 0; top: 0;
-          width: 100% !important;
-          padding: 12mm !important;
-          background: #fff !important;
-          box-shadow: none !important;
-          border: none !important;
-          border-radius: 0 !important;
+          left: 0; top: 0; width: 100% !important;
+          padding: 12mm !important; background: #fff !important;
+          box-shadow: none !important; border: none !important; border-radius: 0 !important;
         }
-
-        /* Hide UI chrome */
-        .no-print,
-        .no-print *,
-        nav, aside, header, footer,
-        button, input, select, textarea { display: none !important; }
-
-        /* Table sizing */
+        .no-print, .no-print *, nav, aside, header, footer, button, input, select, textarea {
+          display: none !important;
+        }
         table { border-collapse: collapse !important; width: 100% !important; }
         thead { display: table-header-group !important; }
         tr { page-break-inside: avoid !important; }
-        th, td {
-          border: 1px solid #cbd5e1 !important;
-          padding: 6px 8px !important;
-          font-size: 11px !important;
-          color: #111 !important;
-          background: #fff !important;
-        }
+        th, td { border: 1px solid #cbd5e1 !important; padding: 6px 8px !important; font-size: 11px !important; color: #111 !important; background: #fff !important; }
         th { background: #f1f5f9 !important; font-weight: 700 !important; }
-
-        /* Print-only signature block */
         .print-only { display: block !important; }
         @page { size: A4 portrait; margin: 10mm; }
       }
@@ -13349,9 +13035,6 @@ const ResultsModule = ({
     };
   }, []);
 
-  // ==================================================================
-  //  ✅ PRINT HANDLER — Report card / Class matrix
-  // ==================================================================
   const handlePrintArea = (areaId) => {
     const el = document.getElementById(areaId);
     if (!el) { window.print(); return; }
@@ -13362,120 +13045,42 @@ const ResultsModule = ({
     }, 80);
   };
 
-  // ==================================================================
-  //  ✅ SEND RESULTS TO PARENTS (unchanged behaviour)
-  // ==================================================================
-  const handleSendToParents = async () => {
-    if (!canSendMessages) { alert('You do not have permission'); return; }
-    if (selectedStudentsForMessage.length === 0) { alert('Select at least one student'); return; }
-    setSendingMessages(true);
-    setMessageLog([]);
-    try {
-      const exam = exams.find(e => e.id === selectedExam);
-      let sentCount = 0;
-      const logs = [];
-      for (const studentId of selectedStudentsForMessage) {
-        const student = resultEntries.find(e => e.studentId === studentId);
-        if (!student) continue;
-        let studentParents = [];
-        try {
-          const res = await api.get(`/parents?studentId=${studentId}`);
-          studentParents = res.data.parents || [];
-        } catch (_) {}
-        if (studentParents.length === 0) {
-          logs.push({ student: student.studentName, error: 'No parents found' });
-          continue;
-        }
-        const itemName = getItemName({}, exam);
-        const msg = (messageTemplate || `Dear Parent,\n\n{student_name} (Adm: {admission}) scored {marks} ({grade}) in {subject} for {exam_name}.\n\n{school_name}`)
-          .replace(/{student_name}/g, student.studentName)
-          .replace(/{admission}/g, student.admissionNumber)
-          .replace(/{exam_name}/g, exam.name)
-          .replace(/{subject}/g, itemName)
-          .replace(/{marks}/g, student.marks)
-          .replace(/{grade}/g, displayGrade(student.grade, student.marks))
-          .replace(/{points}/g, student.points)
-          .replace(/{school_name}/g, currentSchool?.name || 'School')
-          .replace(/{date}/g, new Date().toLocaleDateString());
-        for (const parent of studentParents) {
-          try {
-            if ((messageType === 'SMS' || messageType === 'BOTH') && parent.User?.phone) {
-              await api.post('/messages', { type: 'SMS', content: msg, recipientType: 'PARENT',
-                recipients: [{ type: 'user', id: parent.userId }], sendNow: true, schoolId: currentSchool?.id });
-            }
-            if ((messageType === 'EMAIL' || messageType === 'BOTH') && parent.User?.email) {
-              await api.post('/messages', { type: 'EMAIL', subject: `Results — ${student.studentName}`,
-                content: msg, recipientType: 'PARENT', recipients: [{ type: 'user', id: parent.userId }],
-                sendNow: true, schoolId: currentSchool?.id });
-            }
-            sentCount++;
-          } catch (_) {}
-        }
-        logs.push({ student: student.studentName, parents: studentParents.length, sent: true });
-      }
-      setMessageLog(logs);
-      alert(`✅ Sent to ${sentCount} parent contacts!`);
-    } catch (err) {
-      alert('❌ Failed to send messages');
-    } finally {
-      setSendingMessages(false);
-    }
-  };
-
-  // ==================== MARKS ENTRY (unchanged, but cleaner layout) ====================
-  const [examLevelHintCache] = useState({});
-
+  // ============================================================
+  // MARKS ENTRY
+  // ============================================================
   const loadExamResults = async () => {
     if (!selectedExam) { alert('Please select an exam'); return; }
-    if (!canViewAllResults) { alert('You do not have permission'); return; }
     setLoading(true); setApiError('');
     try {
       const exam = exams.find(e => e.id === selectedExam);
       if (!exam) { alert('Exam not found'); return; }
-      const examLevelHint = getLevelHint(exam, null, exam.classId || selectedClass);
-      examLevelHintCache[selectedExam] = examLevelHint;
 
       let studentList = [];
-      const selectedIds = exam.selectedStudents || [];
-      if (selectedIds.length > 0) {
-        const resolved = selectedIds.map(resolveStudentId).filter(Boolean);
-        if (resolved.length > 0) {
-          const res = await api.get('/students', { params: { ids: resolved.join(',') } });
-          studentList = res.data.students || [];
-        }
-      }
-      if (studentList.length === 0) {
-        const params = {};
-        if (isUniversity && exam.courseId) { params.courseId = exam.courseId; if (exam.year) params.year = exam.year; }
-        else if (isTVET && exam.programId) { params.programId = exam.programId; if (exam.module) params.module = exam.module; if (exam.year) params.year = exam.year; }
-        else if (exam.classId) { params.classId = exam.classId; }
-        if (Object.keys(params).length > 0) {
-          const res = await api.get('/students', { params });
-          studentList = res.data.students || [];
-        }
-      }
-      studentList = studentList.filter(s => s.schoolId === currentSchool?.id);
-      if (studentList.length === 0) { alert('No students found for this exam'); setLoading(false); return; }
+      const params = {};
+      if (isUniversity && exam.courseId) { params.courseId = exam.courseId; if (exam.year) params.year = exam.year; }
+      else if (isTVET && exam.programId) { params.programId = exam.programId; if (exam.module) params.module = exam.module; if (exam.year) params.year = exam.year; }
+      else if (exam.classId) { params.classId = exam.classId; }
+
+      const res = await api.get('/students', { params });
+      studentList = res.data.students || [];
+
+      if (studentList.length === 0) { alert('No students found for this exam'); return; }
 
       let existingResults = [];
       try {
-        const res = await api.get(`/results/exam/${selectedExam}`);
-        existingResults = res.data.results || [];
+        const r = await api.get(`/results/exam/${selectedExam}`);
+        existingResults = r.data.results || [];
       } catch (_) {}
 
       const itemName = getItemName({}, exam);
-      const parentsByStudent = {};
-      parents?.forEach(p => {
-        if (!parentsByStudent[p.studentId]) parentsByStudent[p.studentId] = [];
-        parentsByStudent[p.studentId].push(p);
-      });
 
       const entries = studentList.map(student => {
         const existing = existingResults.find(r => r.studentId === student.id);
         const hasMarks = existing?.marks !== undefined && existing?.marks !== null && existing?.marks !== '';
         const marks = hasMarks ? existing.marks : '';
+        const levelHint = getLevelHint(exam, student);
         const gradeInfo = hasMarks
-          ? calculateGrade(marks, exam.maxMarks || 100, exam.schoolCategory || schoolCategory, examLevelHint)
+          ? calculateGrade(marks, exam.maxMarks || 100, exam.schoolCategory || schoolCategory, levelHint)
           : { grade: '', points: 0 };
         return {
           studentId: student.id,
@@ -13486,8 +13091,7 @@ const ResultsModule = ({
           grade: gradeInfo.grade,
           points: gradeInfo.points,
           isAbsent: existing?.isAbsent || false,
-          resultId: existing?.id,
-          parents: parentsByStudent[student.id] || []
+          resultId: existing?.id
         };
       });
       setResultEntries(entries);
@@ -13507,7 +13111,6 @@ const ResultsModule = ({
     try {
       const exam = exams.find(e => e.id === selectedExam);
       if (!exam) { alert('Exam not found'); return; }
-      const examLevelHint = examLevelHintCache[selectedExam] || getLevelHint(exam, null, exam.classId || selectedClass);
 
       let existingByStudentId = {};
       try {
@@ -13520,7 +13123,8 @@ const ResultsModule = ({
         const student = students.find(s => s.id === entry.studentId);
         if (!student) { errors++; continue; }
 
-        const { grade, points } = calculateGrade(marks, exam.maxMarks || 100, exam.schoolCategory || schoolCategory, examLevelHint);
+        const levelHint = getLevelHint(exam, student);
+        const { grade, points } = calculateGrade(marks, exam.maxMarks || 100, exam.schoolCategory || schoolCategory, levelHint);
         const data = {
           studentId: student.id, examId: selectedExam,
           marks, grade, points,
@@ -13544,23 +13148,6 @@ const ResultsModule = ({
       alert('Failed to save: ' + (err.response?.data?.message || err.message));
     } finally {
       setLoading(false);
-    }
-  };
-
-  const publishResults = async () => {
-    if (!canPublishResults) { alert('You do not have permission'); return; }
-    if (!selectedExam) { alert('Select an exam'); return; }
-    setPublishing(true);
-    try {
-      const exam = exams.find(e => e.id === selectedExam);
-      await api.put(`/exams/${selectedExam}`, { ...exam, isPublished: true, resultsPublished: true, publishedAt: new Date().toISOString() });
-      setExams(prev => prev.map(e => e.id === selectedExam ? { ...e, isPublished: true, resultsPublished: true, publishedAt: new Date().toISOString() } : e));
-      alert('✅ Results published!');
-      await loadExamResults();
-    } catch (err) {
-      alert('Failed to publish');
-    } finally {
-      setPublishing(false);
     }
   };
 
@@ -13589,9 +13176,9 @@ const ResultsModule = ({
 
   const uniqueGrades = [...new Set(resultEntries.map(e => e.grade).filter(Boolean))];
 
-  // ==================================================================
-  //  STUDENT VIEW
-  // ==================================================================
+  // ============================================================
+  // STUDENT VIEW
+  // ============================================================
   if (isStudent) {
     return (
       <div className="space-y-6">
@@ -13638,7 +13225,20 @@ const ResultsModule = ({
 
         {myStudentRecord ? (
           <div id="student-results-print" className="space-y-6">
-            {/* Header */}
+            {/* School header (centered) */}
+            <div className="text-center border-b-2 border-slate-300 pb-4">
+              {currentSchool?.contact?.logo && (
+                <img src={currentSchool.contact.logo} alt="" className="w-16 h-16 object-cover rounded-full mx-auto mb-2 border" />
+              )}
+              <h1 className="text-2xl font-black text-slate-800 uppercase tracking-wider">
+                {currentSchool?.name || 'School'}
+              </h1>
+              {currentSchool?.motto && (
+                <p className="text-xs italic text-slate-500 mt-1">"{currentSchool.motto}"</p>
+              )}
+              <p className="text-xs uppercase tracking-widest text-slate-500 mt-2">Student Results Report</p>
+            </div>
+
             <div className={`rounded-xl p-6 text-white ${isTVET ? 'bg-gradient-to-r from-purple-600 to-pink-600' : 'bg-gradient-to-r from-indigo-600 to-blue-600'}`}>
               <div className="flex items-center gap-4">
                 <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center text-2xl font-bold text-indigo-600">
@@ -13651,56 +13251,62 @@ const ResultsModule = ({
               </div>
             </div>
 
-            {/* Summary Cards */}
             {myResultsSummary && (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <StatBox label="Total Exams" value={myResultsSummary.total} color="blue" icon="file-alt" />
-                <StatBox label="Average" value={`${myResultsSummary.average}%`} color="emerald" icon="chart-line" />
-                <StatBox label="Total Points" value={myResultsSummary.totalPoints} color="purple" icon="star" />
-                <StatBox label="Mean Grade" value={myResultsSummary.meanGrade} color="amber" icon="award" />
+                <div className="bg-blue-50 p-4 rounded-xl text-center border border-blue-100">
+                  <p className="text-xs uppercase tracking-wider text-blue-700 font-bold">Exams</p>
+                  <p className="text-3xl font-black text-blue-700 mt-1">{myResultsSummary.total}</p>
+                </div>
+                <div className="bg-emerald-50 p-4 rounded-xl text-center border border-emerald-100">
+                  <p className="text-xs uppercase tracking-wider text-emerald-700 font-bold">Average</p>
+                  <p className="text-3xl font-black text-emerald-700 mt-1">{myResultsSummary.average}%</p>
+                </div>
+                <div className="bg-purple-50 p-4 rounded-xl text-center border border-purple-100">
+                  <p className="text-xs uppercase tracking-wider text-purple-700 font-bold">Points</p>
+                  <p className="text-3xl font-black text-purple-700 mt-1">{myResultsSummary.totalPoints}</p>
+                </div>
+                <div className="bg-amber-50 p-4 rounded-xl text-center border border-amber-100">
+                  <p className="text-xs uppercase tracking-wider text-amber-700 font-bold">Mean</p>
+                  <p className="text-3xl font-black text-amber-700 mt-1">{myResultsSummary.meanGrade}</p>
+                </div>
               </div>
             )}
 
-            {/* Results Table */}
             {myResults.length > 0 && (
-              <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-200">
-                <div className="px-6 py-4 bg-gray-50 border-b">
+              <div className="bg-white rounded-xl shadow-sm overflow-hidden border">
+                <div className="px-6 py-4 bg-slate-50 border-b">
                   <h3 className="font-semibold text-lg">Detailed Results</h3>
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-slate-100">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wide">Exam</th>
-                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wide">Date</th>
-                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wide">
-                          {isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject'}
-                        </th>
-                        <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase tracking-wide">Marks</th>
-                        <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase tracking-wide">Grade</th>
-                        <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase tracking-wide">Points</th>
-                        <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wide">Remarks</th>
+                <table className="w-full">
+                  <thead className="bg-slate-100">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Exam</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Date</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">
+                        {isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject'}
+                      </th>
+                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Marks</th>
+                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Grade</th>
+                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Points</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {myResults.map((r, i) => (
+                      <tr key={i}>
+                        <td className="px-4 py-3 font-medium">{r.examName}</td>
+                        <td className="px-4 py-3 text-sm">{r.examDate ? formatDate(r.examDate) : '—'}</td>
+                        <td className="px-4 py-3">{r.itemName}</td>
+                        <td className="px-4 py-3 text-center font-bold">{r.marks ?? '—'}</td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradeColor(r.grade)}`}>
+                            {displayGrade(r.grade, r.marks)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-center">{r.points}</td>
                       </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {myResults.map((r, i) => (
-                        <tr key={i} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 font-medium">{r.examName}</td>
-                          <td className="px-4 py-3 text-sm">{r.examDate ? new Date(r.examDate).toLocaleDateString() : '—'}</td>
-                          <td className="px-4 py-3">{r.itemName}</td>
-                          <td className="px-4 py-3 text-center font-bold">{r.marks ?? '—'}</td>
-                          <td className="px-4 py-3 text-center">
-                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradeColor(r.grade)}`}>
-                              {displayGrade(r.grade, r.marks)}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-center">{r.points}</td>
-                          <td className="px-4 py-3 text-sm text-gray-500">{r.remarks || '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
 
@@ -13715,19 +13321,15 @@ const ResultsModule = ({
           <div className="bg-white p-12 rounded-xl shadow-sm text-center no-print">
             <i className="fas fa-user-graduate text-6xl text-gray-300 mb-4"></i>
             <p className="text-gray-500 text-lg">Enter your admission number to view results.</p>
-            <button onClick={() => setShowAdmissionModal(true)}
-              className="mt-4 bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700">
-              Enter Admission Number
-            </button>
           </div>
         )}
       </div>
     );
   }
 
-  // ==================================================================
-  //  PARENT VIEW
-  // ==================================================================
+  // ============================================================
+  // PARENT VIEW
+  // ============================================================
   if (isParent) {
     return (
       <div className="space-y-6">
@@ -13772,64 +13374,49 @@ const ResultsModule = ({
 
             {selectedChild && myStudentRecord && (
               <div id="parent-results-print" className="space-y-6">
-                <div className={`rounded-xl p-6 text-white ${isTVET ? 'bg-gradient-to-r from-purple-500 to-pink-600' : 'bg-gradient-to-r from-indigo-500 to-purple-600'}`}>
-                  <div className="flex items-center gap-4">
-                    <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center text-2xl font-bold text-purple-600">
-                      {myStudentRecord.firstName?.[0]}{myStudentRecord.lastName?.[0]}
-                    </div>
-                    <div>
-                      <h3 className="text-2xl font-bold">{myStudentRecord.firstName} {myStudentRecord.lastName}</h3>
-                      <p className="text-purple-100">Admission: {myStudentRecord.admissionNumber}</p>
-                    </div>
-                  </div>
+                <div className="text-center border-b-2 border-slate-300 pb-4">
+                  {currentSchool?.contact?.logo && (
+                    <img src={currentSchool.contact.logo} alt="" className="w-16 h-16 object-cover rounded-full mx-auto mb-2 border" />
+                  )}
+                  <h1 className="text-2xl font-black text-slate-800 uppercase tracking-wider">
+                    {currentSchool?.name || 'School'}
+                  </h1>
+                  <p className="text-xs uppercase tracking-widest text-slate-500 mt-2">Student Results Report</p>
                 </div>
 
-                {myResultsSummary && (
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <StatBox label="Total Exams" value={myResultsSummary.total} color="blue" icon="file-alt" />
-                    <StatBox label="Average" value={`${myResultsSummary.average}%`} color="emerald" icon="chart-line" />
-                    <StatBox label="Total Points" value={myResultsSummary.totalPoints} color="purple" icon="star" />
-                    <StatBox label="Mean Grade" value={myResultsSummary.meanGrade} color="amber" icon="award" />
-                  </div>
-                )}
+                <div className={`rounded-xl p-6 text-white ${isTVET ? 'bg-gradient-to-r from-purple-500 to-pink-600' : 'bg-gradient-to-r from-indigo-500 to-purple-600'}`}>
+                  <h3 className="text-2xl font-bold">{myStudentRecord.firstName} {myStudentRecord.lastName}</h3>
+                  <p className="text-purple-100">Admission: {myStudentRecord.admissionNumber}</p>
+                </div>
 
                 {childResults.length > 0 ? (
-                  <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-200">
-                    <div className="px-6 py-4 bg-gray-50 border-b">
-                      <h3 className="font-semibold text-lg">Detailed Results</h3>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead className="bg-slate-100">
-                          <tr>
-                            <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Exam</th>
-                            <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Date</th>
-                            <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">
-                              {isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject'}
-                            </th>
-                            <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Marks</th>
-                            <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Grade</th>
-                            <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Points</th>
+                  <div className="bg-white rounded-xl shadow-sm overflow-hidden border">
+                    <table className="w-full">
+                      <thead className="bg-slate-100">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Exam</th>
+                          <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Date</th>
+                          <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase">Subject</th>
+                          <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Marks</th>
+                          <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Grade</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {childResults.map((r, i) => (
+                          <tr key={i}>
+                            <td className="px-4 py-3 font-medium">{r.examName}</td>
+                            <td className="px-4 py-3 text-sm">{r.examDate ? formatDate(r.examDate) : '—'}</td>
+                            <td className="px-4 py-3">{r.itemName}</td>
+                            <td className="px-4 py-3 text-center font-bold">{r.marks ?? '—'}</td>
+                            <td className="px-4 py-3 text-center">
+                              <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradeColor(r.grade)}`}>
+                                {displayGrade(r.grade, r.marks)}
+                              </span>
+                            </td>
                           </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                          {childResults.map((r, i) => (
-                            <tr key={i} className="hover:bg-gray-50">
-                              <td className="px-4 py-3 font-medium">{r.examName}</td>
-                              <td className="px-4 py-3 text-sm">{r.examDate ? new Date(r.examDate).toLocaleDateString() : '—'}</td>
-                              <td className="px-4 py-3">{r.itemName}</td>
-                              <td className="px-4 py-3 text-center font-bold">{r.marks ?? '—'}</td>
-                              <td className="px-4 py-3 text-center">
-                                <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradeColor(r.grade)}`}>
-                                  {displayGrade(r.grade, r.marks)}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3 text-center">{r.points}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 ) : (
                   <div className="bg-white p-12 rounded-xl shadow-sm text-center">
@@ -13852,12 +13439,12 @@ const ResultsModule = ({
     );
   }
 
-  // ==================================================================
-  //  ADMIN / TEACHER VIEW
-  // ==================================================================
+  // ============================================================
+  // ADMIN / TEACHER VIEW
+  // ============================================================
   return (
     <div className="space-y-6">
-      {(loading || publishing || sendingMessages || loadingReport || loadingMatrix) && (
+      {(loading || loadingReport || loadingMatrix || loadingTermMatrix) && (
         <div className="h-1 bg-indigo-600 animate-pulse fixed top-0 left-0 w-full z-50 no-print" />
       )}
       {apiError && (
@@ -13866,14 +13453,14 @@ const ResultsModule = ({
         </div>
       )}
 
-      {/* ============ HEADER ============ */}
+      {/* HEADER */}
       <div className="flex flex-wrap justify-between items-center gap-3 no-print">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">
             {isUniversity ? '📚 Course Results' : isTVET ? '🔧 Program Results'
               : isSecondary ? '📖 Secondary Results' : '🎯 Primary Results'}
           </h2>
-          <p className="text-sm text-slate-500">Manage marks, generate reports, and view class performance</p>
+          <p className="text-sm text-slate-500">Marks entry, reports, and class performance analytics</p>
         </div>
 
         {canViewAllResults && (
@@ -13898,65 +13485,57 @@ const ResultsModule = ({
                 <i className="fas fa-table mr-1.5"></i>Class Matrix
               </button>
             )}
+            {canViewClassMatrix && (
+              <button onClick={() => setViewMode('term-matrix')}
+                className={`px-4 py-1.5 rounded-md font-medium transition-colors ${
+                  viewMode === 'term-matrix' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                }`}>
+                <i className="fas fa-th mr-1.5"></i>Termly Matrix
+              </button>
+            )}
           </div>
         )}
       </div>
 
       {/* ============================================================ */}
-      {/*  DETAILED REPORT VIEW                                         */}
+      {/* DETAILED REPORT VIEW                                          */}
       {/* ============================================================ */}
       {viewMode === 'report' && canViewAllResults && (
         <>
-          {/* -------- FILTERS -------- */}
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 no-print">
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                <i className="fas fa-filter text-indigo-600"></i>
-                Report Filters
-              </h3>
-              <span className="text-xs text-slate-500">
-                {reportTermFilter
-                  ? `Showing all exam types within ${reportTermFilter}`
-                  : 'Pick a term to see all its exam types side-by-side'}
-              </span>
-            </div>
-
+          <div className="bg-white p-6 rounded-xl shadow-sm border no-print">
+            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <i className="fas fa-filter text-indigo-600"></i>Report Filters
+            </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <SearchableSelect
                 label="Class"
                 value={reportClassId}
                 onChange={(e) => { setReportClassId(e.target.value); setReportStudentId(''); }}
                 options={getClassOptions()}
-                placeholder="All classes"
-              />
+                placeholder="All classes" />
               <SearchableSelect
                 label="Student"
                 value={reportStudentId}
                 onChange={(e) => setReportStudentId(e.target.value)}
                 options={getReportStudentOptions()}
                 placeholder="Select student..."
-                disabled={!reportClassId}
-              />
+                disabled={!reportClassId} />
               <SearchableSelect
-                label="Term (recommended)"
+                label="Term"
                 value={reportTermFilter}
                 onChange={(e) => setReportTermFilter(e.target.value)}
                 options={termOptions}
-                placeholder="All terms"
-              />
+                placeholder="All terms" />
               <SearchableSelect
                 label="Exam Type"
                 value={reportExamTypeFilter}
                 onChange={(e) => setReportExamTypeFilter(e.target.value)}
                 options={examTypeOptions}
                 placeholder="All types"
-                disabled={!!reportTermFilter}
-              />
+                disabled={!!reportTermFilter} />
             </div>
-
-            <div className="mt-5 flex flex-wrap gap-2">
-              <button onClick={loadDetailedReport}
-                disabled={!reportStudentId || loadingReport}
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button onClick={loadDetailedReport} disabled={!reportStudentId || loadingReport}
                 className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium flex items-center gap-2">
                 {loadingReport ? <><i className="fas fa-spinner fa-spin"></i>Loading...</> : <><i className="fas fa-chart-line"></i>Generate Report</>}
               </button>
@@ -13969,42 +13548,50 @@ const ResultsModule = ({
             </div>
           </div>
 
-          {/* -------- REPORT BODY -------- */}
           {reportData && (
             <div id="detailed-report-print" className="space-y-6">
-              {/* Header */}
-              <div className="rounded-xl overflow-hidden border border-slate-200 shadow-sm">
-                <div className="bg-gradient-to-r from-slate-800 to-slate-700 p-6 text-white">
-                  <div className="flex flex-wrap justify-between items-start gap-4">
-                    <div>
-                      <p className="text-xs uppercase tracking-widest text-slate-300 mb-1">Student Report</p>
-                      <h3 className="text-3xl font-bold">
-                        {reportData.student.firstName} {reportData.student.lastName}
-                      </h3>
-                      <p className="text-slate-300 font-mono mt-1">{reportData.student.admissionNumber}</p>
-                      <p className="text-slate-400 text-sm mt-1">
-                        {classes.find(c => c.id === reportData.student.classId)?.name || 'No Class'}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs uppercase tracking-widest text-slate-300">Overall Average</p>
-                      <p className="text-5xl font-black">{reportData.overallAverage.toFixed(1)}%</p>
-                    </div>
+              {/* School header */}
+              <div className="text-center border-b-2 border-slate-300 pb-4">
+                {currentSchool?.contact?.logo && (
+                  <img src={currentSchool.contact.logo} alt="" className="w-16 h-16 object-cover rounded-full mx-auto mb-2 border" />
+                )}
+                <h1 className="text-2xl font-black text-slate-800 uppercase tracking-wider">
+                  {currentSchool?.name || 'School'}
+                </h1>
+                {currentSchool?.motto && <p className="text-xs italic text-slate-500 mt-1">"{currentSchool.motto}"</p>}
+                <p className="text-xs uppercase tracking-widest text-slate-500 mt-2">Student Report Card</p>
+              </div>
+
+              {/* Student header */}
+              <div className="bg-slate-800 text-white rounded-xl p-6">
+                <div className="flex flex-wrap justify-between items-start gap-4">
+                  <div>
+                    <p className="text-xs uppercase tracking-widest text-slate-300 mb-1">Student</p>
+                    <h3 className="text-3xl font-bold">
+                      {reportData.student.firstName} {reportData.student.lastName}
+                    </h3>
+                    <p className="text-slate-300 font-mono mt-1">{reportData.student.admissionNumber}</p>
+                    <p className="text-slate-400 text-sm mt-1">
+                      {classes.find(c => c.id === reportData.student.classId)?.name || 'No Class'}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs uppercase tracking-widest text-slate-300">Overall Average</p>
+                    <p className="text-5xl font-black">{reportData.overallAverage.toFixed(1)}%</p>
                   </div>
                 </div>
               </div>
 
-              {/* Term Cards */}
+              {/* Term cards */}
               {reportData.termCards.length === 0 ? (
-                <div className="bg-white p-12 rounded-xl shadow-sm text-center border border-gray-200">
+                <div className="bg-white p-12 rounded-xl shadow-sm text-center border">
                   <i className="fas fa-file-alt text-6xl text-gray-300 mb-4"></i>
-                  <p className="text-gray-500">No results match the selected filters.</p>
+                  <p className="text-gray-500">No results match the filters.</p>
                 </div>
               ) : (
                 reportData.termCards.map((card, ci) => (
-                  <div key={ci} className="bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
-                    {/* Card header */}
-                    <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center flex-wrap gap-2">
+                  <div key={ci} className="bg-white rounded-xl shadow-sm border overflow-hidden">
+                    <div className="bg-slate-50 px-6 py-4 border-b flex justify-between items-center flex-wrap gap-2">
                       <div>
                         <h4 className="font-bold text-slate-800 text-lg">
                           {card.term}{card.year && ` • ${card.year}`}
@@ -14027,96 +13614,77 @@ const ResultsModule = ({
                       </div>
                     </div>
 
-                    {/* Subject table */}
-                    <div className="overflow-x-auto">
-                      <table className="w-full border-collapse">
-                        <thead>
-                          <tr className="bg-slate-100 border-b border-slate-200">
-                            <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider border-r border-slate-200">
-                              Subject
+                    <table className="w-full border-collapse">
+                      <thead>
+                        <tr className="bg-slate-100 border-b">
+                          <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase border-r">Subject</th>
+                          {card.examTypeColumns.map(type => (
+                            <th key={type} className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase border-r">
+                              {examTypeLabel(type)}
                             </th>
-                            {card.examTypeColumns.map(type => (
-                              <th key={type} className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase tracking-wider border-r border-slate-200">
-                                {examTypeLabel(type)}
-                              </th>
-                            ))}
-                            <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase tracking-wider border-r border-slate-200">
-                              Average
-                            </th>
-                            <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase tracking-wider">
-                              Trend
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-200">
-                          {card.subjects.map((s, si) => (
-                            <tr key={si} className={si % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
-                              <td className="px-4 py-3 font-medium text-slate-800 border-r border-slate-200">
-                                <div>{s.subjectName}</div>
-                                {s.stream && (
-                                  <span className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 uppercase tracking-wide">
-                                    {s.stream}
-                                  </span>
-                                )}
-                              </td>
-                              {card.examTypeColumns.map(type => {
-                                const cell = s.cells[type];
-                                return (
-                                  <td key={type} className="px-4 py-3 text-center border-r border-slate-200">
-                                    {cell ? (
-                                      <div className="flex flex-col items-center gap-1">
-                                        <span className="font-bold text-slate-800">{cell.marks}</span>
-                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${getGradeColor(cell.grade)}`}>
-                                          {cell.grade || '—'}
-                                        </span>
-                                      </div>
-                                    ) : (
-                                      <span className="text-slate-300">—</span>
-                                    )}
-                                  </td>
-                                );
-                              })}
-                              <td className="px-4 py-3 text-center font-bold text-indigo-700 border-r border-slate-200">
-                                {s.avg.toFixed(1)}
-                              </td>
-                              <td className="px-4 py-3 text-center">
-                                <TrendArrow trend={s.trend} size="lg" />
-                              </td>
-                            </tr>
                           ))}
-                        </tbody>
-                        <tfoot>
-                          <tr className="bg-slate-100 border-t-2 border-slate-300">
-                            <td colSpan={card.examTypeColumns.length + 1} className="px-4 py-3 font-bold text-right text-slate-700 border-r border-slate-200">
-                              Term Average
+                          <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase border-r">Average</th>
+                          <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Trend</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {card.subjects.map((s, si) => (
+                          <tr key={si} className={si % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
+                            <td className="px-4 py-3 font-medium text-slate-800 border-r">
+                              <div>{s.subjectName}</div>
+                              {s.stream && (
+                                <span className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 uppercase tracking-wide">
+                                  {s.stream}
+                                </span>
+                              )}
                             </td>
-                            <td className="px-4 py-3 text-center font-bold text-indigo-700 border-r border-slate-200">
-                              {card.termAverage.toFixed(1)}
-                            </td>
-                            <td className="px-4 py-3 text-center text-xs text-slate-500">
-                              Grade: <strong className="text-slate-700">{card.termGrade}</strong>
+                            {card.examTypeColumns.map(type => {
+                              const cell = s.cells[type];
+                              return (
+                                <td key={type} className="px-4 py-3 text-center border-r">
+                                  {cell ? (
+                                    <div className="flex flex-col items-center gap-1">
+                                      <span className="font-bold text-slate-800">{cell.marks}</span>
+                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${getGradeColor(cell.grade)}`}>
+                                        {cell.grade || '—'}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-slate-300">—</span>
+                                  )}
+                                </td>
+                              );
+                            })}
+                            <td className="px-4 py-3 text-center font-bold text-indigo-700 border-r">{s.avg.toFixed(1)}</td>
+                            <td className="px-4 py-3 text-center">
+                              {s.trend === 'up' && <span className="text-green-600 font-bold">▲</span>}
+                              {s.trend === 'down' && <span className="text-red-600 font-bold">▼</span>}
+                              {s.trend === 'flat' && <span className="text-gray-300 text-xs">●</span>}
                             </td>
                           </tr>
-                        </tfoot>
-                      </table>
-                    </div>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-slate-100 border-t-2 border-slate-300">
+                          <td colSpan={card.examTypeColumns.length + 1} className="px-4 py-3 font-bold text-right text-slate-700 border-r">Term Average</td>
+                          <td className="px-4 py-3 text-center font-bold text-indigo-700 border-r">{card.termAverage.toFixed(1)}</td>
+                          <td className="px-4 py-3 text-center text-xs text-slate-500">
+                            Grade: <strong className="text-slate-700">{card.termGrade}</strong>
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
                   </div>
                 ))
               )}
 
-              {/* ============================================================ */}
-              {/* KNEC APTITUDE — moved to the BOTTOM                          */}
-              {/* ============================================================ */}
+              {/* KNEC aptitude */}
               {reportData.streamAverages.length > 0 && (
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
                   <div className="bg-gradient-to-r from-violet-600 to-indigo-600 px-6 py-4">
                     <h4 className="text-white font-bold text-lg flex items-center gap-2">
-                      <i className="fas fa-brain"></i>
-                      KNEC Aptitude Analysis
+                      <i className="fas fa-brain"></i>KNEC Aptitude Analysis
                     </h4>
-                    <p className="text-violet-100 text-xs mt-1">
-                      Based on the student's performance across subject streams
-                    </p>
                   </div>
                   <div className="p-6">
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -14124,73 +13692,73 @@ const ResultsModule = ({
                         const isTop = reportData.topStreams.includes(s.stream);
                         return (
                           <div key={s.stream}
-                            className={`p-4 rounded-xl border-2 text-center transition-all ${
-                              isTop
-                                ? 'border-violet-400 bg-violet-50 shadow-md'
-                                : 'border-slate-200 bg-slate-50'
+                            className={`p-4 rounded-xl border-2 text-center ${
+                              isTop ? 'border-violet-400 bg-violet-50 shadow-md' : 'border-slate-200 bg-slate-50'
                             }`}>
                             <p className="text-xs font-bold text-slate-600 uppercase tracking-wider">{s.stream}</p>
-                            <p className={`text-2xl font-black mt-2 ${isTop ? 'text-violet-700' : 'text-slate-700'}`}>
-                              {s.avg.toFixed(0)}%
-                            </p>
+                            <p className={`text-2xl font-black mt-2 ${isTop ? 'text-violet-700' : 'text-slate-700'}`}>{s.avg.toFixed(0)}%</p>
                             <p className="text-[10px] text-slate-500 mt-1">{s.count} subject{s.count !== 1 ? 's' : ''}</p>
-                            {isTop && (
-                              <p className="text-[10px] text-violet-600 font-semibold mt-2">⭐ Likely to thrive</p>
-                            )}
+                            {isTop && <p className="text-[10px] text-violet-600 font-semibold mt-2">⭐ Likely to thrive</p>}
                           </div>
                         );
                       })}
                     </div>
-
                     {reportData.topStreams.length > 0 && (
-                      <div className="mt-5 p-4 bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-200">
+                      <div className="mt-5 p-4 bg-violet-50 rounded-xl border border-violet-200">
                         <p className="text-sm text-violet-900">
-                          <strong>💡 Recommendation:</strong> This student shows strongest potential in{' '}
-                          <strong className="text-violet-700">{reportData.topStreams.join(' and ')}</strong>.
-                          Consider encouraging further development in these areas.
+                          <strong>💡 Recommendation:</strong> This student shows strongest potential in <strong className="text-violet-700">{reportData.topStreams.join(' and ')}</strong>. Consider encouraging further development in these areas.
                         </p>
                       </div>
                     )}
                   </div>
                 </div>
               )}
+
+              {/* Print-only signature block */}
+              <div className="print-only pt-12 border-t border-slate-300">
+                <div className="grid grid-cols-3 gap-8 text-center text-xs text-slate-600">
+                  <div>
+                    <div className="border-t border-slate-400 mt-10 pt-2">Class Teacher</div>
+                  </div>
+                  <div>
+                    <div className="border-t border-slate-400 mt-10 pt-2">Head Teacher / Principal</div>
+                  </div>
+                  <div>
+                    <div className="border-t border-slate-400 mt-10 pt-2">School Stamp</div>
+                  </div>
+                </div>
+                <p className="text-center text-xs text-slate-400 mt-6">
+                  Generated on {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}
+                </p>
+              </div>
             </div>
           )}
         </>
       )}
 
       {/* ============================================================ */}
-      {/*  CLASS MATRIX VIEW                                           */}
+      {/* CLASS MATRIX VIEW (single exam)                              */}
       {/* ============================================================ */}
       {viewMode === 'class-matrix' && canViewClassMatrix && (
         <>
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 no-print">
+          <div className="bg-white p-6 rounded-xl shadow-sm border no-print">
             <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
               <i className="fas fa-table text-indigo-600"></i>Class Results Matrix
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <SearchableSelect
-                label="Class"
-                value={matrixClassId}
+              <SearchableSelect label="Class" value={matrixClassId}
                 onChange={(e) => { setMatrixClassId(e.target.value); setMatrixExamId(''); }}
-                options={getClassOptions()}
-                placeholder="Select class..."
-              />
-              <SearchableSelect
-                label="Exam"
-                value={matrixExamId}
+                options={getClassOptions()} placeholder="Select class..." />
+              <SearchableSelect label="Exam" value={matrixExamId}
                 onChange={(e) => setMatrixExamId(e.target.value)}
                 options={(exams || []).filter(e => !matrixClassId || e.classId === matrixClassId).map(e => ({
-                  value: e.id,
-                  label: e.name,
+                  value: e.id, label: e.name,
                   subLabel: `${e.type || ''} • ${e.date ? new Date(e.date).toLocaleDateString() : ''}`
                 }))}
                 placeholder="Select exam..."
-                disabled={!matrixClassId}
-              />
+                disabled={!matrixClassId} />
               <div className="flex items-end">
-                <button onClick={buildClassMatrix}
-                  disabled={!matrixClassId || !matrixExamId || loadingMatrix}
+                <button onClick={buildClassMatrix} disabled={!matrixClassId || !matrixExamId || loadingMatrix}
                   className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium flex items-center justify-center gap-2">
                   {loadingMatrix ? <><i className="fas fa-spinner fa-spin"></i>Building...</> : <><i className="fas fa-sync-alt"></i>Build Matrix</>}
                 </button>
@@ -14199,68 +13767,245 @@ const ResultsModule = ({
           </div>
 
           {matrixData && (
-            <div id="class-matrix-print" className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-              {/* Header */}
-              <div className="bg-slate-800 text-white px-6 py-4">
-                <div className="flex justify-between items-start flex-wrap gap-3">
+            <div id="class-matrix-print" className="bg-white rounded-xl shadow-sm border overflow-hidden">
+              <div className="bg-slate-800 text-white px-6 py-5">
+                <div className="text-center mb-4">
+                  <h1 className="text-2xl font-black uppercase tracking-wider">{currentSchool?.name || 'School'}</h1>
+                  {currentSchool?.motto && <p className="text-slate-300 text-sm italic mt-1">"{currentSchool.motto}"</p>}
+                  <p className="text-slate-400 text-xs mt-2">Class Results Matrix</p>
+                </div>
+                <div className="flex justify-between items-start flex-wrap gap-3 border-t border-slate-700 pt-4">
                   <div>
-                    <p className="text-xs uppercase tracking-widest text-slate-300">Class Results</p>
+                    <p className="text-xs uppercase tracking-widest text-slate-300">Class</p>
                     <h3 className="text-2xl font-bold">{matrixData.className}</h3>
                     <p className="text-slate-300 text-sm mt-1">{matrixData.exam.name} • {matrixData.itemName}</p>
                   </div>
                   <div className="flex gap-3">
                     <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
-                      <p className="text-[10px] uppercase tracking-wider text-slate-300">Average</p>
+                      <p className="text-[10px] uppercase text-slate-300">Avg</p>
                       <p className="text-xl font-bold">{matrixData.average.toFixed(1)}%</p>
                     </div>
                     <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
-                      <p className="text-[10px] uppercase tracking-wider text-slate-300">Highest</p>
+                      <p className="text-[10px] uppercase text-slate-300">Highest</p>
                       <p className="text-xl font-bold">{matrixData.highest}</p>
                     </div>
                     <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
-                      <p className="text-[10px] uppercase tracking-wider text-slate-300">Pass Rate</p>
+                      <p className="text-[10px] uppercase text-slate-300">Pass</p>
                       <p className="text-xl font-bold">{matrixData.passRate.toFixed(0)}%</p>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Table */}
+              <table className="w-full">
+                <thead className="bg-slate-100 border-b-2 border-slate-300">
+                  <tr>
+                    <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r w-12">#</th>
+                    <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Admission</th>
+                    <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Student</th>
+                    <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">{matrixData.itemName}</th>
+                    <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">Grade</th>
+                    <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">Points</th>
+                    <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase">Pos</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {matrixData.rows.map((r, i) => (
+                    <tr key={r.studentId} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
+                      <td className="px-3 py-3 text-center text-slate-500 font-mono text-xs border-r">{i + 1}</td>
+                      <td className="px-3 py-3 font-mono text-xs border-r">{r.admissionNumber}</td>
+                      <td className="px-3 py-3 font-medium border-r">{r.studentName}</td>
+                      <td className="px-3 py-3 text-center font-bold border-r">
+                        {r.isAbsent ? <span className="text-red-500">ABS</span> : (r.marks ?? '—')}
+                      </td>
+                      <td className="px-3 py-3 text-center border-r">
+                        {r.grade ? <span className={`px-2 py-1 rounded-full text-xs font-bold ${getGradeColor(r.grade)}`}>{r.grade}</span> : '—'}
+                      </td>
+                      <td className="px-3 py-3 text-center border-r">{r.points || '—'}</td>
+                      <td className="px-3 py-3 text-center">
+                        {r.position ? (
+                          <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
+                            r.position === 1 ? 'bg-amber-100 text-amber-700' :
+                            r.position === 2 ? 'bg-slate-200 text-slate-700' :
+                            r.position === 3 ? 'bg-orange-100 text-orange-700' :
+                            'bg-slate-100 text-slate-600'
+                          }`}>{r.position}</span>
+                        ) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div className="px-6 py-4 bg-slate-50 border-t flex justify-end no-print">
+                <button onClick={() => handlePrintArea('class-matrix-print')}
+                  className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
+                  <i className="fas fa-print"></i>Print Matrix
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ============================================================ */}
+      {/* ✅ TERMLY CLASS MATRIX VIEW                                   */}
+      {/* ============================================================ */}
+      {viewMode === 'term-matrix' && canViewClassMatrix && (
+        <>
+          <div className="bg-white p-6 rounded-xl shadow-sm border no-print">
+            <h3 className="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">
+              <i className="fas fa-th text-indigo-600"></i>Termly Class Matrix
+            </h3>
+            <p className="text-sm text-slate-500 mb-4">
+              Line up every student's subject scores for a whole term in one grid.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+              <SearchableSelect
+                label="Class"
+                value={termMatrixClassId}
+                onChange={(e) => setTermMatrixClassId(e.target.value)}
+                options={getClassOptions()}
+                placeholder="Select class..." />
+              <SearchableSelect
+                label="Term"
+                value={termMatrixTerm}
+                onChange={(e) => setTermMatrixTerm(e.target.value)}
+                options={[
+                  { value: 'Term 1', label: 'Term 1' },
+                  { value: 'Term 2', label: 'Term 2' },
+                  { value: 'Term 3', label: 'Term 3' }
+                ]}
+                placeholder="Select term..." />
+              <SearchableSelect
+                label="Exam Type"
+                value={termMatrixExamType}
+                onChange={(e) => setTermMatrixExamType(e.target.value)}
+                options={[
+                  { value: '', label: 'All Types (average)' },
+                  { value: 'OPENER', label: 'Opener' },
+                  { value: 'MIDTERM', label: 'Mid-Term' },
+                  { value: 'ENDTERM', label: 'End Term' },
+                  { value: 'CAT', label: 'CAT' },
+                  { value: 'MOCK', label: 'Mock' },
+                  { value: 'PRE_MOCK', label: 'Pre-Mock' },
+                  { value: 'FINAL', label: 'Final Exam' }
+                ]}
+                placeholder="All Exam Types" />
+              <SearchableSelect
+                label="Exam Name"
+                value={termMatrixSession}
+                onChange={(e) => setTermMatrixSession(e.target.value)}
+                options={[
+                  { value: '', label: 'Any Exam Name' },
+                  ...([...new Set((exams || [])
+                    .filter(e => e.classId === termMatrixClassId && String(e.term || '').toLowerCase() === String(termMatrixTerm).toLowerCase())
+                    .map(e => e.name))].map(n => ({ value: n, label: n })))
+                ]}
+                placeholder="Any Exam Name" />
+              <div className="flex items-end">
+                <button onClick={buildTermMatrix}
+                  disabled={!termMatrixClassId || !termMatrixTerm || loadingTermMatrix}
+                  className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium flex items-center justify-center gap-2">
+                  {loadingTermMatrix
+                    ? <><i className="fas fa-spinner fa-spin"></i>Building...</>
+                    : <><i className="fas fa-sync-alt"></i>Build Matrix</>}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {termMatrixData && (
+            <div id="term-matrix-print" className="bg-white rounded-xl shadow-sm border overflow-hidden">
+              {/* Header */}
+              <div className="bg-slate-800 text-white px-6 py-5">
+                <div className="text-center mb-4">
+                  <h1 className="text-2xl font-black uppercase tracking-wider">
+                    {currentSchool?.name || 'School'}
+                  </h1>
+                  {currentSchool?.motto && (
+                    <p className="text-slate-300 text-sm italic mt-1">"{currentSchool.motto}"</p>
+                  )}
+                  <p className="text-slate-400 text-xs mt-2">
+                    {termMatrixData.term} • {termMatrixData.examType}
+                    {termMatrixData.sessionName && <> • {termMatrixData.sessionName}</>}
+                  </p>
+                </div>
+                <div className="flex justify-between items-start flex-wrap gap-3 border-t border-slate-700 pt-4">
+                  <div>
+                    <p className="text-xs uppercase tracking-widest text-slate-300">Class</p>
+                    <h3 className="text-2xl font-bold">{termMatrixData.className}</h3>
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
+                      <p className="text-[10px] uppercase text-slate-300">Class Avg</p>
+                      <p className="text-xl font-bold">{termMatrixData.classAverage.toFixed(1)}%</p>
+                    </div>
+                    <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
+                      <p className="text-[10px] uppercase text-slate-300">Pass Rate</p>
+                      <p className="text-xl font-bold">{termMatrixData.passRate.toFixed(0)}%</p>
+                    </div>
+                    <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
+                      <p className="text-[10px] uppercase text-slate-300">Students</p>
+                      <p className="text-xl font-bold">{termMatrixData.rows.length}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Matrix table */}
               <div className="overflow-x-auto">
-                <table className="w-full border-collapse">
+                <table className="w-full border-collapse text-sm">
                   <thead>
                     <tr className="bg-slate-100 border-b-2 border-slate-300">
-                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200 w-16">#</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">Admission</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">Student Name</th>
-                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">{matrixData.itemName}</th>
-                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">Grade</th>
-                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">Points</th>
-                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider">Position</th>
+                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r w-12">#</th>
+                      <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r whitespace-nowrap">Student</th>
+                      <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r whitespace-nowrap">Adm</th>
+                      {termMatrixData.subjects.map(subj => (
+                        <th key={subj.id} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r whitespace-nowrap">
+                          {subj.name}
+                        </th>
+                      ))}
+                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Total</th>
+                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Avg</th>
+                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Grade</th>
+                      <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Pos</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {matrixData.rows.map((r, i) => (
-                      <tr key={r.studentId} className={`${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'} hover:bg-indigo-50/50`}>
-                        <td className="px-4 py-3 text-center text-slate-500 font-mono text-xs border-r border-slate-200">{i + 1}</td>
-                        <td className="px-4 py-3 font-mono text-xs text-slate-600 border-r border-slate-200">{r.admissionNumber}</td>
-                        <td className="px-4 py-3 font-medium text-slate-800 border-r border-slate-200">{r.studentName}</td>
-                        <td className="px-4 py-3 text-center font-bold text-slate-800 border-r border-slate-200">
-                          {r.isAbsent ? <span className="text-red-500">ABS</span> : (r.marks ?? '—')}
+                  <tbody className="divide-y">
+                    {termMatrixData.rows.map((r, i) => (
+                      <tr key={r.studentId} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
+                        <td className="px-3 py-2 text-center text-slate-500 font-mono text-xs border-r">{i + 1}</td>
+                        <td className="px-3 py-2 font-medium border-r whitespace-nowrap">{r.studentName}</td>
+                        <td className="px-3 py-2 font-mono text-xs text-slate-600 border-r whitespace-nowrap">{r.admissionNumber}</td>
+                        {r.cells.map((cell, ci) => (
+                          <td key={ci} className="px-3 py-2 text-center border-r">
+                            {cell.marks !== null ? (
+                              <div className="flex flex-col items-center gap-0.5">
+                                <span className="font-bold text-slate-800">{cell.marks}</span>
+                                <span className={`text-[9px] px-1.5 py-0.5 rounded ${getGradeColor(cell.grade)}`}>
+                                  {cell.grade || '—'}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
+                          </td>
+                        ))}
+                        <td className="px-3 py-2 text-center font-bold text-slate-800 border-r bg-slate-50">
+                          {r.totalMarks.toFixed(0)}
                         </td>
-                        <td className="px-4 py-3 text-center border-r border-slate-200">
-                          {r.grade ? (
-                            <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${getGradeColor(r.grade)}`}>
-                              {r.grade}
-                            </span>
-                          ) : '—'}
+                        <td className="px-3 py-2 text-center font-bold text-indigo-700 border-r bg-slate-50">
+                          {r.average.toFixed(1)}
                         </td>
-                        <td className="px-4 py-3 text-center font-medium text-slate-700 border-r border-slate-200">
-                          {r.points || '—'}
+                        <td className="px-3 py-2 text-center border-r bg-slate-50">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getGradeColor(r.meanGrade)}`}>
+                            {r.meanGrade}
+                          </span>
                         </td>
-                        <td className="px-4 py-3 text-center">
+                        <td className="px-3 py-2 text-center bg-slate-50">
                           {r.position ? (
-                            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
+                            <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold ${
                               r.position === 1 ? 'bg-amber-100 text-amber-700' :
                               r.position === 2 ? 'bg-slate-200 text-slate-700' :
                               r.position === 3 ? 'bg-orange-100 text-orange-700' :
@@ -14273,11 +14018,42 @@ const ResultsModule = ({
                       </tr>
                     ))}
                   </tbody>
+                  <tfoot>
+                    <tr className="bg-slate-200 border-t-2 border-slate-400">
+                      <td colSpan={3} className="px-3 py-3 font-bold text-right text-slate-700 border-r border-slate-300">
+                        Class Statistics
+                      </td>
+                      <td colSpan={termMatrixData.subjects.length} className="px-3 py-3 text-center text-slate-700">
+                        <span className="text-xs">
+                          Total students: <strong>{termMatrixData.rows.length}</strong> • Scored: <strong>{termMatrixData.totalScored}</strong>
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-center font-bold text-slate-700 border-r border-slate-300 bg-slate-300">—</td>
+                      <td className="px-3 py-3 text-center font-bold text-slate-800 border-r border-slate-300 bg-slate-300">
+                        {termMatrixData.classAverage.toFixed(1)}
+                      </td>
+                      <td colSpan={2} className="px-3 py-3 text-center text-xs text-slate-600">
+                        Pass: <strong>{termMatrixData.passRate.toFixed(0)}%</strong> ({termMatrixData.passCount}/{termMatrixData.totalScored})
+                      </td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
 
-              <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end no-print">
-                <button onClick={() => handlePrintArea('class-matrix-print')}
+              {/* Print-only signature block */}
+              <div className="print-only px-6 py-6 border-t border-slate-300">
+                <div className="grid grid-cols-3 gap-8 text-center text-xs text-slate-600">
+                  <div><div className="border-t border-slate-400 mt-10 pt-2">Class Teacher</div></div>
+                  <div><div className="border-t border-slate-400 mt-10 pt-2">Head of Department</div></div>
+                  <div><div className="border-t border-slate-400 mt-10 pt-2">Principal</div></div>
+                </div>
+                <p className="text-center text-xs text-slate-400 mt-6">
+                  Generated on {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}
+                </p>
+              </div>
+
+              <div className="px-6 py-4 bg-slate-50 border-t flex justify-end no-print">
+                <button onClick={() => handlePrintArea('term-matrix-print')}
                   className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
                   <i className="fas fa-print"></i>Print Matrix
                 </button>
@@ -14288,11 +14064,11 @@ const ResultsModule = ({
       )}
 
       {/* ============================================================ */}
-      {/*  MARKS ENTRY VIEW                                            */}
+      {/* MARKS ENTRY VIEW                                              */}
       {/* ============================================================ */}
       {viewMode === 'marks' && canViewAllResults && (
         <>
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 no-print">
+          <div className="bg-white p-6 rounded-xl shadow-sm border no-print">
             <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
               <i className="fas fa-search text-indigo-600"></i>Filter Results
             </h3>
@@ -14351,14 +14127,13 @@ const ResultsModule = ({
           </div>
 
           {resultEntries.length > 0 && (
-            <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
-              {/* Toolbar */}
-              <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap gap-3 justify-between items-center no-print">
+            <div className="bg-white rounded-xl shadow-sm overflow-hidden border">
+              <div className="p-4 bg-slate-50 border-b flex flex-wrap gap-3 justify-between items-center no-print">
                 <div className="flex items-center gap-3">
                   {canSendMessages && (
                     <label className="flex items-center gap-2 text-sm">
                       <input type="checkbox" checked={selectAllForMessage}
-                        onChange={(e) => handleSelectAllForMessage(e.target.checked)} className="rounded" />
+                        onChange={(e) => handleSelectAllForMessage(e.target.checked)} />
                       <span className="font-medium">Select All</span>
                     </label>
                   )}
@@ -14368,108 +14143,83 @@ const ResultsModule = ({
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <input type="text" placeholder="Search students..."
-                    className="px-3 py-2 border border-slate-300 rounded-lg w-56 text-sm"
+                    className="px-3 py-2 border rounded-lg w-56 text-sm"
                     value={studentSearch} onChange={(e) => setStudentSearch(e.target.value)} />
                   {uniqueGrades.length > 0 && (
                     <select value={filterGrade} onChange={(e) => setFilterGrade(e.target.value)}
-                      className="px-3 py-2 border border-slate-300 rounded-lg text-sm">
+                      className="px-3 py-2 border rounded-lg text-sm">
                       <option value="">All Grades</option>
                       {uniqueGrades.map(g => <option key={g} value={g}>{g}</option>)}
                     </select>
                   )}
-                  {canPrintAllResults && (
-                    <button onClick={() => { loadAllResultsForPrint?.(); }}
-                      disabled={loading}
-                      className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 flex items-center gap-2 text-sm font-medium disabled:opacity-50">
-                      <i className="fas fa-print"></i>Print All
-                    </button>
-                  )}
                 </div>
               </div>
 
-              {/* Table */}
               <div className="overflow-x-auto">
-                <table className="w-full border-collapse">
-                  <thead>
-                    <tr className="bg-slate-100 border-b-2 border-slate-300">
-                      {canSendMessages && <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200 w-12"></th>}
-                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">Admission</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">Student</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">
+                <table className="w-full">
+                  <thead className="bg-slate-100">
+                    <tr>
+                      {canSendMessages && <th className="px-4 py-3 w-10 border-r"></th>}
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Admission</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Student</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">
                         {isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject'}
                       </th>
-                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">Marks</th>
-                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">Grade</th>
-                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">Points</th>
-                      {canAddResults && <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider border-r border-slate-200">Absent</th>}
-                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase tracking-wider">Actions</th>
+                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">Marks</th>
+                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">Grade</th>
+                      <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">Points</th>
+                      {canAddResults && <th className="px-4 py-3 text-center text-xs font-bold text-slate-700 uppercase">Absent</th>}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {filteredResultEntries.length === 0 ? (
-                      <tr>
-                        <td colSpan={10} className="px-4 py-8 text-center text-slate-500">No students match your filters</td>
-                      </tr>
-                    ) : (
-                      filteredResultEntries.map((entry, idx) => (
-                        <tr key={entry.studentId} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
-                          {canSendMessages && (
-                            <td className="px-4 py-3 text-center border-r border-slate-200">
-                              <input type="checkbox"
-                                checked={selectedStudentsForMessage.includes(entry.studentId)}
-                                onChange={(e) => handleSelectForMessage(entry.studentId, e.target.checked)}
-                                className="rounded" />
-                            </td>
-                          )}
-                          <td className="px-4 py-3 font-mono text-xs border-r border-slate-200">{entry.admissionNumber}</td>
-                          <td className="px-4 py-3 font-medium border-r border-slate-200">{entry.studentName}</td>
-                          <td className="px-4 py-3 border-r border-slate-200">{entry.unitName}</td>
-                          <td className="px-4 py-3 text-center border-r border-slate-200">
-                            <input type="number" value={entry.marks}
-                              onChange={(e) => handleMarkChange(entry.studentId, e.target.value)}
-                              onBlur={(e) => {
-                                if (e.target.value !== '') {
-                                  const exam = exams.find(x => x.id === selectedExam);
-                                  const levelHint = getLevelHint(exam, null, exam?.classId || selectedClass);
-                                  const gi = calculateGrade(e.target.value, exam?.maxMarks || 100, exam?.schoolCategory || schoolCategory, levelHint);
-                                  setResultEntries(prev => prev.map(x =>
-                                    x.studentId === entry.studentId ? { ...x, grade: gi.grade, points: gi.points } : x
-                                  ));
-                                }
-                              }}
-                              className={`w-20 px-2 py-1 border border-slate-300 rounded text-center ${!canAddResults ? 'bg-gray-100' : ''}`}
-                              disabled={entry.isAbsent || !canAddResults} />
+                  <tbody className="divide-y">
+                    {filteredResultEntries.map((entry, idx) => (
+                      <tr key={entry.studentId} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
+                        {canSendMessages && (
+                          <td className="px-4 py-3 text-center border-r">
+                            <input type="checkbox"
+                              checked={selectedStudentsForMessage.includes(entry.studentId)}
+                              onChange={(e) => handleSelectForMessage(entry.studentId, e.target.checked)} />
                           </td>
-                          <td className="px-4 py-3 text-center border-r border-slate-200">
-                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradeColor(entry.grade)}`}>
-                              {displayGrade(entry.grade, entry.marks)}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-center border-r border-slate-200">{(entry.points || 0).toFixed(1)}</td>
-                          {canAddResults && (
-                            <td className="px-4 py-3 text-center border-r border-slate-200">
-                              <input type="checkbox" checked={entry.isAbsent}
-                                onChange={(e) => handleAbsentChange(entry.studentId, e.target.checked)}
-                                className="rounded" />
-                            </td>
-                          )}
+                        )}
+                        <td className="px-4 py-3 font-mono text-xs border-r">{entry.admissionNumber}</td>
+                        <td className="px-4 py-3 font-medium border-r">{entry.studentName}</td>
+                        <td className="px-4 py-3 border-r">{entry.unitName}</td>
+                        <td className="px-4 py-3 text-center border-r">
+                          <input type="number" value={entry.marks}
+                            onChange={(e) => handleMarkChange(entry.studentId, e.target.value)}
+                            onBlur={(e) => {
+                              if (e.target.value !== '') {
+                                const exam = exams.find(x => x.id === selectedExam);
+                                const levelHint = getLevelHint(exam, null, exam?.classId || selectedClass);
+                                const gi = calculateGrade(e.target.value, exam?.maxMarks || 100, exam?.schoolCategory || schoolCategory, levelHint);
+                                setResultEntries(prev => prev.map(x =>
+                                  x.studentId === entry.studentId ? { ...x, grade: gi.grade, points: gi.points } : x
+                                ));
+                              }
+                            }}
+                            className={`w-20 px-2 py-1 border rounded text-center ${!canAddResults ? 'bg-gray-100' : ''}`}
+                            disabled={entry.isAbsent || !canAddResults} />
+                        </td>
+                        <td className="px-4 py-3 text-center border-r">
+                          <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradeColor(entry.grade)}`}>
+                            {displayGrade(entry.grade, entry.marks)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-center border-r">{(entry.points || 0).toFixed(1)}</td>
+                        {canAddResults && (
                           <td className="px-4 py-3 text-center">
-                            <button onClick={() => loadStudentReport?.(entry)}
-                              className="text-indigo-600 hover:text-indigo-900 p-1.5 hover:bg-indigo-50 rounded-lg"
-                              title="View Student Report">
-                              <i className="fas fa-file-alt"></i>
-                            </button>
+                            <input type="checkbox" checked={entry.isAbsent}
+                              onChange={(e) => handleAbsentChange(entry.studentId, e.target.checked)} />
                           </td>
-                        </tr>
-                      ))
-                    )}
+                        )}
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
 
-              {/* Footer actions */}
-              {(canAddResults || canPublishResults || canSendMessages) && (
-                <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-wrap gap-2 no-print">
+              {(canAddResults || canSendMessages) && (
+                <div className="p-4 bg-slate-50 border-t flex flex-wrap gap-2 no-print">
                   {canAddResults && (
                     <button onClick={saveAllResults} disabled={loading}
                       className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 flex items-center gap-2 font-medium">
@@ -14477,7 +14227,15 @@ const ResultsModule = ({
                     </button>
                   )}
                   {canPublishResults && (
-                    <button onClick={publishResults} disabled={publishing}
+                    <button onClick={async () => {
+                      if (!selectedExam) return;
+                      try {
+                        const exam = exams.find(e => e.id === selectedExam);
+                        await api.put(`/exams/${selectedExam}`, { ...exam, isPublished: true, resultsPublished: true, publishedAt: new Date().toISOString() });
+                        setExams(prev => prev.map(e => e.id === selectedExam ? { ...e, isPublished: true, resultsPublished: true, publishedAt: new Date().toISOString() } : e));
+                        alert('✅ Results published!');
+                      } catch (err) { alert('❌ Failed'); }
+                    }}
                       className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 font-medium">
                       <i className="fas fa-globe"></i>Publish
                     </button>
@@ -14497,7 +14255,7 @@ const ResultsModule = ({
         </>
       )}
 
-      {/* ============ MESSAGE MODAL ============ */}
+      {/* MESSAGE MODAL */}
       {showMessageModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 no-print">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
@@ -14507,72 +14265,63 @@ const ResultsModule = ({
                 <i className="fas fa-times"></i>
               </button>
             </div>
-            <div className="mb-4 p-3 bg-indigo-50 rounded-lg">
-              <p className="text-sm text-indigo-700">
-                <i className="fas fa-info-circle mr-2"></i>
-                Sending to {selectedStudentsForMessage.length} student(s)
-              </p>
-            </div>
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">Message Type</label>
-                <select value={messageType} onChange={(e) => setMessageType(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg">
-                  <option value="SMS">SMS Only</option>
-                  <option value="EMAIL">Email Only</option>
-                  <option value="BOTH">Both SMS and Email</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Message Template</label>
-                <textarea className="w-full border rounded-lg p-3 h-40 font-mono text-sm"
-                  value={messageTemplate} onChange={(e) => setMessageTemplate(e.target.value)}
-                  placeholder="Enter your message..." />
-              </div>
-              {messageLog.length > 0 && (
-                <div className="bg-green-50 p-3 rounded-lg max-h-40 overflow-auto">
-                  <p className="text-sm font-medium text-green-700 mb-2">Log:</p>
-                  {messageLog.map((log, i) => (
-                    <p key={i} className="text-xs text-green-600">
-                      {log.error ? <span className="text-red-600">❌ {log.student}: {log.error}</span>
-                        : <span>✓ {log.student}: Sent to {log.parents} parent(s)</span>}
-                    </p>
-                  ))}
-                </div>
-              )}
+              <select value={messageType} onChange={(e) => setMessageType(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg">
+                <option value="SMS">SMS Only</option>
+                <option value="EMAIL">Email Only</option>
+                <option value="BOTH">Both</option>
+              </select>
+              <textarea className="w-full border rounded-lg p-3 h-40 font-mono text-sm"
+                value={messageTemplate} onChange={(e) => setMessageTemplate(e.target.value)}
+                placeholder="Dear Parent, {student_name} scored {marks} ({grade}) in {subject} for {exam_name}." />
               <div className="flex gap-2 pt-4">
-                <button onClick={handleSendToParents}
-                  disabled={sendingMessages || selectedStudentsForMessage.length === 0}
-                  className="bg-violet-600 text-white px-6 py-2 rounded-lg hover:bg-violet-700 flex-1 flex items-center justify-center gap-2 disabled:opacity-50 font-medium">
-                  {sendingMessages ? <><i className="fas fa-spinner fa-spin"></i>Sending...</> : <><i className="fas fa-paper-plane"></i>Send Messages</>}
+                <button onClick={async () => {
+                  setSendingMessages(true);
+                  try {
+                    const exam = exams.find(e => e.id === selectedExam);
+                    for (const sid of selectedStudentsForMessage) {
+                      const student = resultEntries.find(e => e.studentId === sid);
+                      if (!student) continue;
+                      try {
+                        const res = await api.get(`/parents?studentId=${sid}`);
+                        const studentParents = res.data.parents || [];
+                        for (const parent of studentParents) {
+                          const itemName = getItemName({}, exam);
+                          const msg = (messageTemplate || `Dear Parent, {student_name} (Adm {admission}) scored {marks} ({grade}) in {subject} for {exam_name}.`)
+                            .replace(/{student_name}/g, student.studentName)
+                            .replace(/{admission}/g, student.admissionNumber)
+                            .replace(/{exam_name}/g, exam.name)
+                            .replace(/{subject}/g, itemName)
+                            .replace(/{marks}/g, student.marks)
+                            .replace(/{grade}/g, student.grade)
+                            .replace(/{school_name}/g, currentSchool?.name || 'School');
+                          if ((messageType === 'SMS' || messageType === 'BOTH') && parent.User?.phone) {
+                            await api.post('/messages', { type: 'SMS', content: msg, recipientType: 'PARENT',
+                              recipients: [{ type: 'user', id: parent.userId }], sendNow: true, schoolId: currentSchool?.id });
+                          }
+                          if ((messageType === 'EMAIL' || messageType === 'BOTH') && parent.User?.email) {
+                            await api.post('/messages', { type: 'EMAIL', subject: `Results ${student.studentName}`,
+                              content: msg, recipientType: 'PARENT', recipients: [{ type: 'user', id: parent.userId }],
+                              sendNow: true, schoolId: currentSchool?.id });
+                          }
+                        }
+                      } catch (_) {}
+                    }
+                    alert('✅ Sent');
+                    setShowMessageModal(false);
+                  } finally { setSendingMessages(false); }
+                }}
+                  disabled={sendingMessages}
+                  className="bg-violet-600 text-white px-6 py-2 rounded-lg hover:bg-violet-700 flex-1 disabled:opacity-50">
+                  {sendingMessages ? 'Sending...' : 'Send'}
                 </button>
-                <button onClick={() => { setShowMessageModal(false); setMessageLog([]); }}
-                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">
-                  Cancel
-                </button>
+                <button onClick={() => setShowMessageModal(false)}
+                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">Cancel</button>
               </div>
             </div>
           </div>
         </div>
-      )}
-
-      {/* ============ PRINT MODALS (delegated) ============ */}
-      {showPrintModal && studentReportData && typeof StudentResultsPrintModal !== 'undefined' && (
-        <StudentResultsPrintModal
-          reportData={studentReportData}
-          onClose={() => { setShowPrintModal(false); setStudentReportData(null); }}
-          currentSchool={currentSchool}
-        />
-      )}
-      {showAllResultsPrintModal && allResultsPrintData && typeof AllResultsPrintModal !== 'undefined' && (
-        <AllResultsPrintModal
-          printData={allResultsPrintData}
-          onClose={() => { setShowAllResultsPrintModal(false); setAllResultsPrintData(null); }}
-          currentSchool={currentSchool}
-          isUniversity={isUniversity}
-          isTVET={isTVET}
-          isRegularSchool={isRegularSchool}
-        />
       )}
     </div>
   );
