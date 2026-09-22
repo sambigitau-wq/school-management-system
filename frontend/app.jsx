@@ -5172,9 +5172,8 @@ const StudentSelect = ({ label, value, onChange, options = [] }) => (
     </select>
   </div>
 );
-
 // ============================================================
-//  STUDENT MODULE — v7 (consolidated)
+//  STUDENT MODULE — v8 (consolidated)
 //  Features:
 //   · Persistent photo (base64 preferred, URL fallback)
 //   · Multi-guardian with portal access
@@ -5183,8 +5182,9 @@ const StudentSelect = ({ label, value, onChange, options = [] }) => (
 //   · Fee-tagged term invoice (real feeId → real term)
 //   · "General Payments" bucket for un-tagged cash (always last)
 //   · Balance B/F carried correctly across terms
-//   · Centered real school name + logo on invoice
-//   · Clean footer (no synthetic "computer-generated" line)
+//   · Left-aligned school name + logo on invoice (matching other modules)
+//   · Compact receipt-style invoice
+//   · Print student results from details modal
 //   · Print-only invoice (rest of UI hidden)
 //   · Smart labels per school category
 //   · Adaptive grading (CBC / 8-4-4 / TVET / University)
@@ -5314,7 +5314,7 @@ const StudentModule = ({
 
   const SUBJECT_LABEL = isUniversity ? 'Unit' : isTVET ? 'Module' : 'Subject';
   const GROUP_LABEL = isUniversity ? 'Course' : isTVET ? 'Program' : 'Class';
-const TERM_LABEL = isUniversity ? 'Semester' : 'Term';
+  const TERM_LABEL = isUniversity ? 'Semester' : 'Term';
 
   // ✅ REAL SCHOOL NAME — never invent one
   const schoolName =
@@ -5322,7 +5322,7 @@ const TERM_LABEL = isUniversity ? 'Semester' : 'Term';
     currentSchool?.schoolName?.trim() ||
     '';
 
-const schoolLogo = resolveLogoUrl(currentSchool);
+  const schoolLogo = resolveLogoUrl(currentSchool);
   const schoolAddress = currentSchool?.contact?.address || '';
   const schoolPhone = currentSchool?.contact?.phone || '';
   const schoolEmail = currentSchool?.contact?.email || '';
@@ -5987,13 +5987,6 @@ const schoolLogo = resolveLogoUrl(currentSchool);
 
   // ==================================================================
   //  ✅ INVOICE BUILDER — Fee-tagging (NOT date guessing)
-  //
-  //  Rules:
-  //   1. Payment HAS feeId → that fee's real term (from the fee itself).
-  //   2. Payment has NO feeId → "General Payments" bucket.
-  //   3. Terms sorted by number (Term 1 → Term 2 → Term 3).
-  //   4. "General Payments" ALWAYS last.
-  //   5. B/F carried across term groups.
   // ==================================================================
   const buildInvoiceData = (student) => {
     if (!student) return null;
@@ -6016,36 +6009,26 @@ const schoolLogo = resolveLogoUrl(currentSchool);
       const idStr = String(f.id);
       if (!feeById.has(idStr)) feeById.set(idStr, f);
     });
-const getTermKey = (fee) => {
-  if (!fee) return 'General Payments';
 
-  // ────────────────────────────────────────────────
-  //  UNIVERSITY → "Semester 1", "Semester 2", "Semester 3"
-  // ────────────────────────────────────────────────
-  if (isUniversity) {
-    if (fee.semester) return `Semester ${fee.semester}`;
-
-    if (fee.term) {
-      const t = String(fee.term).trim();
-      if (/semester\s*\d/i.test(t)) return t;          // "Semester 1"
-      if (/^sem\s*\d/i.test(t))     return t;          // "Sem 1"
-      if (/^\d+$/.test(t))          return `Semester ${t}`;  // "1" → "Semester 1"
-    }
-
-    return 'General Payments';
-  }
-
-  // ────────────────────────────────────────────────
-  //  TVET / SECONDARY / PRIMARY → "Term 1", "Term 2", "Term 3"
-  // ────────────────────────────────────────────────
-  if (fee.term) {
-    const t = String(fee.term).trim();
-    if (/term\s*\d/i.test(t)) return t;                // "Term 1"
-    if (/^\d+$/.test(t))      return `Term ${t}`;      // "1" → "Term 1"
-  }
-
-  return 'General Payments';
-};
+    const getTermKey = (fee) => {
+      if (!fee) return 'General Payments';
+      if (isUniversity) {
+        if (fee.semester) return `Semester ${fee.semester}`;
+        if (fee.term) {
+          const t = String(fee.term).trim();
+          if (/semester\s*\d/i.test(t)) return t;
+          if (/^sem\s*\d/i.test(t))     return t;
+          if (/^\d+$/.test(t))          return `Semester ${t}`;
+        }
+        return 'General Payments';
+      }
+      if (fee.term) {
+        const t = String(fee.term).trim();
+        if (/term\s*\d/i.test(t)) return t;
+        if (/^\d+$/.test(t))      return `Term ${t}`;
+      }
+      return 'General Payments';
+    };
 
     const termGroups = new Map();
     const ensureTermGroup = (term) => {
@@ -6545,8 +6528,7 @@ const getTermKey = (fee) => {
   };
 
   // ==================================================================
-  //  PRINT-ONLY STYLE (injected once per mount)
-  //  Only .invoice-print-area will print. Everything else hidden.
+  //  PRINT-ONLY STYLES (Invoice + Results Report)
   // ==================================================================
   useEffect(() => {
     const id = '__student_module_print_style__';
@@ -6563,10 +6545,11 @@ const getTermKey = (fee) => {
           left: 0; top: 0;
           width: 100% !important;
           background: #fff !important;
-          padding: 12mm !important;
+          padding: 8mm !important; /* Compact receipt style */
           box-shadow: none !important;
           border: none !important;
           border-radius: 0 !important;
+          font-size: 11px !important;
         }
         .no-print,
         .no-print *,
@@ -6577,13 +6560,13 @@ const getTermKey = (fee) => {
         tr { page-break-inside: avoid !important; }
         th, td {
           border: 1px solid #cbd5e1 !important;
-          padding: 6px 8px !important;
-          font-size: 11px !important;
+          padding: 4px 6px !important; /* Compact padding */
+          font-size: 10px !important;
           color: #111 !important;
           background: #fff !important;
         }
         th { background: #f1f5f9 !important; font-weight: 700 !important; }
-        @page { size: A4 portrait; margin: 10mm; }
+        @page { size: A5 portrait; margin: 8mm; } /* Small receipt size */
       }
     `;
     document.head.appendChild(style);
@@ -6598,6 +6581,162 @@ const getTermKey = (fee) => {
     if (!el) { window.print(); return; }
     el.classList.add('invoice-print-area');
     setTimeout(() => { window.print(); }, 80);
+  };
+
+  const handlePrintResults = () => {
+    if (!studentDetails || groupedResults.length === 0) {
+      alert('No results to print.');
+      return;
+    }
+
+    const escapeHtml = (s) => String(s ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+    // Build result rows
+    let rowsHtml = '';
+    groupedResults.forEach(group => {
+      rowsHtml += `
+        <tr class="term-header">
+          <td colspan="4">
+            <strong>${escapeHtml(group.term)}</strong> • ${escapeHtml(group.examType)}
+            ${group.year ? `• ${escapeHtml(group.year)}` : ''}
+          </td>
+        </tr>
+      `;
+      group.subjects.forEach(s => {
+        rowsHtml += `
+          <tr>
+            <td>${escapeHtml(s.subjectName)}</td>
+            <td class="center">${s.isAbsent ? 'ABSENT' : (s.marks ?? '—')}</td>
+            <td class="center">
+              <span class="grade-pill ${s.grade ? s.grade.replace(/\s+/g, '-').toLowerCase() : ''}">
+                ${escapeHtml(s.grade || '—')}
+              </span>
+            </td>
+            <td class="center">${s.points ?? '—'}</td>
+          </tr>
+        `;
+      });
+      rowsHtml += `
+        <tr class="term-footer">
+          <td><strong>Term Average</strong></td>
+          <td class="center"><strong>${group.average.toFixed(1)}</strong></td>
+          <td class="center"><strong>${escapeHtml(group.meanGrade || '—')}</strong></td>
+          <td class="center"><strong>${group.totalPoints}</strong></td>
+        </tr>
+      `;
+    });
+
+    // Build KNEC analysis
+    let knecHtml = '';
+    if (knecAptitude.length > 0) {
+      knecHtml = `
+        <div class="knec-section">
+          <h3>KNEC Aptitude Analysis</h3>
+          <div class="knec-grid">
+            ${knecAptitude.map(s => `
+              <div class="knec-item">
+                <div class="knec-stream">${escapeHtml(s.stream)}</div>
+                <div class="knec-average">${s.average.toFixed(0)}%</div>
+                <div class="knec-count">${s.count} subjects</div>
+              </div>
+            `).join('')}
+          </div>
+          ${knecAptitude.length >= 2 ? `
+            <p class="knec-recommendation">
+              <strong>Recommendation:</strong> This student shows strongest potential in
+              <strong>${knecAptitude.slice(0, 2).map(s => s.stream).join(' and ')}</strong>.
+            </p>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Student Results — ${escapeHtml(studentDetails.firstName)} ${escapeHtml(studentDetails.lastName)}</title>
+          <meta charset="UTF-8" />
+          <style>
+            @page { size: A4 portrait; margin: 12mm; }
+            body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; color: #1f2937; margin: 0; padding: 10px; }
+            .print-header { display: flex; align-items: center; gap: 16px; border-bottom: 2px solid #4f46e5; padding-bottom: 10px; margin-bottom: 14px; }
+            .print-logo { width: 70px; height: 70px; object-fit: contain; border-radius: 8px; border: 1px solid #e5e7eb; padding: 4px; background: #fff; }
+            .print-title-block { flex: 1; text-align: left; }
+            .print-school-name { font-size: 20px; font-weight: 800; color: #4f46e5; text-transform: uppercase; margin: 0 0 3px 0; letter-spacing: 1px; }
+            .print-doc-title { font-size: 14px; font-weight: 600; margin: 0; color: #1f2937; }
+            .student-info { margin-bottom: 14px; font-size: 12px; }
+            .student-info p { margin: 3px 0; }
+            table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 16px; }
+            th { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; padding: 6px 8px; text-align: left; font-size: 10px; text-transform: uppercase; }
+            td { border: 1px solid #e5e7eb; padding: 5px 7px; }
+            .center { text-align: center; }
+            .term-header td { background: #f3f4f6; font-weight: 600; color: #374151; }
+            .term-footer td { background: #f9fafb; font-weight: 600; }
+            .grade-pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; }
+            .grade-pill.ee, .grade-pill.me { background: #d1fae5; color: #065f46; }
+            .grade-pill.ae { background: #fef3c7; color: #92400e; }
+            .grade-pill.be, .grade-pill.ni { background: #fee2e2; color: #991b1b; }
+            .knec-section { margin-top: 20px; border: 1px solid #c7d2fe; border-radius: 8px; overflow: hidden; page-break-inside: avoid; }
+            .knec-section h3 { background: #4f46e5; color: white; margin: 0; padding: 8px 12px; font-size: 13px; }
+            .knec-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px; }
+            .knec-item { text-align: center; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px; }
+            .knec-stream { font-size: 10px; color: #6b7280; text-transform: uppercase; }
+            .knec-average { font-size: 18px; font-weight: 700; color: #4338ca; }
+            .knec-count { font-size: 9px; color: #9ca3af; }
+            .knec-recommendation { padding: 8px 12px; background: #eef2ff; font-size: 11px; color: #4338ca; margin: 0; }
+            .print-footer { margin-top: 24px; padding-top: 12px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; gap: 24px; font-size: 11px; color: #4b5563; }
+            .signature-line { flex: 1; padding-top: 20px; }
+          </style>
+        </head>
+        <body>
+          <div class="print-header">
+            ${schoolLogo ? `<img src="${schoolLogo}" class="print-logo" alt="Logo"/>` : ''}
+            <div class="print-title-block">
+              <h1 class="print-school-name">${escapeHtml(schoolName)}</h1>
+              <h2 class="print-doc-title">Student Academic Report</h2>
+              <p style="font-size:10px;color:#6b7280;margin:2px 0 0 0;">
+                Generated ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}
+              </p>
+            </div>
+          </div>
+
+          <div class="student-info">
+            <p><strong>Student:</strong> ${escapeHtml(studentDetails.firstName)} ${escapeHtml(studentDetails.lastName)}</p>
+            <p><strong>Admission No:</strong> ${escapeHtml(studentDetails.admissionNumber || '—')}</p>
+            <p><strong>${GROUP_LABEL}:</strong> ${escapeHtml(getStudentClassLabel(studentDetails))}</p>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>${SUBJECT_LABEL}</th>
+                <th class="center">Marks</th>
+                <th class="center">Grade</th>
+                <th class="center">Points</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+
+          ${knecHtml}
+
+          <div class="print-footer">
+            <div class="signature-line"><span>Class Teacher: __________________________</span></div>
+            <div class="signature-line"><span>Principal/Dean: __________________________</span></div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    const w = window.open('', '_blank', 'width=1000,height=800');
+    if (!w) { alert('Please allow pop-ups to print.'); return; }
+    w.document.open(); w.document.write(html); w.document.close();
+    w.onload = () => setTimeout(() => w.print(), 300);
   };
 
   // ==================================================================
@@ -7375,6 +7514,13 @@ const getTermKey = (fee) => {
                     </div>
                   ) : (
                     <>
+                      <div className="flex justify-end gap-2">
+                        <button onClick={handlePrintResults}
+                          className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
+                          <i className="fas fa-print"></i>Print Results
+                        </button>
+                      </div>
+
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div className="bg-indigo-50 p-4 rounded-lg text-center">
                           <p className="text-xs text-gray-500 uppercase">Report Cards</p>
@@ -7745,7 +7891,7 @@ const getTermKey = (fee) => {
       {/* INVOICE MODAL */}
       {showInvoiceModal && selectedStudent && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-auto p-4 print:bg-white print:p-0">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-auto print:max-h-none print:shadow-none print:rounded-none">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-auto print:max-h-none print:shadow-none print:rounded-none print:max-w-none">
             <div className="sticky top-0 bg-white z-10 border-b px-6 py-4 flex justify-between items-center no-print">
               <h2 className="text-2xl font-bold text-gray-800">
                 <i className="fas fa-file-invoice-dollar text-purple-600 mr-2" />
@@ -7768,26 +7914,28 @@ const getTermKey = (fee) => {
               </div>
             ) : invoiceData ? (
               <div className="p-6 space-y-6" id="invoice-print-area">
-                {/* HEADER — centered school name */}
+                {/* HEADER — left-aligned logo + school name (matching other modules) */}
                 <div className="border-b-2 border-indigo-200 pb-4">
-                  <div className="flex flex-col items-center text-center">
+                  <div className="flex items-center gap-4">
                     {invoiceData.school?.contact?.logo ? (
-                      <img src={invoiceData.school.contact.logo} alt="School Logo" className="w-20 h-20 rounded-lg object-cover border mb-2" />
+                      <img src={invoiceData.school.contact.logo} alt="School Logo" className="w-20 h-20 rounded-lg object-cover border" />
                     ) : null}
-                    <h1 className="text-3xl font-bold text-indigo-800">
-                      {invoiceData.school?.name || ''}
-                    </h1>
-                    {invoiceData.school?.motto && (
-                      <p className="text-sm italic text-gray-600 mt-1">"{invoiceData.school.motto}"</p>
-                    )}
-                    <p className="text-xs text-gray-500 mt-2">
-                      {invoiceData.school?.contact?.address && <span>{invoiceData.school.contact.address}</span>}
-                      {invoiceData.school?.contact?.address && invoiceData.school?.contact?.phone && <span> • </span>}
-                      {invoiceData.school?.contact?.phone && <span>{invoiceData.school.contact.phone}</span>}
-                      {(invoiceData.school?.contact?.address || invoiceData.school?.contact?.phone) && invoiceData.school?.contact?.email && <span> • </span>}
-                      {invoiceData.school?.contact?.email && <span>{invoiceData.school.contact.email}</span>}
-                    </p>
-                    <p className="text-xs uppercase tracking-widest text-gray-400 mt-2">Student Fee Statement</p>
+                    <div className="flex-1">
+                      <h1 className="text-2xl font-bold text-indigo-800">
+                        {invoiceData.school?.name || ''}
+                      </h1>
+                      {invoiceData.school?.motto && (
+                        <p className="text-xs italic text-gray-600 mt-1">"{invoiceData.school.motto}"</p>
+                      )}
+                      <p className="text-xs text-gray-500 mt-1">
+                        {invoiceData.school?.contact?.address && <span>{invoiceData.school.contact.address}</span>}
+                        {invoiceData.school?.contact?.address && invoiceData.school?.contact?.phone && <span> • </span>}
+                        {invoiceData.school?.contact?.phone && <span>{invoiceData.school.contact.phone}</span>}
+                        {(invoiceData.school?.contact?.address || invoiceData.school?.contact?.phone) && invoiceData.school?.contact?.email && <span> • </span>}
+                        {invoiceData.school?.contact?.email && <span>{invoiceData.school.contact.email}</span>}
+                      </p>
+                      <p className="text-xs uppercase tracking-widest text-gray-400 mt-1">Student Fee Statement</p>
+                    </div>
                   </div>
                 </div>
 
@@ -7812,153 +7960,151 @@ const getTermKey = (fee) => {
                     <p className="text-gray-500">No fee records found for this student.</p>
                   </div>
                 ) : (
-             invoiceData.termStatements
-  .filter(term => {
-    // Hide the "General Payments" bucket if it has no content at all.
-    // Regular terms are always shown, even if they have zero fees.
-    if (!term.isGeneral) return true;
-    return (term.fees?.length || 0) > 0 || (term.cashOnly?.length || 0) > 0;
-  })
-  .map((term, ti) => (
-                    <div key={ti} className="border-2 rounded-lg overflow-hidden">
-                      <div className={`px-4 py-3 flex justify-between items-center ${term.isPaid ? 'bg-green-500' : 'bg-indigo-600'} text-white`}>
-                        <h3 className="font-bold text-lg">{term.term}</h3>
-                        <span className="px-3 py-1 bg-white bg-opacity-25 rounded-full text-xs font-medium">
-                          {term.isPaid ? '✓ Fully Paid' : 'Balance Due'}
-                        </span>
-                      </div>
+                  invoiceData.termStatements
+                    .filter(term => {
+                      if (!term.isGeneral) return true;
+                      return (term.fees?.length || 0) > 0 || (term.cashOnly?.length || 0) > 0;
+                    })
+                    .map((term, ti) => (
+                      <div key={ti} className="border-2 rounded-lg overflow-hidden">
+                        <div className={`px-4 py-2 flex justify-between items-center ${term.isPaid ? 'bg-green-500' : 'bg-indigo-600'} text-white`}>
+                          <h3 className="font-bold text-base">{term.term}</h3>
+                          <span className="px-2 py-0.5 bg-white bg-opacity-25 rounded-full text-[10px] font-medium">
+                            {term.isPaid ? '✓ Fully Paid' : 'Balance Due'}
+                          </span>
+                        </div>
 
-                      {term.fees.length > 0 && (
-                        <div className="overflow-x-auto">
-                          <table className="w-full">
-                            <thead className="bg-gray-100">
-                              <tr>
-                                <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700 uppercase">Fee Item</th>
-                                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 uppercase">Amount</th>
-                                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 uppercase">Discount</th>
-                                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 uppercase">Net</th>
-                                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 uppercase">Paid</th>
-                                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 uppercase">Balance</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {term.fees.map((fee, fi) => {
-                                const feeBalance = fee.net - fee.paid;
-                                const hasInstallments = fee.installments && fee.installments.length > 1;
-                                return (
-                                  <React.Fragment key={fi}>
-                                    <tr className="border-b">
-                                      <td className="px-4 py-3">
-                                        <div className="font-medium">{fee.name}</div>
-                                        {fee.category && <div className="text-xs text-gray-500">{fee.category}</div>}
-                                      </td>
-                                      <td className="px-4 py-3 text-right">{formatCurrency(fee.amount)}</td>
-                                      <td className="px-4 py-3 text-right text-purple-600">{fee.discount > 0 ? `-${formatCurrency(fee.discount)}` : '—'}</td>
-                                      <td className="px-4 py-3 text-right font-medium">{formatCurrency(fee.net)}</td>
-                                      <td className="px-4 py-3 text-right text-green-600 font-medium">{formatCurrency(fee.paid)}</td>
-                                      <td className={`px-4 py-3 text-right font-bold ${feeBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                                        {formatCurrency(Math.max(0, feeBalance))}
-                                      </td>
-                                    </tr>
-                                    {hasInstallments && (
-                                      <tr>
-                                        <td colSpan={6} className="bg-gray-50 px-8 py-2">
-                                          <div className="text-xs text-gray-600 font-medium mb-1">
-                                            <i className="fas fa-list-ul mr-1"></i>Payment Installments:
-                                          </div>
-                                          <div className="space-y-1">
-                                            {fee.installments.map((inst, ii) => (
-                                              <div key={ii} className="flex items-center gap-3 text-xs">
-                                                <span className="text-gray-500 w-32">{new Date(inst.date).toLocaleDateString('en-GB')}</span>
-                                                <span className="font-mono text-gray-600 w-40">{inst.receiptNo || '—'}</span>
-                                                <span className="text-gray-500 w-24">{inst.method || '—'}</span>
-                                                <span className="text-green-700 font-medium">+ {formatCurrency(inst.amount)}</span>
-                                              </div>
-                                            ))}
-                                          </div>
+                        {term.fees.length > 0 && (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead className="bg-gray-100">
+                                <tr>
+                                  <th className="px-3 py-2 text-left text-[10px] font-semibold text-gray-700 uppercase">Fee Item</th>
+                                  <th className="px-3 py-2 text-right text-[10px] font-semibold text-gray-700 uppercase">Amount</th>
+                                  <th className="px-3 py-2 text-right text-[10px] font-semibold text-gray-700 uppercase">Discount</th>
+                                  <th className="px-3 py-2 text-right text-[10px] font-semibold text-gray-700 uppercase">Net</th>
+                                  <th className="px-3 py-2 text-right text-[10px] font-semibold text-gray-700 uppercase">Paid</th>
+                                  <th className="px-3 py-2 text-right text-[10px] font-semibold text-gray-700 uppercase">Balance</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {term.fees.map((fee, fi) => {
+                                  const feeBalance = fee.net - fee.paid;
+                                  const hasInstallments = fee.installments && fee.installments.length > 1;
+                                  return (
+                                    <React.Fragment key={fi}>
+                                      <tr className="border-b">
+                                        <td className="px-3 py-2">
+                                          <div className="font-medium text-xs">{fee.name}</div>
+                                          {fee.category && <div className="text-[10px] text-gray-500">{fee.category}</div>}
+                                        </td>
+                                        <td className="px-3 py-2 text-right text-xs">{formatCurrency(fee.amount)}</td>
+                                        <td className="px-3 py-2 text-right text-xs text-purple-600">{fee.discount > 0 ? `-${formatCurrency(fee.discount)}` : '—'}</td>
+                                        <td className="px-3 py-2 text-right text-xs font-medium">{formatCurrency(fee.net)}</td>
+                                        <td className="px-3 py-2 text-right text-xs text-green-600 font-medium">{formatCurrency(fee.paid)}</td>
+                                        <td className={`px-3 py-2 text-right text-xs font-bold ${feeBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                          {formatCurrency(Math.max(0, feeBalance))}
                                         </td>
                                       </tr>
-                                    )}
-                                  </React.Fragment>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-
-                      {term.cashOnly.length > 0 && (
-                        <div className="px-4 py-3 bg-yellow-50 border-t">
-                          <p className="text-xs text-yellow-800 font-medium mb-2">
-                            <i className="fas fa-info-circle mr-1"></i>Other payments (no specific fee):
-                          </p>
-                          <div className="space-y-1">
-                            {term.cashOnly.map((p, pi) => (
-                              <div key={pi} className="flex items-center gap-3 text-xs">
-                                <span className="text-gray-500 w-32">{new Date(p.date).toLocaleDateString('en-GB')}</span>
-                                <span className="font-mono text-gray-600 w-40">{p.receiptNo || '—'}</span>
-                                <span className="text-gray-500 w-24">{p.method || '—'}</span>
-                                <span className="text-green-700 font-medium">+ {formatCurrency(p.amount)}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="bg-indigo-50 px-4 py-4 space-y-2 border-t-2 border-indigo-200">
-                        {term.broughtForward > 0 && (
-                          <div className="flex justify-between text-sm text-orange-700">
-                            <span className="font-medium">Balance Brought Forward:</span>
-                            <span className="font-bold">{formatCurrency(term.broughtForward)}</span>
+                                      {hasInstallments && (
+                                        <tr>
+                                          <td colSpan={6} className="bg-gray-50 px-6 py-2">
+                                            <div className="text-[10px] text-gray-600 font-medium mb-1">
+                                              <i className="fas fa-list-ul mr-1"></i>Payment Installments:
+                                            </div>
+                                            <div className="space-y-1">
+                                              {fee.installments.map((inst, ii) => (
+                                                <div key={ii} className="flex items-center gap-3 text-[10px]">
+                                                  <span className="text-gray-500 w-24">{new Date(inst.date).toLocaleDateString('en-GB')}</span>
+                                                  <span className="font-mono text-gray-600 w-32">{inst.receiptNo || '—'}</span>
+                                                  <span className="text-gray-500 w-20">{inst.method || '—'}</span>
+                                                  <span className="text-green-700 font-medium">+ {formatCurrency(inst.amount)}</span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      )}
+                                    </React.Fragment>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
                           </div>
                         )}
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-700">Subtotal ({TERM_LABEL} Fees):</span>
-                          <span>{formatCurrency(term.grossBilled)}</span>
-                        </div>
-                        {term.discount > 0 && (
-                          <div className="flex justify-between text-sm text-purple-600">
-                            <span>Discounts:</span>
-                            <span>- {formatCurrency(term.discount)}</span>
+
+                        {term.cashOnly.length > 0 && (
+                          <div className="px-4 py-2 bg-yellow-50 border-t">
+                            <p className="text-[10px] text-yellow-800 font-medium mb-1">
+                              <i className="fas fa-info-circle mr-1"></i>Other payments (no specific fee):
+                            </p>
+                            <div className="space-y-1">
+                              {term.cashOnly.map((p, pi) => (
+                                <div key={pi} className="flex items-center gap-3 text-[10px]">
+                                  <span className="text-gray-500 w-24">{new Date(p.date).toLocaleDateString('en-GB')}</span>
+                                  <span className="font-mono text-gray-600 w-32">{p.receiptNo || '—'}</span>
+                                  <span className="text-gray-500 w-20">{p.method || '—'}</span>
+                                  <span className="text-green-700 font-medium">+ {formatCurrency(p.amount)}</span>
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         )}
-                        <div className="flex justify-between text-sm font-semibold border-t pt-2">
-                          <span>Total Billed This {TERM_LABEL}:</span>
-                          <span>{formatCurrency(term.billedThisTerm)}</span>
-                        </div>
-                        <div className="flex justify-between text-sm text-green-700">
-                          <span>Paid This {TERM_LABEL}:</span>
-                          <span>- {formatCurrency(term.paidThisTerm)}</span>
-                        </div>
-                        <div className={`flex justify-between text-base font-bold pt-2 border-t-2 ${term.balanceCarriedForward > 0 ? 'text-red-700' : 'text-green-700'}`}>
-                          <span>{term.balanceCarriedForward > 0 ? 'Balance Carried Forward:' : 'Cleared ✓'}</span>
-                          <span>{formatCurrency(term.balanceCarriedForward)}</span>
+
+                        <div className="bg-indigo-50 px-4 py-3 space-y-1.5 border-t-2 border-indigo-200">
+                          {term.broughtForward > 0 && (
+                            <div className="flex justify-between text-xs text-orange-700">
+                              <span className="font-medium">Balance Brought Forward:</span>
+                              <span className="font-bold">{formatCurrency(term.broughtForward)}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between text-xs">
+                            <span className="text-gray-700">Subtotal ({TERM_LABEL} Fees):</span>
+                            <span>{formatCurrency(term.grossBilled)}</span>
+                          </div>
+                          {term.discount > 0 && (
+                            <div className="flex justify-between text-xs text-purple-600">
+                              <span>Discounts:</span>
+                              <span>- {formatCurrency(term.discount)}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between text-xs font-semibold border-t pt-1.5">
+                            <span>Total Billed This {TERM_LABEL}:</span>
+                            <span>{formatCurrency(term.billedThisTerm)}</span>
+                          </div>
+                          <div className="flex justify-between text-xs text-green-700">
+                            <span>Paid This {TERM_LABEL}:</span>
+                            <span>- {formatCurrency(term.paidThisTerm)}</span>
+                          </div>
+                          <div className={`flex justify-between text-sm font-bold pt-1.5 border-t-2 ${term.balanceCarriedForward > 0 ? 'text-red-700' : 'text-green-700'}`}>
+                            <span>{term.balanceCarriedForward > 0 ? 'Balance Carried Forward:' : 'Cleared ✓'}</span>
+                            <span>{formatCurrency(term.balanceCarriedForward)}</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))
+                    ))
                 )}
 
                 {/* GRAND TOTALS */}
                 {invoiceData.totals && (
-                  <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-lg border-2 border-indigo-200">
-                    <h4 className="font-bold text-lg mb-4 text-gray-800">Overall Summary</h4>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-4 rounded-lg border-2 border-indigo-200">
+                    <h4 className="font-bold text-base mb-3 text-gray-800">Overall Summary</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       <div className="text-center">
-                        <p className="text-xs text-gray-500 uppercase">Gross Billed</p>
-                        <p className="text-xl font-bold">{formatCurrency(invoiceData.totals.grossBilled)}</p>
+                        <p className="text-[10px] text-gray-500 uppercase">Gross Billed</p>
+                        <p className="text-lg font-bold">{formatCurrency(invoiceData.totals.grossBilled)}</p>
                       </div>
                       <div className="text-center">
-                        <p className="text-xs text-gray-500 uppercase">Discounts</p>
-                        <p className="text-xl font-bold text-purple-600">{formatCurrency(invoiceData.totals.discount)}</p>
+                        <p className="text-[10px] text-gray-500 uppercase">Discounts</p>
+                        <p className="text-lg font-bold text-purple-600">{formatCurrency(invoiceData.totals.discount)}</p>
                       </div>
                       <div className="text-center">
-                        <p className="text-xs text-gray-500 uppercase">Total Paid</p>
-                        <p className="text-xl font-bold text-green-600">{formatCurrency(invoiceData.totals.paid)}</p>
+                        <p className="text-[10px] text-gray-500 uppercase">Total Paid</p>
+                        <p className="text-lg font-bold text-green-600">{formatCurrency(invoiceData.totals.paid)}</p>
                       </div>
                       <div className="text-center">
-                        <p className="text-xs text-gray-500 uppercase">Outstanding</p>
-                        <p className={`text-xl font-bold ${invoiceData.totals.outstanding > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                        <p className="text-[10px] text-gray-500 uppercase">Outstanding</p>
+                        <p className={`text-lg font-bold ${invoiceData.totals.outstanding > 0 ? 'text-red-600' : 'text-green-600'}`}>
                           {formatCurrency(invoiceData.totals.outstanding)}
                         </p>
                       </div>
@@ -7966,8 +8112,7 @@ const getTermKey = (fee) => {
                   </div>
                 )}
 
-                {/* Clean footer — no "computer-generated" AI-sounding line */}
-                <div className="text-center text-xs text-gray-400 pt-4 border-t">
+                <div className="text-center text-[10px] text-gray-400 pt-3 border-t">
                   <p>Generated on {new Date().toLocaleString('en-GB')}</p>
                 </div>
               </div>
@@ -11412,22 +11557,28 @@ const ExamModule = ({
 
     const html = `<!DOCTYPE html><html><head><title>${escapeHtml(schoolName)} — Exam Schedule</title>
       <style>
-        @page { size: A4 portrait; margin: 12mm; }
-        body { font-family: 'Segoe UI', Arial, sans-serif; color: #1f2937; padding: 12px; }
-        .print-header { display: flex; align-items: center; gap: 20px; border-bottom: 3px double #4f46e5; padding-bottom: 14px; margin-bottom: 20px; }
-        .print-logo { width: 120px; height: 120px; object-fit: contain; border-radius: 12px; border: 2px solid #e5e7eb; padding: 6px; background: #fff; }
-        .print-title-block { flex: 1; text-align: center; }
-        .print-school-name { font-size: 26px; font-weight: 800; color: #4f46e5; text-transform: uppercase; margin: 0 0 6px 0; letter-spacing: 1px; }
-        .print-doc-title { font-size: 17px; font-weight: 600; margin: 0; color: #1f2937; }
-        .session-block { margin-bottom: 24px; page-break-inside: avoid; }
-        .session-header { display: flex; justify-content: space-between; background: #eef2ff; padding: 10px 14px; border-radius: 6px 6px 0 0; border: 1px solid #c7d2fe; }
-        .session-header h3 { margin: 0 0 4px 0; color: #4338ca; }
-        .session-meta { font-size: 11px; color: #4b5563; margin: 0; }
-        .session-badge { font-size: 11px; background: #4338ca; color: white; padding: 3px 10px; border-radius: 20px; height: fit-content; }
-        table { width: 100%; border-collapse: collapse; font-size: 11px; }
-        th { background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; font-size: 10px; text-transform: uppercase; }
-        td { border: 1px solid #e5e7eb; padding: 6px 8px; }
-        .num { text-align: center; width: 32px; color: #6b7280; }
+        @page { size: A4 portrait; margin: 10mm; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; color: #1f2937; padding: 5px; }
+        
+        /* Repositioned Logo Header */
+        .print-header { display: flex; align-items: center; gap: 24px; border-bottom: 3px double #4f46e5; padding-bottom: 12px; margin-bottom: 16px; }
+        .print-logo { width: 100px; height: 100px; object-fit: contain; border-radius: 12px; border: 2px solid #e5e7eb; padding: 6px; background: #fff; flex-shrink: 0; }
+        .print-title-block { flex: 1; text-align: left; }
+        .print-school-name { font-size: 24px; font-weight: 800; color: #4f46e5; text-transform: uppercase; margin: 0 0 4px 0; letter-spacing: 1px; }
+        .print-doc-title { font-size: 16px; font-weight: 600; margin: 0; color: #1f2937; }
+        .print-meta { font-size: 11px; color: #6b7280; margin-top: 4px; }
+        
+        /* Reduced Timetable Size */
+        .session-block { margin-bottom: 16px; page-break-inside: avoid; }
+        .session-header { display: flex; justify-content: space-between; background: #eef2ff; padding: 8px 12px; border-radius: 6px 6px 0 0; border: 1px solid #c7d2fe; }
+        .session-header h3 { margin: 0 0 2px 0; color: #4338ca; font-size: 14px; }
+        .session-meta { font-size: 10px; color: #4b5563; margin: 0; }
+        .session-badge { font-size: 10px; background: #4338ca; color: white; padding: 2px 8px; border-radius: 20px; height: fit-content; align-self: center; }
+        
+        table { width: 100%; border-collapse: collapse; font-size: 10px; }
+        th { background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; padding: 4px 6px; text-align: left; font-size: 9px; text-transform: uppercase; }
+        td { border: 1px solid #e5e7eb; padding: 4px 6px; }
+        .num { text-align: center; width: 24px; color: #6b7280; }
         tr:nth-child(even) td { background: #fafaff; }
       </style></head><body>
         <div class="print-header">
@@ -11435,7 +11586,7 @@ const ExamModule = ({
           <div class="print-title-block">
             <h1 class="print-school-name">${escapeHtml(schoolName)}</h1>
             <h2 class="print-doc-title">Examination Timetable</h2>
-            <p style="font-size:11px;color:#6b7280;margin:4px 0 0 0;">
+            <p class="print-meta">
               Generated ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}
             </p>
           </div>
@@ -11483,13 +11634,16 @@ const ExamModule = ({
 
     const html = `<!DOCTYPE html><html><head><title>${escapeHtml(schoolName)} — Mark Sheet</title>
       <style>
-        @page { size: A4 portrait; margin: 12mm; }
-        body { font-family: 'Segoe UI', Arial, sans-serif; padding: 12px; }
-        .print-header { display: flex; align-items: center; gap: 20px; border-bottom: 3px double #4f46e5; padding-bottom: 14px; margin-bottom: 14px; }
-        .print-logo { width: 120px; height: 120px; object-fit: contain; border-radius: 12px; border: 2px solid #e5e7eb; padding: 6px; background: #fff; }
-        .print-title-block { flex: 1; text-align: center; }
-        .print-school-name { font-size: 26px; font-weight: 800; color: #4f46e5; margin: 0 0 6px 0; text-transform: uppercase; letter-spacing: 1px; }
-        .print-doc-title { font-size: 17px; font-weight: 600; margin: 0; color: #1f2937; }
+        @page { size: A4 portrait; margin: 10mm; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; padding: 5px; }
+        
+        /* Repositioned Logo Header */
+        .print-header { display: flex; align-items: center; gap: 24px; border-bottom: 3px double #4f46e5; padding-bottom: 12px; margin-bottom: 14px; }
+        .print-logo { width: 100px; height: 100px; object-fit: contain; border-radius: 12px; border: 2px solid #e5e7eb; padding: 6px; background: #fff; flex-shrink: 0; }
+        .print-title-block { flex: 1; text-align: left; }
+        .print-school-name { font-size: 24px; font-weight: 800; color: #4f46e5; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 1px; }
+        .print-doc-title { font-size: 16px; font-weight: 600; margin: 0; color: #1f2937; }
+        
         table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 8px; }
         th { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; padding: 6px 8px; text-align: left; font-size: 10px; text-transform: uppercase; }
         td { border: 1px solid #e5e7eb; padding: 6px 8px; }
@@ -15061,6 +15215,7 @@ const ResultsModule = ({
     </div>
   );
 };
+
 // ==================== TIMETABLE MODULE — MULTI-TYPE (Class / Tuition / Extra / Remedial) ====================
 const TimetableModule = ({
   timetable, setTimetable,
@@ -15167,8 +15322,6 @@ const TimetableModule = ({
   };
 
   // ==================== SEARCHABLE SELECT ====================
-  // Defined once via useMemo so React keeps a stable component identity
-  // (this is the fix for the input-blocking issue we discussed earlier).
   const SearchableSelect = useMemo(() => {
     return function SearchableSelectInner({
       label, value, onChange, options, placeholder, disabled, required, className
@@ -15826,7 +15979,7 @@ const TimetableModule = ({
     }
 
     const schoolName = currentSchool?.name || 'School Timetable';
-       const schoolLogo = resolveLogoUrl(currentSchool);
+    const schoolLogo = resolveLogoUrl(currentSchool);
 
     const headerHtml = `
       <div class="print-header">
@@ -15927,12 +16080,15 @@ const TimetableModule = ({
             @page { size: A4 landscape; margin: 12mm; }
             * { box-sizing: border-box; }
             body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; color: #1f2937; margin: 0; padding: 12px; background: #fff; }
-            .print-header { display: flex; align-items: center; gap: 16px; border-bottom: 3px double #4f46e5; padding-bottom: 12px; margin-bottom: 16px; }
-            .print-logo { width: 72px; height: 72px; object-fit: contain; border-radius: 8px; border: 1px solid #e5e7eb; padding: 4px; background: #fff; }
-            .print-title-block { flex: 1; text-align: center; }
+            
+            /* Logo positioned left, good size */
+            .print-header { display: flex; align-items: center; gap: 20px; border-bottom: 3px double #4f46e5; padding-bottom: 12px; margin-bottom: 16px; }
+            .print-logo { width: 80px; height: 80px; object-fit: contain; border-radius: 8px; border: 1px solid #e5e7eb; padding: 4px; background: #fff; flex-shrink: 0; }
+            .print-title-block { flex: 1; text-align: left; }
             .print-school-name { font-size: 22px; font-weight: 800; color: #4f46e5; text-transform: uppercase; letter-spacing: 1.2px; margin: 0 0 4px 0; }
             .print-doc-title { font-size: 15px; font-weight: 600; color: #374151; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.8px; }
             .print-generated { font-size: 11px; color: #6b7280; margin: 0; }
+            
             .print-filters { text-align: center; font-size: 12px; color: #4b5563; background: #eef2ff; padding: 6px 10px; border-radius: 6px; margin: 0 0 14px 0; }
             .print-table { width: 100%; border-collapse: collapse; font-size: 11px; }
             .print-table th { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; padding: 6px 4px; text-align: center; font-weight: 700; text-transform: uppercase; font-size: 10px; }
@@ -16303,6 +16459,7 @@ const TimetableModule = ({
     </div>
   );
 };
+
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   ComposedChart, AreaChart, Area, RadarChart, Radar,
@@ -16321,6 +16478,19 @@ const ReportsModule = ({
   const isSecondary = schoolCategory === 'SENIOR_SECONDARY';
   const isPrimary = schoolCategory === 'ECDE_PRIMARY_JSS';
   const isRegularSchool = !isUniversity && !isTVET;
+
+  // ==================== SCHOOL IDENTITY FOR PRINT ====================
+  const schoolName =
+    currentSchool?.name?.trim() ||
+    currentSchool?.schoolName?.trim() ||
+    'School Name';
+  const schoolLogo = (typeof resolveLogoUrl === 'function')
+    ? resolveLogoUrl(currentSchool)
+    : (currentSchool?.logo || currentSchool?.schoolLogo || currentSchool?.contact?.logo || null);
+  const schoolMotto = currentSchool?.motto || currentSchool?.schoolMotto || '';
+  const schoolAddress = currentSchool?.contact?.address || '';
+  const schoolPhone = currentSchool?.contact?.phone || '';
+  const schoolEmail = currentSchool?.contact?.email || '';
 
   // ==================== PERMISSIONS ====================
   const canViewStudentReports   = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER', 'PARENT', 'STUDENT'].includes(user?.role);
@@ -16374,36 +16544,30 @@ const ReportsModule = ({
   const [feeTransfers, setFeeTransfers] = useState([]);
   const [fetchedOnce, setFetchedOnce] = useState({});
 
-  // Student
   const [selectedStudent, setSelectedStudent] = useState('');
   const [selectedExam, setSelectedExam] = useState('');
   const [academicStudent, setAcademicStudent] = useState('');
 
-  // Class
   const [selectedClass, setSelectedClass] = useState('');
   const [selectedCourse, setSelectedCourse] = useState('');
   const [selectedProgram, setSelectedProgram] = useState('');
   const [selectedYear, setSelectedYear] = useState('');
   const [selectedModule, setSelectedModule] = useState('');
 
-  // Fee
   const [feeDateRange, setFeeDateRange] = useState(dateRange || { start: '', end: '' });
   const [feeClassId, setFeeClassId] = useState('');
   const [feeCourseId, setFeeCourseId] = useState('');
   const [feeProgramId, setFeeProgramId] = useState('');
 
-  // Outstanding
   const [outstandingMinBalance, setOutstandingMinBalance] = useState(0);
   const [outstandingClassId, setOutstandingClassId] = useState('');
   const [outstandingCourseId, setOutstandingCourseId] = useState('');
   const [outstandingProgramId, setOutstandingProgramId] = useState('');
 
-  // Fee Transfers
   const [transferSearch, setTransferSearch] = useState('');
   const [transferStatus, setTransferStatus] = useState('');
   const [transferStudentId, setTransferStudentId] = useState('');
 
-  // Admission
   const [admissionYear, setAdmissionYear] = useState(new Date().getFullYear().toString());
   const [admissionClassId, setAdmissionClassId] = useState('');
   const [admissionCourseId, setAdmissionCourseId] = useState('');
@@ -16411,35 +16575,21 @@ const ReportsModule = ({
   const [admissionGender, setAdmissionGender] = useState('');
   const [admissionBoarding, setAdmissionBoarding] = useState('');
 
-  // Attendance
   const [attendanceDateRange, setAttendanceDateRange] = useState(dateRange || { start: '', end: '' });
   const [attendanceClassId, setAttendanceClassId] = useState('');
   const [attendanceCourseId, setAttendanceCourseId] = useState('');
   const [attendanceProgramId, setAttendanceProgramId] = useState('');
 
-  // Staff
   const [staffDepartment, setStaffDepartment] = useState('');
   const [staffType, setStaffType] = useState('');
-
-  // Discounts
   const [discountSearch, setDiscountSearch] = useState('');
-
-  // Allocation
   const [allocationFeeId, setAllocationFeeId] = useState('');
-
-  // Inventory
   const [inventoryCategory, setInventoryCategory] = useState('');
   const [inventoryLowStockOnly, setInventoryLowStockOnly] = useState(false);
-
-  // Transport
   const [transportSearch, setTransportSearch] = useState('');
   const [transportView, setTransportView] = useState('routes');
-
-  // Hostel
   const [hostelGenderFilter, setHostelGenderFilter] = useState('');
   const [hostelView, setHostelView] = useState('hostels');
-
-  // Library
   const [libraryCategory, setLibraryCategory] = useState('');
   const [libraryView, setLibraryView] = useState('books');
 
@@ -16457,11 +16607,6 @@ const ReportsModule = ({
     return s.class?.name || classes.find(c => c.id === s.classId)?.name || 'N/A';
   };
 
-  /**
-   * ✅ Compute total discount (in KES) for a student's bill.
-   * Handles FIXED, AMOUNT, PERCENTAGE, PERCENT types.
-   * Only counts discounts where isActive !== false.
-   */
   const computeDiscountKES = (studentDiscounts, grossBilled) => {
     if (!Array.isArray(studentDiscounts) || studentDiscounts.length === 0) return 0;
     let total = 0;
@@ -16472,14 +16617,12 @@ const ReportsModule = ({
       if (type === 'PERCENTAGE' || type === 'PERCENT') {
         total += (grossBilled * value) / 100;
       } else {
-        // FIXED / AMOUNT / anything else
         total += value;
       }
     });
-    return Math.min(total, grossBilled); // Never discount more than the gross
+    return Math.min(total, grossBilled);
   };
 
-  /** Get all active discounts for a student (optionally scoped to a fee) */
   const getStudentDiscounts = (studentId, fetchedDiscounts, feeId = null) => {
     if (!Array.isArray(fetchedDiscounts)) return [];
     return fetchedDiscounts.filter(d => {
@@ -16490,11 +16633,77 @@ const ReportsModule = ({
     });
   };
 
+  // ============================================================
+  // PRINT HEADER COMPONENT (rendered inside each .print-area)
+  // Includes LEFT-ALIGNED logo
+  // ============================================================
+  const PrintHeader = ({ title }) => (
+    <div className="reports-print-header">
+      {schoolLogo ? (
+        <img
+          src={schoolLogo}
+          alt="School Logo"
+          className="reports-print-logo"
+          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+        />
+      ) : (
+        <div className="reports-print-logo-placeholder">
+          {(schoolName || 'S').charAt(0)}
+        </div>
+      )}
+      <div className="reports-print-school-info">
+        <div className="reports-print-school-name">{schoolName}</div>
+        {schoolMotto && <div className="reports-print-school-motto">"{schoolMotto}"</div>}
+        <div className="reports-print-school-contact">
+          {schoolAddress && <span>📍 {schoolAddress}</span>}
+          {schoolPhone && <span>📞 {schoolPhone}</span>}
+          {schoolEmail && <span>✉️ {schoolEmail}</span>}
+        </div>
+        {title && <div className="reports-print-doc-title">{title}</div>}
+      </div>
+    </div>
+  );
+
   // ==================== PRINT STYLES ====================
   useEffect(() => {
+    const styleId = '__reports_print_style__';
+    if (document.getElementById(styleId)) return;
+
     const style = document.createElement('style');
+    style.id = styleId;
     style.innerHTML = `
       .print-area { display: block; }
+
+      /* Print header styles (visible only when printing) */
+      .reports-print-header { display: none; }
+      .reports-print-logo {
+        width: 70px; height: 70px; object-fit: contain;
+        border-radius: 8px; border: 1px solid #e5e7eb;
+        padding: 4px; background: #fff; flex-shrink: 0;
+      }
+      .reports-print-logo-placeholder {
+        width: 70px; height: 70px; background: #1e3a5f; color: #fff;
+        border-radius: 8px; display: flex; align-items: center;
+        justify-content: center; font-size: 28px; font-weight: 700;
+        flex-shrink: 0;
+      }
+      .reports-print-school-info { flex: 1; text-align: left; }
+      .reports-print-school-name {
+        font-size: 20px; font-weight: 800; color: #1e3a5f;
+        text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px;
+      }
+      .reports-print-school-motto {
+        font-size: 11px; font-style: italic; color: #6b7280; margin-bottom: 4px;
+      }
+      .reports-print-school-contact {
+        font-size: 10px; color: #6b7280;
+        display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 4px;
+      }
+      .reports-print-doc-title {
+        font-size: 13px; font-weight: 700; color: #1e3a5f;
+        text-transform: uppercase; letter-spacing: 1px;
+        margin-top: 6px; padding-top: 6px; border-top: 1px solid #e5e7eb;
+      }
 
       @media print {
         body * { visibility: hidden !important; }
@@ -16512,7 +16721,7 @@ const ReportsModule = ({
           left: 0 !important;
           top: 0 !important;
           width: 100% !important;
-          padding: 12px !important;
+          padding: 10mm !important;
           margin: 0 !important;
           background: white !important;
           box-shadow: none !important;
@@ -16530,15 +16739,14 @@ const ReportsModule = ({
         .recharts-legend-wrapper,
         .recharts-tooltip-wrapper { display: none !important; }
 
-        .print-area::before {
-          content: attr(data-print-title);
-          display: block;
-          font-size: 15px;
-          font-weight: bold;
-          color: #111;
-          margin-bottom: 10px;
-          padding-bottom: 6px;
-          border-bottom: 1px solid #d1d5db;
+        /* Show the print header (logo on the LEFT) */
+        .reports-print-header {
+          display: flex !important;
+          align-items: center;
+          gap: 16px;
+          border-bottom: 3px double #1e3a5f;
+          padding-bottom: 12px;
+          margin-bottom: 14px;
         }
 
         table {
@@ -16572,7 +16780,10 @@ const ReportsModule = ({
       }
     `;
     document.head.appendChild(style);
-    return () => document.head.removeChild(style);
+    return () => {
+      const el = document.getElementById(styleId);
+      if (el) el.remove();
+    };
   }, []);
 
   // ==================== SELF-FETCH ====================
@@ -17028,7 +17239,6 @@ const ReportsModule = ({
         });
         const grossBilled = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
 
-        // ✅ APPLY DISCOUNTS
         const studentDiscounts = getStudentDiscounts(s.id, fetchedDiscounts);
         const discountAmount = computeDiscountKES(studentDiscounts, grossBilled);
         const billed = Math.max(0, grossBilled - discountAmount);
@@ -17115,7 +17325,6 @@ const ReportsModule = ({
         });
         const grossBilled = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
 
-        // ✅ APPLY DISCOUNTS
         const studentDiscounts = getStudentDiscounts(s.id, fetchedDiscounts);
         const discountAmount = computeDiscountKES(studentDiscounts, grossBilled);
         const billed = Math.max(0, grossBilled - discountAmount);
@@ -17182,7 +17391,6 @@ const ReportsModule = ({
     setLoading(true);
     try {
       const fetchedTransfers = (await fetchOnce('feeTransfers')) || feeTransfers;
-
       let rows = fetchedTransfers;
 
       if (transferStatus) rows = rows.filter(t => t.status === transferStatus);
@@ -18025,9 +18233,10 @@ const ReportsModule = ({
               )}
 
               {reportData.results.length > 0 && (
-                <div className="print-area" data-print-title={`Student Report — ${reportData.student.firstName} ${reportData.student.lastName} (${reportData.student.admissionNumber})`}>
+                <div className="print-area">
+                  <PrintHeader title={`Student Report — ${reportData.student.firstName} ${reportData.student.lastName} (${reportData.student.admissionNumber})`} />
                   <Card>
-                    <div className="flex justify-between items-center mb-3">
+                    <div className="flex justify-between items-center mb-3 no-print">
                       <h3 className="font-semibold">Detailed Results ({reportData.results.length})</h3>
                       <ExportBtn onClick={() => exportCSV(reportData.results, 'student_report.csv')} />
                     </div>
@@ -18108,9 +18317,10 @@ const ReportsModule = ({
                 </div>
               )}
 
-              <div className="print-area" data-print-title={`${reportData.entityName} — Student Performance`}>
+              <div className="print-area">
+                <PrintHeader title={`${reportData.entityName} — Student Performance`} />
                 <Card>
-                  <div className="flex justify-between items-center mb-3">
+                  <div className="flex justify-between items-center mb-3 no-print">
                     <h3 className="font-semibold">Student Performance ({reportData.studentPerformance.length})</h3>
                     <ExportBtn onClick={() => exportCSV(reportData.studentPerformance.map(p => ({
                       admissionNumber: p.student?.admissionNumber,
@@ -18183,9 +18393,10 @@ const ReportsModule = ({
                 </div>
               )}
 
-              <div className="print-area" data-print-title={`Detailed Academic — ${reportData.student.firstName} ${reportData.student.lastName}`}>
+              <div className="print-area">
+                <PrintHeader title={`Detailed Academic — ${reportData.student.firstName} ${reportData.student.lastName}`} />
                 <Card>
-                  <div className="flex justify-between items-center mb-3">
+                  <div className="flex justify-between items-center mb-3 no-print">
                     <h3 className="font-semibold">{academicColumnLabel} Breakdown ({reportData.subjectRows.length})</h3>
                     <ExportBtn onClick={() => exportCSV(reportData.subjectRows.map(s => ({
                       subject: s.subject, exams: s.examCount, total: s.totalMarks, average: s.average,
@@ -18261,9 +18472,10 @@ const ReportsModule = ({
                 </div>
               )}
 
-              <div className="print-area" data-print-title={`Fee Collection Report — ${reportData.period?.start || ''} to ${reportData.period?.end || ''}`}>
+              <div className="print-area">
+                <PrintHeader title={`Fee Collection Report — ${reportData.period?.start || ''} to ${reportData.period?.end || ''}`} />
                 <Card>
-                  <div className="flex justify-between items-center mb-3">
+                  <div className="flex justify-between items-center mb-3 no-print">
                     <h3 className="font-semibold">Per-Student Fee Status ({reportData.rows.length})</h3>
                     <ExportBtn onClick={() => exportCSV(reportData.rows.map(r => ({
                       admissionNumber: r.admissionNumber,
@@ -18340,9 +18552,10 @@ const ReportsModule = ({
                 </div>
               )}
 
-              <div className="print-area" data-print-title="Outstanding Balances">
+              <div className="print-area">
+                <PrintHeader title="Outstanding Balances" />
                 <Card>
-                  <div className="flex justify-between items-center mb-3">
+                  <div className="flex justify-between items-center mb-3 no-print">
                     <h3 className="font-semibold">Students with Balances ({reportData.rows.length})</h3>
                     <ExportBtn onClick={() => exportCSV(reportData.rows.map(r => ({
                       admissionNumber: r.admissionNumber,
@@ -18473,9 +18686,10 @@ const ReportsModule = ({
                 </div>
               )}
 
-              <div className="print-area" data-print-title="Fee Transfers Report">
+              <div className="print-area">
+                <PrintHeader title="Fee Transfers Report" />
                 <Card>
-                  <div className="flex justify-between items-center mb-3">
+                  <div className="flex justify-between items-center mb-3 no-print">
                     <h3 className="font-semibold">
                       Transfers ({reportData.rows.length})
                     </h3>
@@ -18594,9 +18808,10 @@ const ReportsModule = ({
                 </div>
               )}
 
-              <div className="print-area" data-print-title={`Admissions Report — ${admissionYear}`}>
+              <div className="print-area">
+                <PrintHeader title={`Admissions Report — ${admissionYear}`} />
                 <Card>
-                  <div className="flex justify-between items-center mb-3">
+                  <div className="flex justify-between items-center mb-3 no-print">
                     <h3 className="font-semibold">Admitted Students ({reportData.rows.length})</h3>
                     <ExportBtn onClick={() => exportCSV(reportData.rows, 'admissions.csv')} />
                   </div>
@@ -18700,9 +18915,10 @@ const ReportsModule = ({
                 </div>
               )}
 
-              <div className="print-area" data-print-title="Attendance Report">
+              <div className="print-area">
+                <PrintHeader title="Attendance Report" />
                 <Card>
-                  <div className="flex justify-between items-center mb-3">
+                  <div className="flex justify-between items-center mb-3 no-print">
                     <h3 className="font-semibold">Per-Student Attendance ({reportData.rows.length})</h3>
                     <ExportBtn onClick={() => exportCSV(reportData.rows, 'attendance_report.csv')} />
                   </div>
@@ -18774,9 +18990,10 @@ const ReportsModule = ({
                 </div>
               )}
 
-              <div className="print-area" data-print-title="Staff Report">
+              <div className="print-area">
+                <PrintHeader title="Staff Report" />
                 <Card>
-                  <div className="flex justify-between items-center mb-3">
+                  <div className="flex justify-between items-center mb-3 no-print">
                     <h3 className="font-semibold">Staff List ({reportData.rows.length})</h3>
                     <ExportBtn onClick={() => exportCSV(reportData.rows, 'staff_report.csv')} />
                   </div>
@@ -18837,9 +19054,10 @@ const ReportsModule = ({
                 </div>
               )}
 
-              <div className="print-area" data-print-title="Discounts Report">
+              <div className="print-area">
+                <PrintHeader title="Discounts Report" />
                 <Card>
-                  <div className="flex justify-between items-center mb-3">
+                  <div className="flex justify-between items-center mb-3 no-print">
                     <h3 className="font-semibold">Discount Records ({reportData.rows.length})</h3>
                     <ExportBtn onClick={() => exportCSV(reportData.rows, 'discounts.csv')} />
                   </div>
@@ -18886,9 +19104,10 @@ const ReportsModule = ({
                 <StatCard label="Collection Rate" value={`${reportData.summary.collectionRate}%`} color="yellow" />
               </div>
 
-              <div className="print-area" data-print-title="Fee Allocation Report">
+              <div className="print-area">
+                <PrintHeader title="Fee Allocation Report" />
                 <Card>
-                  <div className="flex justify-between items-center mb-3">
+                  <div className="flex justify-between items-center mb-3 no-print">
                     <h3 className="font-semibold">Allocation Records ({reportData.rows.length})</h3>
                     <ExportBtn onClick={() => exportCSV(reportData.rows, 'fee_allocations.csv')} />
                   </div>
@@ -18941,9 +19160,10 @@ const ReportsModule = ({
                 <StatCard label="Out of Stock" value={reportData.summary.outOfStock} color="red" />
               </div>
 
-              <div className="print-area" data-print-title="Inventory Report">
+              <div className="print-area">
+                <PrintHeader title="Inventory Report" />
                 <Card>
-                  <div className="flex justify-between items-center mb-3">
+                  <div className="flex justify-between items-center mb-3 no-print">
                     <h3 className="font-semibold">Inventory Items ({reportData.rows.length})</h3>
                     <ExportBtn onClick={() => exportCSV(reportData.rows, 'inventory.csv')} />
                   </div>
@@ -19036,9 +19256,10 @@ const ReportsModule = ({
               )}
 
               {transportView === 'routes' && (
-                <div className="print-area" data-print-title="Transport Routes Report">
+                <div className="print-area">
+                  <PrintHeader title="Transport Routes Report" />
                   <Card>
-                    <div className="flex justify-between items-center mb-3">
+                    <div className="flex justify-between items-center mb-3 no-print">
                       <h3 className="font-semibold">Transport Routes ({reportData.rows.length})</h3>
                       <ExportBtn onClick={() => exportCSV(reportData.rows, 'transport_routes.csv')} />
                     </div>
@@ -19062,9 +19283,10 @@ const ReportsModule = ({
               )}
 
               {transportView === 'students' && (
-                <div className="print-area" data-print-title="Students on Transport">
+                <div className="print-area">
+                  <PrintHeader title="Students on Transport" />
                   <Card>
-                    <div className="flex justify-between items-center mb-3">
+                    <div className="flex justify-between items-center mb-3 no-print">
                       <h3 className="font-semibold">Students on Transport ({reportData.studentRows.length})</h3>
                       <ExportBtn onClick={() => exportCSV(reportData.studentRows, 'transport_students.csv')} />
                     </div>
@@ -19139,9 +19361,10 @@ const ReportsModule = ({
               )}
 
               {hostelView === 'hostels' && (
-                <div className="print-area" data-print-title="Hostel Report">
+                <div className="print-area">
+                  <PrintHeader title="Hostel Report" />
                   <Card>
-                    <div className="flex justify-between items-center mb-3">
+                    <div className="flex justify-between items-center mb-3 no-print">
                       <h3 className="font-semibold">Hostels ({reportData.rows.length})</h3>
                       <ExportBtn onClick={() => exportCSV(reportData.rows, 'hostels.csv')} />
                     </div>
@@ -19165,9 +19388,10 @@ const ReportsModule = ({
               )}
 
               {hostelView === 'students' && (
-                <div className="print-area" data-print-title="Students in Hostels">
+                <div className="print-area">
+                  <PrintHeader title="Students in Hostels" />
                   <Card>
-                    <div className="flex justify-between items-center mb-3">
+                    <div className="flex justify-between items-center mb-3 no-print">
                       <h3 className="font-semibold">Students in Hostels ({reportData.studentRows.length})</h3>
                       <ExportBtn onClick={() => exportCSV(reportData.studentRows, 'hostel_students.csv')} />
                     </div>
@@ -19228,9 +19452,10 @@ const ReportsModule = ({
               </div>
 
               {libraryView === 'books' && (
-                <div className="print-area" data-print-title="Library Books Report">
+                <div className="print-area">
+                  <PrintHeader title="Library Books Report" />
                   <Card>
-                    <div className="flex justify-between items-center mb-3">
+                    <div className="flex justify-between items-center mb-3 no-print">
                       <h3 className="font-semibold">Books ({reportData.rows.length})</h3>
                       <ExportBtn onClick={() => exportCSV(reportData.rows, 'library_books.csv')} />
                     </div>
@@ -19254,9 +19479,10 @@ const ReportsModule = ({
               )}
 
               {libraryView === 'borrows' && (
-                <div className="print-area" data-print-title="Library Borrowers Report">
+                <div className="print-area">
+                  <PrintHeader title="Library Borrowers Report" />
                   <Card>
-                    <div className="flex justify-between items-center mb-3">
+                    <div className="flex justify-between items-center mb-3 no-print">
                       <h3 className="font-semibold">Borrowers ({reportData.borrowRows.length})</h3>
                       <ExportBtn onClick={() => exportCSV(reportData.borrowRows, 'library_borrowers.csv')} />
                     </div>
@@ -19294,7 +19520,6 @@ const ReportsModule = ({
     </div>
   );
 };
-
 
 // ==================== EXAM CARD PRINT MODAL ====================
 const ExamCardPrintModal = ({ student, units, currentSchool, onClose }) => {
@@ -39573,20 +39798,11 @@ const ExamCardsModule = ({
   const isStudent = user?.role === 'STUDENT';
   const isParent = user?.role === 'PARENT';
 
-  // ✅ Who can approve / revoke exam card overrides
   const canApproveOverride = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'ACCOUNTANT', 'PRINCIPAL'].includes(user?.role);
 
   // ==================== SEARCHABLE SELECT COMPONENT ====================
   const SearchableSelect = ({ 
-    label, 
-    value, 
-    onChange, 
-    options, 
-    placeholder, 
-    disabled, 
-    required, 
-    className,
-    showClear = true 
+    label, value, onChange, options, placeholder, disabled, required, className, showClear = true 
   }) => {
     const [search, setSearch] = useState('');
     const [isOpen, setIsOpen] = useState(false);
@@ -39600,7 +39816,6 @@ const ExamCardsModule = ({
       return [{ value: '', label: '' }, ...options];
     }, [options]);
 
-    // ✅ FIXED: All string ops guarded with String(... ?? '')
     const filteredOptions = useMemo(() => {
       if (!String(search || '').trim()) return optionsWithEmpty;
       const searchLower = String(search || '').toLowerCase();
@@ -39638,9 +39853,7 @@ const ExamCardsModule = ({
       setSearch(selected ? selected.label : '');
       setIsOpen(false);
       setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
+      if (inputRef.current) inputRef.current.focus();
     };
 
     const handleInputChange = (e) => {
@@ -39648,30 +39861,18 @@ const ExamCardsModule = ({
       setSearch(newValue);
       setIsOpen(true);
       setIsFocused(true);
-      if (newValue === '') {
-        onChange({ target: { value: '' } });
-      }
+      if (newValue === '') onChange({ target: { value: '' } });
     };
 
-    const handleFocus = () => {
-      setIsFocused(true);
-      setIsOpen(true);
-    };
+    const handleFocus = () => { setIsFocused(true); setIsOpen(true); };
 
-    const handleBlur = (e) => {
-      const relatedTarget = e.relatedTarget;
-      if (dropdownRef.current && dropdownRef.current.contains(relatedTarget)) {
-        return;
-      }
+    const handleBlur = () => {
       setTimeout(() => {
         if (document.activeElement !== inputRef.current) {
           setIsOpen(false);
           setIsFocused(false);
-          if (selectedOption) {
-            setSearch(selectedOption.label);
-          } else {
-            setSearch('');
-          }
+          if (selectedOption) setSearch(selectedOption.label);
+          else setSearch('');
         }
       }, 150);
     };
@@ -39682,9 +39883,7 @@ const ExamCardsModule = ({
       setSearch('');
       setIsOpen(false);
       setIsFocused(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
+      if (inputRef.current) inputRef.current.focus();
     };
 
     const getDisplayValue = () => {
@@ -39827,12 +40026,8 @@ const ExamCardsModule = ({
 
   const getStudentItems = (student) => {
     if (!student) return [];
-    if (isUniversity) {
-      return units?.filter(u => u.courseId === student.courseId) || [];
-    }
-    if (isTVET) {
-      return units?.filter(u => u.programId === student.programId) || [];
-    }
+    if (isUniversity) return units?.filter(u => u.courseId === student.courseId) || [];
+    if (isTVET) return units?.filter(u => u.programId === student.programId) || [];
     return subjects?.filter(s => s.classId === student.classId) || [];
   };
 
@@ -39875,20 +40070,14 @@ const ExamCardsModule = ({
     return '';
   };
 
-  // ✅ Check if a student has an active override
   const hasOverride = (studentId) => {
     if (!studentId) return false;
-    return (examCardOverrides || []).some(
-      o => o.studentId === studentId && o.isActive !== false
-    );
+    return (examCardOverrides || []).some(o => o.studentId === studentId && o.isActive !== false);
   };
 
-  // ✅ Get the active override object for a student
   const getActiveOverride = (studentId) => {
     if (!studentId) return null;
-    return (examCardOverrides || []).find(
-      o => o.studentId === studentId && o.isActive !== false
-    ) || null;
+    return (examCardOverrides || []).find(o => o.studentId === studentId && o.isActive !== false) || null;
   };
 
   // ==================== STATE ====================
@@ -39912,26 +40101,15 @@ const ExamCardsModule = ({
   const [tempAdmissionNumber, setTempAdmissionNumber] = useState('');
   const [showExamCardModal, setShowExamCardModal] = useState(false);
   const [loadingExamCard, setLoadingExamCard] = useState(false);
-  // ✅ Override action loading state
   const [overrideActionLoading, setOverrideActionLoading] = useState(null);
   
   const [currentExamCardData, setCurrentExamCardData] = useState({
-    student: null,
-    balance: 0,
-    totalFees: 0,
-    totalPaid: 0,
-    isEligible: false,
-    isOverridden: false,
-    entityName: '',
-    items: []
+    student: null, balance: 0, totalFees: 0, totalPaid: 0, isEligible: false, isOverridden: false, entityName: '', items: []
   });
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-KE', { 
-      style: 'currency', 
-      currency: 'KES',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
+      style: 'currency', currency: 'KES', minimumFractionDigits: 0, maximumFractionDigits: 0
     }).format(amount || 0);
   };
 
@@ -39959,26 +40137,21 @@ const ExamCardsModule = ({
     totalFees = applicableFees.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
     
     let totalPaid = 0;
+    let totalBF = 0;
     if (existingPayments && Array.isArray(existingPayments)) {
       totalPaid = existingPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+      totalBF = existingPayments.reduce((sum, p) => sum + (parseFloat(p.balanceBroughtForward) || 0), 0);
     }
     
-    const balance = totalFees - totalPaid;
+    const balance = (totalFees + totalBF) - totalPaid;
     const overrideActive = hasOverride(studentData.id);
-    const isEligible = balance <= 0 || overrideActive;   // ✅ override wins
+    const isEligible = balance <= 0 || overrideActive;
     
     const entityName = getEntityName(studentData);
     const items = getStudentItems(studentData);
     
     return {
-      student: studentData,
-      balance,
-      totalFees,
-      totalPaid,
-      isEligible,
-      isOverridden: overrideActive,
-      entityName,
-      items
+      student: studentData, balance, totalFees, totalBF, totalPaid, isEligible, isOverridden: overrideActive, entityName, items
     };
   };
 
@@ -39986,7 +40159,6 @@ const ExamCardsModule = ({
   const loadExamCardForStudent = async (studentId, studentAdmissionNumber = null) => {
     setLoadingExamCard(true);
     setApiError('');
-    
     try {
       let studentData;
       if (studentAdmissionNumber) {
@@ -39997,10 +40169,7 @@ const ExamCardsModule = ({
         studentData = studentRes.data.student;
       }
       
-      if (!studentData) {
-        setApiError('Student not found');
-        return null;
-      }
+      if (!studentData) { setApiError('Student not found'); return null; }
       
       let studentPayments = [];
       try {
@@ -40012,16 +40181,13 @@ const ExamCardsModule = ({
       
       if (examCardData) {
         setCurrentExamCardData(examCardData);
-        
         if (isStudent) {
           localStorage.setItem('studentExamAdmission', studentData.admissionNumber);
           localStorage.setItem('studentExamData', JSON.stringify(studentData));
           setMyStudentRecord(studentData);
         }
       }
-      
       return examCardData;
-      
     } catch (error) {
       console.error('❌ Error:', error);
       setApiError(error.response?.data?.message || 'Failed to load exam card');
@@ -40050,9 +40216,7 @@ const ExamCardsModule = ({
   }, [isStudent]);
 
   useEffect(() => {
-    if (isParent) {
-      loadMyChildren();
-    }
+    if (isParent) loadMyChildren();
   }, [isParent]);
 
   const loadMyChildren = async () => {
@@ -40074,10 +40238,8 @@ const ExamCardsModule = ({
 
   const loadZeroBalanceStudents = async () => {
     if (isStudent || isParent) return;
-    
     setLoading(true);
     setApiError('');
-    
     try {
       if (!selectedClass) {
         alert(`Please select a ${getEntityLabel()}`);
@@ -40123,29 +40285,19 @@ const ExamCardsModule = ({
           } catch (err) {}
           
           const totalPaid = studentPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
-          const balance = totalFeesAmount - totalPaid;
+          const totalBF = studentPayments.reduce((sum, p) => sum + (parseFloat(p.balanceBroughtForward) || 0), 0);
+          const balance = (totalFeesAmount + totalBF) - totalPaid;
           const overrideActive = hasOverride(student.id);
           const isEligible = balance <= 0 || overrideActive;
-          
           const entityName = getEntityName(student);
           
-          return {
-            ...student,
-            entityName,
-            totalFees: totalFeesAmount,
-            totalPaid,
-            balance,
-            isEligible,
-            isOverridden: overrideActive
-          };
+          return { ...student, entityName, totalFees: totalFeesAmount, totalPaid, balance, isEligible, isOverridden: overrideActive };
         })
       );
       
       const eligibleStudents = studentsWithBalance.filter(s => s.isEligible);
-      
       setStudentsWithZeroBalance(eligibleStudents);
       setFilteredStudents(eligibleStudents);
-      
     } catch (error) {
       console.error('❌ Error loading students:', error);
       setApiError('Failed to load students');
@@ -40155,10 +40307,7 @@ const ExamCardsModule = ({
   };
 
   const handleAdmissionSubmit = async () => {
-    if (!tempAdmissionNumber) {
-      setApiError('Please enter your admission number');
-      return;
-    }
+    if (!tempAdmissionNumber) { setApiError('Please enter your admission number'); return; }
     const admNumber = tempAdmissionNumber.toUpperCase().trim();
     setAdmissionNumber(admNumber);
     await loadExamCardForStudent(null, admNumber);
@@ -40171,16 +40320,7 @@ const ExamCardsModule = ({
     setAdmissionNumber('');
     setTempAdmissionNumber('');
     setMyStudentRecord(null);
-    setCurrentExamCardData({
-      student: null,
-      balance: 0,
-      totalFees: 0,
-      totalPaid: 0,
-      isEligible: false,
-      isOverridden: false,
-      entityName: '',
-      items: []
-    });
+    setCurrentExamCardData({ student: null, balance: 0, totalFees: 0, totalPaid: 0, isEligible: false, isOverridden: false, entityName: '', items: [] });
     setShowAdmissionModal(true);
   };
 
@@ -40190,15 +40330,10 @@ const ExamCardsModule = ({
   };
 
   const handleSelect = (id, checked) => {
-    if (checked) {
-      setSelectedStudents([...selectedStudents, id]);
-    } else {
-      setSelectedStudents(selectedStudents.filter(sid => sid !== id));
-      setSelectAll(false);
-    }
+    if (checked) setSelectedStudents([...selectedStudents, id]);
+    else { setSelectedStudents(selectedStudents.filter(sid => sid !== id)); setSelectAll(false); }
   };
 
-  // ✅ FIXED: Student search filter — all strings guarded
   useEffect(() => {
     if (studentsWithZeroBalance.length > 0) {
       let filtered = [...studentsWithZeroBalance];
@@ -40213,35 +40348,22 @@ const ExamCardsModule = ({
     }
   }, [searchTerm, studentsWithZeroBalance]);
 
-  // ✅ Approve exam card override
   const handleApproveOverride = async (student) => {
     const reason = window.prompt(
-      `Approve exam card for ${student.firstName} ${student.lastName}?\n\nBalance: ${formatCurrency(student.balance)}\n\nReason (optional):`,
-      ''
+      `Approve exam card for ${student.firstName} ${student.lastName}?\n\nBalance: ${formatCurrency(student.balance)}\n\nReason (optional):`, ''
     );
     if (reason === null) return;
 
     setOverrideActionLoading(student.id);
     try {
       const res = await api.post('/exam-card-overrides', {
-        studentId: student.id,
-        reason: reason || null,
-        balanceAtApproval: student.balance
+        studentId: student.id, reason: reason || null, balanceAtApproval: student.balance
       });
       const newOverride = res.data.override;
       setExamCardOverrides?.(prev => [...prev, newOverride]);
-
-      setFilteredStudents(prev =>
-        prev.map(s => s.id === student.id ? { ...s, isOverridden: true, isEligible: true } : s)
-      );
-      setStudentsWithZeroBalance(prev =>
-        prev.map(s => s.id === student.id ? { ...s, isOverridden: true, isEligible: true } : s)
-      );
-
-      if (currentExamCardData.student?.id === student.id) {
-        setCurrentExamCardData(prev => ({ ...prev, isOverridden: true, isEligible: true }));
-      }
-
+      setFilteredStudents(prev => prev.map(s => s.id === student.id ? { ...s, isOverridden: true, isEligible: true } : s));
+      setStudentsWithZeroBalance(prev => prev.map(s => s.id === student.id ? { ...s, isOverridden: true, isEligible: true } : s));
+      if (currentExamCardData.student?.id === student.id) setCurrentExamCardData(prev => ({ ...prev, isOverridden: true, isEligible: true }));
       setOverrideActionLoading(null);
       alert(`✅ Exam card approved for ${student.firstName} ${student.lastName}`);
     } catch (err) {
@@ -40251,32 +40373,19 @@ const ExamCardsModule = ({
     }
   };
 
-  // ✅ Revoke exam card override
   const handleRevokeOverride = async (student) => {
     const activeOverride = getActiveOverride(student.id);
-    if (!activeOverride) {
-      alert('No active override found for this student');
-      return;
-    }
+    if (!activeOverride) { alert('No active override found for this student'); return; }
     if (!window.confirm(`Revoke exam card approval for ${student.firstName} ${student.lastName}?`)) return;
 
     setOverrideActionLoading(student.id);
     try {
       await api.delete(`/exam-card-overrides/${activeOverride.id}`);
       setExamCardOverrides?.(prev => prev.filter(o => o.id !== activeOverride.id));
-
       const stillEligible = student.balance <= 0;
-      setFilteredStudents(prev =>
-        prev.map(s => s.id === student.id ? { ...s, isOverridden: false, isEligible: stillEligible } : s)
-      );
-      setStudentsWithZeroBalance(prev =>
-        prev.map(s => s.id === student.id ? { ...s, isOverridden: false, isEligible: stillEligible } : s)
-      );
-
-      if (currentExamCardData.student?.id === student.id) {
-        setCurrentExamCardData(prev => ({ ...prev, isOverridden: false, isEligible: stillEligible }));
-      }
-
+      setFilteredStudents(prev => prev.map(s => s.id === student.id ? { ...s, isOverridden: false, isEligible: stillEligible } : s));
+      setStudentsWithZeroBalance(prev => prev.map(s => s.id === student.id ? { ...s, isOverridden: false, isEligible: stillEligible } : s));
+      if (currentExamCardData.student?.id === student.id) setCurrentExamCardData(prev => ({ ...prev, isOverridden: false, isEligible: stillEligible }));
       setOverrideActionLoading(null);
       alert('✅ Override revoked');
     } catch (err) {
@@ -40295,35 +40404,18 @@ const ExamCardsModule = ({
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-2xl font-bold">Exam Card Access</h2>
-                {myStudentRecord && (
-                  <button onClick={() => setShowAdmissionModal(false)} className="text-gray-500 hover:text-gray-700">
-                    <i className="fas fa-times"></i>
-                  </button>
-                )}
+                {myStudentRecord && <button onClick={() => setShowAdmissionModal(false)} className="text-gray-500 hover:text-gray-700"><i className="fas fa-times"></i></button>}
               </div>
               <p className="text-gray-600 mb-4">Enter your admission number to view your exam card.</p>
-              {apiError && (
-                <div className="bg-red-50 p-3 rounded-lg text-red-600 text-sm mb-4">
-                  <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
-                </div>
-              )}
+              {apiError && <div className="bg-red-50 p-3 rounded-lg text-red-600 text-sm mb-4"><i className="fas fa-exclamation-circle mr-2"></i>{apiError}</div>}
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Admission Number</label>
-                  <input
-                    type="text"
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                    value={tempAdmissionNumber}
-                    onChange={(e) => setTempAdmissionNumber(e.target.value.toUpperCase())}
-                    placeholder="e.g., BCM-05"
-                    autoFocus
-                  />
+                  <input type="text" className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+                    value={tempAdmissionNumber} onChange={(e) => setTempAdmissionNumber(e.target.value.toUpperCase())} placeholder="e.g., BCM-05" autoFocus />
                 </div>
-                <button
-                  onClick={handleAdmissionSubmit}
-                  disabled={loadingExamCard || !tempAdmissionNumber}
-                  className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-                >
+                <button onClick={handleAdmissionSubmit} disabled={loadingExamCard || !tempAdmissionNumber}
+                  className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
                   {loadingExamCard ? 'Loading...' : 'View Exam Card'}
                 </button>
               </div>
@@ -40348,9 +40440,7 @@ const ExamCardsModule = ({
               <div className="bg-white rounded-xl shadow-sm p-6">
                 <div className="flex items-center gap-4">
                   <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center">
-                    <span className="text-2xl font-bold text-indigo-600">
-                      {currentExamCardData.student.firstName?.[0]}{currentExamCardData.student.lastName?.[0]}
-                    </span>
+                    <span className="text-2xl font-bold text-indigo-600">{currentExamCardData.student.firstName?.[0]}{currentExamCardData.student.lastName?.[0]}</span>
                   </div>
                   <div>
                     <h3 className="text-xl font-bold">{currentExamCardData.student.firstName} {currentExamCardData.student.lastName}</h3>
@@ -40373,19 +40463,15 @@ const ExamCardsModule = ({
                     {currentExamCardData.isEligible ? (
                       <div className="flex flex-col items-end gap-1">
                         <div className="flex items-center text-green-600">
-                          <i className="fas fa-check-circle text-2xl mr-2"></i>
-                          <span className="font-medium">Eligible for Exam Card</span>
+                          <i className="fas fa-check-circle text-2xl mr-2"></i><span className="font-medium">Eligible for Exam Card</span>
                         </div>
                         {currentExamCardData.isOverridden && (
-                          <span className="text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded-full">
-                            <i className="fas fa-user-check mr-1"></i>Approved with balance
-                          </span>
+                          <span className="text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded-full"><i className="fas fa-user-check mr-1"></i>Approved with balance</span>
                         )}
                       </div>
                     ) : (
                       <div className="flex items-center text-red-600">
-                        <i className="fas fa-exclamation-circle text-2xl mr-2"></i>
-                        <span className="font-medium">Clear balance to get exam card</span>
+                        <i className="fas fa-exclamation-circle text-2xl mr-2"></i><span className="font-medium">Clear balance to get exam card</span>
                       </div>
                     )}
                   </div>
@@ -40394,10 +40480,7 @@ const ExamCardsModule = ({
               
               <div className="flex justify-center">
                 {currentExamCardData.isEligible && (
-                  <button 
-                    onClick={() => setShowExamCardModal(true)} 
-                    className="bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 flex items-center justify-center w-full max-w-xs"
-                  >
+                  <button onClick={() => setShowExamCardModal(true)} className="bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 flex items-center justify-center w-full max-w-xs">
                     <i className="fas fa-id-card mr-2"></i>View My Exam Card
                   </button>
                 )}
@@ -40407,28 +40490,17 @@ const ExamCardsModule = ({
             <div className="bg-white p-12 rounded-xl shadow-sm text-center">
               <i className="fas fa-id-card text-6xl text-gray-300 mb-4"></i>
               <p className="text-gray-500 text-lg">Enter your admission number to view your exam card</p>
-              <button onClick={() => setShowAdmissionModal(true)} className="mt-4 bg-indigo-600 text-white px-6 py-2 rounded-lg">
-                Enter Admission Number
-              </button>
+              <button onClick={() => setShowAdmissionModal(true)} className="mt-4 bg-indigo-600 text-white px-6 py-2 rounded-lg">Enter Admission Number</button>
             </div>
           )}
         </div>
         
         {showExamCardModal && currentExamCardData.student && (
           <ExamCardPrintModalComponent
-            student={currentExamCardData.student}
-            currentSchool={currentSchool}
-            items={currentExamCardData.items}
-            entityName={currentExamCardData.entityName}
-            isTVET={isTVET}
-            isUniversity={isUniversity}
-            isRegularSchool={isRegularSchool}
-            getEntityLabel={getEntityLabel}
-            getItemLabel={getItemLabel}
-            getItemDisplayName={getItemDisplayName}
-            getItemCode={getItemCode}
-            getModuleLevelDisplay={getModuleLevelDisplay}
-            onClose={() => setShowExamCardModal(false)}
+            student={currentExamCardData.student} currentSchool={currentSchool} items={currentExamCardData.items}
+            entityName={currentExamCardData.entityName} isTVET={isTVET} isUniversity={isUniversity} isRegularSchool={isRegularSchool}
+            getEntityLabel={getEntityLabel} getItemLabel={getItemLabel} getItemDisplayName={getItemDisplayName}
+            getItemCode={getItemCode} getModuleLevelDisplay={getModuleLevelDisplay} onClose={() => setShowExamCardModal(false)}
           />
         )}
       </>
@@ -40440,7 +40512,6 @@ const ExamCardsModule = ({
     return (
       <div className="space-y-6">
         {loadingChildren && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
-        
         <h2 className="text-2xl font-bold">My Children's Exam Cards</h2>
         
         {myChildren.length === 0 ? (
@@ -40452,21 +40523,13 @@ const ExamCardsModule = ({
           <div className="space-y-6">
             <div className="bg-white p-6 rounded-xl shadow-sm">
               <label className="block text-sm font-medium text-gray-700 mb-2">Select Child</label>
-              <select
-                value={selectedChild?.id || ''}
-                onChange={(e) => {
-                  const child = myChildren.find(c => c.id === e.target.value);
-                  setSelectedChild(child);
-                  if (child) loadExamCardForStudent(child.id);
-                }}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-              >
+              <select value={selectedChild?.id || ''} onChange={(e) => {
+                const child = myChildren.find(c => c.id === e.target.value);
+                setSelectedChild(child);
+                if (child) loadExamCardForStudent(child.id);
+              }} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
                 <option value="">-- Select Child --</option>
-                {myChildren.map(child => (
-                  <option key={child.id} value={child.id}>
-                    {child.firstName} {child.lastName} ({child.admissionNumber})
-                  </option>
-                ))}
+                {myChildren.map(child => (<option key={child.id} value={child.id}>{child.firstName} {child.lastName} ({child.admissionNumber})</option>))}
               </select>
             </div>
             
@@ -40475,9 +40538,7 @@ const ExamCardsModule = ({
                 <div className="bg-gradient-to-r from-purple-500 to-pink-600 rounded-xl p-6 text-white">
                   <div className="flex items-center space-x-4">
                     <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center">
-                      <span className="text-2xl font-bold text-purple-600">
-                        {currentExamCardData.student.firstName?.[0]}{currentExamCardData.student.lastName?.[0]}
-                      </span>
+                      <span className="text-2xl font-bold text-purple-600">{currentExamCardData.student.firstName?.[0]}{currentExamCardData.student.lastName?.[0]}</span>
                     </div>
                     <div>
                       <h3 className="text-2xl font-bold">{currentExamCardData.student.firstName} {currentExamCardData.student.lastName}</h3>
@@ -40497,19 +40558,15 @@ const ExamCardsModule = ({
                       {currentExamCardData.isEligible ? (
                         <div className="flex flex-col items-end gap-1">
                           <div className="flex items-center text-green-600">
-                            <i className="fas fa-check-circle text-2xl mr-2"></i>
-                            <span className="font-medium">Eligible for Exam Card</span>
+                            <i className="fas fa-check-circle text-2xl mr-2"></i><span className="font-medium">Eligible for Exam Card</span>
                           </div>
                           {currentExamCardData.isOverridden && (
-                            <span className="text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded-full">
-                              <i className="fas fa-user-check mr-1"></i>Approved with balance
-                            </span>
+                            <span className="text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded-full"><i className="fas fa-user-check mr-1"></i>Approved with balance</span>
                           )}
                         </div>
                       ) : (
                         <div className="flex items-center text-red-600">
-                          <i className="fas fa-exclamation-circle text-2xl mr-2"></i>
-                          <span className="font-medium">Clear balance to get exam card</span>
+                          <i className="fas fa-exclamation-circle text-2xl mr-2"></i><span className="font-medium">Clear balance to get exam card</span>
                         </div>
                       )}
                     </div>
@@ -40518,10 +40575,7 @@ const ExamCardsModule = ({
                 
                 <div className="flex justify-center">
                   {currentExamCardData.isEligible && (
-                    <button 
-                      onClick={() => setShowExamCardModal(true)} 
-                      className="bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700"
-                    >
+                    <button onClick={() => setShowExamCardModal(true)} className="bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700">
                       <i className="fas fa-id-card mr-2"></i>View Exam Card
                     </button>
                   )}
@@ -40533,19 +40587,10 @@ const ExamCardsModule = ({
         
         {showExamCardModal && currentExamCardData.student && (
           <ExamCardPrintModalComponent
-            student={currentExamCardData.student}
-            currentSchool={currentSchool}
-            items={currentExamCardData.items}
-            entityName={currentExamCardData.entityName}
-            isTVET={isTVET}
-            isUniversity={isUniversity}
-            isRegularSchool={isRegularSchool}
-            getEntityLabel={getEntityLabel}
-            getItemLabel={getItemLabel}
-            getItemDisplayName={getItemDisplayName}
-            getItemCode={getItemCode}
-            getModuleLevelDisplay={getModuleLevelDisplay}
-            onClose={() => setShowExamCardModal(false)}
+            student={currentExamCardData.student} currentSchool={currentSchool} items={currentExamCardData.items}
+            entityName={currentExamCardData.entityName} isTVET={isTVET} isUniversity={isUniversity} isRegularSchool={isRegularSchool}
+            getEntityLabel={getEntityLabel} getItemLabel={getItemLabel} getItemDisplayName={getItemDisplayName}
+            getItemCode={getItemCode} getModuleLevelDisplay={getModuleLevelDisplay} onClose={() => setShowExamCardModal(false)}
           />
         )}
       </div>
@@ -40556,12 +40601,7 @@ const ExamCardsModule = ({
   return (
     <div className="space-y-6">
       {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse"></div>}
-      
-      {apiError && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-          <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
-        </div>
-      )}
+      {apiError && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg"><i className="fas fa-exclamation-circle mr-2"></i>{apiError}</div>}
       
       <div className="flex justify-between items-center flex-wrap gap-4">
         <div>
@@ -40570,10 +40610,7 @@ const ExamCardsModule = ({
         </div>
         {examCardOverrides.length > 0 && (
           <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
-            <span className="text-sm text-amber-800">
-              <i className="fas fa-user-check mr-1"></i>
-              <strong>{examCardOverrides.length}</strong> manual approval{examCardOverrides.length !== 1 ? 's' : ''}
-            </span>
+            <span className="text-sm text-amber-800"><i className="fas fa-user-check mr-1"></i><strong>{examCardOverrides.length}</strong> manual approval{examCardOverrides.length !== 1 ? 's' : ''}</span>
           </div>
         )}
       </div>
@@ -40581,25 +40618,14 @@ const ExamCardsModule = ({
       <div className="bg-white p-6 rounded-xl shadow-sm">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <SearchableSelect
-              label={`Select ${getEntityLabel()}`}
-              value={selectedClass}
-              onChange={(e) => {
-                setSelectedClass(e.target.value);
-                setSelectedStudents([]);
-                setSelectAll(false);
-              }}
+            <SearchableSelect label={`Select ${getEntityLabel()}`} value={selectedClass}
+              onChange={(e) => { setSelectedClass(e.target.value); setSelectedStudents([]); setSelectAll(false); }}
               options={isTVET ? programOptions : isUniversity ? courseOptions : classOptions}
-              placeholder={`Search ${getEntityLabel()}...`}
-            />
+              placeholder={`Search ${getEntityLabel()}...`} />
           </div>
-          
           <div className="flex items-end">
-            <button
-              onClick={loadZeroBalanceStudents}
-              disabled={!selectedClass || loading}
-              className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-            >
+            <button onClick={loadZeroBalanceStudents} disabled={!selectedClass || loading}
+              className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
               {loading ? 'Loading...' : 'Load Students'}
             </button>
           </div>
@@ -40618,13 +40644,7 @@ const ExamCardsModule = ({
                 <input type="checkbox" checked={selectAll} onChange={(e) => handleSelectAll(e.target.checked)} className="rounded" />
                 <span>Select All</span>
               </label>
-              <input 
-                type="text" 
-                placeholder="Search..." 
-                className="px-3 py-1 border rounded-lg text-sm" 
-                value={searchTerm} 
-                onChange={(e) => setSearchTerm(e.target.value)} 
-              />
+              <input type="text" placeholder="Search..." className="px-3 py-1 border rounded-lg text-sm" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
             </div>
           </div>
           
@@ -40650,77 +40670,44 @@ const ExamCardsModule = ({
                   return (
                     <tr key={student.id} className={`hover:bg-gray-50 ${overrideActive ? 'bg-amber-50/40' : ''}`}>
                       <td className="px-4 py-2">
-                        <input 
-                          type="checkbox" 
-                          checked={selectedStudents.includes(student.id)} 
-                          onChange={(e) => handleSelect(student.id, e.target.checked)} 
-                          className="rounded" 
-                        />
+                        <input type="checkbox" checked={selectedStudents.includes(student.id)} onChange={(e) => handleSelect(student.id, e.target.checked)} className="rounded" />
                       </td>
                       <td className="px-4 py-2 font-mono text-sm">{student.admissionNumber}</td>
                       <td className="px-4 py-2">
                         {student.firstName} {student.lastName}
-                        {overrideActive && (
-                          <span className="ml-2 text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
-                            <i className="fas fa-user-check mr-1"></i>Approved
-                          </span>
-                        )}
+                        {overrideActive && <span className="ml-2 text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full"><i className="fas fa-user-check mr-1"></i>Approved</span>}
                       </td>
                       <td className="px-4 py-2 text-sm">{entityName || 'N/A'}</td>
                       <td className="px-4 py-2 text-sm">{formatCurrency(student.totalFees)}</td>
                       <td className="px-4 py-2 text-sm text-green-600">{formatCurrency(student.totalPaid)}</td>
                       <td className="px-4 py-2 text-sm font-medium">
-                        <span className={student.balance > 0 ? 'text-red-600' : 'text-green-600'}>
-                          {formatCurrency(student.balance)}
-                        </span>
+                        <span className={student.balance > 0 ? 'text-red-600' : 'text-green-600'}>{formatCurrency(student.balance)}</span>
                       </td>
                       <td className="px-4 py-2">
                         {overrideActive ? (
-                          <button
-                            onClick={() => handleRevokeOverride(student)}
-                            disabled={overrideActionLoading === student.id}
-                            className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 disabled:opacity-50 flex items-center gap-1"
-                            title="Revoke override"
-                          >
-                            {overrideActionLoading === student.id ? (
-                              <><i className="fas fa-spinner fa-spin"></i>Revoking...</>
-                            ) : (
-                              <><i className="fas fa-undo"></i>Revoke</>
-                            )}
+                          <button onClick={() => handleRevokeOverride(student)} disabled={overrideActionLoading === student.id}
+                            className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200 disabled:opacity-50 flex items-center gap-1" title="Revoke override">
+                            {overrideActionLoading === student.id ? <><i className="fas fa-spinner fa-spin"></i>Revoking...</> : <><i className="fas fa-undo"></i>Revoke</>}
                           </button>
                         ) : student.balance > 0 && canApproveOverride ? (
-                          <button
-                            onClick={() => handleApproveOverride(student)}
-                            disabled={overrideActionLoading === student.id}
-                            className="text-xs px-2 py-1 bg-amber-100 text-amber-800 rounded hover:bg-amber-200 disabled:opacity-50 flex items-center gap-1"
-                            title="Approve exam card despite balance"
-                          >
-                            {overrideActionLoading === student.id ? (
-                              <><i className="fas fa-spinner fa-spin"></i>Approving...</>
-                            ) : (
-                              <><i className="fas fa-user-check"></i>Approve</>
-                            )}
+                          <button onClick={() => handleApproveOverride(student)} disabled={overrideActionLoading === student.id}
+                            className="text-xs px-2 py-1 bg-amber-100 text-amber-800 rounded hover:bg-amber-200 disabled:opacity-50 flex items-center gap-1" title="Approve exam card despite balance">
+                            {overrideActionLoading === student.id ? <><i className="fas fa-spinner fa-spin"></i>Approving...</> : <><i className="fas fa-user-check"></i>Approve</>}
                           </button>
                         ) : student.balance <= 0 ? (
-                          <span className="text-xs text-green-600 flex items-center gap-1">
-                            <i className="fas fa-check-circle"></i>Eligible
-                          </span>
+                          <span className="text-xs text-green-600 flex items-center gap-1"><i className="fas fa-check-circle"></i>Eligible</span>
                         ) : (
                           <span className="text-xs text-gray-400">No permission</span>
                         )}
                       </td>
                       <td className="px-4 py-2">
-                        <button 
-                          onClick={() => {
-                            const paymentsArray = [{ amount: student.totalPaid }];
-                            const examData = calculateExamCardData(student, paymentsArray);
-                            setCurrentExamCardData(examData);
-                            setSelectedStudentForCard(student);
-                            setShowSingleCardModal(true);
-                          }} 
-                          className="text-indigo-600 hover:text-indigo-900 p-2" 
-                          title="View Exam Card"
-                        >
+                        <button onClick={() => {
+                          const paymentsArray = [{ amount: student.totalPaid }];
+                          const examData = calculateExamCardData(student, paymentsArray);
+                          setCurrentExamCardData(examData);
+                          setSelectedStudentForCard(student);
+                          setShowSingleCardModal(true);
+                        }} className="text-indigo-600 hover:text-indigo-900 p-2" title="View Exam Card">
                           <i className="fas fa-id-card"></i>
                         </button>
                       </td>
@@ -40733,11 +40720,8 @@ const ExamCardsModule = ({
           
           <div className="p-4 bg-gray-50 border-t flex justify-between items-center">
             <span className="text-sm text-gray-600">Selected: {selectedStudents.length} students</span>
-            <button 
-              onClick={() => setShowPrintModal(true)} 
-              disabled={selectedStudents.length === 0} 
-              className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-            >
+            <button onClick={() => setShowPrintModal(true)} disabled={selectedStudents.length === 0}
+              className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
               Generate Exam Cards ({selectedStudents.length} students)
             </button>
           </div>
@@ -40754,204 +40738,313 @@ const ExamCardsModule = ({
 
       {showSingleCardModal && selectedStudentForCard && (
         <ExamCardPrintModalComponent
-          student={selectedStudentForCard}
-          currentSchool={currentSchool}
-          items={currentExamCardData.items || []}
+          student={selectedStudentForCard} currentSchool={currentSchool} items={currentExamCardData.items || []}
           entityName={currentExamCardData.entityName || getEntityName(selectedStudentForCard)}
-          isTVET={isTVET}
-          isUniversity={isUniversity}
-          isRegularSchool={isRegularSchool}
-          getEntityLabel={getEntityLabel}
-          getItemLabel={getItemLabel}
-          getItemDisplayName={getItemDisplayName}
-          getItemCode={getItemCode}
-          getModuleLevelDisplay={getModuleLevelDisplay}
-          onClose={() => {
-            setShowSingleCardModal(false);
-            setSelectedStudentForCard(null);
-          }}
+          isTVET={isTVET} isUniversity={isUniversity} isRegularSchool={isRegularSchool}
+          getEntityLabel={getEntityLabel} getItemLabel={getItemLabel} getItemDisplayName={getItemDisplayName}
+          getItemCode={getItemCode} getModuleLevelDisplay={getModuleLevelDisplay}
+          onClose={() => { setShowSingleCardModal(false); setSelectedStudentForCard(null); }}
         />
       )}
 
       {showPrintModal && (
         <ExamCardsPrintModalComponent
           students={studentsWithZeroBalance.filter(s => selectedStudents.includes(s.id))}
-          currentSchool={currentSchool}
-          subjects={subjects || []}
-          units={units || []}
-          programs={programs || []}
-          courses={courses || []}
-          isTVET={isTVET}
-          isUniversity={isUniversity}
-          isRegularSchool={isRegularSchool}
-          getEntityLabel={getEntityLabel}
-          getItemLabel={getItemLabel}
-          getEntityName={getEntityName}
-          getStudentItems={getStudentItems}
-          getItemDisplayName={getItemDisplayName}
-          getItemCode={getItemCode}
-          getModuleLevelDisplay={getModuleLevelDisplay}
+          currentSchool={currentSchool} subjects={subjects || []} units={units || []}
+          programs={programs || []} courses={courses || []}
+          isTVET={isTVET} isUniversity={isUniversity} isRegularSchool={isRegularSchool}
+          getEntityLabel={getEntityLabel} getItemLabel={getItemLabel} getEntityName={getEntityName}
+          getStudentItems={getStudentItems} getItemDisplayName={getItemDisplayName}
+          getItemCode={getItemCode} getModuleLevelDisplay={getModuleLevelDisplay}
           onClose={() => setShowPrintModal(false)}
         />
       )}
     </div>
   );
 };
-// ==================== EXAM CARD PRINT MODAL COMPONENT - ALL SCHOOL TYPES ====================
-const ExamCardPrintModalComponent = ({ 
-  student, 
-  currentSchool, 
-  items = [], 
-  entityName = '',
-  isTVET = false,
-  isUniversity = false,
-  isRegularSchool = true,
+
+// ==================== EXAM CARD PRINT MODAL (Single Student) ====================
+const ExamCardPrintModalComponent = ({
+  student,
+  currentSchool,
+  items,
+  entityName,
+  isTVET,
+  isUniversity,
+  isRegularSchool,
   getEntityLabel,
   getItemLabel,
   getItemDisplayName,
   getItemCode,
   getModuleLevelDisplay,
-  onClose 
+  onClose
 }) => {
-  const schoolLogo = currentSchool?.logo || '/default-logo.png';
-  const currentDate = new Date().toLocaleDateString();
-  
-  const entityLabel = getEntityLabel ? getEntityLabel() : 'Class';
-  const itemLabel = getItemLabel ? getItemLabel() : 'Subjects';
+  const schoolLogo = resolveLogoUrl(currentSchool);
+  const schoolName = currentSchool?.name || 'School Name';
+  const schoolMotto = currentSchool?.motto || '';
 
-  console.log('🖨️ Printing exam card for:', student?.firstName, student?.lastName);
-  console.log('🖨️ Items count:', items?.length);
-  console.log('🖨️ Entity name:', entityName);
+  const handlePrint = () => {
+    const printWindow = window.open('', '_blank', 'width=800,height=900');
+    const escapeHtml = (s) => String(s ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-auto">
-        <div className="p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-xl font-bold">Exam Card</h3>
-            <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
-              <i className="fas fa-times"></i>
-            </button>
-          </div>
-          
-          <div className="border-2 border-indigo-200 rounded-lg p-6" id="exam-card-print">
-            {/* School Header */}
-            <div className="text-center border-b pb-4">
-              {schoolLogo && schoolLogo !== '/default-logo.png' && (
-                <img src={schoolLogo} alt="School Logo" className="h-16 mx-auto mb-2" />
-              )}
-              <h1 className="text-2xl font-bold text-indigo-800">{currentSchool?.name || 'School Name'}</h1>
-              <p className="text-sm text-gray-600">{currentSchool?.address || 'School Address'}</p>
-              <p className="text-sm text-gray-600">{currentSchool?.phone || 'Phone Number'}</p>
-              <h2 className="text-xl font-bold mt-3">EXAMINATION CARD</h2>
-              <p className="text-sm">Issue Date: {currentDate}</p>
+    const itemsHtml = items.map((item, i) => `
+      <tr>
+        <td class="num">${i + 1}</td>
+        <td>${escapeHtml(getItemDisplayName(item))}</td>
+        <td class="center">${escapeHtml(getItemCode(item))}</td>
+        <td class="center">${escapeHtml(getModuleLevelDisplay(item) || '—')}</td>
+      </tr>
+    `).join('');
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Exam Card - ${escapeHtml(student.firstName)} ${escapeHtml(student.lastName)}</title>
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: 'Inter', sans-serif; background: #f5f5f5; padding: 20px; }
+            .card {
+              max-width: 700px; margin: 0 auto; background: white;
+              border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+              overflow: hidden; border: 1px solid #e5e7eb;
+            }
+            .card-header {
+              background: #1e3a5f; color: white; padding: 24px 32px;
+              display: flex; align-items: center; gap: 20px;
+            }
+            .logo-container {
+              width: 70px; height: 70px; background: white; border-radius: 12px;
+              display: flex; align-items: center; justify-content: center;
+              flex-shrink: 0; overflow: hidden;
+            }
+            .logo-container img { width: 100%; height: 100%; object-fit: contain; padding: 4px; }
+            .logo-placeholder {
+              width: 70px; height: 70px; background: rgba(255,255,255,0.15);
+              border-radius: 12px; display: flex; align-items: center; justify-content: center;
+              flex-shrink: 0; font-size: 28px; font-weight: 700; color: white;
+            }
+            .school-info { flex: 1; }
+            .school-name { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+            .school-motto { font-size: 12px; opacity: 0.85; font-style: italic; }
+            .card-title-bar {
+              background: #f8fafc; padding: 16px 32px; border-bottom: 1px solid #e2e8f0;
+            }
+            .card-title {
+              font-size: 14px; font-weight: 600; color: #1e3a5f;
+              text-transform: uppercase; letter-spacing: 1px;
+            }
+            .card-body { padding: 28px 32px; }
+            .info-grid {
+              display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px;
+            }
+            .info-item {
+              padding: 12px 16px; background: #f8fafc; border-radius: 8px;
+              border-left: 3px solid #1e3a5f;
+            }
+            .info-label {
+              font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+              color: #64748b; font-weight: 600; margin-bottom: 4px;
+            }
+            .info-value { font-size: 14px; font-weight: 600; color: #1e293b; }
+            .items-table {
+              width: 100%; border-collapse: collapse; margin: 20px 0;
+              border-radius: 8px; overflow: hidden;
+            }
+            .items-table thead { background: #1e3a5f; color: white; }
+            .items-table th {
+              padding: 10px 14px; text-align: left; font-size: 11px;
+              text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
+            }
+            .items-table td {
+              padding: 10px 14px; border-bottom: 1px solid #e2e8f0;
+              font-size: 13px; color: #334155;
+            }
+            .items-table td.num { text-align: center; color: #64748b; width: 36px; }
+            .items-table td.center { text-align: center; }
+            .signature-section {
+              display: flex; justify-content: space-between;
+              margin-top: 40px; padding-top: 20px; border-top: 1px dashed #cbd5e1;
+            }
+            .signature-line { width: 200px; text-align: center; }
+            .signature-line .line {
+              border-bottom: 1px solid #94a3b8; margin-bottom: 4px; height: 40px;
+            }
+            .signature-line .label {
+              font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;
+            }
+            @media print { body { background: white; padding: 0; } .card { box-shadow: none; border-radius: 0; max-width: 100%; } }
+            @page { size: A4; margin: 10mm; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="card-header">
+              ${schoolLogo ? `<div class="logo-container"><img src="${schoolLogo}" alt="Logo" /></div>` : `<div class="logo-placeholder">${(schoolName || 'S').charAt(0)}</div>`}
+              <div class="school-info">
+                <div class="school-name">${escapeHtml(schoolName)}</div>
+                ${schoolMotto ? `<div class="school-motto">"${escapeHtml(schoolMotto)}"</div>` : ''}
+              </div>
             </div>
-            
-            {/* Student Info */}
-            <div className="mt-4 space-y-2">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <p className="text-xs text-gray-500">Student Name</p>
-                  <p className="font-bold">{student?.firstName || 'N/A'} {student?.lastName || ''}</p>
+            <div class="card-title-bar">
+              <div class="card-title">Examination Card</div>
+            </div>
+            <div class="card-body">
+              <div class="info-grid">
+                <div class="info-item">
+                  <div class="info-label">Student Name</div>
+                  <div class="info-value">${escapeHtml(student.firstName)} ${escapeHtml(student.lastName)}</div>
                 </div>
-                <div>
-                  <p className="text-xs text-gray-500">Admission Number</p>
-                  <p className="font-bold">{student?.admissionNumber || 'N/A'}</p>
+                <div class="info-item">
+                  <div class="info-label">Admission Number</div>
+                  <div class="info-value">${escapeHtml(student.admissionNumber || 'N/A')}</div>
                 </div>
-                <div>
-                  <p className="text-xs text-gray-500">{entityLabel}</p>
-                  <p className="font-bold">{entityName || 'N/A'}</p>
+                <div class="info-item">
+                  <div class="info-label">${escapeHtml(getEntityLabel())}</div>
+                  <div class="info-value">${escapeHtml(entityName || 'N/A')}</div>
                 </div>
-                <div>
-                  <p className="text-xs text-gray-500">Exam Period</p>
-                  <p className="font-bold">End of Term Examinations</p>
+                <div class="info-item">
+                  <div class="info-label">Exam Period</div>
+                  <div class="info-value">${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}</div>
+                </div>
+              </div>
+              <table class="items-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>${escapeHtml(getItemLabel())}</th>
+                    <th style="text-align: center;">Code</th>
+                    <th style="text-align: center;">Level</th>
+                  </tr>
+                </thead>
+                <tbody>${itemsHtml}</tbody>
+              </table>
+              <div class="signature-section">
+                <div class="signature-line">
+                  <div class="line"></div>
+                  <div class="label">Student Signature</div>
+                </div>
+                <div class="signature-line">
+                  <div class="line"></div>
+                  <div class="label">Invigilator Signature</div>
                 </div>
               </div>
             </div>
-            
-            {/* Items Table */}
-            <div className="mt-6">
-              <h4 className="font-bold mb-2">{itemLabel} to be Examined</h4>
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="bg-gray-100">
-                    <th className="border p-2 text-left">#</th>
-                    <th className="border p-2 text-left">Name</th>
-                    <th className="border p-2 text-left">Code</th>
-                    <th className="border p-2 text-left">Level</th>
-                    <th className="border p-2 text-left">Date</th>
-                    <th className="border p-2 text-left">Time</th>
+          </div>
+          <script>window.onload = function() { setTimeout(function() { window.print(); }, 300); }</script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-hidden flex flex-col">
+        <div className="bg-slate-800 px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-white/10 rounded-lg flex items-center justify-center">
+              <i className="fas fa-id-card text-white"></i>
+            </div>
+            <div>
+              <h3 className="text-white font-semibold">Exam Card Preview</h3>
+              <p className="text-white/60 text-xs">{student.firstName} {student.lastName}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors">
+            <i className="fas fa-times"></i>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6">
+          <div className="flex items-center gap-4 mb-6 pb-6 border-b border-gray-200">
+            {schoolLogo ? (
+              <img src={schoolLogo} alt={schoolName} className="w-16 h-16 object-contain rounded-lg border border-gray-200 p-1 flex-shrink-0" />
+            ) : (
+              <div className="w-16 h-16 bg-slate-700 rounded-lg flex items-center justify-center text-white text-2xl font-bold flex-shrink-0">
+                {(schoolName || 'S').charAt(0)}
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <h2 className="text-xl font-bold text-slate-800 truncate">{schoolName}</h2>
+              {schoolMotto && <p className="text-sm text-slate-500 italic truncate">"{schoolMotto}"</p>}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 mb-6">
+            <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Student Name</p>
+              <p className="font-semibold text-slate-800 text-sm">{student.firstName} {student.lastName}</p>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Admission No</p>
+              <p className="font-mono font-semibold text-slate-800 text-sm">{student.admissionNumber || 'N/A'}</p>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">{getEntityLabel()}</p>
+              <p className="font-semibold text-slate-800 text-sm">{entityName || 'N/A'}</p>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Exam Period</p>
+              <p className="font-semibold text-slate-800 text-sm">
+                {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}
+              </p>
+            </div>
+          </div>
+
+          <div className="border border-gray-200 rounded-xl overflow-hidden">
+            <table className="w-full">
+              <thead className="bg-slate-800 text-white">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide w-12">#</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">{getItemLabel()}</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide">Code</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide">Level</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {items.map((item, i) => (
+                  <tr key={i} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 text-center text-sm text-slate-500">{i + 1}</td>
+                    <td className="px-4 py-3 text-sm font-medium text-slate-800">{getItemDisplayName(item)}</td>
+                    <td className="px-4 py-3 text-center text-sm font-mono text-slate-600">{getItemCode(item)}</td>
+                    <td className="px-4 py-3 text-center text-sm text-slate-600">{getModuleLevelDisplay(item) || '—'}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {items && items.length > 0 ? (
-                    items.map((item, idx) => {
-                      const displayName = getItemDisplayName ? getItemDisplayName(item) : item.name || 'Unknown';
-                      const code = getItemCode ? getItemCode(item) : item.code || '—';
-                      const levelDisplay = getModuleLevelDisplay ? getModuleLevelDisplay(item) : '';
-                      
-                      return (
-                        <tr key={item.id || idx}>
-                          <td className="border p-2 text-center">{idx + 1}</td>
-                          <td className="border p-2">{displayName}</td>
-                          <td className="border p-2">{code}</td>
-                          <td className="border p-2 text-center">{levelDisplay}</td>
-                          <td className="border p-2 text-center">—</td>
-                          <td className="border p-2 text-center">—</td>
-                        </tr>
-                      );
-                    })
-                  ) : (
-                    <tr>
-                      <td colSpan="6" className="border p-4 text-center text-gray-500">
-                        No {itemLabel.toLowerCase()} assigned
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            
-            {/* Footer */}
-            <div className="mt-6 pt-4 border-t text-center text-xs text-gray-500">
-              <p>This card is valid for the current examination period.</p>
-              <p>Students must present this card for each examination.</p>
-              <p className="mt-2">_________________________</p>
-              <p>Principal's Signature</p>
-            </div>
+                ))}
+              </tbody>
+            </table>
           </div>
-          
-          <div className="flex justify-end mt-4 space-x-3">
-            <button
-              onClick={() => window.print()}
-              className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700"
-            >
-              <i className="fas fa-print mr-2"></i>Print
-            </button>
-            <button
-              onClick={onClose}
-              className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
-            >
-              Close
-            </button>
-          </div>
+        </div>
+
+        <div className="flex gap-3 p-4 bg-slate-50 border-t border-gray-200">
+          <button onClick={handlePrint}
+            className="flex-1 bg-slate-800 text-white py-2.5 px-4 rounded-lg hover:bg-slate-900 transition-colors flex items-center justify-center gap-2 font-medium">
+            <i className="fas fa-print"></i>Print Exam Card
+          </button>
+          <button onClick={onClose}
+            className="flex-1 bg-white text-slate-700 py-2.5 px-4 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors font-medium">
+            Close
+          </button>
         </div>
       </div>
     </div>
   );
 };
 
-// ==================== MULTI EXAM CARDS PRINT MODAL COMPONENT - ALL SCHOOL TYPES ====================
-const ExamCardsPrintModalComponent = ({ 
-  students, 
-  currentSchool, 
-  subjects = [], 
-  units = [],
-  programs = [],
-  courses = [],
-  isTVET = false,
-  isUniversity = false,
-  isRegularSchool = true,
+// ==================== EXAM CARDS PRINT MODAL (Bulk) ====================
+const ExamCardsPrintModalComponent = ({
+  students,
+  currentSchool,
+  subjects,
+  units,
+  programs,
+  courses,
+  isTVET,
+  isUniversity,
+  isRegularSchool,
   getEntityLabel,
   getItemLabel,
   getEntityName,
@@ -40959,140 +41052,196 @@ const ExamCardsPrintModalComponent = ({
   getItemDisplayName,
   getItemCode,
   getModuleLevelDisplay,
-  onClose 
+  onClose
 }) => {
-  const schoolLogo = currentSchool?.logo || '/default-logo.png';
-  const currentDate = new Date().toLocaleDateString();
-  const entityLabel = getEntityLabel ? getEntityLabel() : 'Class';
-  const itemLabel = getItemLabel ? getItemLabel() : 'Subjects';
+  const schoolLogo = resolveLogoUrl(currentSchool);
+  const schoolName = currentSchool?.name || 'School Name';
+  const schoolMotto = currentSchool?.motto || '';
+
+  const handlePrintAll = () => {
+    const printWindow = window.open('', '_blank', 'width=1000,height=900');
+    const escapeHtml = (s) => String(s ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+    const cardsHtml = students.map(student => {
+      const items = getStudentItems(student);
+      const entityName = getEntityName(student);
+      const itemsRows = items.map((item, i) => `
+        <tr>
+          <td class="num">${i + 1}</td>
+          <td>${escapeHtml(getItemDisplayName(item))}</td>
+          <td class="center">${escapeHtml(getItemCode(item))}</td>
+          <td class="center">${escapeHtml(getModuleLevelDisplay(item) || '—')}</td>
+        </tr>
+      `).join('');
+
+      return `
+        <div class="card">
+          <div class="card-header">
+            ${schoolLogo ? `<div class="logo-container"><img src="${schoolLogo}" alt="Logo" /></div>` : `<div class="logo-placeholder">${(schoolName || 'S').charAt(0)}</div>`}
+            <div class="school-info">
+              <div class="school-name">${escapeHtml(schoolName)}</div>
+              ${schoolMotto ? `<div class="school-motto">"${escapeHtml(schoolMotto)}"</div>` : ''}
+            </div>
+          </div>
+          <div class="card-title-bar">
+            <div class="card-title">Examination Card</div>
+          </div>
+          <div class="card-body">
+            <div class="info-grid">
+              <div class="info-item">
+                <div class="info-label">Student Name</div>
+                <div class="info-value">${escapeHtml(student.firstName)} ${escapeHtml(student.lastName)}</div>
+              </div>
+              <div class="info-item">
+                <div class="info-label">Admission Number</div>
+                <div class="info-value">${escapeHtml(student.admissionNumber || 'N/A')}</div>
+              </div>
+              <div class="info-item">
+                <div class="info-label">${escapeHtml(getEntityLabel())}</div>
+                <div class="info-value">${escapeHtml(entityName || 'N/A')}</div>
+              </div>
+              <div class="info-item">
+                <div class="info-label">Exam Period</div>
+                <div class="info-value">${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}</div>
+              </div>
+            </div>
+            <table class="items-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>${escapeHtml(getItemLabel())}</th>
+                  <th style="text-align: center;">Code</th>
+                  <th style="text-align: center;">Level</th>
+                </tr>
+              </thead>
+              <tbody>${itemsRows}</tbody>
+            </table>
+            <div class="signature-section">
+              <div class="signature-line"><div class="line"></div><div class="label">Student Signature</div></div>
+              <div class="signature-line"><div class="line"></div><div class="label">Invigilator Signature</div></div>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Exam Cards - ${escapeHtml(schoolName)}</title>
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: 'Inter', sans-serif; background: #f5f5f5; padding: 20px; }
+            .card {
+              max-width: 700px; margin: 0 auto 24px; background: white;
+              border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+              overflow: hidden; border: 1px solid #e5e7eb;
+              page-break-after: always;
+            }
+            .card:last-child { page-break-after: auto; }
+            .card-header {
+              background: #1e3a5f; color: white; padding: 24px 32px;
+              display: flex; align-items: center; gap: 20px;
+            }
+            .logo-container {
+              width: 70px; height: 70px; background: white; border-radius: 12px;
+              display: flex; align-items: center; justify-content: center;
+              flex-shrink: 0; overflow: hidden;
+            }
+            .logo-container img { width: 100%; height: 100%; object-fit: contain; padding: 4px; }
+            .logo-placeholder {
+              width: 70px; height: 70px; background: rgba(255,255,255,0.15);
+              border-radius: 12px; display: flex; align-items: center; justify-content: center;
+              flex-shrink: 0; font-size: 28px; font-weight: 700; color: white;
+            }
+            .school-info { flex: 1; }
+            .school-name { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+            .school-motto { font-size: 12px; opacity: 0.85; font-style: italic; }
+            .card-title-bar { background: #f8fafc; padding: 16px 32px; border-bottom: 1px solid #e2e8f0; }
+            .card-title { font-size: 14px; font-weight: 600; color: #1e3a5f; text-transform: uppercase; letter-spacing: 1px; }
+            .card-body { padding: 28px 32px; }
+            .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px; }
+            .info-item { padding: 12px 16px; background: #f8fafc; border-radius: 8px; border-left: 3px solid #1e3a5f; }
+            .info-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; font-weight: 600; margin-bottom: 4px; }
+            .info-value { font-size: 14px; font-weight: 600; color: #1e293b; }
+            .items-table { width: 100%; border-collapse: collapse; margin: 20px 0; border-radius: 8px; overflow: hidden; }
+            .items-table thead { background: #1e3a5f; color: white; }
+            .items-table th { padding: 10px 14px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+            .items-table td { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-size: 13px; color: #334155; }
+            .items-table td.num { text-align: center; color: #64748b; width: 36px; }
+            .items-table td.center { text-align: center; }
+            .signature-section { display: flex; justify-content: space-between; margin-top: 40px; padding-top: 20px; border-top: 1px dashed #cbd5e1; }
+            .signature-line { width: 200px; text-align: center; }
+            .signature-line .line { border-bottom: 1px solid #94a3b8; margin-bottom: 4px; height: 40px; }
+            .signature-line .label { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+            @media print { body { background: white; padding: 0; } .card { box-shadow: none; border-radius: 0; max-width: 100%; border: none; } }
+            @page { size: A4; margin: 10mm; }
+          </style>
+        </head>
+        <body>
+          ${cardsHtml}
+          <script>window.onload = function() { setTimeout(function() { window.print(); }, 300); }</script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-auto">
-        <div className="p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-xl font-bold">Exam Cards ({students.length} students)</h3>
-            <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
-              <i className="fas fa-times"></i>
-            </button>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-hidden flex flex-col">
+        <div className="bg-slate-800 px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-white/10 rounded-lg flex items-center justify-center">
+              <i className="fas fa-layer-group text-white"></i>
+            </div>
+            <div>
+              <h3 className="text-white font-semibold">Bulk Exam Cards</h3>
+              <p className="text-white/60 text-xs">{students.length} students selected</p>
+            </div>
           </div>
-          
-          <div className="space-y-6" id="exam-cards-print">
-            {students.map((student, index) => {
-              const studentItems = getStudentItems ? getStudentItems(student) : [];
-              const entityName = getEntityName ? getEntityName(student) : '';
-              
-              return (
-                <div key={student.id} className="border-2 border-indigo-200 rounded-lg p-6 break-inside-avoid">
-                  {/* School Header */}
-                  <div className="text-center border-b pb-4">
-                    {schoolLogo && schoolLogo !== '/default-logo.png' && (
-                      <img src={schoolLogo} alt="School Logo" className="h-16 mx-auto mb-2" />
-                    )}
-                    <h1 className="text-2xl font-bold text-indigo-800">{currentSchool?.name || 'School Name'}</h1>
-                    <p className="text-sm text-gray-600">{currentSchool?.address || 'School Address'}</p>
-                    <h2 className="text-xl font-bold mt-3">EXAMINATION CARD</h2>
-                    <p className="text-sm">Issue Date: {currentDate}</p>
-                  </div>
-                  
-                  {/* Student Info */}
-                  <div className="mt-4 space-y-2">
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <p className="text-xs text-gray-500">Student Name</p>
-                        <p className="font-bold">{student.firstName} {student.lastName}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500">Admission Number</p>
-                        <p className="font-bold">{student.admissionNumber}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500">{entityLabel}</p>
-                        <p className="font-bold">{entityName || 'N/A'}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500">Exam Period</p>
-                        <p className="font-bold">End of Term Examinations</p>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* Items Table */}
-                  <div className="mt-6">
-                    <h4 className="font-bold mb-2">{itemLabel} to be Examined</h4>
-                    <table className="w-full border-collapse">
-                      <thead>
-                        <tr className="bg-gray-100">
-                          <th className="border p-2 text-left">#</th>
-                          <th className="border p-2 text-left">Name</th>
-                          <th className="border p-2 text-left">Code</th>
-                          <th className="border p-2 text-left">Level</th>
-                          <th className="border p-2 text-left">Date</th>
-                          <th className="border p-2 text-left">Time</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {studentItems && studentItems.length > 0 ? (
-                          studentItems.map((item, idx) => {
-                            const displayName = getItemDisplayName ? getItemDisplayName(item) : item.name || 'Unknown';
-                            const code = getItemCode ? getItemCode(item) : item.code || '—';
-                            const levelDisplay = getModuleLevelDisplay ? getModuleLevelDisplay(item) : '';
-                            
-                            return (
-                              <tr key={item.id || idx}>
-                                <td className="border p-2 text-center">{idx + 1}</td>
-                                <td className="border p-2">{displayName}</td>
-                                <td className="border p-2">{code}</td>
-                                <td className="border p-2 text-center">{levelDisplay}</td>
-                                <td className="border p-2 text-center">—</td>
-                                <td className="border p-2 text-center">—</td>
-                              </tr>
-                            );
-                          })
-                        ) : (
-                          <tr>
-                            <td colSpan="6" className="border p-4 text-center text-gray-500">
-                              No {itemLabel.toLowerCase()} assigned
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                  
-                  {/* Footer */}
-                  <div className="mt-6 pt-4 border-t text-center text-xs text-gray-500">
-                    <p>This card is valid for the current examination period.</p>
-                    <p className="mt-2">_________________________</p>
-                    <p>Principal's Signature</p>
-                  </div>
-                  
-                  {index < students.length - 1 && <hr className="my-4 border-gray-300" />}
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors">
+            <i className="fas fa-times"></i>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6">
+          <div className="space-y-3">
+            {students.map(s => (
+              <div key={s.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                <div className="w-10 h-10 bg-slate-700 rounded-full flex items-center justify-center text-white text-sm font-bold">
+                  {s.firstName?.[0]}{s.lastName?.[0]}
                 </div>
-              );
-            })}
+                <div className="flex-1">
+                  <p className="font-medium text-slate-800">{s.firstName} {s.lastName}</p>
+                  <p className="text-xs text-slate-500 font-mono">{s.admissionNumber}</p>
+                </div>
+                <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded-full">
+                  <i className="fas fa-check-circle mr-1"></i>Eligible
+                </span>
+              </div>
+            ))}
           </div>
-          
-          <div className="flex justify-end mt-4 space-x-3 sticky bottom-0 bg-white pt-4">
-            <button
-              onClick={() => window.print()}
-              className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700"
-            >
-              <i className="fas fa-print mr-2"></i>Print All
-            </button>
-            <button
-              onClick={onClose}
-              className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600"
-            >
-              Close
-            </button>
-          </div>
+        </div>
+
+        <div className="flex gap-3 p-4 bg-slate-50 border-t border-gray-200">
+          <button onClick={handlePrintAll}
+            className="flex-1 bg-slate-800 text-white py-2.5 px-4 rounded-lg hover:bg-slate-900 transition-colors flex items-center justify-center gap-2 font-medium">
+            <i className="fas fa-print"></i>Print All ({students.length})
+          </button>
+          <button onClick={onClose}
+            className="flex-1 bg-white text-slate-700 py-2.5 px-4 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors font-medium">
+            Close
+          </button>
         </div>
       </div>
     </div>
   );
 };
-
 // ==================== EXAM CARD OVERRIDES MODULE ====================
 const ExamCardOverridesModule = ({
   user,
@@ -50036,7 +50185,6 @@ const SickBayModule = ({ hostels, students, healthRecords, setActiveModule, user
   );
 };
 
-
 const SchemesOfWorkModule = ({ 
   timetable, 
   classes, 
@@ -50481,11 +50629,16 @@ const SchemesOfWorkModule = ({
     setShowPrintModal(true);
   };
   
+  // ============================================================
+  // PRINT SCHEME PDF — WITH LEFT-ALIGNED LOGO
+  // ============================================================
   const printSchemePDF = () => {
     const printWindow = window.open('', '_blank');
     const schoolName = currentSchool?.name || 'School Name';
-  const schoolLogo = resolveLogoUrl(currentSchool);
+    const schoolLogo = resolveLogoUrl(currentSchool);
     const schoolAddress = currentSchool?.contact?.address || '';
+    const schoolPhone = currentSchool?.contact?.phone || '';
+    const schoolEmail = currentSchool?.contact?.email || '';
     const schoolMotto = currentSchool?.motto || '';
     
     const entityName = getEntityName(selectedEntity);
@@ -50493,93 +50646,125 @@ const SchemesOfWorkModule = ({
     const lecturerName = getTeacherName(selectedItem);
     const department = getDepartmentName();
     
+    const escapeHtml = (s) => String(s ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+    // Shared header block with LEFT-aligned logo
+    const headerHtml = `
+      <div class="print-header">
+        ${schoolLogo ? `<div class="logo-container"><img src="${schoolLogo}" alt="Logo" /></div>` : `<div class="logo-placeholder">${(schoolName || 'S').charAt(0)}</div>`}
+        <div class="school-info">
+          <div class="school-name">${escapeHtml(schoolName)}</div>
+          ${schoolMotto ? `<div class="school-motto">"${escapeHtml(schoolMotto)}"</div>` : ''}
+          <div class="school-contact">
+            ${schoolAddress ? `<span>📍 ${escapeHtml(schoolAddress)}</span>` : ''}
+            ${schoolPhone ? `<span>📞 ${escapeHtml(schoolPhone)}</span>` : ''}
+            ${schoolEmail ? `<span>✉️ ${escapeHtml(schoolEmail)}</span>` : ''}
+          </div>
+        </div>
+      </div>
+    `;
+
     let htmlContent = '';
     
     if (printAll) {
-      htmlContent = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <title>Scheme of Work - ${itemName} - ${entityName}</title>
-            <meta charset="UTF-8">
-            <style>
-              * { margin: 0; padding: 0; box-sizing: border-box; }
-              body { font-family: 'Arial', sans-serif; padding: 20px; background: white; font-size: 12px; }
-              .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 15px; }
-              .school-name { font-size: 24px; font-weight: bold; color: #000; }
-              .title { font-size: 18px; font-weight: bold; margin: 10px 0; }
-              .info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 15px 0; border: 1px solid #000; }
-              .info-item { padding: 8px; border-bottom: 1px solid #ddd; }
-              .info-label { font-weight: bold; display: inline-block; width: 120px; }
-              table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 11px; }
-              th, td { border: 1px solid #000; padding: 8px; text-align: left; vertical-align: top; }
-              th { background: #f0f0f0; font-weight: bold; text-align: center; }
-              .week-header { background: #e0e0e0; font-weight: bold; }
-              .status-covered { color: green; font-weight: bold; }
-              .status-pending { color: orange; font-weight: bold; }
-              .footer { margin-top: 30px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; font-size: 11px; }
-              .signature-line { border-top: 1px solid #000; padding-top: 5px; margin-top: 15px; }
-              .stamp { text-align: right; margin-top: 20px; }
-              .stamp-box { border: 1px solid #000; width: 120px; height: 70px; float: right; text-align: center; padding-top: 22px; font-size: 10px; }
-              .page-break { page-break-before: always; }
-              @media print { body { padding: 10px; } th { background: #f0f0f0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
-            </style>
-          </head>
-          <body>
-            <div class="header">
-              ${schoolLogo ? `<img src="${schoolLogo}" style="max-height: 60px; margin-bottom: 8px;">` : ''}
-              <div class="school-name">${schoolName}</div>
-              ${schoolMotto ? `<p style="font-size: 11px;">${schoolMotto}</p>` : ''}
-              <div class="title">SCHEME OF WORK</div>
-            </div>
-            
-            <div class="info-grid">
-              <div class="info-item"><span class="info-label">DEPARTMENT:</span> ${department}</div>
-              <div class="info-item"><span class="info-label">COURSE:</span> ${entityName}</div>
-              <div class="info-item"><span class="info-label">LECTURER:</span> ${lecturerName}</div>
-              <div class="info-item"><span class="info-label">SUBJECT:</span> ${itemName}</div>
-              <div class="info-item"><span class="info-label">PERIOD:</span> ${selectedPeriod || 'All Periods'}</div>
-              <div class="info-item"><span class="info-label">ACADEMIC YEAR:</span> ${new Date().getFullYear()}</div>
-            </div>
-            
-            <table>
-              <thead>
-                <tr>
-                  <th width="8%">WEEK</th>
-                  <th width="8%">LESSON</th>
-                  <th width="10%">DATES</th>
-                  <th width="15%">TOPICS</th>
-                  <th width="15%">SUB-TOPICS</th>
-                  <th width="15%">TEACHING ACTIVITIES</th>
-                  <th width="12%">RESOURCES</th>
-                  <th width="12%">REMARKS</th>
-                 </thead>
-              <tbody>
-      `;
+      // ============ BULK PRINT (all schemes in one table) ============
+      let rowsHtml = '';
       schemes.forEach((scheme) => {
-        htmlContent += `
+        rowsHtml += `
           <tr>
-            <td class="week-header">${scheme.week}</td>
-            <td>${scheme.lesson || '1&2'}</td>
-            <td>${scheme.dates || formatDates(scheme.week)}</td>
-            <td><strong>${scheme.topic}</strong></td>
-            <td>${scheme.subTopic || '—'}</td>
-            <td>${scheme.teachingActivities || '—'}</td>
-            <td>${scheme.resources || '—'}</td>
+            <td class="week-cell">${escapeHtml(scheme.week)}</td>
+            <td>${escapeHtml(scheme.lesson || '1&2')}</td>
+            <td>${escapeHtml(scheme.dates || formatDates(scheme.week))}</td>
+            <td><strong>${escapeHtml(scheme.topic)}</strong></td>
+            <td>${escapeHtml(scheme.subTopic || '—')}</td>
+            <td>${escapeHtml(scheme.teachingActivities || '—')}</td>
+            <td>${escapeHtml(scheme.resources || '—')}</td>
             <td class="${scheme.covered ? 'status-covered' : 'status-pending'}">
               ${scheme.covered ? `✅ ${new Date(scheme.dateCovered).toLocaleDateString()}` : '⏳ Pending'}
             </td>
           </tr>
         `;
       });
-      htmlContent += `
+
+      htmlContent = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Scheme of Work - ${escapeHtml(itemName)} - ${escapeHtml(entityName)}</title>
+            <meta charset="UTF-8">
+            <style>
+              @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+              * { margin: 0; padding: 0; box-sizing: border-box; }
+              body { font-family: 'Inter', Arial, sans-serif; padding: 16px; background: white; font-size: 11px; color: #1f2937; }
+              
+              /* Left-aligned logo header */
+              .print-header { display: flex; align-items: center; gap: 16px; border-bottom: 2px solid #1e3a5f; padding-bottom: 12px; margin-bottom: 16px; }
+              .logo-container { width: 60px; height: 60px; background: white; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; border: 1px solid #e5e7eb; }
+              .logo-container img { width: 100%; height: 100%; object-fit: contain; padding: 4px; }
+              .logo-placeholder { width: 60px; height: 60px; background: #1e3a5f; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 22px; font-weight: 700; color: white; }
+              .school-info { flex: 1; text-align: left; }
+              .school-name { font-size: 20px; font-weight: 700; color: #1e3a5f; margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
+              .school-motto { font-size: 11px; font-style: italic; color: #6b7280; margin-bottom: 4px; }
+              .school-contact { font-size: 10px; color: #6b7280; display: flex; flex-wrap: wrap; gap: 12px; }
+              
+              .doc-title { text-align: center; font-size: 16px; font-weight: 700; color: #1e3a5f; text-transform: uppercase; letter-spacing: 1px; margin: 12px 0; }
+              
+              .info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0; margin: 12px 0; border: 1px solid #cbd5e1; }
+              .info-item { padding: 8px 12px; border-bottom: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb; }
+              .info-item:nth-child(2n) { border-right: none; }
+              .info-label { font-weight: 700; display: inline-block; width: 110px; color: #475569; font-size: 10px; text-transform: uppercase; }
+              
+              table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 10.5px; }
+              th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; vertical-align: top; }
+              th { background: #1e3a5f; color: white; font-weight: 600; text-align: center; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.5px; }
+              .week-cell { background: #f1f5f9; font-weight: 700; text-align: center; color: #1e3a5f; }
+              .status-covered { color: #15803d; font-weight: 600; text-align: center; }
+              .status-pending { color: #b45309; font-weight: 600; text-align: center; }
+              
+              .footer { margin-top: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; font-size: 11px; }
+              .signature-line { border-top: 1px solid #94a3b8; padding-top: 6px; margin-top: 24px; }
+              
+              @media print { body { padding: 10px; } th { background: #1e3a5f !important; color: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+              @page { size: A4 landscape; margin: 10mm; }
+            </style>
+          </head>
+          <body>
+            ${headerHtml}
+            <div class="doc-title">Scheme of Work</div>
+            
+            <div class="info-grid">
+              <div class="info-item"><span class="info-label">Department:</span> ${escapeHtml(department)}</div>
+              <div class="info-item"><span class="info-label">${isTVET ? 'Program' : isUniversity ? 'Course' : 'Class'}:</span> ${escapeHtml(entityName)}</div>
+              <div class="info-item"><span class="info-label">Lecturer:</span> ${escapeHtml(lecturerName)}</div>
+              <div class="info-item"><span class="info-label">${isTVET || isUniversity ? 'Unit' : 'Subject'}:</span> ${escapeHtml(itemName)}</div>
+              <div class="info-item"><span class="info-label">Period:</span> ${escapeHtml(selectedPeriod || 'All Periods')}</div>
+              <div class="info-item"><span class="info-label">Academic Year:</span> ${new Date().getFullYear()}</div>
+            </div>
+            
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 6%;">Week</th>
+                  <th style="width: 6%;">Lesson</th>
+                  <th style="width: 10%;">Dates</th>
+                  <th style="width: 15%;">Topics</th>
+                  <th style="width: 15%;">Sub-Topics</th>
+                  <th style="width: 18%;">Teaching Activities</th>
+                  <th style="width: 15%;">Resources</th>
+                  <th style="width: 15%;">Remarks</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rowsHtml}
               </tbody>
             </table>
             
             <div class="footer">
               <div>
                 <div class="signature-line">Teacher's Signature</div>
-                <p style="margin-top: 5px;">Name: ${lecturerName}</p>
+                <p style="margin-top: 5px;">Name: ${escapeHtml(lecturerName)}</p>
                 <p>Date: _________________</p>
               </div>
               <div>
@@ -50588,76 +50773,81 @@ const SchemesOfWorkModule = ({
                 <p>Date: _________________</p>
               </div>
             </div>
-            
-            <div class="stamp">
-              <div class="stamp-box">OFFICIAL<br>STAMP</div>
-            </div>
-            
-            <p style="text-align: center; font-size: 10px; margin-top: 20px;">
-              Generated on: ${new Date().toLocaleString()}
-            </p>
           </body>
         </html>
       `;
     } else {
+      // ============ SINGLE SCHEME PRINT ============
       htmlContent = `
         <!DOCTYPE html>
         <html>
           <head>
-            <title>Scheme of Work - ${printData?.topic}</title>
+            <title>Scheme of Work - ${escapeHtml(printData?.topic)}</title>
             <style>
+              @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
               * { margin: 0; padding: 0; box-sizing: border-box; }
-              body { font-family: 'Arial', sans-serif; padding: 40px; background: white; max-width: 1000px; margin: 0 auto; }
-              .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #000; padding-bottom: 20px; }
-              .school-name { font-size: 28px; font-weight: bold; color: #000; }
-              .title { font-size: 24px; font-weight: bold; margin: 20px 0; }
-              .info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 20px 0; border: 1px solid #000; }
-              .info-item { padding: 10px; border-bottom: 1px solid #ddd; }
-              .info-label { font-weight: bold; display: inline-block; width: 120px; }
-              table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-              th, td { border: 1px solid #000; padding: 12px; text-align: left; vertical-align: top; }
-              th { background: #f0f0f0; font-weight: bold; width: 180px; }
+              body { font-family: 'Inter', Arial, sans-serif; padding: 30px; background: white; max-width: 1000px; margin: 0 auto; color: #1f2937; }
+              
+              /* Left-aligned logo header */
+              .print-header { display: flex; align-items: center; gap: 20px; border-bottom: 3px double #1e3a5f; padding-bottom: 14px; margin-bottom: 18px; }
+              .logo-container { width: 80px; height: 80px; background: white; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; border: 1px solid #e5e7eb; }
+              .logo-container img { width: 100%; height: 100%; object-fit: contain; padding: 4px; }
+              .logo-placeholder { width: 80px; height: 80px; background: #1e3a5f; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 30px; font-weight: 700; color: white; }
+              .school-info { flex: 1; text-align: left; }
+              .school-name { font-size: 24px; font-weight: 700; color: #1e3a5f; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+              .school-motto { font-size: 12px; font-style: italic; color: #6b7280; margin-bottom: 6px; }
+              .school-contact { font-size: 11px; color: #6b7280; display: flex; flex-wrap: wrap; gap: 14px; }
+              
+              .doc-title { text-align: center; font-size: 20px; font-weight: 700; color: #1e3a5f; text-transform: uppercase; letter-spacing: 1.5px; margin: 18px 0; }
+              
+              .info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0; margin: 16px 0; border: 1px solid #cbd5e1; }
+              .info-item { padding: 10px 14px; border-bottom: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb; }
+              .info-item:nth-child(2n) { border-right: none; }
+              .info-label { font-weight: 700; display: inline-block; width: 120px; color: #475569; font-size: 11px; text-transform: uppercase; }
+              
+              table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+              th, td { border: 1px solid #cbd5e1; padding: 12px 14px; text-align: left; vertical-align: top; font-size: 12px; }
+              th { background: #1e3a5f; color: white; font-weight: 600; width: 200px; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; }
+              
               .footer { margin-top: 40px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
-              .signature-line { border-top: 1px solid #000; padding-top: 8px; margin-top: 20px; }
-              .stamp { text-align: right; margin-top: 30px; }
-              .stamp-box { border: 2px solid #000; width: 150px; height: 80px; float: right; text-align: center; padding-top: 28px; font-size: 12px; }
-              .generated-date { text-align: center; margin-top: 20px; font-size: 11px; color: #666; clear: both; }
-              @media print { body { padding: 20px; } th { background: #f0f0f0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+              .signature-line { border-top: 1px solid #94a3b8; padding-top: 8px; margin-top: 30px; }
+              
+              @media print { body { padding: 20px; } th { background: #1e3a5f !important; color: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+              @page { size: A4 portrait; margin: 12mm; }
             </style>
           </head>
           <body>
-            <div class="header">
-              ${schoolLogo ? `<img src="${schoolLogo}" style="max-height: 80px; margin-bottom: 10px;">` : ''}
-              <div class="school-name">${schoolName}</div>
-              ${schoolMotto ? `<p>${schoolMotto}</p>` : ''}
-              <div class="title">SCHEME OF WORK</div>
-            </div>
+            ${headerHtml}
+            <div class="doc-title">Scheme of Work</div>
             
             <div class="info-grid">
-              <div class="info-item"><span class="info-label">DEPARTMENT:</span> ${getDepartmentName()}</div>
-              <div class="info-item"><span class="info-label">COURSE:</span> ${getEntityName(selectedEntity)}</div>
-              <div class="info-item"><span class="info-label">LECTURER:</span> ${getTeacherName(printData?.teacherId || selectedItem)}</div>
-              <div class="info-item"><span class="info-label">SUBJECT:</span> ${getItemName(selectedItem)}</div>
-              <div class="info-item"><span class="info-label">PERIOD:</span> ${printData?.period || 'N/A'}</div>
-              <div class="info-item"><span class="info-label">WEEK:</span> ${printData?.week}</div>
+              <div class="info-item"><span class="info-label">Department:</span> ${escapeHtml(department)}</div>
+              <div class="info-item"><span class="info-label">${isTVET ? 'Program' : isUniversity ? 'Course' : 'Class'}:</span> ${escapeHtml(entityName)}</div>
+              <div class="info-item"><span class="info-label">Lecturer:</span> ${escapeHtml(getTeacherName(printData?.teacherId || selectedItem))}</div>
+              <div class="info-item"><span class="info-label">${isTVET || isUniversity ? 'Unit' : 'Subject'}:</span> ${escapeHtml(itemName)}</div>
+              <div class="info-item"><span class="info-label">Period:</span> ${escapeHtml(printData?.period || 'N/A')}</div>
+              <div class="info-item"><span class="info-label">Week:</span> ${escapeHtml(printData?.week || 'N/A')}</div>
             </div>
             
             <table>
-              <tr><th>TOPIC</th><td colspan="3">${printData?.topic}</td></tr>
-              <tr><th>SUB-TOPIC</th><td colspan="3">${printData?.subTopic || '—'}</td></tr>
-              <tr><th>LEARNING OBJECTIVES</th><td colspan="3">${(printData?.objectives || '—').replace(/\n/g, '<br>')}</td></tr>
-              <tr><th>TEACHING ACTIVITIES</th><td colspan="3">${(printData?.teachingActivities || '—').replace(/\n/g, '<br>')}</td></tr>
-              <tr><th>STUDENT ACTIVITIES</th><td colspan="3">${(printData?.learningActivities || '—').replace(/\n/g, '<br>')}</td></tr>
-              <tr><th>RESOURCES/MATERIALS</th><td colspan="3">${(printData?.resources || '—').replace(/\n/g, '<br>')}</td></tr>
-              <tr><th>ASSESSMENT METHODS</th><td colspan="3">${printData?.assessment || '—'}</td></tr>
-              <tr><th>REMARKS</th><td colspan="3">${printData?.remarks || '—'}</td></tr>
-              <tr><th>STATUS</th><td colspan="3">${printData?.covered ? '✅ Covered on ' + new Date(printData.dateCovered).toLocaleDateString() : '⏳ Pending'}</td></tr>
-             </table>
+              <tr><th>Topic</th><td>${escapeHtml(printData?.topic)}</td></tr>
+              <tr><th>Sub-Topic</th><td>${escapeHtml(printData?.subTopic || '—')}</td></tr>
+              <tr><th>Learning Objectives</th><td>${escapeHtml(printData?.objectives || '—').replace(/\n/g, '<br>')}</td></tr>
+              <tr><th>Teaching Activities</th><td>${escapeHtml(printData?.teachingActivities || '—').replace(/\n/g, '<br>')}</td></tr>
+              <tr><th>Student Activities</th><td>${escapeHtml(printData?.learningActivities || '—').replace(/\n/g, '<br>')}</td></tr>
+              <tr><th>Resources / Materials</th><td>${escapeHtml(printData?.resources || '—').replace(/\n/g, '<br>')}</td></tr>
+              <tr><th>Assessment Methods</th><td>${escapeHtml(printData?.assessment || '—')}</td></tr>
+              <tr><th>Remarks</th><td>${escapeHtml(printData?.remarks || '—')}</td></tr>
+              <tr>
+                <th>Status</th>
+                <td>${printData?.covered ? `✅ Covered on ${new Date(printData.dateCovered).toLocaleDateString()}` : '⏳ Pending'}</td>
+              </tr>
+            </table>
             
             <div class="footer">
               <div>
                 <div class="signature-line">Teacher's Signature</div>
-                <p style="margin-top: 5px;">Name: ${getTeacherName(printData?.teacherId || selectedItem)}</p>
+                <p style="margin-top: 5px;">Name: ${escapeHtml(getTeacherName(printData?.teacherId || selectedItem))}</p>
                 <p>Date: _________________</p>
               </div>
               <div>
@@ -50665,14 +50855,6 @@ const SchemesOfWorkModule = ({
                 <p style="margin-top: 5px;">Name: _________________</p>
                 <p>Date: _________________</p>
               </div>
-            </div>
-            
-            <div class="stamp">
-              <div class="stamp-box">OFFICIAL<br>STAMP</div>
-            </div>
-            
-            <div class="generated-date">
-              Generated on: ${new Date().toLocaleString()}
             </div>
           </body>
         </html>
@@ -53816,7 +53998,6 @@ const MODULE_PERMISSIONS = {
  
 };
 
-
 // ==================== ENHANCED RECEIPT HISTORY MODULE ====================
 const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRange, setDateRange }) => {
   const [filteredPayments, setFilteredPayments] = useState([]);
@@ -53894,17 +54075,14 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
     const student = getStudent(studentId);
     if (!student) return 'N/A';
     
-    // For TVET
     if (isTVET && student.programId) {
       const program = currentSchool?.programs?.find(p => p.id === student.programId);
       return program?.name || student.currentModule || 'N/A';
     }
-    // For University
     if (isUniversity && student.courseId) {
       const course = currentSchool?.courses?.find(c => c.id === student.courseId);
       return course?.name || 'N/A';
     }
-    // For regular schools
     return student.class?.name || student.className || 'N/A';
   };
 
@@ -53920,7 +54098,6 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
     const student = getStudent(studentId);
     if (!student) return { totalFees: 0, totalPaid: 0, balance: 0 };
 
-    // Get applicable fees for this student
     let applicableFees = [];
     if (isTVET && student.programId) {
       applicableFees = fees?.filter(f => f.programId === student.programId) || [];
@@ -53932,22 +54109,20 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
 
     const totalFees = applicableFees.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
 
-    // Get all payments for this student
     const studentPayments = payments?.filter(p => p.studentId === studentId) || [];
     const totalPaid = studentPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+    const totalBF = studentPayments.reduce((sum, p) => sum + (parseFloat(p.balanceBroughtForward) || 0), 0);
 
-    const balance = totalFees - totalPaid;
+    const balance = (totalFees + totalBF) - totalPaid;
 
-    return { totalFees, totalPaid, balance };
+    return { totalFees, totalPaid, balance, totalBF };
   };
 
   // ==================== CALCULATE RUNNING BALANCE ====================
-  // This calculates the balance AFTER each payment for a student
   const calculateRunningBalance = (studentId, paymentDate, paymentAmount) => {
     const student = getStudent(studentId);
     if (!student) return 0;
 
-    // Get applicable fees
     let applicableFees = [];
     if (isTVET && student.programId) {
       applicableFees = fees?.filter(f => f.programId === student.programId) || [];
@@ -53959,7 +54134,6 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
 
     const totalFees = applicableFees.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
 
-    // Get all payments for this student UP TO AND INCLUDING this payment
     const paymentDateObj = new Date(paymentDate);
     const paymentsUpToThis = payments?.filter(p => {
       if (p.studentId !== studentId) return false;
@@ -53991,7 +54165,6 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
       const studentId = payment.studentId;
       const student = getStudent(studentId);
       
-      // Get applicable fees
       let applicableFees = [];
       if (student) {
         if (isTVET && student.programId) {
@@ -54005,7 +54178,6 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
 
       const totalFees = applicableFees.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
 
-      // Get all payments for this student up to this payment date
       const paymentDateObj = new Date(payment.date || payment.createdAt);
       const paymentsUpToThis = payments?.filter(p => {
         if (p.studentId !== studentId) return false;
@@ -54014,28 +54186,28 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
       }) || [];
 
       const totalPaidUpToThis = paymentsUpToThis.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+      const totalBF = paymentsUpToThis.reduce((sum, p) => sum + (parseFloat(p.balanceBroughtForward) || 0), 0);
 
-      // Get ALL payments for this student (for final balance)
       const allStudentPayments = payments?.filter(p => p.studentId === studentId) || [];
       const totalPaidAll = allStudentPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+      const totalBFAll = allStudentPayments.reduce((sum, p) => sum + (parseFloat(p.balanceBroughtForward) || 0), 0);
 
-      const runningBalance = totalFees - totalPaidUpToThis;
-      const currentBalance = totalFees - totalPaidAll;
+      const runningBalance = (totalFees + totalBF) - totalPaidUpToThis;
+      const currentBalance = (totalFees + totalBFAll) - totalPaidAll;
 
       return {
         ...payment,
-        // Student info
         studentName: student ? `${student.firstName} ${student.lastName}` : 'Unknown',
         admissionNumber: student?.admissionNumber || 'N/A',
         className: getStudentClass(studentId),
-        // Fee info
         feeName: getFeeName(payment.feeId),
-        // Balance info
         totalFees,
+        totalBF,
+        totalBFAll,
         totalPaidUpToThis,
-        runningBalance, // Balance after this payment
+        runningBalance,
         totalPaidAll,
-        currentBalance, // Current total balance
+        currentBalance,
         isFullyPaid: currentBalance <= 0
       };
     });
@@ -54045,7 +54217,6 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
   const loadReceipts = async () => {
     setLoading(true);
     try {
-      // First load fees if not loaded
       if (fees.length === 0) {
         await loadFees();
       }
@@ -54064,7 +54235,6 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
       const res = await api.get('/payments', { params });
       let receipts = res.data.payments || [];
       
-      // Apply search filter
       if (searchTerm) {
         const term = searchTerm.toLowerCase();
         receipts = receipts.filter(r => {
@@ -54077,22 +54247,18 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
         });
       }
       
-      // Sort by date (newest first)
       const sortedReceipts = receipts.sort((a, b) => 
         new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt)
       );
       
-      // Enrich with balance info
       const enriched = enrichPaymentsWithBalance(sortedReceipts);
       
       setFilteredPayments(sortedReceipts);
       setEnrichedPayments(enriched);
       
-      // Calculate totals
       const total = receipts.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
       setTotalCollected(total);
       
-      // Calculate stats
       const today = new Date().toISOString().split('T')[0];
       const todayReceipts = receipts.filter(r => {
         const rDate = (r.date || r.createdAt || '').split('T')[0];
@@ -54141,352 +54307,166 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
     return opts;
   }, [students]);
 
+  // ==================== NUMBER TO WORDS ====================
+  const numberToWords = (num) => {
+    if (!num || num === 0) return 'Zero';
+    
+    const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
+      'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+    const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+    
+    const numToWords = (n) => {
+      if (n < 20) return ones[n];
+      if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '');
+      if (n < 1000) return ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' + numToWords(n % 100) : '');
+      if (n < 1000000) return numToWords(Math.floor(n / 1000)) + ' Thousand' + (n % 1000 ? ' ' + numToWords(n % 1000) : '');
+      if (n < 1000000000) return numToWords(Math.floor(n / 1000000)) + ' Million' + (n % 1000000 ? ' ' + numToWords(n % 1000000) : '');
+      return numToWords(Math.floor(n / 1000000000)) + ' Billion' + (n % 1000000000 ? ' ' + numToWords(n % 1000000000) : '');
+    };
+    
+    return numToWords(Math.floor(num));
+  };
+
   // ==================== PRINT RECEIPT ====================
   const handlePrintReceipt = (receipt) => {
     const enrichedReceipt = enrichedPayments.find(p => p.id === receipt.id) || receipt;
     const student = getStudent(receipt.studentId);
     const printWindow = window.open('', '_blank', 'width=800,height=900');
     
-    const receiptNo = receipt.receiptNo || `RCP-${String(receipt.id).padStart(6, '0')}`;
     const amountInWords = numberToWords(receipt.amount);
-const schoolLogo = resolveLogoUrl(currentSchool);
-    
+    const schoolLogo = resolveLogoUrl(currentSchool);
+
+    // Clean receipt HTML - no AI comments, no receipt no in header, no reference
     printWindow.document.write(`
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Receipt ${receiptNo} - ${currentSchool?.name || 'School'}</title>
+          <title>Fee Receipt - ${currentSchool?.name || 'School'}</title>
           <style>
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-            
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            
             body {
               font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-              background: #f5f5f5;
-              padding: 20px;
-              -webkit-print-color-adjust: exact;
-              print-color-adjust: exact;
+              background: #f9fafb; padding: 20px;
+              -webkit-print-color-adjust: exact; print-color-adjust: exact;
             }
-            
             .receipt-container {
-              max-width: 700px;
-              margin: 0 auto;
-              background: white;
-              border-radius: 12px;
-              box-shadow: 0 4px 24px rgba(0,0,0,0.1);
-              overflow: hidden;
+              max-width: 700px; margin: 0 auto; background: white;
+              border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); overflow: hidden;
+              border: 1px solid #e5e7eb;
             }
-            
-            /* Header */
             .receipt-header {
-              background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%);
-              color: white;
-              padding: 24px 32px;
-              display: flex;
-              align-items: center;
-              gap: 20px;
+              background: #1e3a5f; color: white; padding: 24px 32px;
+              display: flex; align-items: center; gap: 20px;
             }
-            
             .logo-container {
-              width: 70px;
-              height: 70px;
-              background: white;
-              border-radius: 12px;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              flex-shrink: 0;
-              overflow: hidden;
-              box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+              width: 70px; height: 70px; background: white; border-radius: 12px;
+              display: flex; align-items: center; justify-content: center;
+              flex-shrink: 0; overflow: hidden;
             }
-            
-            .logo-container img {
-              width: 100%;
-              height: 100%;
-              object-fit: contain;
-              padding: 4px;
-            }
-            
+            .logo-container img { width: 100%; height: 100%; object-fit: contain; padding: 4px; }
             .logo-placeholder {
-              width: 70px;
-              height: 70px;
-              background: rgba(255,255,255,0.2);
-              border-radius: 12px;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              flex-shrink: 0;
-              font-size: 28px;
-              font-weight: 700;
-              color: white;
-              border: 2px dashed rgba(255,255,255,0.4);
+              width: 70px; height: 70px; background: rgba(255,255,255,0.15);
+              border-radius: 12px; display: flex; align-items: center; justify-content: center;
+              flex-shrink: 0; font-size: 28px; font-weight: 700; color: white;
+              border: 2px dashed rgba(255,255,255,0.3);
             }
-            
             .school-info { flex: 1; }
+            .school-name { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 4px; }
+            .school-motto { font-size: 12px; opacity: 0.85; font-style: italic; margin-bottom: 6px; }
+            .school-contact { font-size: 11px; opacity: 0.75; display: flex; flex-wrap: wrap; gap: 12px; }
             
-            .school-name {
-              font-size: 22px;
-              font-weight: 700;
-              letter-spacing: -0.5px;
-              margin-bottom: 4px;
-            }
-            
-            .school-motto {
-              font-size: 12px;
-              opacity: 0.85;
-              font-style: italic;
-              margin-bottom: 6px;
-            }
-            
-            .school-contact {
-              font-size: 11px;
-              opacity: 0.75;
-              display: flex;
-              flex-wrap: wrap;
-              gap: 12px;
-            }
-            
-            /* Receipt Title */
-            .receipt-title-bar {
-              background: #f8fafc;
-              padding: 16px 32px;
-              border-bottom: 1px solid #e2e8f0;
-              display: flex;
-              justify-content: space-between;
-              align-items: center;
-            }
-            
-            .receipt-title {
-              font-size: 14px;
-              font-weight: 600;
-              color: #1e3a5f;
-              text-transform: uppercase;
-              letter-spacing: 1px;
-            }
-            
-            .receipt-number {
-              font-size: 16px;
-              font-weight: 700;
-              color: #1e3a5f;
-              font-family: 'Courier New', monospace;
-            }
-            
-            /* Body */
-            .receipt-body { padding: 28px 32px; position: relative; }
+            .receipt-body { padding: 32px; }
             
             .info-grid {
-              display: grid;
-              grid-template-columns: 1fr 1fr;
-              gap: 16px;
-              margin-bottom: 24px;
+              display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 28px;
             }
-            
             .info-item {
-              padding: 12px 16px;
-              background: #f8fafc;
-              border-radius: 8px;
-              border-left: 3px solid #2d5a87;
+              padding: 12px 16px; background: #f8fafc; border-radius: 8px;
+              border-left: 3px solid #1e3a5f;
             }
-            
             .info-label {
-              font-size: 10px;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-              color: #64748b;
-              font-weight: 600;
-              margin-bottom: 4px;
+              font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+              color: #64748b; font-weight: 600; margin-bottom: 4px;
             }
+            .info-value { font-size: 14px; font-weight: 600; color: #1e293b; }
             
-            .info-value {
-              font-size: 14px;
-              font-weight: 600;
-              color: #1e293b;
-            }
-            
-            /* Payment Table */
             .payment-table {
-              width: 100%;
-              border-collapse: collapse;
-              margin: 24px 0;
-              border-radius: 8px;
-              overflow: hidden;
-              box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+              width: 100%; border-collapse: collapse; margin: 24px 0;
+              border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05);
             }
-            
-            .payment-table thead {
-              background: #1e3a5f;
-              color: white;
-            }
-            
+            .payment-table thead { background: #1e3a5f; color: white; }
             .payment-table th {
-              padding: 12px 16px;
-              text-align: left;
-              font-size: 11px;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-              font-weight: 600;
+              padding: 12px 16px; text-align: left; font-size: 11px;
+              text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
             }
-            
             .payment-table th:last-child { text-align: right; }
-            
             .payment-table td {
-              padding: 14px 16px;
-              border-bottom: 1px solid #e2e8f0;
-              font-size: 14px;
-              color: #334155;
+              padding: 14px 16px; border-bottom: 1px solid #e2e8f0;
+              font-size: 14px; color: #334155;
             }
+            .payment-table td:last-child { text-align: right; font-weight: 600; }
+            .payment-table .total-row { background: #f1f5f9; font-weight: 700; }
+            .payment-table .total-row td { font-size: 16px; color: #1e3a5f; }
             
-            .payment-table td:last-child {
-              text-align: right;
-              font-weight: 600;
-            }
-            
-            .payment-table .total-row {
-              background: #f1f5f9;
-              font-weight: 700;
-            }
-            
-            .payment-table .total-row td {
-              font-size: 16px;
-              color: #1e3a5f;
-            }
-            
-            /* Balance Section */
             .balance-section {
-              display: grid;
-              grid-template-columns: repeat(3, 1fr);
-              gap: 12px;
-              margin: 24px 0;
+              display: grid; grid-template-columns: repeat(3, 1fr);
+              gap: 12px; margin: 24px 0;
             }
-            
-            .balance-card {
-              padding: 16px;
-              border-radius: 8px;
-              text-align: center;
-            }
-            
+            .balance-card { padding: 16px; border-radius: 8px; text-align: center; }
             .balance-card.total { background: #eff6ff; border: 1px solid #bfdbfe; }
             .balance-card.paid { background: #f0fdf4; border: 1px solid #bbf7d0; }
             .balance-card.remaining { background: #fef2f2; border: 1px solid #fecaca; }
             .balance-card.cleared { background: #f0fdf4; border: 1px solid #bbf7d0; }
-            
+            .balance-card.bf { background: #fffbeb; border: 1px solid #fde68a; }
             .balance-label {
-              font-size: 10px;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-              font-weight: 600;
-              margin-bottom: 6px;
+              font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+              font-weight: 600; margin-bottom: 6px;
             }
-            
             .balance-card.total .balance-label { color: #1d4ed8; }
             .balance-card.paid .balance-label { color: #15803d; }
             .balance-card.remaining .balance-label { color: #dc2626; }
             .balance-card.cleared .balance-label { color: #15803d; }
-            
-            .balance-value {
-              font-size: 20px;
-              font-weight: 700;
-            }
-            
+            .balance-card.bf .balance-label { color: #b45309; }
+            .balance-value { font-size: 20px; font-weight: 700; }
             .balance-card.total .balance-value { color: #1e40af; }
             .balance-card.paid .balance-value { color: #166534; }
             .balance-card.remaining .balance-value { color: #991b1b; }
             .balance-card.cleared .balance-value { color: #166534; }
+            .balance-card.bf .balance-value { color: #92400e; }
             
-            /* Amount in Words */
             .amount-words {
-              background: #fef3c7;
-              border: 1px solid #fcd34d;
-              border-radius: 8px;
-              padding: 12px 16px;
-              margin: 20px 0;
-              font-size: 13px;
-              color: #92400e;
+              background: #fef3c7; border: 1px solid #fcd34d;
+              border-radius: 8px; padding: 12px 16px; margin: 20px 0;
+              font-size: 13px; color: #92400e;
             }
             
-            /* Footer */
-            .receipt-footer {
-              padding: 20px 32px;
-              background: #f8fafc;
-              border-top: 1px solid #e2e8f0;
-              text-align: center;
-            }
-            
-            .thank-you {
-              font-size: 14px;
-              font-weight: 600;
-              color: #1e3a5f;
-              margin-bottom: 8px;
-            }
-            
-            .footer-note {
-              font-size: 11px;
-              color: #94a3b8;
-              line-height: 1.6;
-            }
-            
-            /* Signature */
             .signature-section {
-              display: flex;
-              justify-content: space-between;
-              margin-top: 32px;
-              padding-top: 20px;
-              border-top: 1px dashed #cbd5e1;
+              display: flex; justify-content: space-between;
+              margin-top: 40px; padding-top: 20px; border-top: 1px dashed #cbd5e1;
             }
-            
-            .signature-line {
-              width: 180px;
-              text-align: center;
-            }
-            
+            .signature-line { width: 180px; text-align: center; }
             .signature-line .line {
-              border-bottom: 1px solid #94a3b8;
-              margin-bottom: 4px;
-              height: 40px;
+              border-bottom: 1px solid #94a3b8; margin-bottom: 4px; height: 40px;
             }
-            
             .signature-line .label {
-              font-size: 10px;
-              color: #64748b;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-            }
-            
-            /* Watermark */
-            .watermark {
-              position: absolute;
-              top: 50%;
-              left: 50%;
-              transform: translate(-50%, -50%) rotate(-30deg);
-              font-size: 80px;
-              font-weight: 700;
-              color: rgba(30, 58, 95, 0.04);
-              pointer-events: none;
-              white-space: nowrap;
-              z-index: 0;
+              font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;
             }
             
             @media print {
               body { background: white; padding: 0; }
-              .receipt-container { box-shadow: none; border-radius: 0; max-width: 100%; }
+              .receipt-container { box-shadow: none; border-radius: 0; max-width: 100%; border: none; }
             }
-            
             @page { size: A4; margin: 10mm; }
           </style>
         </head>
         <body>
           <div class="receipt-container">
-            <!-- Header -->
             <div class="receipt-header">
               ${schoolLogo ? `
-                <div class="logo-container">
-                  <img src="${schoolLogo}" alt="School Logo" />
-                </div>
+                <div class="logo-container"><img src="${schoolLogo}" alt="Logo" /></div>
               ` : `
-                <div class="logo-placeholder">
-                  ${(currentSchool?.name || 'S').charAt(0)}
-                </div>
+                <div class="logo-placeholder">${(currentSchool?.name || 'S').charAt(0)}</div>
               `}
               <div class="school-info">
                 <div class="school-name">${currentSchool?.name || 'School Name'}</div>
@@ -54498,18 +54478,8 @@ const schoolLogo = resolveLogoUrl(currentSchool);
                 </div>
               </div>
             </div>
-            
-            <!-- Title Bar -->
-            <div class="receipt-title-bar">
-              <div class="receipt-title">Official Payment Receipt</div>
-              <div class="receipt-number">${receiptNo}</div>
-            </div>
-            
-            <!-- Body -->
+
             <div class="receipt-body">
-              <div class="watermark">PAID</div>
-              
-              <!-- Student Info -->
               <div class="info-grid">
                 <div class="info-item">
                   <div class="info-label">Student Name</div>
@@ -54531,13 +54501,8 @@ const schoolLogo = resolveLogoUrl(currentSchool);
                   <div class="info-label">Payment Method</div>
                   <div class="info-value">${receipt.paymentMethod || 'Cash'}</div>
                 </div>
-                <div class="info-item">
-                  <div class="info-label">Reference</div>
-                  <div class="info-value">${receipt.reference || receipt.transactionId || '—'}</div>
-                </div>
               </div>
-              
-              <!-- Payment Details -->
+
               <table class="payment-table">
                 <thead>
                   <tr>
@@ -54556,8 +54521,7 @@ const schoolLogo = resolveLogoUrl(currentSchool);
                   </tr>
                 </tbody>
               </table>
-              
-              <!-- Balance Section -->
+
               <div class="balance-section">
                 <div class="balance-card total">
                   <div class="balance-label">Total Fees</div>
@@ -54572,21 +54536,27 @@ const schoolLogo = resolveLogoUrl(currentSchool);
                   <div class="balance-value">${enrichedReceipt.currentBalance <= 0 ? '✓ CLEARED' : formatCurrency(enrichedReceipt.currentBalance)}</div>
                 </div>
               </div>
-              
-              <!-- Amount in Words -->
+
+              ${enrichedReceipt.totalBFAll > 0 ? `
+                <div class="balance-section" style="grid-template-columns: 1fr;">
+                  <div class="balance-card bf">
+                    <div class="balance-label">Balance Brought Forward</div>
+                    <div class="balance-value">${formatCurrency(enrichedReceipt.totalBFAll)}</div>
+                  </div>
+                </div>
+              ` : ''}
+
               <div class="amount-words">
                 <strong>Amount in words:</strong> ${amountInWords} Kenya Shillings Only
               </div>
-              
-              <!-- Notes -->
+
               ${receipt.notes ? `
-                <div style="margin: 16px 0; padding: 12px; background: #f1f5f9; border-radius: 8px;">
+                <div style="margin: 20px 0; padding: 12px 16px; background: #f1f5f9; border-radius: 8px;">
                   <div class="info-label">Notes</div>
                   <div style="font-size: 13px; color: #475569; margin-top: 4px;">${receipt.notes}</div>
                 </div>
               ` : ''}
-              
-              <!-- Signatures -->
+
               <div class="signature-section">
                 <div class="signature-line">
                   <div class="line"></div>
@@ -54598,67 +54568,34 @@ const schoolLogo = resolveLogoUrl(currentSchool);
                 </div>
               </div>
             </div>
-            
-            <!-- Footer -->
-            <div class="receipt-footer">
-              <div class="thank-you">Thank you for your payment!</div>
-              <div class="footer-note">
-                This is a computer-generated receipt and is valid without signature.<br>
-                Printed on: ${formatDateTime(new Date())} | Receipt: ${receiptNo}
-              </div>
-            </div>
           </div>
-          
-          <script>
-            window.onload = function() {
-              setTimeout(function() { window.print(); }, 300);
-            }
-          </script>
+          <script>window.onload = function() { setTimeout(function() { window.print(); }, 300); }</script>
         </body>
       </html>
     `);
     printWindow.document.close();
   };
 
-  // ==================== NUMBER TO WORDS ====================
-  const numberToWords = (num) => {
-    if (!num || num === 0) return 'Zero';
-    
-    const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
-      'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
-    const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
-    
-    const numToWords = (n) => {
-      if (n < 20) return ones[n];
-      if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '');
-      if (n < 1000) return ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' + numToWords(n % 100) : '');
-      if (n < 1000000) return numToWords(Math.floor(n / 1000)) + ' Thousand' + (n % 1000 ? ' ' + numToWords(n % 1000) : '');
-      if (n < 1000000000) return numToWords(Math.floor(n / 1000000)) + ' Million' + (n % 1000000 ? ' ' + numToWords(n % 1000000) : '');
-      return numToWords(Math.floor(n / 1000000000)) + ' Billion' + (n % 1000000000 ? ' ' + numToWords(n % 1000000000) : '');
-    };
-    
-    return numToWords(Math.floor(num));
-  };
-
   // ==================== RECEIPT VIEW MODAL ====================
   const ReceiptViewModal = ({ receipt, onClose }) => {
     const enriched = enrichedPayments.find(p => p.id === receipt.id) || receipt;
     const student = getStudent(receipt.studentId);
-    const receiptNo = receipt.receiptNo || `RCP-${String(receipt.id).padStart(6, '0')}`;
     const amountInWords = numberToWords(receipt.amount);
+    const isCleared = enriched.currentBalance <= 0;
+    const hasBF = (enriched.totalBFAll || 0) > 0;
     
     return (
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
           {/* Modal Header */}
-          <div className="bg-gradient-to-r from-slate-800 to-slate-700 px-6 py-4 flex items-center justify-between">
+          <div className="bg-slate-800 px-6 py-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-white/10 rounded-lg flex items-center justify-center">
                 <i className="fas fa-receipt text-white"></i>
               </div>
               <div>
-                <h3 className="text-white font-semibold">Receipt Preview</h3>
-                <p className="text-white/60 text-xs">{receiptNo}</p>
+                <h3 className="text-white font-semibold">Payment Receipt</h3>
+                <p className="text-white/60 text-xs">Fee Payment</p>
               </div>
             </div>
             <button 
@@ -54671,23 +54608,23 @@ const schoolLogo = resolveLogoUrl(currentSchool);
           
           {/* Modal Body */}
           <div className="flex-1 overflow-y-auto p-6">
-            {/* School Header */}
+            {/* School Header (Left Aligned) */}
             <div className="flex items-center gap-4 mb-6 pb-6 border-b border-gray-200">
               {currentSchool?.contact?.logo ? (
                 <img 
                   src={currentSchool.contact.logo} 
                   alt={currentSchool.name}
-                  className="w-16 h-16 object-contain rounded-lg border border-gray-200 p-1"
+                  className="w-16 h-16 object-contain rounded-lg border border-gray-200 p-1 flex-shrink-0"
                 />
               ) : (
-                <div className="w-16 h-16 bg-gradient-to-br from-slate-700 to-slate-800 rounded-lg flex items-center justify-center text-white text-2xl font-bold">
+                <div className="w-16 h-16 bg-slate-700 rounded-lg flex items-center justify-center text-white text-2xl font-bold flex-shrink-0">
                   {currentSchool?.name?.charAt(0) || 'S'}
                 </div>
               )}
-              <div>
-                <h2 className="text-xl font-bold text-slate-800">{currentSchool?.name || 'School Name'}</h2>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-xl font-bold text-slate-800 truncate">{currentSchool?.name || 'School Name'}</h2>
                 {currentSchool?.motto && (
-                  <p className="text-sm text-slate-500 italic">"{currentSchool.motto}"</p>
+                  <p className="text-sm text-slate-500 italic truncate">"{currentSchool.motto}"</p>
                 )}
                 <div className="flex flex-wrap gap-3 mt-1 text-xs text-slate-400">
                   {currentSchool?.contact?.address && <span>📍 {currentSchool.contact.address}</span>}
@@ -54699,20 +54636,20 @@ const schoolLogo = resolveLogoUrl(currentSchool);
             {/* Receipt Info Grid */}
             <div className="grid grid-cols-2 gap-4 mb-6">
               <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
-                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Receipt Number</p>
-                <p className="font-mono font-bold text-slate-800">{receiptNo}</p>
-              </div>
-              <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
-                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Date</p>
-                <p className="font-semibold text-slate-800">{formatDate(receipt.date || receipt.createdAt)}</p>
-              </div>
-              <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
                 <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Student Name</p>
-                <p className="font-semibold text-slate-800">{student?.firstName} {student?.lastName}</p>
+                <p className="font-semibold text-slate-800 text-sm truncate">{student?.firstName} {student?.lastName}</p>
               </div>
               <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
                 <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Admission No</p>
-                <p className="font-mono font-semibold text-slate-800">{student?.admissionNumber || 'N/A'}</p>
+                <p className="font-mono font-semibold text-slate-800 text-sm">{student?.admissionNumber || 'N/A'}</p>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Payment Date</p>
+                <p className="font-semibold text-slate-800 text-sm">{formatDate(receipt.date || receipt.createdAt)}</p>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Payment Method</p>
+                <p className="font-semibold text-slate-800 text-sm">{receipt.paymentMethod || 'Cash'}</p>
               </div>
             </div>
             
@@ -54748,38 +54685,35 @@ const schoolLogo = resolveLogoUrl(currentSchool);
                 <p className="text-xs text-green-600 uppercase tracking-wide font-semibold mb-1">Total Paid</p>
                 <p className="text-lg font-bold text-green-800">{formatCurrency(enriched.totalPaidAll || 0)}</p>
               </div>
-              <div className={`${enriched.currentBalance <= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'} border rounded-lg p-4 text-center`}>
-                <p className={`text-xs ${enriched.currentBalance <= 0 ? 'text-green-600' : 'text-red-600'} uppercase tracking-wide font-semibold mb-1`}>
-                  {enriched.currentBalance <= 0 ? 'Fully Paid' : 'Balance Remaining'}
+              <div className={`${isCleared ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'} border rounded-lg p-4 text-center`}>
+                <p className={`text-xs ${isCleared ? 'text-green-600' : 'text-red-600'} uppercase tracking-wide font-semibold mb-1`}>
+                  {isCleared ? 'Fully Paid' : 'Balance Remaining'}
                 </p>
-                <p className={`text-lg font-bold ${enriched.currentBalance <= 0 ? 'text-green-800' : 'text-red-800'}`}>
-                  {enriched.currentBalance <= 0 ? '✓ CLEARED' : formatCurrency(enriched.currentBalance)}
+                <p className={`text-lg font-bold ${isCleared ? 'text-green-800' : 'text-red-800'}`}>
+                  {isCleared ? '✓ CLEARED' : formatCurrency(enriched.currentBalance)}
                 </p>
               </div>
             </div>
+
+            {/* Balance Brought Forward */}
+            {hasBF && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-6">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-amber-700 font-medium">
+                    <i className="fas fa-arrow-right mr-1"></i>Balance Brought Forward:
+                  </span>
+                  <span className="font-bold text-amber-800">
+                    {formatCurrency(enriched.totalBFAll)}
+                  </span>
+                </div>
+              </div>
+            )}
             
             {/* Amount in Words */}
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-6">
               <p className="text-xs text-amber-700">
                 <strong>Amount in words:</strong> {amountInWords} Kenya Shillings Only
               </p>
-            </div>
-            
-            {/* Payment Method & Reference */}
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <div>
-                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Payment Method</p>
-                <span className="inline-flex items-center px-3 py-1 bg-slate-100 rounded-full text-sm font-medium text-slate-700">
-                  <i className="fas fa-credit-card mr-2 text-slate-400"></i>
-                  {receipt.paymentMethod || 'Cash'}
-                </span>
-              </div>
-              {(receipt.reference || receipt.transactionId) && (
-                <div>
-                  <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Reference</p>
-                  <span className="font-mono text-sm text-slate-700">{receipt.reference || receipt.transactionId}</span>
-                </div>
-              )}
             </div>
             
             {/* Notes */}
@@ -54793,9 +54727,6 @@ const schoolLogo = resolveLogoUrl(currentSchool);
             {/* Footer */}
             <div className="text-center pt-4 border-t border-dashed border-gray-200">
               <p className="text-sm font-medium text-slate-600">Thank you for your payment!</p>
-              <p className="text-xs text-slate-400 mt-1">
-                This is a computer-generated receipt. No signature required.
-              </p>
             </div>
           </div>
           
@@ -54927,7 +54858,6 @@ const schoolLogo = resolveLogoUrl(currentSchool);
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Receipt No</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Student</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Admission</th>
@@ -54946,9 +54876,6 @@ const schoolLogo = resolveLogoUrl(currentSchool);
                   
                   return (
                     <tr key={payment.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-4 font-mono text-sm font-medium text-slate-700">
-                        {payment.receiptNo || `RCP-${String(payment.id).padStart(6, '0')}`}
-                      </td>
                       <td className="px-4 py-4 text-sm text-gray-600">
                         {formatDate(payment.date || payment.createdAt)}
                       </td>
@@ -55019,8 +54946,7 @@ const schoolLogo = resolveLogoUrl(currentSchool);
   );
 };
 
-
-// ==================== FEE COLLECTION MODULE (with discounts) ====================
+// ==================== FEE COLLECTION MODULE (with discounts & B/F) ====================
 const FeeCollectionModule = ({
   students = [],
   fees = [],
@@ -55038,6 +54964,7 @@ const FeeCollectionModule = ({
   const [selectedStudent, setSelectedStudent] = useState('');
   const [studentDetails, setStudentDetails] = useState(null);
   const [amount, setAmount] = useState('');
+  const [balanceBroughtForward, setBalanceBroughtForward] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('CASH');
   const [paymentDate, setPaymentDate] = useState(() => {
     const now = new Date();
@@ -55419,6 +55346,7 @@ const FeeCollectionModule = ({
       setTotalDiscounts(0);
       setStudentDiscounts([]);
       setRecentPayments([]);
+      setBalanceBroughtForward('');
     }
   };
 
@@ -55427,9 +55355,13 @@ const FeeCollectionModule = ({
     e.preventDefault();
     if (!selectedStudent) { setApiError('Please select a student'); return; }
     if (!amount || parseFloat(amount) <= 0) { setApiError('Please enter a valid amount'); return; }
-    if (parseFloat(amount) > outstandingBalance && outstandingBalance > 0) {
+
+    const bf = parseFloat(balanceBroughtForward) || 0;
+    const effectiveOutstanding = outstandingBalance + bf;
+
+    if (parseFloat(amount) > effectiveOutstanding && effectiveOutstanding > 0) {
       if (!window.confirm(
-        `Warning: Amount (${formatCurrency(amount)}) exceeds outstanding balance (${formatCurrency(outstandingBalance)}). Continue?`
+        `Warning: Amount (${formatCurrency(amount)}) exceeds outstanding balance (${formatCurrency(effectiveOutstanding)}). Continue?`
       )) return;
     }
     setLoading(true);
@@ -55443,6 +55375,7 @@ const FeeCollectionModule = ({
         date: paymentDate,
         transactionId: reference || `PAY-${Date.now()}`,
         notes,
+        balanceBroughtForward: bf,
         schoolId: currentSchool?.id,
         studentName: student ? `${student.firstName} ${student.lastName}` : null,
         admissionNumber: student?.admissionNumber || null
@@ -55452,7 +55385,6 @@ const FeeCollectionModule = ({
       const data = res.data;
 
       if (data.success) {
-        // ✅ Rich receipt object with balance + student + fee info
         const receipt = {
           id: data.payment.id,
           receiptNo: data.payment.receiptNo || `RCP-${String(data.payment.id).padStart(6, '0')}`,
@@ -55465,17 +55397,21 @@ const FeeCollectionModule = ({
           date: paymentDate,
           reference: reference || data.payment.transactionId,
           notes,
-          // ✅ Balance info
+          balanceBroughtForward: bf,
           totalFees: feeStructure.reduce((s, f) => s + (parseFloat(f.amount) || 0), 0),
           totalDiscounts: totalDiscounts,
           totalPaid: totalPaid + parseFloat(amount),
           balanceBefore: outstandingBalance,
-          balanceAfter: Math.max(0, outstandingBalance - parseFloat(amount)),
+          balanceAfter: Math.max(0, effectiveOutstanding - parseFloat(amount)),
           collectedBy: `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'System'
         };
         setLastReceipt(receipt);
         setShowReceipt(true);
-        setAmount(''); setReference(''); setNotes(''); setPaymentMethod('CASH');
+        setAmount('');
+        setBalanceBroughtForward('');
+        setReference('');
+        setNotes('');
+        setPaymentMethod('CASH');
         await loadStudentFeeInfo(selectedStudent);
         if (setPayments) setPayments(prev => [data.payment, ...prev]);
       } else {
@@ -55567,15 +55503,15 @@ const FeeCollectionModule = ({
   // ==================== PRINT RECEIPT ====================
   const handlePrintReceipt = (receipt) => {
     const printWindow = window.open('', '_blank', 'width=800,height=900');
-  const schoolLogo = resolveLogoUrl(currentSchool);
-    const receiptNo = receipt.receiptNo || receipt.receiptNumber || `RCP-${String(receipt.id).padStart(6, '0')}`;
+    const schoolLogo = resolveLogoUrl(currentSchool);
     const amountInWords = numberToWords(receipt.amount);
 
+    // Build receipt HTML (Left-aligned logo, no receipt no, no references, no AI comments)
     printWindow.document.write(`
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Receipt ${receiptNo} - ${currentSchool?.name || 'School'}</title>
+          <title>Fee Receipt - ${currentSchool?.name || 'School'}</title>
           <style>
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
             * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -55588,119 +55524,107 @@ const FeeCollectionModule = ({
               max-width: 700px; margin: 0 auto; background: white;
               border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.1); overflow: hidden;
             }
+            
+            /* Left-Aligned Header */
             .receipt-header {
               background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%);
-              color: white; padding: 24px 32px;
-              display: flex; align-items: center; gap: 20px;
+              color: white; padding: 20px 24px;
+              display: flex; align-items: center; gap: 16px;
             }
             .logo-container {
-              width: 70px; height: 70px; background: white; border-radius: 12px;
+              width: 60px; height: 60px; background: white; border-radius: 10px;
               display: flex; align-items: center; justify-content: center;
-              flex-shrink: 0; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+              flex-shrink: 0; overflow: hidden;
             }
             .logo-container img { width: 100%; height: 100%; object-fit: contain; padding: 4px; }
             .logo-placeholder {
-              width: 70px; height: 70px; background: rgba(255,255,255,0.2);
-              border-radius: 12px; display: flex; align-items: center; justify-content: center;
-              flex-shrink: 0; font-size: 28px; font-weight: 700; color: white;
+              width: 60px; height: 60px; background: rgba(255,255,255,0.2);
+              border-radius: 10px; display: flex; align-items: center; justify-content: center;
+              flex-shrink: 0; font-size: 24px; font-weight: 700; color: white;
               border: 2px dashed rgba(255,255,255,0.4);
             }
             .school-info { flex: 1; }
-            .school-name { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 4px; }
-            .school-motto { font-size: 12px; opacity: 0.85; font-style: italic; margin-bottom: 6px; }
-            .school-contact { font-size: 11px; opacity: 0.75; display: flex; flex-wrap: wrap; gap: 12px; }
-            .receipt-title-bar {
-              background: #f8fafc; padding: 16px 32px; border-bottom: 1px solid #e2e8f0;
-              display: flex; justify-content: space-between; align-items: center;
-            }
-            .receipt-title {
-              font-size: 14px; font-weight: 600; color: #1e3a5f;
-              text-transform: uppercase; letter-spacing: 1px;
-            }
-            .receipt-number {
-              font-size: 16px; font-weight: 700; color: #1e3a5f;
-              font-family: 'Courier New', monospace;
-            }
-            .receipt-body { padding: 28px 32px; position: relative; }
+            .school-name { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 3px; }
+            .school-motto { font-size: 11px; opacity: 0.85; font-style: italic; margin-bottom: 4px; }
+            .school-contact { font-size: 10px; opacity: 0.75; display: flex; flex-wrap: wrap; gap: 10px; }
+            
+            .receipt-body { padding: 24px; position: relative; }
+            
             .info-grid {
-              display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px;
+              display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px;
             }
             .info-item {
-              padding: 12px 16px; background: #f8fafc; border-radius: 8px;
+              padding: 10px 14px; background: #f8fafc; border-radius: 8px;
               border-left: 3px solid #2d5a87;
             }
             .info-label {
-              font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
-              color: #64748b; font-weight: 600; margin-bottom: 4px;
+              font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px;
+              color: #64748b; font-weight: 600; margin-bottom: 3px;
             }
-            .info-value { font-size: 14px; font-weight: 600; color: #1e293b; }
+            .info-value { font-size: 13px; font-weight: 600; color: #1e293b; }
+            
             .payment-table {
-              width: 100%; border-collapse: collapse; margin: 24px 0;
+              width: 100%; border-collapse: collapse; margin: 20px 0;
               border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
             }
             .payment-table thead { background: #1e3a5f; color: white; }
             .payment-table th {
-              padding: 12px 16px; text-align: left; font-size: 11px;
+              padding: 10px 14px; text-align: left; font-size: 10px;
               text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
             }
             .payment-table th:last-child { text-align: right; }
             .payment-table td {
-              padding: 14px 16px; border-bottom: 1px solid #e2e8f0;
-              font-size: 14px; color: #334155;
+              padding: 12px 14px; border-bottom: 1px solid #e2e8f0;
+              font-size: 13px; color: #334155;
             }
             .payment-table td:last-child { text-align: right; font-weight: 600; }
             .payment-table .total-row { background: #f1f5f9; font-weight: 700; }
-            .payment-table .total-row td { font-size: 16px; color: #1e3a5f; }
+            .payment-table .total-row td { font-size: 15px; color: #1e3a5f; }
+            
             .balance-section {
               display: grid; grid-template-columns: repeat(3, 1fr);
-              gap: 12px; margin: 24px 0;
+              gap: 10px; margin: 20px 0;
             }
-            .balance-card { padding: 16px; border-radius: 8px; text-align: center; }
+            .balance-card { padding: 14px; border-radius: 8px; text-align: center; }
             .balance-card.total { background: #eff6ff; border: 1px solid #bfdbfe; }
             .balance-card.paid { background: #f0fdf4; border: 1px solid #bbf7d0; }
             .balance-card.remaining { background: #fef2f2; border: 1px solid #fecaca; }
             .balance-card.cleared { background: #f0fdf4; border: 1px solid #bbf7d0; }
+            .balance-card.bf { background: #fffbeb; border: 1px solid #fde68a; }
             .balance-label {
-              font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
-              font-weight: 600; margin-bottom: 6px;
+              font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px;
+              font-weight: 600; margin-bottom: 5px;
             }
             .balance-card.total .balance-label { color: #1d4ed8; }
             .balance-card.paid .balance-label { color: #15803d; }
             .balance-card.remaining .balance-label { color: #dc2626; }
             .balance-card.cleared .balance-label { color: #15803d; }
-            .balance-value { font-size: 20px; font-weight: 700; }
+            .balance-card.bf .balance-label { color: #b45309; }
+            .balance-value { font-size: 18px; font-weight: 700; }
             .balance-card.total .balance-value { color: #1e40af; }
             .balance-card.paid .balance-value { color: #166534; }
             .balance-card.remaining .balance-value { color: #991b1b; }
             .balance-card.cleared .balance-value { color: #166534; }
+            .balance-card.bf .balance-value { color: #92400e; }
+            
             .amount-words {
               background: #fef3c7; border: 1px solid #fcd34d;
-              border-radius: 8px; padding: 12px 16px; margin: 20px 0;
-              font-size: 13px; color: #92400e;
+              border-radius: 8px; padding: 10px 14px; margin: 16px 0;
+              font-size: 12px; color: #92400e;
             }
-            .receipt-footer {
-              padding: 20px 32px; background: #f8fafc;
-              border-top: 1px solid #e2e8f0; text-align: center;
-            }
-            .thank-you { font-size: 14px; font-weight: 600; color: #1e3a5f; margin-bottom: 8px; }
-            .footer-note { font-size: 11px; color: #94a3b8; line-height: 1.6; }
+            
             .signature-section {
               display: flex; justify-content: space-between;
-              margin-top: 32px; padding-top: 20px; border-top: 1px dashed #cbd5e1;
+              margin-top: 28px; padding-top: 16px; border-top: 1px dashed #cbd5e1;
             }
-            .signature-line { width: 180px; text-align: center; }
+            .signature-line { width: 160px; text-align: center; }
             .signature-line .line {
-              border-bottom: 1px solid #94a3b8; margin-bottom: 4px; height: 40px;
+              border-bottom: 1px solid #94a3b8; margin-bottom: 4px; height: 36px;
             }
             .signature-line .label {
-              font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;
+              font-size: 9px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;
             }
-            .watermark {
-              position: absolute; top: 50%; left: 50%;
-              transform: translate(-50%, -50%) rotate(-30deg);
-              font-size: 80px; font-weight: 700; color: rgba(30, 58, 95, 0.04);
-              pointer-events: none; white-space: nowrap; z-index: 0;
-            }
+            
             @media print {
               body { background: white; padding: 0; }
               .receipt-container { box-shadow: none; border-radius: 0; max-width: 100%; }
@@ -55727,14 +55651,7 @@ const FeeCollectionModule = ({
               </div>
             </div>
 
-            <div class="receipt-title-bar">
-              <div class="receipt-title">Official Payment Receipt</div>
-              <div class="receipt-number">${receiptNo}</div>
-            </div>
-
             <div class="receipt-body">
-              <div class="watermark">PAID</div>
-
               <div class="info-grid">
                 <div class="info-item">
                   <div class="info-label">Student Name</div>
@@ -55752,12 +55669,6 @@ const FeeCollectionModule = ({
                   <div class="info-label">Payment Method</div>
                   <div class="info-value">${receipt.paymentMethod}</div>
                 </div>
-                ${receipt.reference ? `
-                  <div class="info-item" style="grid-column: span 2;">
-                    <div class="info-label">Reference</div>
-                    <div class="info-value" style="font-family: 'Courier New', monospace; font-size: 13px;">${receipt.reference}</div>
-                  </div>
-                ` : ''}
               </div>
 
               <table class="payment-table">
@@ -55794,14 +55705,23 @@ const FeeCollectionModule = ({
                 </div>
               </div>
 
+              ${receipt.balanceBroughtForward > 0 ? `
+                <div class="balance-section" style="grid-template-columns: 1fr;">
+                  <div class="balance-card bf">
+                    <div class="balance-label">Balance Brought Forward</div>
+                    <div class="balance-value">${formatCurrency(receipt.balanceBroughtForward)}</div>
+                  </div>
+                </div>
+              ` : ''}
+
               <div class="amount-words">
                 <strong>Amount in words:</strong> ${amountInWords} Kenya Shillings Only
               </div>
 
               ${receipt.notes ? `
-                <div style="margin: 16px 0; padding: 12px; background: #f1f5f9; border-radius: 8px;">
+                <div style="margin: 16px 0; padding: 10px; background: #f1f5f9; border-radius: 8px;">
                   <div class="info-label">Notes</div>
-                  <div style="font-size: 13px; color: #475569; margin-top: 4px;">${receipt.notes}</div>
+                  <div style="font-size: 12px; color: #475569; margin-top: 3px;">${receipt.notes}</div>
                 </div>
               ` : ''}
 
@@ -55816,14 +55736,6 @@ const FeeCollectionModule = ({
                 </div>
               </div>
             </div>
-
-            <div class="receipt-footer">
-              <div class="thank-you">Thank you for your payment!</div>
-              <div class="footer-note">
-                This is a computer-generated receipt and is valid without signature.<br>
-                Printed on: ${formatDateTime(new Date())} | Receipt: ${receiptNo}
-              </div>
-            </div>
           </div>
           <script>window.onload = function() { setTimeout(function() { window.print(); }, 300); }</script>
         </body>
@@ -55832,16 +55744,16 @@ const FeeCollectionModule = ({
     printWindow.document.close();
   };
 
-  // ==================== ENHANCED RECEIPT MODAL ====================
+  // ==================== RECEIPT MODAL ====================
   const ReceiptModal = ({ receipt, onClose, students, user, school }) => {
     const amountInWords = numberToWords(receipt.amount);
-    const receiptNo = receipt.receiptNo || receipt.receiptNumber || `RCP-${String(receipt.id).padStart(6, '0')}`;
     const isCleared = (receipt.balanceAfter || 0) <= 0;
+    const hasBF = (receipt.balanceBroughtForward || 0) > 0;
 
     return (
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-hidden flex flex-col">
-          {/* ============ MODAL HEADER ============ */}
+          {/* HEADER */}
           <div className="bg-gradient-to-r from-slate-800 to-slate-700 px-6 py-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-white/10 rounded-lg flex items-center justify-center">
@@ -55849,7 +55761,7 @@ const FeeCollectionModule = ({
               </div>
               <div>
                 <h3 className="text-white font-semibold">Payment Receipt</h3>
-                <p className="text-white/60 text-xs font-mono">{receiptNo}</p>
+                <p className="text-white/60 text-xs font-mono">Fee Payment</p>
               </div>
             </div>
             <button
@@ -55860,18 +55772,18 @@ const FeeCollectionModule = ({
             </button>
           </div>
 
-          {/* ============ MODAL BODY ============ */}
+          {/* BODY */}
           <div className="flex-1 overflow-y-auto p-6">
-            {/* --- School Header --- */}
+            {/* School Header (Left Aligned) */}
             <div className="flex items-center gap-4 mb-6 pb-6 border-b border-gray-200">
               {school?.contact?.logo ? (
                 <img
                   src={school.contact.logo}
                   alt={school.name}
-                  className="w-16 h-16 object-contain rounded-lg border border-gray-200 p-1"
+                  className="w-16 h-16 object-contain rounded-lg border border-gray-200 p-1 flex-shrink-0"
                 />
               ) : (
-                <div className="w-16 h-16 bg-gradient-to-br from-slate-700 to-slate-800 rounded-lg flex items-center justify-center text-white text-2xl font-bold">
+                <div className="w-16 h-16 bg-gradient-to-br from-slate-700 to-slate-800 rounded-lg flex items-center justify-center text-white text-2xl font-bold flex-shrink-0">
                   {school?.name?.charAt(0) || 'S'}
                 </div>
               )}
@@ -55889,16 +55801,8 @@ const FeeCollectionModule = ({
               </div>
             </div>
 
-            {/* --- Receipt Info Grid --- */}
+            {/* Receipt Info Grid */}
             <div className="grid grid-cols-2 gap-4 mb-6">
-              <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
-                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Receipt Number</p>
-                <p className="font-mono font-bold text-slate-800 text-sm">{receiptNo}</p>
-              </div>
-              <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
-                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Date</p>
-                <p className="font-semibold text-slate-800 text-sm">{formatDate(receipt.date)}</p>
-              </div>
               <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
                 <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Student Name</p>
                 <p className="font-semibold text-slate-800 text-sm truncate">{receipt.studentName}</p>
@@ -55907,9 +55811,17 @@ const FeeCollectionModule = ({
                 <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Admission No</p>
                 <p className="font-mono font-semibold text-slate-800 text-sm">{receipt.admissionNumber}</p>
               </div>
+              <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Payment Date</p>
+                <p className="font-semibold text-slate-800 text-sm">{formatDate(receipt.date)}</p>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-3 border-l-4 border-slate-600">
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Payment Method</p>
+                <p className="font-semibold text-slate-800 text-sm">{receipt.paymentMethod}</p>
+              </div>
             </div>
 
-            {/* --- Payment Table --- */}
+            {/* Payment Table */}
             <div className="border border-gray-200 rounded-xl overflow-hidden mb-6">
               <table className="w-full">
                 <thead className="bg-slate-800 text-white">
@@ -55935,7 +55847,7 @@ const FeeCollectionModule = ({
               </table>
             </div>
 
-            {/* --- ✅ Balance Section (3 cards) --- */}
+            {/* Balance Section */}
             <div className="grid grid-cols-3 gap-3 mb-6">
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
                 <p className="text-xs text-blue-600 uppercase tracking-wide font-semibold mb-1">
@@ -55963,47 +55875,28 @@ const FeeCollectionModule = ({
               </div>
             </div>
 
-            {/* --- Balance Change Summary --- */}
-            {receipt.balanceBefore !== undefined && (
+            {/* Balance Brought Forward */}
+            {hasBF && (
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-6">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-amber-700">
-                    <i className="fas fa-arrow-right mr-1"></i>
-                    Balance Before: <strong>{formatCurrency(receipt.balanceBefore)}</strong>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-amber-700 font-medium">
+                    <i className="fas fa-arrow-right mr-1"></i>Balance Brought Forward:
                   </span>
-                  <i className="fas fa-arrow-right text-amber-400"></i>
-                  <span className="text-amber-700">
-                    Balance After: <strong>{formatCurrency(receipt.balanceAfter || 0)}</strong>
+                  <span className="font-bold text-amber-800">
+                    {formatCurrency(receipt.balanceBroughtForward)}
                   </span>
                 </div>
               </div>
             )}
 
-            {/* --- Amount in Words --- */}
+            {/* Amount in Words */}
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-6">
               <p className="text-xs text-amber-700">
                 <strong>Amount in words:</strong> {amountInWords} Kenya Shillings Only
               </p>
             </div>
 
-            {/* --- Payment Method & Reference --- */}
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <div>
-                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Payment Method</p>
-                <span className="inline-flex items-center px-3 py-1 bg-slate-100 rounded-full text-sm font-medium text-slate-700">
-                  <i className="fas fa-credit-card mr-2 text-slate-400"></i>
-                  {receipt.paymentMethod}
-                </span>
-              </div>
-              {receipt.reference && (
-                <div>
-                  <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Reference</p>
-                  <span className="font-mono text-sm text-slate-700 break-all">{receipt.reference}</span>
-                </div>
-              )}
-            </div>
-
-            {/* --- Notes --- */}
+            {/* Notes */}
             {receipt.notes && (
               <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 mb-6">
                 <p className="text-xs text-blue-600 uppercase tracking-wide mb-1">Notes</p>
@@ -56011,7 +55904,7 @@ const FeeCollectionModule = ({
               </div>
             )}
 
-            {/* --- Collected By --- */}
+            {/* Collected By */}
             {receipt.collectedBy && (
               <div className="text-xs text-slate-500 text-center mb-2">
                 <i className="fas fa-user-tie mr-1"></i>
@@ -56019,16 +55912,13 @@ const FeeCollectionModule = ({
               </div>
             )}
 
-            {/* --- Footer --- */}
+            {/* Footer */}
             <div className="text-center pt-4 border-t border-dashed border-gray-200">
               <p className="text-sm font-medium text-slate-600">Thank you for your payment!</p>
-              <p className="text-xs text-slate-400 mt-1">
-                This is a computer-generated receipt. No signature required.
-              </p>
             </div>
           </div>
 
-          {/* ============ MODAL FOOTER ============ */}
+          {/* FOOTER */}
           <div className="flex gap-3 p-4 bg-slate-50 border-t border-gray-200">
             <button
               onClick={() => handlePrintReceipt(receipt)}
@@ -56318,6 +56208,25 @@ const FeeCollectionModule = ({
               )}
             </div>
 
+            {/* Balance Brought Forward */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Balance Brought Forward (Optional)
+              </label>
+              <input
+                type="number"
+                value={balanceBroughtForward}
+                onChange={(e) => setBalanceBroughtForward(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-500"
+                placeholder="e.g., 5000"
+                step="0.01"
+                min="0"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Add any unpaid balance carried over from a previous term or school.
+              </p>
+            </div>
+
             <SearchableSelect
               label="Payment Method *"
               value={paymentMethod}
@@ -56334,17 +56243,6 @@ const FeeCollectionModule = ({
                 value={paymentDate}
                 onChange={(e) => setPaymentDate(e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Reference (Optional)</label>
-              <input
-                type="text"
-                value={reference}
-                onChange={(e) => setReference(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                placeholder="M-Pesa ref, Cheque no, etc."
               />
             </div>
 
@@ -56372,7 +56270,7 @@ const FeeCollectionModule = ({
           </form>
         </div>
 
-        {/* ==================== ✅ ENHANCED RECENT PAYMENTS ==================== */}
+        {/* ==================== RECENT PAYMENTS ==================== */}
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="px-6 py-4 bg-gradient-to-r from-slate-50 to-gray-50 border-b border-gray-100">
             <div className="flex items-center justify-between">
@@ -56407,7 +56305,6 @@ const FeeCollectionModule = ({
                       key={p.id}
                       className="group border border-gray-100 rounded-xl p-4 hover:border-indigo-200 hover:shadow-md transition-all bg-white"
                     >
-                      {/* Top Row: Amount + Date */}
                       <div className="flex items-start justify-between gap-3 mb-3">
                         <div className="flex items-center gap-3">
                           <div className={`w-10 h-10 ${method.bg} ${method.border} border rounded-xl flex items-center justify-center`}>
@@ -56430,21 +56327,13 @@ const FeeCollectionModule = ({
                         </div>
                       </div>
 
-                      {/* Divider */}
                       <div className="h-px bg-gray-100 mb-3"></div>
 
-                      {/* Bottom Row: Receipt + Reference + Notes */}
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
                         {p.receiptNo && (
                           <span className="flex items-center gap-1 text-slate-600">
                             <i className="fas fa-hashtag text-slate-400"></i>
                             <span className="font-mono font-medium">{p.receiptNo}</span>
-                          </span>
-                        )}
-                        {p.transactionId && (
-                          <span className="flex items-center gap-1 text-slate-500">
-                            <i className="fas fa-tag text-slate-400"></i>
-                            <span className="font-mono truncate max-w-[120px]">{p.transactionId}</span>
                           </span>
                         )}
                         {p.notes && (
@@ -56475,7 +56364,6 @@ const FeeCollectionModule = ({
             )}
           </div>
 
-          {/* Summary Footer */}
           {recentPayments.length > 0 && (
             <div className="px-6 py-3 bg-gradient-to-r from-slate-50 to-gray-50 border-t border-gray-100">
               <div className="flex items-center justify-between text-xs">
@@ -56496,7 +56384,6 @@ const FeeCollectionModule = ({
     </div>
   );
 };
-
 
 const StudentArrivalModule = ({ 
   students, 
@@ -60759,7 +60646,6 @@ const ReceptionistModule = ({
     </div>
   );
 };
-
 const CardManagementModule = ({ 
   students, 
   staff, 
@@ -60783,6 +60669,8 @@ const CardManagementModule = ({
   const [showValidityModal, setShowValidityModal] = useState(false);
   const [validUntilDate, setValidUntilDate] = useState('');
   const [pendingGenerate, setPendingGenerate] = useState(null);
+
+  // ==================== LIVE PREVIEW DATA ====================
   const [livePreviewData, setLivePreviewData] = useState({
     name: 'John Doe',
     id: 'ADM-2024-001',
@@ -60914,7 +60802,9 @@ const CardManagementModule = ({
     showSchoolLogo: true,
     showSchoolName: true,
     showSchoolMotto: true,
-    showSchoolAddress: false,
+    showSchoolAddress: false,  // NEW
+    showSchoolPhone: false,    // NEW
+    showSchoolEmail: false,    // NEW
     showStudentPhoto: true,
     showQRCode: false,
     showBarcode: false,
@@ -61165,32 +61055,19 @@ const CardManagementModule = ({
   };
 
   // ==================== GET PERSON BY ID ====================
-  const getStudentById = (id) => {
-    return students?.find(s => s.id === id);
-  };
-
-  const getStaffById = (id) => {
-    return staff?.find(s => s.id === id);
-  };
+  const getStudentById = (id) => students?.find(s => s.id === id);
+  const getStaffById = (id) => staff?.find(s => s.id === id);
 
   const getEntityById = (id) => {
     if (!id) return null;
-    if (isTVET) {
-      return programs?.find(p => p.id === id);
-    }
-    if (isUniversity) {
-      return courses?.find(c => c.id === id);
-    }
+    if (isTVET) return programs?.find(p => p.id === id);
+    if (isUniversity) return courses?.find(c => c.id === id);
     return classes?.find(c => c.id === id);
   };
 
-  // ==================== GET PERSON BY ID FOR GENERATE ====================
   const getPersonById = (id, type) => {
-    if (type === 'student') {
-      return getStudentById(id);
-    } else if (type === 'staff') {
-      return getStaffById(id);
-    }
+    if (type === 'student') return getStudentById(id);
+    if (type === 'staff') return getStaffById(id);
     return null;
   };
 
@@ -61250,15 +61127,9 @@ const CardManagementModule = ({
               const program = programs.find(p => p.id === entityId);
               entityName = program?.name || 'N/A';
             }
-            if (person.currentModule) {
-              moduleInfo = `Module ${person.currentModule}`;
-            }
-            if (person.currentYear) {
-              yearInfo = `Year ${person.currentYear}`;
-            }
-            if (person.currentSemester) {
-              semesterInfo = `Sem ${person.currentSemester}`;
-            }
+            if (person.currentModule) moduleInfo = `Module ${person.currentModule}`;
+            if (person.currentYear) yearInfo = `Year ${person.currentYear}`;
+            if (person.currentSemester) semesterInfo = `Sem ${person.currentSemester}`;
           }
           else if (isUniversity) {
             entityId = person.courseId;
@@ -61266,12 +61137,8 @@ const CardManagementModule = ({
               const course = courses.find(c => c.id === entityId);
               entityName = course?.name || 'N/A';
             }
-            if (person.currentYear) {
-              yearInfo = `Year ${person.currentYear}`;
-            }
-            if (person.currentSemester) {
-              semesterInfo = `Sem ${person.currentSemester}`;
-            }
+            if (person.currentYear) yearInfo = `Year ${person.currentYear}`;
+            if (person.currentSemester) semesterInfo = `Sem ${person.currentSemester}`;
           }
           else {
             entityId = person.classId;
@@ -61377,6 +61244,7 @@ const CardManagementModule = ({
   };
 
   // ==================== PRINT CARD ====================
+  // ✅ REWRITTEN: logo on the LEFT, full school info (address/phone/email), clean layout
   const printCard = (card) => {
     let cardData = generatedCard || null;
     
@@ -61470,7 +61338,7 @@ const CardManagementModule = ({
       return;
     }
 
-    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    const printWindow = window.open('', '_blank', 'width=900,height=700');
     if (!printWindow) {
       alert('❌ Please allow popups for this site');
       return;
@@ -61487,7 +61355,11 @@ const CardManagementModule = ({
     const cardNumber = cardData.cardNumber || 'N/A';
     const validUntil = cardData.validUntil || 'N/A';
     const schoolName = cardData.schoolName || currentSchool?.name || 'School Name';
-       const schoolLogo = resolveLogoUrl(currentSchool);
+    const schoolLogo = resolveLogoUrl(currentSchool);
+    const schoolMotto = currentSchool?.motto || cardData.schoolMotto || '';
+    const schoolAddress = currentSchool?.contact?.address || '';
+    const schoolPhone = currentSchool?.contact?.phone || '';
+    const schoolEmail = currentSchool?.contact?.email || '';
 
     const primaryColor = cardTemplate.primaryColor || '#4f46e5';
     const textColor = cardTemplate.textColor || '#ffffff';
@@ -61501,79 +61373,82 @@ const CardManagementModule = ({
     const bloodGroup = cardData.bloodGroup || 'N/A';
     const parentName = cardData.parentName || 'N/A';
     const isStudent = cardData.personType === 'STUDENT';
-    
-    let detailsHtml = `
-      <div class="detail">📋 ID: <span>${idNumber}</span></div>
-    `;
+
+    // ✅ Build school contact line (only show what's enabled)
+    const contactParts = [];
+    if (cardTemplate.showSchoolAddress && schoolAddress) contactParts.push(schoolAddress);
+    if (cardTemplate.showSchoolPhone && schoolPhone) contactParts.push(schoolPhone);
+    if (cardTemplate.showSchoolEmail && schoolEmail) contactParts.push(schoolEmail);
+    const contactLine = contactParts.join(' • ');
+
+    // Student details for card
+    let detailsHtml = `<div class="detail"><span class="detail-label">ID:</span> <span class="detail-value">${idNumber}</span></div>`;
     
     if (isStudent) {
       if (isTVET && cardTemplate.fields.programName) {
-        detailsHtml += `<div class="detail">${entityLabel}: <span>${entityName}</span></div>`;
+        detailsHtml += `<div class="detail"><span class="detail-label">${entityLabel}:</span> <span class="detail-value">${entityName}</span></div>`;
       } else if (isUniversity && cardTemplate.fields.courseName) {
-        detailsHtml += `<div class="detail">${entityLabel}: <span>${entityName}</span></div>`;
+        detailsHtml += `<div class="detail"><span class="detail-label">${entityLabel}:</span> <span class="detail-value">${entityName}</span></div>`;
       } else if (!isTVET && !isUniversity && cardTemplate.fields.className) {
-        detailsHtml += `<div class="detail">${entityLabel}: <span>${entityName}</span></div>`;
+        detailsHtml += `<div class="detail"><span class="detail-label">${entityLabel}:</span> <span class="detail-value">${entityName}</span></div>`;
       }
     }
     
     if (isTVET && isStudent) {
       if (cardTemplate.fields.currentModule && moduleInfo && moduleInfo !== 'N/A' && moduleInfo !== '') {
-        detailsHtml += `<div class="detail">📚 <span>${moduleInfo}</span></div>`;
+        detailsHtml += `<div class="detail"><span class="detail-value">${moduleInfo}</span></div>`;
       }
       if (cardTemplate.fields.currentYear && yearInfo && yearInfo !== 'N/A' && yearInfo !== '') {
-        detailsHtml += `<div class="detail">📅 <span>${yearInfo}</span></div>`;
+        detailsHtml += `<div class="detail"><span class="detail-value">${yearInfo}</span></div>`;
       }
       if (cardTemplate.fields.currentSemester && semesterInfo && semesterInfo !== 'N/A' && semesterInfo !== '') {
-        detailsHtml += `<div class="detail">📅 <span>${semesterInfo}</span></div>`;
+        detailsHtml += `<div class="detail"><span class="detail-value">${semesterInfo}</span></div>`;
       }
     }
     
     if (isUniversity && isStudent) {
       if (cardTemplate.fields.currentYear && yearInfo && yearInfo !== 'N/A' && yearInfo !== '') {
-        detailsHtml += `<div class="detail">📅 <span>${yearInfo}</span></div>`;
+        detailsHtml += `<div class="detail"><span class="detail-value">${yearInfo}</span></div>`;
       }
       if (cardTemplate.fields.currentSemester && semesterInfo && semesterInfo !== 'N/A' && semesterInfo !== '') {
-        detailsHtml += `<div class="detail">📅 <span>${semesterInfo}</span></div>`;
+        detailsHtml += `<div class="detail"><span class="detail-value">${semesterInfo}</span></div>`;
       }
     }
     
     if (cardTemplate.fields.gender && gender && gender !== 'N/A' && gender !== '') {
-      detailsHtml += `<div class="detail">⚤ <span>${gender}</span></div>`;
+      detailsHtml += `<div class="detail"><span class="detail-label">Gender:</span> <span class="detail-value">${gender}</span></div>`;
     }
     if (cardTemplate.fields.dateOfBirth && dateOfBirth && dateOfBirth !== 'N/A') {
-      detailsHtml += `<div class="detail">📅 DOB: <span>${dateOfBirth}</span></div>`;
+      detailsHtml += `<div class="detail"><span class="detail-label">DOB:</span> <span class="detail-value">${dateOfBirth}</span></div>`;
     }
     if (cardTemplate.fields.phone && phone && phone !== 'N/A') {
-      detailsHtml += `<div class="detail">📱 <span>${phone}</span></div>`;
+      detailsHtml += `<div class="detail"><span class="detail-value">${phone}</span></div>`;
     }
     if (cardTemplate.fields.email && email && email !== 'N/A') {
-      detailsHtml += `<div class="detail">✉️ <span>${email}</span></div>`;
+      detailsHtml += `<div class="detail"><span class="detail-value">${email}</span></div>`;
     }
     if (cardTemplate.fields.bloodGroup && bloodGroup && bloodGroup !== 'N/A') {
-      detailsHtml += `<div class="detail">🩸 <span>${bloodGroup}</span></div>`;
+      detailsHtml += `<div class="detail"><span class="detail-label">Blood:</span> <span class="detail-value">${bloodGroup}</span></div>`;
     }
     if (cardTemplate.fields.nationality && nationality && nationality !== 'N/A') {
-      detailsHtml += `<div class="detail">🌍 <span>${nationality}</span></div>`;
+      detailsHtml += `<div class="detail"><span class="detail-value">${nationality}</span></div>`;
     }
     if (cardTemplate.fields.parentName && parentName && parentName !== 'N/A') {
-      detailsHtml += `<div class="detail">👨‍👩‍👦 <span>${parentName}</span></div>`;
+      detailsHtml += `<div class="detail"><span class="detail-label">Guardian:</span> <span class="detail-value">${parentName}</span></div>`;
     }
     if (cardTemplate.fields.address && address && address !== 'N/A') {
-      detailsHtml += `<div class="detail">📍 <span>${address}</span></div>`;
-    }
-    if (cardTemplate.fields.validUntil && validUntil && validUntil !== 'N/A') {
-      detailsHtml += `<div class="detail">📅 Valid Until: <span>${validUntil}</span></div>`;
+      detailsHtml += `<div class="detail"><span class="detail-value">${address}</span></div>`;
     }
     
     if (!isStudent) {
       if (cardTemplate.fields.department && cardData.department && cardData.department !== 'N/A') {
-        detailsHtml += `<div class="detail">🏢 <span>${cardData.department}</span></div>`;
+        detailsHtml += `<div class="detail"><span class="detail-value">${cardData.department}</span></div>`;
       }
       if (cardTemplate.fields.jobTitle && cardData.jobTitle && cardData.jobTitle !== 'N/A') {
-        detailsHtml += `<div class="detail">💼 <span>${cardData.jobTitle}</span></div>`;
+        detailsHtml += `<div class="detail"><span class="detail-value">${cardData.jobTitle}</span></div>`;
       }
       if (cardTemplate.fields.staffType && cardData.staffType && cardData.staffType !== 'N/A') {
-        detailsHtml += `<div class="detail">📋 <span>${cardData.staffType}</span></div>`;
+        detailsHtml += `<div class="detail"><span class="detail-value">${cardData.staffType}</span></div>`;
       }
     }
     
@@ -61599,7 +61474,7 @@ const CardManagementModule = ({
               height: 54mm;
               background: ${primaryColor};
               border-radius: ${cardTemplate.borderRadius || '12px'};
-              padding: 15px;
+              padding: 12px 14px;
               color: ${textColor};
               position: relative;
               overflow: hidden;
@@ -61630,112 +61505,151 @@ const CardManagementModule = ({
                 pointer-events: none;
               }
             ` : ''}
+
+            /* ✅ LEFT-ALIGNED LOGO HEADER */
             .card-header {
               display: flex;
-              justify-content: space-between;
               align-items: center;
-              margin-bottom: 10px;
-              border-bottom: 2px solid rgba(255,255,255,0.2);
-              padding-bottom: 8px;
+              gap: 10px;
+              margin-bottom: 8px;
+              border-bottom: 1.5px solid rgba(255,255,255,0.25);
+              padding-bottom: 6px;
             }
-            .school-name {
-              font-size: 14px;
-              font-weight: bold;
-              text-transform: uppercase;
-              letter-spacing: 1px;
-            }
-            .school-motto {
-              font-size: 8px;
-              opacity: 0.7;
-              font-style: italic;
-            }
-            .logo {
-              width: 40px;
-              height: 40px;
+            .header-logo {
+              width: 38px;
+              height: 38px;
               border-radius: 50%;
               background: white;
               display: flex;
               align-items: center;
               justify-content: center;
-              font-size: 20px;
+              font-size: 18px;
               font-weight: bold;
               color: ${primaryColor};
               overflow: hidden;
+              flex-shrink: 0;
+              border: 1.5px solid rgba(255,255,255,0.4);
             }
-            .logo img {
+            .header-logo img {
               width: 100%;
               height: 100%;
               object-fit: cover;
             }
+            .header-info {
+              flex: 1;
+              min-width: 0;
+              text-align: left;
+            }
+            .school-name {
+              font-size: 12px;
+              font-weight: bold;
+              text-transform: uppercase;
+              letter-spacing: 0.6px;
+              line-height: 1.1;
+            }
+            .school-motto {
+              font-size: 7px;
+              opacity: 0.75;
+              font-style: italic;
+              margin-top: 1px;
+            }
+            .school-contact {
+              font-size: 6.5px;
+              opacity: 0.7;
+              margin-top: 2px;
+              line-height: 1.2;
+            }
+
+            /* Card title strip */
+            .card-title {
+              text-align: center;
+              font-size: 8.5px;
+              font-weight: bold;
+              text-transform: uppercase;
+              letter-spacing: 2.5px;
+              opacity: 0.85;
+              margin-bottom: 6px;
+            }
+
+            /* Body */
             .card-body {
               display: flex;
               flex-direction: ${cardTemplate.layout === 'vertical' ? 'column' : 'row'};
-              gap: 12px;
-              align-items: center;
+              gap: 10px;
+              align-items: ${cardTemplate.layout === 'vertical' ? 'center' : 'flex-start'};
             }
             .photo {
-              width: 70px;
-              height: 70px;
+              width: ${cardTemplate.layout === 'vertical' ? '60px' : '58px'};
+              height: ${cardTemplate.layout === 'vertical' ? '60px' : '58px'};
               border-radius: 50%;
               background: rgba(255,255,255,0.2);
               display: flex;
               align-items: center;
               justify-content: center;
-              font-size: 28px;
+              font-size: 22px;
               font-weight: bold;
-              border: 3px solid rgba(255,255,255,0.4);
+              border: 2.5px solid rgba(255,255,255,0.4);
               flex-shrink: 0;
             }
             .info {
               flex: 1;
               width: 100%;
+              min-width: 0;
             }
             .info .name {
-              font-size: 16px;
+              font-size: 13px;
               font-weight: bold;
               margin-bottom: 4px;
+              text-transform: capitalize;
+              line-height: 1.1;
             }
             .info .detail {
-              font-size: 11px;
-              opacity: 0.9;
-              margin-bottom: 2px;
+              font-size: 9px;
+              opacity: 0.95;
+              margin-bottom: 1.5px;
+              line-height: 1.2;
+              white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
             }
-            .info .detail span {
+            .info .detail-label {
               opacity: 0.7;
+              font-weight: 600;
             }
+            .info .detail-value {
+              font-weight: 500;
+            }
+
+            /* Footer */
             .card-footer {
               display: flex;
               justify-content: space-between;
               align-items: center;
-              margin-top: 10px;
-              padding-top: 8px;
-              border-top: 1px solid rgba(255,255,255,0.2);
-              font-size: 8px;
-              opacity: 0.8;
+              margin-top: 8px;
+              padding-top: 5px;
+              border-top: 1px solid rgba(255,255,255,0.25);
+              font-size: 7px;
+              opacity: 0.85;
+              position: absolute;
+              bottom: 8px;
+              left: 14px;
+              right: 14px;
             }
             .status-badge {
               position: absolute;
-              top: 10px;
-              right: 10px;
-              background: rgba(255,255,255,0.2);
-              padding: 2px 10px;
+              top: 8px;
+              right: 8px;
+              background: rgba(255,255,255,0.22);
+              padding: 2px 8px;
               border-radius: 20px;
-              font-size: 8px;
+              font-size: 6.5px;
               text-transform: uppercase;
               letter-spacing: 0.5px;
+              font-weight: 600;
             }
             @media print {
               body { background: white; padding: 0; }
               .card { box-shadow: none; border: 1px solid #ddd; }
-            }
-            .card-title {
-              text-align: center;
-              font-size: 10px;
-              font-weight: bold;
-              text-transform: uppercase;
-              letter-spacing: 2px;
-              opacity: 0.8;
-              margin-bottom: 8px;
             }
           </style>
         </head>
@@ -61744,16 +61658,18 @@ const CardManagementModule = ({
             ${cardTemplate.showStatusBadge ? `<div class="status-badge">${status}</div>` : ''}
             ${cardTemplate.showWatermark ? `<div class="watermark">${cardTemplate.watermarkText}</div>` : ''}
             
+            <!-- ✅ LEFT-ALIGNED LOGO HEADER -->
             <div class="card-header">
-              <div>
-                <div class="school-name">${schoolName}</div>
-                ${cardTemplate.showSchoolMotto && schoolName ? `<div class="school-motto">${schoolName}</div>` : ''}
-              </div>
               ${cardTemplate.showSchoolLogo ? `
-                <div class="logo">
-                  ${schoolLogo ? `<img src="${schoolLogo}" alt="Logo">` : '🏫'}
+                <div class="header-logo">
+                  ${schoolLogo ? `<img src="${schoolLogo}" alt="Logo" />` : '🏫'}
                 </div>
               ` : ''}
+              <div class="header-info">
+                ${cardTemplate.showSchoolName ? `<div class="school-name">${schoolName}</div>` : ''}
+                ${cardTemplate.showSchoolMotto && schoolMotto ? `<div class="school-motto">"${schoolMotto}"</div>` : ''}
+                ${contactLine ? `<div class="school-contact">${contactLine}</div>` : ''}
+              </div>
             </div>
             
             <div class="card-title">${cardTemplate.cardTitle}</div>
@@ -61770,7 +61686,7 @@ const CardManagementModule = ({
             
             <div class="card-footer">
               <div>${cardTemplate.validityText}: ${validUntil}</div>
-              ${cardTemplate.showCardNumber ? `<div>🆔 ${cardNumber}</div>` : ''}
+              ${cardTemplate.showCardNumber ? `<div>ID: ${cardNumber}</div>` : ''}
             </div>
           </div>
           <script>
@@ -61791,7 +61707,6 @@ const CardManagementModule = ({
   // ==================== DELETE CARD ====================
   const deleteCard = async (cardId) => {
     if (!window.confirm('Delete this card?')) return;
-    
     setLoading(true);
     try {
       await api.delete(`/cards/${cardId}`);
@@ -61806,10 +61721,7 @@ const CardManagementModule = ({
 
   // ==================== TEMPLATE FUNCTIONS ====================
   const saveTemplate = () => {
-    const templateToSave = {
-      ...cardTemplate,
-    };
-    localStorage.setItem('cardTemplate', JSON.stringify(templateToSave));
+    localStorage.setItem('cardTemplate', JSON.stringify(cardTemplate));
     alert('✅ Template saved successfully!');
     setShowDesignModal(false);
   };
@@ -61822,10 +61734,7 @@ const CardManagementModule = ({
         const currentFields = getDefaultFieldState();
         setCardTemplate({
           ...parsed,
-          fields: {
-            ...currentFields,
-            ...parsed.fields
-          }
+          fields: { ...currentFields, ...parsed.fields }
         });
         alert('✅ Template loaded successfully!');
       } catch (error) {
@@ -61858,6 +61767,8 @@ const CardManagementModule = ({
       showSchoolName: true,
       showSchoolMotto: true,
       showSchoolAddress: false,
+      showSchoolPhone: false,
+      showSchoolEmail: false,
       showStudentPhoto: true,
       showQRCode: false,
       showBarcode: false,
@@ -61895,7 +61806,6 @@ const CardManagementModule = ({
   // ==================== BULK GENERATE ====================
   const bulkGenerate = async (type) => {
     if (!window.confirm(`Generate cards for all ${type}?`)) return;
-    
     setLoading(true);
     try {
       const res = await api.post('/cards/bulk-generate', { 
@@ -61936,19 +61846,14 @@ const CardManagementModule = ({
     if (!card) return 'N/A';
     if (card.personType === 'STUDENT') {
       let entity = card.programName || card.courseName || card.className || card.entityName;
-      
       if ((!entity || entity === 'N/A') && card.personId) {
         const student = students?.find(s => s.id === card.personId);
-        if (student) {
-          entity = getEntityName(student, 'student');
-        }
+        if (student) entity = getEntityName(student, 'student');
       }
-      
       if ((!entity || entity === 'N/A') && card.entityId) {
         const entityObj = getEntityById(card.entityId);
         entity = entityObj?.name || 'N/A';
       }
-      
       return entity || 'N/A';
     }
     return card.department || card.entityName || 'N/A';
@@ -61964,10 +61869,7 @@ const CardManagementModule = ({
         const currentFields = getDefaultFieldState();
         setCardTemplate({
           ...parsed,
-          fields: {
-            ...currentFields,
-            ...parsed.fields
-          }
+          fields: { ...currentFields, ...parsed.fields }
         });
       } catch (error) {}
     }
@@ -61992,18 +61894,14 @@ const CardManagementModule = ({
       'Staff': [],
       'Parent': []
     };
-    
     Object.keys(dynamicFields).forEach(key => {
       const field = dynamicFields[key];
-      if (groups[field.category]) {
-        groups[field.category].push({ key, ...field });
-      }
+      if (groups[field.category]) groups[field.category].push({ key, ...field });
     });
-    
     return groups;
   };
 
-  // ==================== RENDER LIVE PREVIEW CARD ====================
+  // ==================== RENDER LIVE PREVIEW CARD (LEFT LOGO) ====================
   const renderLivePreview = () => {
     const entityLabel = getEntityLabel();
     const name = livePreviewData.name || 'John Doe';
@@ -62024,78 +61922,73 @@ const CardManagementModule = ({
     const firstLetter = name ? name.charAt(0).toUpperCase() : '👤';
     const isStudent = true;
 
+    // Build school contact line for preview
+    const contactParts = [];
+    if (cardTemplate.showSchoolAddress && cardTemplate.schoolAddress) contactParts.push(cardTemplate.schoolAddress);
+    if (cardTemplate.showSchoolPhone && cardTemplate.schoolPhone) contactParts.push(cardTemplate.schoolPhone);
+    if (cardTemplate.showSchoolEmail && cardTemplate.schoolEmail) contactParts.push(cardTemplate.schoolEmail);
+    const contactLine = contactParts.join(' • ');
+
     let detailsHtml = [];
-    
     detailsHtml.push(
-      <div key="id" className="text-[10px] opacity-80">📋 ID: <span className="opacity-60">{id}</span></div>
+      <div key="id" className="text-[10px] opacity-90 leading-tight">
+        <span className="opacity-70">ID: </span>{id}
+      </div>
     );
     
     if (isTVET && cardTemplate.fields.programName) {
       detailsHtml.push(
-        <div key="entity" className="text-[10px] opacity-80 font-medium">{entityLabel}: <span className="opacity-60">{entity}</span></div>
+        <div key="entity" className="text-[10px] opacity-90 leading-tight">
+          <span className="opacity-70">{entityLabel}: </span>{entity}
+        </div>
       );
     } else if (isUniversity && cardTemplate.fields.courseName) {
       detailsHtml.push(
-        <div key="entity" className="text-[10px] opacity-80 font-medium">{entityLabel}: <span className="opacity-60">{entity}</span></div>
+        <div key="entity" className="text-[10px] opacity-90 leading-tight">
+          <span className="opacity-70">{entityLabel}: </span>{entity}
+        </div>
       );
     } else if (!isTVET && !isUniversity && cardTemplate.fields.className) {
       detailsHtml.push(
-        <div key="entity" className="text-[10px] opacity-80 font-medium">{entityLabel}: <span className="opacity-60">{entity}</span></div>
+        <div key="entity" className="text-[10px] opacity-90 leading-tight">
+          <span className="opacity-70">{entityLabel}: </span>{entity}
+        </div>
       );
     }
     
     if (isTVET) {
       if (cardTemplate.fields.currentModule) {
-        detailsHtml.push(<div key="module" className="text-[10px] opacity-80">📚 <span className="opacity-60">{module}</span></div>);
+        detailsHtml.push(<div key="module" className="text-[10px] opacity-90 leading-tight">{module}</div>);
       }
       if (cardTemplate.fields.currentYear) {
-        detailsHtml.push(<div key="year" className="text-[10px] opacity-80">📅 <span className="opacity-60">{year}</span></div>);
+        detailsHtml.push(<div key="year" className="text-[10px] opacity-90 leading-tight">{year}</div>);
       }
       if (cardTemplate.fields.currentSemester) {
-        detailsHtml.push(<div key="semester" className="text-[10px] opacity-80">📅 <span className="opacity-60">{semester}</span></div>);
+        detailsHtml.push(<div key="semester" className="text-[10px] opacity-90 leading-tight">{semester}</div>);
       }
     }
     
     if (isUniversity) {
       if (cardTemplate.fields.currentYear) {
-        detailsHtml.push(<div key="year" className="text-[10px] opacity-80">📅 <span className="opacity-60">{year}</span></div>);
+        detailsHtml.push(<div key="year" className="text-[10px] opacity-90 leading-tight">{year}</div>);
       }
       if (cardTemplate.fields.currentSemester) {
-        detailsHtml.push(<div key="semester" className="text-[10px] opacity-80">📅 <span className="opacity-60">{semester}</span></div>);
+        detailsHtml.push(<div key="semester" className="text-[10px] opacity-90 leading-tight">{semester}</div>);
       }
     }
     
-    if (cardTemplate.fields.gender) {
-      detailsHtml.push(<div key="gender" className="text-[10px] opacity-80">⚤ <span className="opacity-60">{gender}</span></div>);
-    }
-    if (cardTemplate.fields.dateOfBirth) {
-      detailsHtml.push(<div key="dob" className="text-[10px] opacity-80">📅 DOB: <span className="opacity-60">{dob}</span></div>);
-    }
-    if (cardTemplate.fields.phone) {
-      detailsHtml.push(<div key="phone" className="text-[10px] opacity-80">📱 <span className="opacity-60">{phone}</span></div>);
-    }
-    if (cardTemplate.fields.email) {
-      detailsHtml.push(<div key="email" className="text-[10px] opacity-80">✉️ <span className="opacity-60">{email}</span></div>);
-    }
-    if (cardTemplate.fields.bloodGroup) {
-      detailsHtml.push(<div key="blood" className="text-[10px] opacity-80">🩸 <span className="opacity-60">{bloodGroup}</span></div>);
-    }
-    if (cardTemplate.fields.nationality) {
-      detailsHtml.push(<div key="nationality" className="text-[10px] opacity-80">🌍 <span className="opacity-60">{nationality}</span></div>);
-    }
-    if (cardTemplate.fields.address) {
-      detailsHtml.push(<div key="address" className="text-[10px] opacity-80">📍 <span className="opacity-60">{address}</span></div>);
-    }
-    if (cardTemplate.fields.parentName) {
-      detailsHtml.push(<div key="parent" className="text-[10px] opacity-80">👨‍👩‍👦 <span className="opacity-60">{parentName}</span></div>);
-    }
-    if (cardTemplate.fields.validUntil) {
-      detailsHtml.push(<div key="validUntil" className="text-[10px] opacity-80">📅 Valid Until: <span className="opacity-60">{validUntil}</span></div>);
-    }
+    if (cardTemplate.fields.gender) detailsHtml.push(<div key="gender" className="text-[10px] opacity-90 leading-tight"><span className="opacity-70">Gender: </span>{gender}</div>);
+    if (cardTemplate.fields.dateOfBirth) detailsHtml.push(<div key="dob" className="text-[10px] opacity-90 leading-tight"><span className="opacity-70">DOB: </span>{dob}</div>);
+    if (cardTemplate.fields.phone) detailsHtml.push(<div key="phone" className="text-[10px] opacity-90 leading-tight">{phone}</div>);
+    if (cardTemplate.fields.email) detailsHtml.push(<div key="email" className="text-[10px] opacity-90 leading-tight">{email}</div>);
+    if (cardTemplate.fields.bloodGroup) detailsHtml.push(<div key="blood" className="text-[10px] opacity-90 leading-tight"><span className="opacity-70">Blood: </span>{bloodGroup}</div>);
+    if (cardTemplate.fields.nationality) detailsHtml.push(<div key="nat" className="text-[10px] opacity-90 leading-tight">{nationality}</div>);
+    if (cardTemplate.fields.address) detailsHtml.push(<div key="addr" className="text-[10px] opacity-90 leading-tight">{address}</div>);
+    if (cardTemplate.fields.parentName) detailsHtml.push(<div key="parent" className="text-[10px] opacity-90 leading-tight"><span className="opacity-70">Guardian: </span>{parentName}</div>);
 
     return (
       <div 
-        className="p-4 rounded-lg mx-auto"
+        className="p-3 rounded-lg mx-auto"
         style={{
           width: cardTemplate.cardSize === 'large' ? '320px' : cardTemplate.cardSize === 'compact' ? '240px' : '280px',
           background: cardTemplate.primaryColor,
@@ -62110,84 +62003,80 @@ const CardManagementModule = ({
         }}
       >
         {cardTemplate.showWatermark && (
-          <div 
-            style={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%) rotate(-45deg)',
-              fontSize: '40px',
-              fontWeight: 'bold',
-              opacity: cardTemplate.watermarkOpacity,
-              color: cardTemplate.textColor,
-              whiteSpace: 'nowrap',
-              pointerEvents: 'none'
-            }}
-          >
+          <div style={{
+            position: 'absolute', top: '50%', left: '50%',
+            transform: 'translate(-50%, -50%) rotate(-45deg)',
+            fontSize: '40px', fontWeight: 'bold',
+            opacity: cardTemplate.watermarkOpacity,
+            color: cardTemplate.textColor,
+            whiteSpace: 'nowrap', pointerEvents: 'none'
+          }}>
             {cardTemplate.watermarkText}
           </div>
         )}
 
-        {cardTemplate.showSchoolLogo && (
-          <div className="flex justify-center mb-2">
-            <div className="w-14 h-14 bg-white/20 rounded-full flex items-center justify-center text-3xl font-bold">
+        {/* ✅ LEFT-ALIGNED LOGO HEADER */}
+        <div className="flex items-center gap-3 pb-2 mb-2 border-b border-white/25">
+          {cardTemplate.showSchoolLogo && (
+            <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-2xl font-bold flex-shrink-0 overflow-hidden border-2 border-white/40">
               {cardTemplate.schoolLogo ? (
-                <img src={cardTemplate.schoolLogo} alt="Logo" className="w-full h-full object-cover rounded-full" />
+                <img src={cardTemplate.schoolLogo} alt="Logo" className="w-full h-full object-cover" />
               ) : (
-                '🏫'
+                <span style={{ color: cardTemplate.primaryColor }}>🏫</span>
               )}
             </div>
-          </div>
-        )}
-
-        {cardTemplate.showSchoolName && (
-          <div className="text-center">
-            <div className="text-sm font-bold uppercase tracking-wider">
-              {cardTemplate.schoolName}
-            </div>
+          )}
+          <div className="flex-1 min-w-0 text-left">
+            {cardTemplate.showSchoolName && (
+              <div className="text-[11px] font-bold uppercase tracking-wider leading-tight">
+                {cardTemplate.schoolName}
+              </div>
+            )}
             {cardTemplate.showSchoolMotto && cardTemplate.schoolMotto && (
-              <div className="text-[8px] opacity-70 italic">{cardTemplate.schoolMotto}</div>
+              <div className="text-[7px] opacity-75 italic leading-tight mt-0.5">
+                "{cardTemplate.schoolMotto}"
+              </div>
+            )}
+            {contactLine && (
+              <div className="text-[6.5px] opacity-70 mt-1 leading-tight">
+                {contactLine}
+              </div>
             )}
           </div>
-        )}
+        </div>
 
-        <div className="border-t border-white/20 my-2"></div>
-
-        <div className="text-center text-[10px] font-bold uppercase tracking-wider opacity-80">
+        <div className="text-center text-[9px] font-bold uppercase tracking-wider opacity-85 mb-1.5">
           {cardTemplate.cardTitle || 'ID CARD'}
         </div>
 
-        <div className={`flex ${cardTemplate.layout === 'vertical' ? 'flex-col' : 'flex-row'} gap-3 items-center my-2`}>
+        <div className={`flex ${cardTemplate.layout === 'vertical' ? 'flex-col' : 'flex-row'} gap-3 items-center mb-1`}>
           {cardTemplate.showStudentPhoto && (
-            <div className={`${cardTemplate.layout === 'vertical' ? 'w-20 h-20' : 'w-16 h-16'} bg-white/20 rounded-full flex items-center justify-center text-3xl font-bold flex-shrink-0 border-2 border-white/30`}>
+            <div className={`${cardTemplate.layout === 'vertical' ? 'w-16 h-16' : 'w-14 h-14'} bg-white/20 rounded-full flex items-center justify-center text-2xl font-bold flex-shrink-0 border-2 border-white/30`}>
               {firstLetter}
             </div>
           )}
           <div className={`${cardTemplate.layout === 'vertical' ? 'text-center' : 'flex-1'} w-full`}>
-            <div className={`font-bold ${cardTemplate.layout === 'vertical' ? 'text-lg' : 'text-base'}`}>{name}</div>
-            <div className="flex flex-col gap-0.5 mt-1">
+            <div className={`font-bold ${cardTemplate.layout === 'vertical' ? 'text-base' : 'text-sm'} mb-1`}>{name}</div>
+            <div className="flex flex-col gap-0.5">
               {detailsHtml}
             </div>
           </div>
         </div>
 
         {cardTemplate.showStatusBadge && (
-          <div className="mt-2 text-center">
-            <span className="px-3 py-0.5 bg-green-500 text-white text-[8px] rounded-full font-bold uppercase">
+          <div className="mt-1.5 text-center">
+            <span className="px-2 py-0.5 bg-green-500 text-white text-[7px] rounded-full font-bold uppercase">
               {cardTemplate.activeStatusText || 'ACTIVE'}
             </span>
           </div>
         )}
 
-        <div className="mt-2 pt-1 border-t border-white/20 text-center text-[8px] opacity-70">
-          {cardTemplate.footerText || 'This card is the property of the school'}
+        <div className="mt-2 pt-1.5 border-t border-white/20 flex justify-between items-center text-[7px] opacity-75">
+          <div>{cardTemplate.validityText}: {validUntil}</div>
+          {cardTemplate.showCardNumber && (
+            <div className="font-mono">ID: CARD-2024-0001</div>
+          )}
         </div>
-
-        {cardTemplate.showCardNumber && (
-          <div className="text-center text-[6px] opacity-50 font-mono mt-1">
-            CARD-2024-0001
-          </div>
-        )}
       </div>
     );
   };
@@ -62204,28 +62093,16 @@ const CardManagementModule = ({
           <span className="text-sm font-normal text-gray-500">| {currentSchool?.name}</span>
         </h2>
         <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setShowDesignModal(true)}
-            className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm transition shadow-sm"
-          >
+          <button onClick={() => setShowDesignModal(true)} className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm transition shadow-sm">
             <i className="fas fa-palette mr-2"></i>Design Template
           </button>
-          <button
-            onClick={loadTemplate}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm transition shadow-sm"
-          >
+          <button onClick={loadTemplate} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm transition shadow-sm">
             <i className="fas fa-upload mr-2"></i>Load Template
           </button>
-          <button
-            onClick={resetTemplate}
-            className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm transition shadow-sm"
-          >
+          <button onClick={resetTemplate} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm transition shadow-sm">
             <i className="fas fa-undo mr-2"></i>Reset
           </button>
-          <button
-            onClick={fetchCards}
-            className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm transition shadow-sm"
-          >
+          <button onClick={fetchCards} className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm transition shadow-sm">
             <i className="fas fa-sync-alt mr-2"></i>Refresh
           </button>
         </div>
@@ -62251,7 +62128,7 @@ const CardManagementModule = ({
         </div>
       </div>
 
-      {/* ===== GENERATE ID CARD SECTION - FIXED ===== */}
+      {/* ===== GENERATE ID CARD SECTION ===== */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <h3 className="text-lg font-semibold mb-4 flex items-center gap-2 text-gray-800">
           <i className="fas fa-id-card text-indigo-500"></i>
@@ -62259,11 +62136,8 @@ const CardManagementModule = ({
         </h3>
         
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Person Type - Using native select with clean styling */}
           <div className="space-y-2">
-            <label className="block text-sm font-medium text-gray-700">
-              Person Type <span className="text-red-500">*</span>
-            </label>
+            <label className="block text-sm font-medium text-gray-700">Person Type <span className="text-red-500">*</span></label>
             <select
               value={selectedEntityType}
               onChange={(e) => {
@@ -62282,11 +62156,8 @@ const CardManagementModule = ({
             </select>
           </div>
           
-          {/* Select Person - Dynamically responds to Person Type */}
           <div className="space-y-2">
-            <label className="block text-sm font-medium text-gray-700">
-              Select Person <span className="text-red-500">*</span>
-            </label>
+            <label className="block text-sm font-medium text-gray-700">Select Person <span className="text-red-500">*</span></label>
             <SearchableSelect
               key={`${selectedEntityType}-${selectedEntityId}`}
               options={selectedEntityType === 'student' ? getStudentOptions() : getStaffOptions()}
@@ -62315,7 +62186,6 @@ const CardManagementModule = ({
             />
           </div>
           
-          {/* Generate Button */}
           <div className="flex items-end">
             <button
               onClick={generateCardFromSelect}
@@ -62331,7 +62201,6 @@ const CardManagementModule = ({
           </div>
         </div>
         
-        {/* Selected Person Display */}
         {selectedEntityId && selectedEntityName && (
           <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
             <p className="text-sm text-green-700">
@@ -62344,28 +62213,16 @@ const CardManagementModule = ({
 
       {/* Tabs */}
       <div className="flex flex-wrap space-x-2 border-b border-gray-200">
-        <button
-          onClick={() => { setActiveTab('students'); setFilterType(''); }}
-          className={`px-4 py-2 font-medium transition-colors ${
-            activeTab === 'students' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
+        <button onClick={() => { setActiveTab('students'); setFilterType(''); }}
+          className={`px-4 py-2 font-medium transition-colors ${activeTab === 'students' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
           <i className="fas fa-user-graduate mr-2"></i>Students ({students?.length || 0})
         </button>
-        <button
-          onClick={() => { setActiveTab('staff'); setFilterType(''); }}
-          className={`px-4 py-2 font-medium transition-colors ${
-            activeTab === 'staff' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
+        <button onClick={() => { setActiveTab('staff'); setFilterType(''); }}
+          className={`px-4 py-2 font-medium transition-colors ${activeTab === 'staff' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
           <i className="fas fa-chalkboard-teacher mr-2"></i>Staff ({staff?.length || 0})
         </button>
-        <button
-          onClick={() => { setActiveTab('cards'); setFilterType(''); }}
-          className={`px-4 py-2 font-medium transition-colors ${
-            activeTab === 'cards' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'
-          }`}
-        >
+        <button onClick={() => { setActiveTab('cards'); setFilterType(''); }}
+          className={`px-4 py-2 font-medium transition-colors ${activeTab === 'cards' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
           <i className="fas fa-id-card mr-2"></i>All Cards ({cards.length})
         </button>
       </div>
@@ -62375,10 +62232,7 @@ const CardManagementModule = ({
         <div className="space-y-4">
           <div className="flex flex-wrap justify-between items-center gap-2">
             <p className="text-sm text-gray-500">{students?.length || 0} students • Click "Generate" to create ID card</p>
-            <button
-              onClick={() => bulkGenerate('students')}
-              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm transition shadow-sm"
-            >
+            <button onClick={() => bulkGenerate('students')} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm transition shadow-sm">
               <i className="fas fa-file-pdf mr-2"></i>Bulk Generate
             </button>
           </div>
@@ -62388,50 +62242,32 @@ const CardManagementModule = ({
                 const existingCard = cards.find(c => c.personId === student.id && c.personType === 'STUDENT');
                 const entityName = getEntityName(student, 'student');
                 const entityLabel = getEntityLabel();
-                
                 return (
                   <div key={student.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:shadow-md transition-shadow">
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-3">
                         <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center">
-                          <span className="text-xl font-bold text-indigo-600">
-                            {student.firstName?.[0]}{student.lastName?.[0]}
-                          </span>
+                          <span className="text-xl font-bold text-indigo-600">{student.firstName?.[0]}{student.lastName?.[0]}</span>
                         </div>
                         <div>
                           <h4 className="font-bold text-gray-800">{student.firstName} {student.lastName}</h4>
                           <p className="text-sm text-gray-500">{student.admissionNumber}</p>
                           <p className="text-xs text-gray-400">{entityLabel}: {entityName}</p>
-                          {isTVET && student.currentModule && (
-                            <p className="text-xs text-purple-500">Module {student.currentModule}</p>
-                          )}
-                          {isTVET && student.currentYear && (
-                            <p className="text-xs text-blue-500">Year {student.currentYear}</p>
-                          )}
-                          {isUniversity && student.currentYear && (
-                            <p className="text-xs text-green-500">Year {student.currentYear}</p>
-                          )}
+                          {isTVET && student.currentModule && <p className="text-xs text-purple-500">Module {student.currentModule}</p>}
+                          {isTVET && student.currentYear && <p className="text-xs text-blue-500">Year {student.currentYear}</p>}
+                          {isUniversity && student.currentYear && <p className="text-xs text-green-500">Year {student.currentYear}</p>}
                         </div>
                       </div>
                       {existingCard && (
-                        <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(existingCard.status)}`}>
-                          {existingCard.status}
-                        </span>
+                        <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(existingCard.status)}`}>{existingCard.status}</span>
                       )}
                     </div>
                     <div className="mt-4 flex gap-2">
-                      <button
-                        onClick={() => openValidityModal(student, 'student')}
-                        className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-sm transition disabled:opacity-50"
-                        disabled={loading}
-                      >
+                      <button onClick={() => openValidityModal(student, 'student')} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-sm transition disabled:opacity-50" disabled={loading}>
                         <i className="fas fa-id-card mr-1"></i>Generate
                       </button>
                       {existingCard && (
-                        <button
-                          onClick={() => printCard(existingCard)}
-                          className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm transition"
-                        >
+                        <button onClick={() => printCard(existingCard)} className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm transition">
                           <i className="fas fa-print"></i>
                         </button>
                       )}
@@ -62454,10 +62290,7 @@ const CardManagementModule = ({
         <div className="space-y-4">
           <div className="flex flex-wrap justify-between items-center gap-2">
             <p className="text-sm text-gray-500">{staff?.length || 0} staff members</p>
-            <button
-              onClick={() => bulkGenerate('staff')}
-              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm transition shadow-sm"
-            >
+            <button onClick={() => bulkGenerate('staff')} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm transition shadow-sm">
               <i className="fas fa-file-pdf mr-2"></i>Bulk Generate
             </button>
           </div>
@@ -62470,9 +62303,7 @@ const CardManagementModule = ({
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-3">
                         <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
-                          <span className="text-xl font-bold text-purple-600">
-                            {member.User?.firstName?.[0]}{member.User?.lastName?.[0]}
-                          </span>
+                          <span className="text-xl font-bold text-purple-600">{member.User?.firstName?.[0]}{member.User?.lastName?.[0]}</span>
                         </div>
                         <div>
                           <h4 className="font-bold text-gray-800">{member.User?.firstName} {member.User?.lastName}</h4>
@@ -62481,24 +62312,15 @@ const CardManagementModule = ({
                         </div>
                       </div>
                       {existingCard && (
-                        <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(existingCard.status)}`}>
-                          {existingCard.status}
-                        </span>
+                        <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(existingCard.status)}`}>{existingCard.status}</span>
                       )}
                     </div>
                     <div className="mt-4 flex gap-2">
-                      <button
-                        onClick={() => openValidityModal(member, 'staff')}
-                        className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-sm transition disabled:opacity-50"
-                        disabled={loading}
-                      >
+                      <button onClick={() => openValidityModal(member, 'staff')} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-sm transition disabled:opacity-50" disabled={loading}>
                         <i className="fas fa-id-card mr-1"></i>Generate
                       </button>
                       {existingCard && (
-                        <button
-                          onClick={() => printCard(existingCard)}
-                          className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm transition"
-                        >
+                        <button onClick={() => printCard(existingCard)} className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm transition">
                           <i className="fas fa-print"></i>
                         </button>
                       )}
@@ -62521,29 +62343,15 @@ const CardManagementModule = ({
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
           <div className="p-4 bg-gray-50 border-b border-gray-200">
             <div className="flex flex-wrap gap-2">
-              <input
-                type="text"
-                placeholder="Search by name..."
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm min-w-[200px] focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-              <select
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition bg-white"
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-              >
+              <input type="text" placeholder="Search by name..." className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm min-w-[200px] focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+              <select className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition bg-white" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
                 <option value="">All Status</option>
                 <option value="ACTIVE">Active</option>
                 <option value="INACTIVE">Inactive</option>
                 <option value="SUSPENDED">Suspended</option>
                 <option value="EXPIRED">Expired</option>
               </select>
-              <select
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition bg-white"
-                value={filterType}
-                onChange={(e) => setFilterType(e.target.value)}
-              >
+              <select className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition bg-white" value={filterType} onChange={(e) => setFilterType(e.target.value)}>
                 <option value="">All Types</option>
                 <option value="STUDENT">Student</option>
                 <option value="STAFF">Staff</option>
@@ -62579,32 +62387,20 @@ const CardManagementModule = ({
                       <td className="px-4 py-3 font-mono text-sm text-gray-600">{card.cardNumber || 'N/A'}</td>
                       <td className="px-4 py-3 font-medium text-gray-800">{getPersonName(card)}</td>
                       <td className="px-4 py-3">
-                        <span className={`px-2 py-1 rounded-full text-xs ${
-                          card.personType === 'STUDENT' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'
-                        }`}>
-                          {card.personType}
-                        </span>
+                        <span className={`px-2 py-1 rounded-full text-xs ${card.personType === 'STUDENT' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>{card.personType}</span>
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">{getEntityDisplay(card)}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">{new Date(card.issuedDate).toLocaleDateString()}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">{card.expiryDate ? new Date(card.expiryDate).toLocaleDateString() : 'N/A'}</td>
                       <td className="px-4 py-3">
-                        <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(card.status)}`}>
-                          {card.status}
-                        </span>
+                        <span className={`px-2 py-1 rounded-full text-xs ${getStatusBadge(card.status)}`}>{card.status}</span>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex gap-2">
-                          <button
-                            onClick={() => printCard(card)}
-                            className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded text-sm transition"
-                          >
+                          <button onClick={() => printCard(card)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded text-sm transition">
                             <i className="fas fa-print mr-1"></i>Print
                           </button>
-                          <button
-                            onClick={() => deleteCard(card.id)}
-                            className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm transition"
-                          >
+                          <button onClick={() => deleteCard(card.id)} className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm transition">
                             <i className="fas fa-trash mr-1"></i>
                           </button>
                         </div>
@@ -62630,35 +62426,20 @@ const CardManagementModule = ({
             </div>
             
             <div className="space-y-4">
-              <p className="text-sm text-gray-600">
-                Set the expiry date for this ID card. 
-              </p>
+              <p className="text-sm text-gray-600">Set the expiry date for this ID card.</p>
               
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Valid Until Date</label>
-                <input
-                  type="date"
-                  value={validUntilDate}
-                  onChange={(e) => setValidUntilDate(e.target.value)}
+                <input type="date" value={validUntilDate} onChange={(e) => setValidUntilDate(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                  min={new Date().toISOString().split('T')[0]}
-                />
+                  min={new Date().toISOString().split('T')[0]} />
               </div>
               
               <div className="flex gap-2 pt-2">
-                <button
-                  onClick={generateCardWithValidity}
-                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg transition disabled:opacity-50"
-                  disabled={!validUntilDate}
-                >
+                <button onClick={generateCardWithValidity} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg transition disabled:opacity-50" disabled={!validUntilDate}>
                   <i className="fas fa-check mr-2"></i>Generate Card
                 </button>
-                <button
-                  onClick={() => { setShowValidityModal(false); setPendingGenerate(null); }}
-                  className="bg-gray-500 hover:bg-gray-600 text-white px-6 py-2 rounded-lg transition"
-                >
-                  Cancel
-                </button>
+                <button onClick={() => { setShowValidityModal(false); setPendingGenerate(null); }} className="bg-gray-500 hover:bg-gray-600 text-white px-6 py-2 rounded-lg transition">Cancel</button>
               </div>
             </div>
           </div>
@@ -62685,31 +62466,35 @@ const CardManagementModule = ({
                   <div className="grid grid-cols-2 gap-3">
                     <div className="col-span-2">
                       <label className="block text-sm font-medium text-gray-700 mb-1">School Name</label>
-                      <input
-                        type="text"
-                        value={cardTemplate.schoolName}
-                        onChange={(e) => setCardTemplate({...cardTemplate, schoolName: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                      />
+                      <input type="text" value={cardTemplate.schoolName} onChange={(e) => setCardTemplate({...cardTemplate, schoolName: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition" />
                     </div>
                     <div className="col-span-2">
                       <label className="block text-sm font-medium text-gray-700 mb-1">School Motto</label>
-                      <input
-                        type="text"
-                        value={cardTemplate.schoolMotto}
-                        onChange={(e) => setCardTemplate({...cardTemplate, schoolMotto: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                      />
+                      <input type="text" value={cardTemplate.schoolMotto} onChange={(e) => setCardTemplate({...cardTemplate, schoolMotto: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition" />
                     </div>
                     <div className="col-span-2">
                       <label className="block text-sm font-medium text-gray-700 mb-1">School Logo URL</label>
-                      <input
-                        type="text"
-                        value={cardTemplate.schoolLogo}
-                        onChange={(e) => setCardTemplate({...cardTemplate, schoolLogo: e.target.value})}
+                      <input type="text" value={cardTemplate.schoolLogo} onChange={(e) => setCardTemplate({...cardTemplate, schoolLogo: e.target.value})}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                        placeholder="https://example.com/logo.png"
-                      />
+                        placeholder="https://example.com/logo.png" />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">School Address</label>
+                      <input type="text" value={cardTemplate.schoolAddress} onChange={(e) => setCardTemplate({...cardTemplate, schoolAddress: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
+                        placeholder="P.O. Box 123, Nairobi" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">School Phone</label>
+                      <input type="text" value={cardTemplate.schoolPhone} onChange={(e) => setCardTemplate({...cardTemplate, schoolPhone: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">School Email</label>
+                      <input type="text" value={cardTemplate.schoolEmail} onChange={(e) => setCardTemplate({...cardTemplate, schoolEmail: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition" />
                     </div>
                   </div>
                 </div>
@@ -62720,39 +62505,19 @@ const CardManagementModule = ({
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Primary</label>
-                      <input
-                        type="color"
-                        value={cardTemplate.primaryColor}
-                        onChange={(e) => setCardTemplate({...cardTemplate, primaryColor: e.target.value})}
-                        className="w-full h-10 border border-gray-300 rounded-lg cursor-pointer"
-                      />
+                      <input type="color" value={cardTemplate.primaryColor} onChange={(e) => setCardTemplate({...cardTemplate, primaryColor: e.target.value})} className="w-full h-10 border border-gray-300 rounded-lg cursor-pointer" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Secondary</label>
-                      <input
-                        type="color"
-                        value={cardTemplate.secondaryColor}
-                        onChange={(e) => setCardTemplate({...cardTemplate, secondaryColor: e.target.value})}
-                        className="w-full h-10 border border-gray-300 rounded-lg cursor-pointer"
-                      />
+                      <input type="color" value={cardTemplate.secondaryColor} onChange={(e) => setCardTemplate({...cardTemplate, secondaryColor: e.target.value})} className="w-full h-10 border border-gray-300 rounded-lg cursor-pointer" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Text</label>
-                      <input
-                        type="color"
-                        value={cardTemplate.textColor}
-                        onChange={(e) => setCardTemplate({...cardTemplate, textColor: e.target.value})}
-                        className="w-full h-10 border border-gray-300 rounded-lg cursor-pointer"
-                      />
+                      <input type="color" value={cardTemplate.textColor} onChange={(e) => setCardTemplate({...cardTemplate, textColor: e.target.value})} className="w-full h-10 border border-gray-300 rounded-lg cursor-pointer" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Border</label>
-                      <input
-                        type="color"
-                        value={cardTemplate.borderColor}
-                        onChange={(e) => setCardTemplate({...cardTemplate, borderColor: e.target.value})}
-                        className="w-full h-10 border border-gray-300 rounded-lg cursor-pointer"
-                      />
+                      <input type="color" value={cardTemplate.borderColor} onChange={(e) => setCardTemplate({...cardTemplate, borderColor: e.target.value})} className="w-full h-10 border border-gray-300 rounded-lg cursor-pointer" />
                     </div>
                   </div>
                 </div>
@@ -62763,22 +62528,14 @@ const CardManagementModule = ({
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Layout</label>
-                      <select
-                        value={cardTemplate.layout}
-                        onChange={(e) => setCardTemplate({...cardTemplate, layout: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition bg-white"
-                      >
+                      <select value={cardTemplate.layout} onChange={(e) => setCardTemplate({...cardTemplate, layout: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition bg-white">
                         <option value="horizontal">Horizontal</option>
                         <option value="vertical">Vertical</option>
                       </select>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Card Size</label>
-                      <select
-                        value={cardTemplate.cardSize}
-                        onChange={(e) => setCardTemplate({...cardTemplate, cardSize: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition bg-white"
-                      >
+                      <select value={cardTemplate.cardSize} onChange={(e) => setCardTemplate({...cardTemplate, cardSize: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition bg-white">
                         <option value="standard">Standard</option>
                         <option value="large">Large</option>
                         <option value="compact">Compact</option>
@@ -62786,11 +62543,7 @@ const CardManagementModule = ({
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Card Shape</label>
-                      <select
-                        value={cardTemplate.cardShape}
-                        onChange={(e) => setCardTemplate({...cardTemplate, cardShape: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition bg-white"
-                      >
+                      <select value={cardTemplate.cardShape} onChange={(e) => setCardTemplate({...cardTemplate, cardShape: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition bg-white">
                         <option value="rounded">Rounded</option>
                         <option value="square">Square</option>
                         <option value="circle">Circle</option>
@@ -62798,11 +62551,7 @@ const CardManagementModule = ({
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Border Style</label>
-                      <select
-                        value={cardTemplate.borderStyle}
-                        onChange={(e) => setCardTemplate({...cardTemplate, borderStyle: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition bg-white"
-                      >
+                      <select value={cardTemplate.borderStyle} onChange={(e) => setCardTemplate({...cardTemplate, borderStyle: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition bg-white">
                         <option value="solid">Solid</option>
                         <option value="dashed">Dashed</option>
                         <option value="dotted">Dotted</option>
@@ -62827,6 +62576,18 @@ const CardManagementModule = ({
                     <label className="flex items-center space-x-2">
                       <input type="checkbox" checked={cardTemplate.showSchoolMotto} onChange={(e) => setCardTemplate({...cardTemplate, showSchoolMotto: e.target.checked})} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
                       <span className="text-sm text-gray-700">School Motto</span>
+                    </label>
+                    <label className="flex items-center space-x-2">
+                      <input type="checkbox" checked={cardTemplate.showSchoolAddress} onChange={(e) => setCardTemplate({...cardTemplate, showSchoolAddress: e.target.checked})} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                      <span className="text-sm text-gray-700">School Address</span>
+                    </label>
+                    <label className="flex items-center space-x-2">
+                      <input type="checkbox" checked={cardTemplate.showSchoolPhone} onChange={(e) => setCardTemplate({...cardTemplate, showSchoolPhone: e.target.checked})} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                      <span className="text-sm text-gray-700">School Phone</span>
+                    </label>
+                    <label className="flex items-center space-x-2">
+                      <input type="checkbox" checked={cardTemplate.showSchoolEmail} onChange={(e) => setCardTemplate({...cardTemplate, showSchoolEmail: e.target.checked})} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                      <span className="text-sm text-gray-700">School Email</span>
                     </label>
                     <label className="flex items-center space-x-2">
                       <input type="checkbox" checked={cardTemplate.showStudentPhoto} onChange={(e) => setCardTemplate({...cardTemplate, showStudentPhoto: e.target.checked})} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
@@ -62867,15 +62628,9 @@ const CardManagementModule = ({
                           <div className="grid grid-cols-2 gap-1 pl-2">
                             {fields.map(({ key, label }) => (
                               <label key={key} className="flex items-center space-x-2">
-                                <input
-                                  type="checkbox"
-                                  checked={cardTemplate.fields[key] || false}
-                                  onChange={(e) => setCardTemplate({
-                                    ...cardTemplate,
-                                    fields: { ...cardTemplate.fields, [key]: e.target.checked }
-                                  })}
-                                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                />
+                                <input type="checkbox" checked={cardTemplate.fields[key] || false}
+                                  onChange={(e) => setCardTemplate({...cardTemplate, fields: { ...cardTemplate.fields, [key]: e.target.checked }})}
+                                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
                                 <span className="text-sm text-gray-700">{label}</span>
                               </label>
                             ))}
@@ -62892,39 +62647,19 @@ const CardManagementModule = ({
                   <div className="grid grid-cols-2 gap-3">
                     <div className="col-span-2">
                       <label className="block text-sm font-medium text-gray-700 mb-1">Card Title</label>
-                      <input
-                        type="text"
-                        value={cardTemplate.cardTitle}
-                        onChange={(e) => setCardTemplate({...cardTemplate, cardTitle: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                      />
+                      <input type="text" value={cardTemplate.cardTitle} onChange={(e) => setCardTemplate({...cardTemplate, cardTitle: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition" />
                     </div>
                     <div className="col-span-2">
                       <label className="block text-sm font-medium text-gray-700 mb-1">Footer Text</label>
-                      <input
-                        type="text"
-                        value={cardTemplate.footerText}
-                        onChange={(e) => setCardTemplate({...cardTemplate, footerText: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                      />
+                      <input type="text" value={cardTemplate.footerText} onChange={(e) => setCardTemplate({...cardTemplate, footerText: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Validity Text</label>
-                      <input
-                        type="text"
-                        value={cardTemplate.validityText}
-                        onChange={(e) => setCardTemplate({...cardTemplate, validityText: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                      />
+                      <input type="text" value={cardTemplate.validityText} onChange={(e) => setCardTemplate({...cardTemplate, validityText: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Active Status Text</label>
-                      <input
-                        type="text"
-                        value={cardTemplate.activeStatusText}
-                        onChange={(e) => setCardTemplate({...cardTemplate, activeStatusText: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                      />
+                      <input type="text" value={cardTemplate.activeStatusText} onChange={(e) => setCardTemplate({...cardTemplate, activeStatusText: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition" />
                     </div>
                   </div>
                 </div>
@@ -62935,50 +62670,25 @@ const CardManagementModule = ({
                   <div className="grid grid-cols-2 gap-3">
                     <div className="col-span-2">
                       <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
-                      <input
-                        type="text"
-                        value={livePreviewData.name}
-                        onChange={(e) => setLivePreviewData({...livePreviewData, name: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                      />
+                      <input type="text" value={livePreviewData.name} onChange={(e) => setLivePreviewData({...livePreviewData, name: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">ID Number</label>
-                      <input
-                        type="text"
-                        value={livePreviewData.id}
-                        onChange={(e) => setLivePreviewData({...livePreviewData, id: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                      />
+                      <input type="text" value={livePreviewData.id} onChange={(e) => setLivePreviewData({...livePreviewData, id: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">{getEntityLabel()} Name</label>
-                      <input
-                        type="text"
-                        value={livePreviewData.entity}
-                        onChange={(e) => setLivePreviewData({...livePreviewData, entity: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                      />
+                      <input type="text" value={livePreviewData.entity} onChange={(e) => setLivePreviewData({...livePreviewData, entity: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition" />
                     </div>
                     {isTVET && (
                       <>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">Module</label>
-                          <input
-                            type="text"
-                            value={livePreviewData.module}
-                            onChange={(e) => setLivePreviewData({...livePreviewData, module: e.target.value})}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                          />
+                          <input type="text" value={livePreviewData.module} onChange={(e) => setLivePreviewData({...livePreviewData, module: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition" />
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">Year</label>
-                          <input
-                            type="text"
-                            value={livePreviewData.year}
-                            onChange={(e) => setLivePreviewData({...livePreviewData, year: e.target.value})}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                          />
+                          <input type="text" value={livePreviewData.year} onChange={(e) => setLivePreviewData({...livePreviewData, year: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition" />
                         </div>
                       </>
                     )}
@@ -62986,123 +62696,43 @@ const CardManagementModule = ({
                       <>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">Year</label>
-                          <input
-                            type="text"
-                            value={livePreviewData.year}
-                            onChange={(e) => setLivePreviewData({...livePreviewData, year: e.target.value})}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                          />
+                          <input type="text" value={livePreviewData.year} onChange={(e) => setLivePreviewData({...livePreviewData, year: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition" />
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">Semester</label>
-                          <input
-                            type="text"
-                            value={livePreviewData.semester}
-                            onChange={(e) => setLivePreviewData({...livePreviewData, semester: e.target.value})}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                          />
+                          <input type="text" value={livePreviewData.semester} onChange={(e) => setLivePreviewData({...livePreviewData, semester: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition" />
                         </div>
                       </>
                     )}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">DOB</label>
-                      <input
-                        type="text"
-                        value={livePreviewData.dob}
-                        onChange={(e) => setLivePreviewData({...livePreviewData, dob: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                      />
+                      <input type="text" value={livePreviewData.dob} onChange={(e) => setLivePreviewData({...livePreviewData, dob: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Gender</label>
-                      <input
-                        type="text"
-                        value={livePreviewData.gender}
-                        onChange={(e) => setLivePreviewData({...livePreviewData, gender: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                      />
+                      <input type="text" value={livePreviewData.gender} onChange={(e) => setLivePreviewData({...livePreviewData, gender: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                      <input
-                        type="text"
-                        value={livePreviewData.phone}
-                        onChange={(e) => setLivePreviewData({...livePreviewData, phone: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                      />
+                      <input type="text" value={livePreviewData.phone} onChange={(e) => setLivePreviewData({...livePreviewData, phone: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                      <input
-                        type="text"
-                        value={livePreviewData.email}
-                        onChange={(e) => setLivePreviewData({...livePreviewData, email: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Blood Group</label>
-                      <input
-                        type="text"
-                        value={livePreviewData.bloodGroup}
-                        onChange={(e) => setLivePreviewData({...livePreviewData, bloodGroup: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Nationality</label>
-                      <input
-                        type="text"
-                        value={livePreviewData.nationality}
-                        onChange={(e) => setLivePreviewData({...livePreviewData, nationality: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
-                      <input
-                        type="text"
-                        value={livePreviewData.address}
-                        onChange={(e) => setLivePreviewData({...livePreviewData, address: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Parent/Guardian Name</label>
-                      <input
-                        type="text"
-                        value={livePreviewData.parentName}
-                        onChange={(e) => setLivePreviewData({...livePreviewData, parentName: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                      />
+                      <input type="text" value={livePreviewData.email} onChange={(e) => setLivePreviewData({...livePreviewData, email: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition" />
                     </div>
                     <div className="col-span-2">
                       <label className="block text-sm font-medium text-gray-700 mb-1">Valid Until</label>
-                      <input
-                        type="text"
-                        value={livePreviewData.validUntil}
-                        onChange={(e) => setLivePreviewData({...livePreviewData, validUntil: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition"
-                        placeholder="12/31/2025"
-                      />
+                      <input type="text" value={livePreviewData.validUntil} onChange={(e) => setLivePreviewData({...livePreviewData, validUntil: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition" placeholder="12/31/2025" />
                     </div>
                   </div>
                 </div>
 
                 {/* Buttons */}
                 <div className="flex flex-wrap gap-2 pt-4">
-                  <button
-                    onClick={saveTemplate}
-                    className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg transition shadow-sm"
-                  >
+                  <button onClick={saveTemplate} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg transition shadow-sm">
                     <i className="fas fa-save mr-2"></i>Save Template
                   </button>
-                  <button
-                    onClick={() => { setShowDesignModal(false); setEntitySearchTerm(''); }}
-                    className="bg-gray-500 hover:bg-gray-600 text-white px-6 py-2 rounded-lg transition shadow-sm"
-                  >
-                    Close
-                  </button>
+                  <button onClick={() => { setShowDesignModal(false); setEntitySearchTerm(''); }} className="bg-gray-500 hover:bg-gray-600 text-white px-6 py-2 rounded-lg transition shadow-sm">Close</button>
                 </div>
               </div>
 
@@ -63133,9 +62763,9 @@ const CardManagementModule = ({
 
             <div className="border border-gray-200 rounded-lg p-4 bg-gray-50 mb-4">
               <div 
-                className="p-4 rounded-lg mx-auto"
+                className="p-3 rounded-lg mx-auto"
                 style={{
-                  width: '240px',
+                  width: '260px',
                   background: cardTemplate.primaryColor,
                   color: cardTemplate.textColor,
                   borderRadius: cardTemplate.borderRadius,
@@ -63145,152 +62775,117 @@ const CardManagementModule = ({
                   overflow: 'hidden'
                 }}
               >
+                {/* Watermark */}
                 {cardTemplate.showWatermark && (
                   <div style={{
-                    position: 'absolute',
-                    top: '50%',
-                    left: '50%',
+                    position: 'absolute', top: '50%', left: '50%',
                     transform: 'translate(-50%, -50%) rotate(-45deg)',
-                    fontSize: '30px',
-                    fontWeight: 'bold',
+                    fontSize: '28px', fontWeight: 'bold',
                     opacity: cardTemplate.watermarkOpacity,
                     color: cardTemplate.textColor,
-                    whiteSpace: 'nowrap',
-                    pointerEvents: 'none'
+                    whiteSpace: 'nowrap', pointerEvents: 'none'
                   }}>
                     {cardTemplate.watermarkText}
                   </div>
                 )}
 
-                {cardTemplate.showSchoolLogo && (
-                  <div className="flex justify-center mb-2">
-                    <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center text-2xl">
+                {/* ✅ LEFT-ALIGNED LOGO HEADER */}
+                <div className="flex items-center gap-2 pb-2 mb-2 border-b border-white/25">
+                  {cardTemplate.showSchoolLogo && (
+                    <div className="w-11 h-11 bg-white rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden border-2 border-white/40">
                       {generatedCard.schoolLogo ? (
-                        <img src={generatedCard.schoolLogo} alt="School Logo" className="w-full h-full object-cover rounded-full" />
-                      ) : '🏫'}
+                        <img src={generatedCard.schoolLogo} alt="Logo" className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-lg" style={{ color: cardTemplate.primaryColor }}>🏫</span>
+                      )}
                     </div>
-                  </div>
-                )}
-
-                {cardTemplate.showSchoolName && (
-                  <div className="text-center">
-                    <div className="text-sm font-bold uppercase tracking-wider">
-                      {generatedCard.schoolName || 'School Name'}
-                    </div>
-                    {cardTemplate.showSchoolMotto && generatedCard.schoolMotto && (
-                      <div className="text-[8px] opacity-70 italic">{generatedCard.schoolMotto}</div>
+                  )}
+                  <div className="flex-1 min-w-0 text-left">
+                    {cardTemplate.showSchoolName && (
+                      <div className="text-[10px] font-bold uppercase tracking-wider leading-tight">
+                        {generatedCard.schoolName || 'School Name'}
+                      </div>
+                    )}
+                    {cardTemplate.showSchoolMotto && (generatedCard.schoolMotto || cardTemplate.schoolMotto) && (
+                      <div className="text-[6.5px] opacity-75 italic leading-tight mt-0.5">
+                        "{generatedCard.schoolMotto || cardTemplate.schoolMotto}"
+                      </div>
+                    )}
+                    {(cardTemplate.showSchoolAddress || cardTemplate.showSchoolPhone || cardTemplate.showSchoolEmail) && (
+                      <div className="text-[6px] opacity-70 mt-0.5 leading-tight">
+                        {[
+                          cardTemplate.showSchoolAddress && cardTemplate.schoolAddress,
+                          cardTemplate.showSchoolPhone && cardTemplate.schoolPhone,
+                          cardTemplate.showSchoolEmail && cardTemplate.schoolEmail
+                        ].filter(Boolean).join(' • ')}
+                      </div>
                     )}
                   </div>
-                )}
+                </div>
 
-                <div className="border-t border-white/20 my-2"></div>
-
-                <div className="text-center text-[10px] font-bold uppercase tracking-wider opacity-80">
+                <div className="text-center text-[8.5px] font-bold uppercase tracking-wider opacity-85 mb-1.5">
                   {cardTemplate.cardTitle}
                 </div>
 
-                <div className="flex flex-col gap-1 items-center my-2">
+                <div className="flex flex-col gap-1 items-center mb-1">
                   {cardTemplate.showStudentPhoto && (
-                    <div className="w-14 h-14 bg-white/20 rounded-full flex items-center justify-center text-2xl font-bold flex-shrink-0">
+                    <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center text-xl font-bold flex-shrink-0 border-2 border-white/30">
                       {generatedCard.personName?.charAt(0) || '👤'}
                     </div>
                   )}
-                  <div className="text-center flex-1">
-                    <div className="font-bold text-base">{generatedCard.personName || 'Unknown'}</div>
-                    <div className="text-[10px] opacity-80">ID: {generatedCard.idNumber || 'N/A'}</div>
-                    
+                  <div className="text-center flex-1 w-full">
+                    <div className="font-bold text-sm">{generatedCard.personName || 'Unknown'}</div>
+                    <div className="text-[9px] opacity-90 mt-1">
+                      <span className="opacity-70">ID: </span>{generatedCard.idNumber || 'N/A'}
+                    </div>
                     {generatedCard.personType === 'STUDENT' && (
                       <>
-                        {isTVET && cardTemplate.fields.programName && (
-                          <div className="text-[10px] opacity-80 font-medium">{getEntityLabel()}: {generatedCard.entityName || 'N/A'}</div>
+                        {((isTVET && cardTemplate.fields.programName) ||
+                          (isUniversity && cardTemplate.fields.courseName) ||
+                          (!isTVET && !isUniversity && cardTemplate.fields.className)) && (
+                          <div className="text-[9px] opacity-90">
+                            <span className="opacity-70">{getEntityLabel()}: </span>{generatedCard.entityName || 'N/A'}
+                          </div>
                         )}
-                        {isUniversity && cardTemplate.fields.courseName && (
-                          <div className="text-[10px] opacity-80 font-medium">{getEntityLabel()}: {generatedCard.entityName || 'N/A'}</div>
-                        )}
-                        {!isTVET && !isUniversity && cardTemplate.fields.className && (
-                          <div className="text-[10px] opacity-80 font-medium">{getEntityLabel()}: {generatedCard.entityName || 'N/A'}</div>
-                        )}
-                        
                         {isTVET && cardTemplate.fields.currentModule && generatedCard.moduleInfo && generatedCard.moduleInfo !== 'N/A' && (
-                          <div className="text-[10px] opacity-80">{generatedCard.moduleInfo}</div>
+                          <div className="text-[9px] opacity-90">{generatedCard.moduleInfo}</div>
                         )}
-                        {cardTemplate.fields.currentYear && generatedCard.yearInfo && generatedCard.yearInfo !== 'N/A' && (
-                          <div className="text-[10px] opacity-80">{generatedCard.yearInfo}</div>
+                        {(cardTemplate.fields.currentYear && generatedCard.yearInfo && generatedCard.yearInfo !== 'N/A') && (
+                          <div className="text-[9px] opacity-90">{generatedCard.yearInfo}</div>
                         )}
                         {isUniversity && cardTemplate.fields.currentSemester && generatedCard.semesterInfo && generatedCard.semesterInfo !== 'N/A' && (
-                          <div className="text-[10px] opacity-80">{generatedCard.semesterInfo}</div>
+                          <div className="text-[9px] opacity-90">{generatedCard.semesterInfo}</div>
                         )}
                       </>
+                    )}
+                    {cardTemplate.fields.validUntil && generatedCard.validUntil && generatedCard.validUntil !== 'N/A' && (
+                      <div className="text-[9px] opacity-90 mt-0.5">
+                        <span className="opacity-70">{cardTemplate.validityText}: </span>{generatedCard.validUntil}
+                      </div>
                     )}
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-1 text-[9px] mt-2">
-                  {cardTemplate.fields.dateOfBirth && generatedCard.dateOfBirth && generatedCard.dateOfBirth !== 'N/A' && (
-                    <div className="opacity-80">📅 {generatedCard.dateOfBirth}</div>
-                  )}
-                  {cardTemplate.fields.gender && generatedCard.gender && generatedCard.gender !== 'N/A' && (
-                    <div className="opacity-80">⚤ {generatedCard.gender}</div>
-                  )}
-                  {cardTemplate.fields.phone && generatedCard.phone && generatedCard.phone !== 'N/A' && (
-                    <div className="opacity-80">📱 {generatedCard.phone}</div>
-                  )}
-                  {cardTemplate.fields.email && generatedCard.email && generatedCard.email !== 'N/A' && (
-                    <div className="opacity-80">✉️ {generatedCard.email}</div>
-                  )}
-                  {cardTemplate.fields.bloodGroup && generatedCard.bloodGroup && generatedCard.bloodGroup !== 'N/A' && (
-                    <div className="opacity-80">🩸 {generatedCard.bloodGroup}</div>
-                  )}
-                  {cardTemplate.fields.nationality && generatedCard.nationality && generatedCard.nationality !== 'N/A' && (
-                    <div className="opacity-80">🇰🇪 {generatedCard.nationality}</div>
-                  )}
-                  {isTVET && cardTemplate.fields.currentModule && generatedCard.currentModule && generatedCard.currentModule !== 'N/A' && (
-                    <div className="opacity-80">📚 Module {generatedCard.currentModule}</div>
-                  )}
-                  {cardTemplate.fields.currentYear && generatedCard.currentYear && generatedCard.currentYear !== 'N/A' && (
-                    <div className="opacity-80">📅 Year {generatedCard.currentYear}</div>
-                  )}
-                  {isUniversity && cardTemplate.fields.currentSemester && generatedCard.currentSemester && generatedCard.currentSemester !== 'N/A' && (
-                    <div className="opacity-80">📅 Sem {generatedCard.currentSemester}</div>
-                  )}
-                  {cardTemplate.fields.validUntil && generatedCard.validUntil && generatedCard.validUntil !== 'N/A' && (
-                    <div className="opacity-80">📅 Valid: {generatedCard.validUntil}</div>
-                  )}
-                </div>
-
                 {cardTemplate.showStatusBadge && (
-                  <div className="mt-2 text-center">
-                    <span className="px-3 py-0.5 bg-green-500 text-white text-[8px] rounded-full font-bold uppercase">
+                  <div className="mt-1.5 text-center">
+                    <span className="px-2 py-0.5 bg-green-500 text-white text-[7px] rounded-full font-bold uppercase">
                       {cardTemplate.activeStatusText}
                     </span>
                   </div>
                 )}
 
-                <div className="mt-2 pt-1 border-t border-white/20 text-center text-[8px] opacity-70">
-                  {cardTemplate.footerText}
+                <div className="mt-2 pt-1 border-t border-white/20 flex justify-between items-center text-[7px] opacity-75">
+                  <div>{cardTemplate.footerText}</div>
+                  {cardTemplate.showCardNumber && <div className="font-mono">{generatedCard.cardNumber || 'N/A'}</div>}
                 </div>
-
-                {cardTemplate.showCardNumber && (
-                  <div className="text-center text-[6px] opacity-50 font-mono mt-1">
-                    {generatedCard.cardNumber || 'N/A'}
-                  </div>
-                )}
               </div>
             </div>
 
             <div className="flex gap-2">
-              <button
-                onClick={() => printCard(generatedCard)}
-                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg transition shadow-sm"
-              >
+              <button onClick={() => printCard(generatedCard)} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg transition shadow-sm">
                 <i className="fas fa-print mr-2"></i>Print Card
               </button>
-              <button
-                onClick={() => { setShowPreviewModal(false); setGeneratedCard(null); }}
-                className="bg-gray-500 hover:bg-gray-600 text-white px-6 py-2 rounded-lg transition shadow-sm"
-              >
-                Close
-              </button>
+              <button onClick={() => { setShowPreviewModal(false); setGeneratedCard(null); }} className="bg-gray-500 hover:bg-gray-600 text-white px-6 py-2 rounded-lg transition shadow-sm">Close</button>
             </div>
           </div>
         </div>
@@ -63298,7 +62893,6 @@ const CardManagementModule = ({
     </div>
   );
 };
-
 // ==================== CERTIFICATE MODULE - WITH SEARCHABLE SELECTS ====================
 const CertificateModule = ({ students, staff, currentSchool, user }) => {
   const [certificates, setCertificates] = useState([]);
@@ -63324,6 +62918,18 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
     colorScheme: 'gold'
   });
 
+  // ==================== SCHOOL IDENTITY ====================
+  const schoolName =
+    currentSchool?.name?.trim() ||
+    currentSchool?.schoolName?.trim() ||
+    'School Name';
+  const schoolLogo = (typeof resolveLogoUrl === 'function')
+    ? resolveLogoUrl(currentSchool)
+    : (currentSchool?.logo || currentSchool?.schoolLogo || currentSchool?.contact?.logo || null);
+  const schoolMotto = currentSchool?.motto || currentSchool?.schoolMotto || '';
+  const schoolAddress = currentSchool?.contact?.address || '';
+  const schoolPhone = currentSchool?.contact?.phone || '';
+  const schoolEmail = currentSchool?.contact?.email || '';
 
   const certTypes = [
     { value: 'student_of_year', label: '🏆 Student of the Year' },
@@ -63338,36 +62944,77 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
     { value: 'custom', label: '✨ Custom Certificate' }
   ];
 
+  // ==================== COLOR SCHEMES ====================
+  // ✅ These are now used on the FRONTEND to build the certificate HTML,
+  // so switching schemes actually changes the printed output.
+  const COLOR_SCHEMES = {
+    gold: {
+      primary: '#b8860b',
+      primaryDark: '#8b6914',
+      primaryLight: '#f5e6c8',
+      accent: '#d4af37',
+      bg: '#fffdf5',
+      text: '#3d2f0a',
+      borderOuter: '#b8860b',
+      borderInner: '#d4af37',
+      sealFill: '#d4af37',
+      sealText: '#fff'
+    },
+    blue: {
+      primary: '#1e3a8a',
+      primaryDark: '#1e2d5f',
+      primaryLight: '#dbeafe',
+      accent: '#3b82f6',
+      bg: '#f8fbff',
+      text: '#0c1e4a',
+      borderOuter: '#1e3a8a',
+      borderInner: '#3b82f6',
+      sealFill: '#3b82f6',
+      sealText: '#fff'
+    },
+    green: {
+      primary: '#166534',
+      primaryDark: '#0f4a25',
+      primaryLight: '#dcfce7',
+      accent: '#22c55e',
+      bg: '#f7fef9',
+      text: '#0a3318',
+      borderOuter: '#166534',
+      borderInner: '#22c55e',
+      sealFill: '#22c55e',
+      sealText: '#fff'
+    },
+    premium: {
+      primary: '#1f2937',
+      primaryDark: '#0f172a',
+      primaryLight: '#e5e7eb',
+      accent: '#d4af37',
+      bg: '#0f172a',
+      text: '#f1f5f9',
+      borderOuter: '#d4af37',
+      borderInner: '#f5e6c8',
+      sealFill: '#d4af37',
+      sealText: '#0f172a'
+    }
+  };
+
   // ==================== SEARCHABLE SELECT COMPONENT ====================
   const SearchableSelect = ({ 
-    options, 
-    value, 
-    onChange, 
-    placeholder = 'Search...', 
-    label = 'Select',
-    searchTerm,
-    setSearchTerm,
-    isOpen,
-    setIsOpen,
-    disabled = false,
-    required = false,
-    className = '',
-    emptyMessage = 'No options available',
+    options, value, onChange, placeholder = 'Search...', label = 'Select',
+    searchTerm, setSearchTerm, isOpen, setIsOpen, disabled = false,
+    required = false, className = '', emptyMessage = 'No options available',
     renderOption = null
   }) => {
     const dropdownRef = useRef(null);
     
-    // Filter options based on search term
     const filteredOptions = options.filter(option => 
-      option.label.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      option.label?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (option.subLabel && option.subLabel.toLowerCase().includes(searchTerm.toLowerCase()))
     );
     
-    // Get selected option
     const selectedOption = options.find(opt => opt.value === value);
     const displayValue = selectedOption ? selectedOption.label : '';
     
-    // Close dropdown on outside click
     useEffect(() => {
       const handleClickOutside = (event) => {
         if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -63428,14 +63075,10 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
                       }
                     }}
                   >
-                    {renderOption ? (
-                      renderOption(option)
-                    ) : (
+                    {renderOption ? renderOption(option) : (
                       <>
                         <div className="font-medium text-sm">{option.label}</div>
-                        {option.subLabel && (
-                          <div className="text-xs text-gray-500">{option.subLabel}</div>
-                        )}
+                        {option.subLabel && <div className="text-xs text-gray-500">{option.subLabel}</div>}
                       </>
                     )}
                   </div>
@@ -63451,8 +63094,6 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
   // ==================== GET RECIPIENT OPTIONS ====================
   const getRecipientOptions = () => {
     const options = [];
-    
-    // Add students
     if (students && students.length > 0) {
       students.forEach(s => {
         options.push({
@@ -63464,8 +63105,6 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
         });
       });
     }
-    
-    // Add staff
     if (staff && staff.length > 0) {
       staff.forEach(s => {
         options.push({
@@ -63477,14 +63116,10 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
         });
       });
     }
-    
-    // Sort by label
     options.sort((a, b) => a.label.localeCompare(b.label));
-    
     if (options.length === 0) {
       return [{ value: '', label: 'No recipients available', disabled: true }];
     }
-    
     return options;
   };
 
@@ -63501,10 +63136,386 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
     }
   };
 
+  // ==================== BUILD CERTIFICATE HTML (FRONTEND) ====================
+  // ✅ This is now built on the frontend so colorScheme and borderStyle
+  // are always applied correctly.
+  const buildCertificateHTML = ({ recipientName, recipientType, certificateNumber, issueDate }) => {
+    const scheme = COLOR_SCHEMES[certificateTemplate.colorScheme] || COLOR_SCHEMES.gold;
+    const borderStyleKey = certificateTemplate.borderStyle || 'classic';
+
+    // Build body text with placeholders replaced
+    const bodyText = (certificateTemplate.body || '')
+      .replace(/{name}/g, recipientName)
+      .replace(/{year}/g, new Date().getFullYear())
+      .replace(/{school}/g, schoolName);
+
+    // Build footer (supports multiline via \n)
+    const footerLines = (certificateTemplate.footer || 'Principal\n{date}')
+      .replace(/{date}/g, issueDate)
+      .split('\n');
+
+    // Border style variations
+    let outerBorderCSS = '';
+    let innerBorderCSS = '';
+    if (borderStyleKey === 'classic') {
+      outerBorderCSS = `border: 4px double ${scheme.borderOuter};`;
+      innerBorderCSS = `border: 1px solid ${scheme.borderInner};`;
+    } else if (borderStyleKey === 'modern') {
+      outerBorderCSS = `border: 12px solid ${scheme.borderOuter}; border-right-width: 6px; border-left-width: 6px;`;
+      innerBorderCSS = `border: 2px dashed ${scheme.borderInner};`;
+    } else if (borderStyleKey === 'elegant') {
+      outerBorderCSS = `border: 2px solid ${scheme.borderOuter};`;
+      innerBorderCSS = `border: 1px solid ${scheme.borderInner};`;
+    } else {
+      // minimal
+      outerBorderCSS = `border: 1px solid ${scheme.borderOuter};`;
+      innerBorderCSS = '';
+    }
+
+    // Dark scheme (premium) inverts text
+    const isDark = certificateTemplate.colorScheme === 'premium';
+    const textOnBg = isDark ? scheme.text : scheme.text;
+    const subtitleColor = isDark ? scheme.accent : scheme.primary;
+    const titleColor = isDark ? scheme.accent : scheme.primaryDark;
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Certificate — ${recipientName}</title>
+          <meta charset="UTF-8">
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Great+Vibes&family=Inter:wght@400;500;600&display=swap');
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+              font-family: 'Inter', 'Georgia', serif;
+              background: #f3f4f6;
+              padding: 20px;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              min-height: 100vh;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            .certificate {
+              width: 297mm;
+              min-height: 200mm;
+              background: ${scheme.bg};
+              padding: 10mm;
+              ${outerBorderCSS}
+              border-radius: 4px;
+              position: relative;
+            }
+            .inner {
+              ${innerBorderCSS}
+              padding: 15mm 20mm;
+              min-height: 175mm;
+              display: flex;
+              flex-direction: column;
+              position: relative;
+            }
+
+            /* === LEFT-ALIGNED LOGO HEADER === */
+            .school-header {
+              display: flex;
+              align-items: center;
+              gap: 14px;
+              margin-bottom: 8mm;
+              padding-bottom: 5mm;
+              border-bottom: 1px solid ${scheme.borderInner}55;
+              text-align: left;
+            }
+            .school-logo {
+              width: 70px;
+              height: 70px;
+              border-radius: 50%;
+              background: #fff;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              overflow: hidden;
+              border: 2px solid ${scheme.borderOuter};
+              flex-shrink: 0;
+            }
+            .school-logo img {
+              width: 100%;
+              height: 100%;
+              object-fit: contain;
+              padding: 6px;
+            }
+            .school-logo-placeholder {
+              width: 70px;
+              height: 70px;
+              border-radius: 50%;
+              background: ${scheme.primary};
+              color: ${scheme.sealText};
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 30px;
+              font-weight: 700;
+              flex-shrink: 0;
+              border: 2px solid ${scheme.borderOuter};
+            }
+            .school-info {
+              flex: 1;
+              text-align: left;
+            }
+            .school-name {
+              font-family: 'Playfair Display', serif;
+              font-size: 24px;
+              font-weight: 700;
+              color: ${titleColor};
+              text-transform: uppercase;
+              letter-spacing: 1.5px;
+              line-height: 1.1;
+            }
+            .school-motto {
+              font-size: 11px;
+              font-style: italic;
+              color: ${subtitleColor};
+              margin-top: 3px;
+              opacity: 0.85;
+            }
+            .school-contact {
+              font-size: 10px;
+              color: ${textOnBg};
+              opacity: 0.7;
+              margin-top: 4px;
+              display: flex;
+              flex-wrap: wrap;
+              gap: 12px;
+            }
+
+            /* === TITLE BLOCK === */
+            .title-block {
+              text-align: center;
+              margin: 8mm 0 6mm 0;
+            }
+            .cert-title {
+              font-family: 'Playfair Display', serif;
+              font-size: 42px;
+              font-weight: 700;
+              color: ${titleColor};
+              letter-spacing: 3px;
+              text-transform: uppercase;
+              line-height: 1.15;
+            }
+            .cert-ornament {
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              gap: 12px;
+              margin: 8px 0;
+            }
+            .cert-ornament .line {
+              height: 1px;
+              width: 80px;
+              background: ${scheme.accent};
+            }
+            .cert-ornament .dot {
+              width: 8px;
+              height: 8px;
+              border-radius: 50%;
+              background: ${scheme.accent};
+            }
+
+            /* === PRESENTED TO === */
+            .presented-to {
+              text-align: center;
+              font-size: 14px;
+              letter-spacing: 3px;
+              text-transform: uppercase;
+              color: ${subtitleColor};
+              margin-bottom: 6mm;
+              font-weight: 500;
+            }
+
+            /* === RECIPIENT NAME === */
+            .recipient-name {
+              text-align: center;
+              font-family: 'Great Vibes', cursive;
+              font-size: 58px;
+              color: ${isDark ? scheme.accent : scheme.primaryDark};
+              margin-bottom: 8mm;
+              line-height: 1.1;
+              padding-bottom: 4mm;
+              border-bottom: 2px solid ${scheme.accent}44;
+              max-width: 200mm;
+              margin-left: auto;
+              margin-right: auto;
+            }
+
+            /* === BODY TEXT === */
+            .body-text {
+              text-align: center;
+              font-size: 14px;
+              line-height: 1.7;
+              color: ${textOnBg};
+              max-width: 220mm;
+              margin: 0 auto 12mm auto;
+              padding: 0 10mm;
+            }
+
+            /* === FOOTER + SIGNATURE === */
+            .footer-block {
+              margin-top: auto;
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-end;
+              padding-top: 8mm;
+              gap: 15mm;
+            }
+            .signature-block {
+              text-align: center;
+              flex: 1;
+              max-width: 90mm;
+            }
+            .signature-line {
+              border-bottom: 1px solid ${scheme.borderOuter};
+              height: 40px;
+              margin-bottom: 6px;
+            }
+            .signature-label {
+              font-size: 11px;
+              font-weight: 600;
+              color: ${textOnBg};
+              text-transform: uppercase;
+              letter-spacing: 1px;
+            }
+            .date-line {
+              font-size: 12px;
+              color: ${textOnBg};
+              opacity: 0.75;
+              margin-top: 6px;
+            }
+
+            /* === SEAL === */
+            .seal {
+              width: 90px;
+              height: 90px;
+              border-radius: 50%;
+              background: radial-gradient(circle at 30% 30%, ${scheme.accent}, ${scheme.primary});
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              color: ${scheme.sealText};
+              font-family: 'Playfair Display', serif;
+              font-size: 10px;
+              font-weight: 700;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+              text-align: center;
+              border: 3px solid ${scheme.accent};
+              box-shadow: 0 0 0 4px ${scheme.accent}33, inset 0 0 8px rgba(0,0,0,0.15);
+              flex-shrink: 0;
+            }
+            .seal-inner {
+              line-height: 1.1;
+            }
+
+            /* === CERTIFICATE NUMBER === */
+            .cert-number {
+              position: absolute;
+              top: 5mm;
+              right: 8mm;
+              font-family: 'Courier New', monospace;
+              font-size: 9px;
+              color: ${textOnBg};
+              opacity: 0.55;
+              letter-spacing: 0.5px;
+            }
+
+            /* === PRINT === */
+            @media print {
+              body { background: white; padding: 0; }
+              .certificate { box-shadow: none; width: 100%; min-height: auto; }
+              @page { size: A4 landscape; margin: 8mm; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="certificate">
+            <div class="inner">
+
+              ${certificateNumber ? `<div class="cert-number">No. ${certificateNumber}</div>` : ''}
+
+              <!-- ✅ LEFT-ALIGNED LOGO HEADER -->
+              <div class="school-header">
+                ${schoolLogo ? `
+                  <div class="school-logo"><img src="${schoolLogo}" alt="Logo" /></div>
+                ` : `
+                  <div class="school-logo-placeholder">${(schoolName || 'S').charAt(0)}</div>
+                `}
+                <div class="school-info">
+                  <div class="school-name">${schoolName}</div>
+                  ${schoolMotto ? `<div class="school-motto">"${schoolMotto}"</div>` : ''}
+                  ${(schoolAddress || schoolPhone || schoolEmail) ? `
+                    <div class="school-contact">
+                      ${schoolAddress ? `<span>📍 ${schoolAddress}</span>` : ''}
+                      ${schoolPhone ? `<span>📞 ${schoolPhone}</span>` : ''}
+                      ${schoolEmail ? `<span>✉️ ${schoolEmail}</span>` : ''}
+                    </div>
+                  ` : ''}
+                </div>
+              </div>
+
+              <!-- TITLE -->
+              <div class="title-block">
+                <div class="cert-title">${certificateTemplate.title || 'Certificate of Achievement'}</div>
+                <div class="cert-ornament">
+                  <span class="line"></span>
+                  <span class="dot"></span>
+                  <span class="line"></span>
+                </div>
+              </div>
+
+              <!-- PRESENTED TO -->
+              <div class="presented-to">${certificateTemplate.subtitle || 'Presented to'}</div>
+
+              <!-- RECIPIENT NAME -->
+              <div class="recipient-name">${recipientName}</div>
+
+              <!-- BODY -->
+              <div class="body-text">${bodyText}</div>
+
+              <!-- FOOTER / SIGNATURE -->
+              <div class="footer-block">
+                <div class="signature-block">
+                  <div class="signature-line"></div>
+                  <div class="signature-label">${footerLines[0] || 'Principal'}</div>
+                  ${footerLines[1] ? `<div class="date-line">${footerLines[1]}</div>` : `<div class="date-line">${issueDate}</div>`}
+                </div>
+
+                <div class="seal">
+                  <div class="seal-inner">
+                    OFFICIAL<br>SEAL<br>${new Date().getFullYear()}
+                  </div>
+                </div>
+
+                <div class="signature-block">
+                  <div class="signature-line"></div>
+                  <div class="signature-label">Registrar / Dean</div>
+                  <div class="date-line">${issueDate}</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+          <script>
+            window.onload = function() {
+              setTimeout(function() { window.print(); }, 400);
+            };
+          </script>
+        </body>
+      </html>
+    `;
+  };
+
   // ==================== GENERATE CERTIFICATE ====================
   const handleGenerateCertificate = async (e) => {
     e.preventDefault();
-    
     const recipientId = selectedStudent?.id || selectedStaff?.id;
     
     if (!recipientId) {
@@ -63514,8 +63525,18 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
 
     setLoading(true);
     try {
+      const recipientType = selectedStudent ? 'STUDENT' : 'STAFF';
+      const recipientName = selectedStudent
+        ? `${selectedStudent.firstName} ${selectedStudent.lastName}`
+        : `${selectedStaff?.User?.firstName || ''} ${selectedStaff?.User?.lastName || ''}`.trim();
+
+      const issueDate = new Date().toLocaleDateString('en-GB', {
+        day: '2-digit', month: 'long', year: 'numeric'
+      });
+
       const payload = {
         recipientId: recipientId,
+        recipientType: recipientType,
         type: certType,
         template: certificateTemplate,
         description: certificateTemplate.body || 'For outstanding achievement'
@@ -63526,23 +63547,24 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
       const res = await api.post('/certificates/generate', payload);
       
       if (res.data.success) {
-        // Add to certificate list
         setCertificates([res.data.certificate, ...certificates]);
-        
-        // Open print window with certificate
-        if (res.data.html) {
-          const printWindow = window.open('', '_blank', 'width=800,height=600');
-          printWindow.document.write(res.data.html);
+
+        // ✅ Build HTML on the FRONTEND so colorScheme and borderStyle always apply
+        const certificateNumber = res.data.certificate?.certificateNumber || res.data.certificate?.id || 'N/A';
+        const html = buildCertificateHTML({
+          recipientName,
+          recipientType,
+          certificateNumber,
+          issueDate
+        });
+
+        const printWindow = window.open('', '_blank', 'width=1100,height=800');
+        if (printWindow) {
+          printWindow.document.write(html);
           printWindow.document.close();
-          
-          // Wait for content to load then print
-          setTimeout(() => {
-            printWindow.focus();
-            printWindow.print();
-          }, 500);
         }
-        
-        // Reset form
+
+        // Reset
         setShowCreateModal(false);
         setSelectedStudent(null);
         setSelectedStaff(null);
@@ -63557,7 +63579,7 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
           fontStyle: 'serif',
           colorScheme: 'gold'
         });
-        
+
         alert('✅ Certificate generated successfully!');
       } else {
         throw new Error(res.data.message || 'Failed to generate certificate');
@@ -63574,29 +63596,287 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
   const handlePrintCertificate = async (cert) => {
     setLoading(true);
     try {
-      const res = await api.get(`/certificates/${cert.id}/print`);
+      // ✅ Rebuild HTML on the frontend so we don't rely on the backend's
+      // (possibly stale / gold-only) template.
+      let recipientName = 'Unknown';
+      if (cert.recipientType === 'STUDENT') {
+        const student = students.find(s => s.id === cert.recipientId);
+        if (student) recipientName = `${student.firstName} ${student.lastName}`;
+      } else {
+        const staffMember = staff.find(s => s.id === cert.recipientId);
+        if (staffMember?.User) {
+          recipientName = `${staffMember.User.firstName} ${staffMember.User.lastName}`;
+        }
+      }
+
+      const issueDate = cert.issuedDate
+        ? new Date(cert.issuedDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })
+        : new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
+
+      // Use the certificate's stored template if available; otherwise use current
+      const templateForPrint = cert.template || certificateTemplate;
       
-      if (res.data.html) {
-        const printWindow = window.open('', '_blank', 'width=800,height=600');
-        printWindow.document.write(res.data.html);
+      // Temporarily swap the template so buildCertificateHTML uses the cert's own style
+      const savedTemplate = certificateTemplate;
+      setCertificateTemplate(templateForPrint);
+
+      const certificateNumber = cert.certificateNumber || cert.id || 'N/A';
+      
+      // ✅ Build HTML using the cert's own stored template values
+      const html = buildCertificateHTMLWithTemplate({
+        recipientName,
+        recipientType: cert.recipientType,
+        certificateNumber,
+        issueDate,
+        template: templateForPrint
+      });
+
+      // Restore
+      setCertificateTemplate(savedTemplate);
+
+      const printWindow = window.open('', '_blank', 'width=1100,height=800');
+      if (printWindow) {
+        printWindow.document.write(html);
         printWindow.document.close();
-        setTimeout(() => {
-          printWindow.focus();
-          printWindow.print();
-        }, 500);
       }
     } catch (error) {
       console.error('❌ Print error:', error);
-      alert('❌ Failed to print certificate');
+      alert('❌ Failed to print certificate: ' + error.message);
     } finally {
       setLoading(false);
     }
   };
 
+  // ==================== BUILD HTML WITH EXPLICIT TEMPLATE ====================
+  // Same as buildCertificateHTML but uses a passed-in template (used when
+  // reprinting historical certs so their original style is preserved).
+  const buildCertificateHTMLWithTemplate = ({ recipientName, recipientType, certificateNumber, issueDate, template }) => {
+    const scheme = COLOR_SCHEMES[template?.colorScheme] || COLOR_SCHEMES.gold;
+    const borderStyleKey = template?.borderStyle || 'classic';
+    const tpl = template || certificateTemplate;
+
+    const bodyText = (tpl.body || '')
+      .replace(/{name}/g, recipientName)
+      .replace(/{year}/g, new Date().getFullYear())
+      .replace(/{school}/g, schoolName);
+
+    const footerLines = (tpl.footer || 'Principal\n{date}')
+      .replace(/{date}/g, issueDate)
+      .split('\n');
+
+    let outerBorderCSS = '';
+    let innerBorderCSS = '';
+    if (borderStyleKey === 'classic') {
+      outerBorderCSS = `border: 4px double ${scheme.borderOuter};`;
+      innerBorderCSS = `border: 1px solid ${scheme.borderInner};`;
+    } else if (borderStyleKey === 'modern') {
+      outerBorderCSS = `border: 12px solid ${scheme.borderOuter}; border-right-width: 6px; border-left-width: 6px;`;
+      innerBorderCSS = `border: 2px dashed ${scheme.borderInner};`;
+    } else if (borderStyleKey === 'elegant') {
+      outerBorderCSS = `border: 2px solid ${scheme.borderOuter};`;
+      innerBorderCSS = `border: 1px solid ${scheme.borderInner};`;
+    } else {
+      outerBorderCSS = `border: 1px solid ${scheme.borderOuter};`;
+      innerBorderCSS = '';
+    }
+
+    const isDark = template?.colorScheme === 'premium';
+    const textOnBg = scheme.text;
+    const subtitleColor = isDark ? scheme.accent : scheme.primary;
+    const titleColor = isDark ? scheme.accent : scheme.primaryDark;
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Certificate — ${recipientName}</title>
+          <meta charset="UTF-8">
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Great+Vibes&family=Inter:wght@400;500;600&display=swap');
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+              font-family: 'Inter', 'Georgia', serif;
+              background: #f3f4f6;
+              padding: 20px;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              min-height: 100vh;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            .certificate {
+              width: 297mm;
+              min-height: 200mm;
+              background: ${scheme.bg};
+              padding: 10mm;
+              ${outerBorderCSS}
+              border-radius: 4px;
+              position: relative;
+            }
+            .inner {
+              ${innerBorderCSS}
+              padding: 15mm 20mm;
+              min-height: 175mm;
+              display: flex;
+              flex-direction: column;
+              position: relative;
+            }
+            .school-header {
+              display: flex;
+              align-items: center;
+              gap: 14px;
+              margin-bottom: 8mm;
+              padding-bottom: 5mm;
+              border-bottom: 1px solid ${scheme.borderInner}55;
+              text-align: left;
+            }
+            .school-logo {
+              width: 70px; height: 70px; border-radius: 50%; background: #fff;
+              display: flex; align-items: center; justify-content: center;
+              overflow: hidden; border: 2px solid ${scheme.borderOuter}; flex-shrink: 0;
+            }
+            .school-logo img { width: 100%; height: 100%; object-fit: contain; padding: 6px; }
+            .school-logo-placeholder {
+              width: 70px; height: 70px; border-radius: 50%; background: ${scheme.primary};
+              color: ${scheme.sealText}; display: flex; align-items: center; justify-content: center;
+              font-size: 30px; font-weight: 700; flex-shrink: 0; border: 2px solid ${scheme.borderOuter};
+            }
+            .school-info { flex: 1; text-align: left; }
+            .school-name {
+              font-family: 'Playfair Display', serif; font-size: 24px; font-weight: 700;
+              color: ${titleColor}; text-transform: uppercase; letter-spacing: 1.5px; line-height: 1.1;
+            }
+            .school-motto { font-size: 11px; font-style: italic; color: ${subtitleColor}; margin-top: 3px; opacity: 0.85; }
+            .school-contact {
+              font-size: 10px; color: ${textOnBg}; opacity: 0.7;
+              margin-top: 4px; display: flex; flex-wrap: wrap; gap: 12px;
+            }
+            .title-block { text-align: center; margin: 8mm 0 6mm 0; }
+            .cert-title {
+              font-family: 'Playfair Display', serif; font-size: 42px; font-weight: 700;
+              color: ${titleColor}; letter-spacing: 3px; text-transform: uppercase; line-height: 1.15;
+            }
+            .cert-ornament { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 8px 0; }
+            .cert-ornament .line { height: 1px; width: 80px; background: ${scheme.accent}; }
+            .cert-ornament .dot { width: 8px; height: 8px; border-radius: 50%; background: ${scheme.accent}; }
+            .presented-to {
+              text-align: center; font-size: 14px; letter-spacing: 3px; text-transform: uppercase;
+              color: ${subtitleColor}; margin-bottom: 6mm; font-weight: 500;
+            }
+            .recipient-name {
+              text-align: center; font-family: 'Great Vibes', cursive; font-size: 58px;
+              color: ${isDark ? scheme.accent : scheme.primaryDark};
+              margin-bottom: 8mm; line-height: 1.1; padding-bottom: 4mm;
+              border-bottom: 2px solid ${scheme.accent}44;
+              max-width: 200mm; margin-left: auto; margin-right: auto;
+            }
+            .body-text {
+              text-align: center; font-size: 14px; line-height: 1.7;
+              color: ${textOnBg}; max-width: 220mm; margin: 0 auto 12mm auto; padding: 0 10mm;
+            }
+            .footer-block {
+              margin-top: auto; display: flex; justify-content: space-between;
+              align-items: flex-end; padding-top: 8mm; gap: 15mm;
+            }
+            .signature-block { text-align: center; flex: 1; max-width: 90mm; }
+            .signature-line { border-bottom: 1px solid ${scheme.borderOuter}; height: 40px; margin-bottom: 6px; }
+            .signature-label {
+              font-size: 11px; font-weight: 600; color: ${textOnBg};
+              text-transform: uppercase; letter-spacing: 1px;
+            }
+            .date-line { font-size: 12px; color: ${textOnBg}; opacity: 0.75; margin-top: 6px; }
+            .seal {
+              width: 90px; height: 90px; border-radius: 50%;
+              background: radial-gradient(circle at 30% 30%, ${scheme.accent}, ${scheme.primary});
+              display: flex; align-items: center; justify-content: center;
+              color: ${scheme.sealText}; font-family: 'Playfair Display', serif;
+              font-size: 10px; font-weight: 700; text-transform: uppercase;
+              letter-spacing: 1px; text-align: center;
+              border: 3px solid ${scheme.accent};
+              box-shadow: 0 0 0 4px ${scheme.accent}33, inset 0 0 8px rgba(0,0,0,0.15);
+              flex-shrink: 0;
+            }
+            .seal-inner { line-height: 1.1; }
+            .cert-number {
+              position: absolute; top: 5mm; right: 8mm;
+              font-family: 'Courier New', monospace; font-size: 9px;
+              color: ${textOnBg}; opacity: 0.55; letter-spacing: 0.5px;
+            }
+            @media print {
+              body { background: white; padding: 0; }
+              .certificate { box-shadow: none; width: 100%; min-height: auto; }
+              @page { size: A4 landscape; margin: 8mm; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="certificate">
+            <div class="inner">
+              ${certificateNumber ? `<div class="cert-number">No. ${certificateNumber}</div>` : ''}
+
+              <div class="school-header">
+                ${schoolLogo ? `
+                  <div class="school-logo"><img src="${schoolLogo}" alt="Logo" /></div>
+                ` : `
+                  <div class="school-logo-placeholder">${(schoolName || 'S').charAt(0)}</div>
+                `}
+                <div class="school-info">
+                  <div class="school-name">${schoolName}</div>
+                  ${schoolMotto ? `<div class="school-motto">"${schoolMotto}"</div>` : ''}
+                  ${(schoolAddress || schoolPhone || schoolEmail) ? `
+                    <div class="school-contact">
+                      ${schoolAddress ? `<span>📍 ${schoolAddress}</span>` : ''}
+                      ${schoolPhone ? `<span>📞 ${schoolPhone}</span>` : ''}
+                      ${schoolEmail ? `<span>✉️ ${schoolEmail}</span>` : ''}
+                    </div>
+                  ` : ''}
+                </div>
+              </div>
+
+              <div class="title-block">
+                <div class="cert-title">${tpl.title || 'Certificate of Achievement'}</div>
+                <div class="cert-ornament">
+                  <span class="line"></span>
+                  <span class="dot"></span>
+                  <span class="line"></span>
+                </div>
+              </div>
+
+              <div class="presented-to">${tpl.subtitle || 'Presented to'}</div>
+              <div class="recipient-name">${recipientName}</div>
+              <div class="body-text">${bodyText}</div>
+
+              <div class="footer-block">
+                <div class="signature-block">
+                  <div class="signature-line"></div>
+                  <div class="signature-label">${footerLines[0] || 'Principal'}</div>
+                  ${footerLines[1] ? `<div class="date-line">${footerLines[1]}</div>` : `<div class="date-line">${issueDate}</div>`}
+                </div>
+                <div class="seal">
+                  <div class="seal-inner">OFFICIAL<br>SEAL<br>${new Date().getFullYear()}</div>
+                </div>
+                <div class="signature-block">
+                  <div class="signature-line"></div>
+                  <div class="signature-label">Registrar / Dean</div>
+                  <div class="date-line">${issueDate}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <script>
+            window.onload = function() {
+              setTimeout(function() { window.print(); }, 400);
+            };
+          </script>
+        </body>
+      </html>
+    `;
+  };
+
   // ==================== DELETE CERTIFICATE ====================
   const handleDeleteCertificate = async (certId) => {
     if (!window.confirm('Are you sure you want to delete this certificate?')) return;
-    
     setLoading(true);
     try {
       await api.delete(`/certificates/${certId}`);
@@ -63613,14 +63893,12 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
   // ==================== BULK GENERATE ====================
   const handleBulkGenerate = async () => {
     if (!window.confirm(`Generate certificates for all eligible recipients?`)) return;
-    
     setLoading(true);
     try {
       const res = await api.post('/certificates/bulk-generate', {
         type: certType,
         template: certificateTemplate
       });
-      
       await fetchCertificates();
       alert(`✅ ${res.data.count || 0} certificates generated successfully!`);
     } catch (error) {
@@ -63642,7 +63920,6 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
     }
   };
 
-  // ==================== GET STATUS BADGE ====================
   const getStatusBadge = (status) => {
     const colors = {
       'ISSUED': 'bg-green-100 text-green-800',
@@ -63652,16 +63929,13 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
 
-  // ==================== GET CERTIFICATE TYPE LABEL ====================
   const getCertTypeLabel = (type) => {
     const found = certTypes.find(t => t.value === type);
     return found ? found.label : type?.replace(/_/g, ' ') || 'Custom';
   };
 
-  // ==================== HANDLE RECIPIENT SELECT ====================
   const handleRecipientSelect = (option) => {
     if (!option || !option.data) return;
-    
     if (option.type === 'STUDENT') {
       setSelectedStudent(option.data);
       setSelectedStaff(null);
@@ -63675,7 +63949,6 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
     fetchCertificates();
   }, []);
 
-  // ==================== RENDER OPTION ====================
   const renderRecipientOption = (option) => (
     <div>
       <div className="font-medium text-sm">{option.label}</div>
@@ -63690,6 +63963,9 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
     </div>
   );
 
+  // ==================== LIVE PREVIEW (COLOR SCHEME AWARE) ====================
+  const getPreviewScheme = () => COLOR_SCHEMES[certificateTemplate.colorScheme] || COLOR_SCHEMES.gold;
+
   return (
     <div className="space-y-6">
       {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
@@ -63701,10 +63977,7 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
         </h2>
         <div className="flex gap-2">
           <button
-            onClick={() => {
-              setShowCreateModal(true);
-              setRecipientSearchTerm('');
-            }}
+            onClick={() => { setShowCreateModal(true); setRecipientSearchTerm(''); }}
             className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors flex items-center"
           >
             <i className="fas fa-plus mr-2"></i>Create Certificate
@@ -63725,7 +63998,7 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
         </div>
       </div>
 
-      {/* Stats Cards */}
+      {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl p-4 text-white">
           <p className="text-sm opacity-90">Total Certificates</p>
@@ -63749,23 +64022,6 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
       <div className="bg-white rounded-xl shadow-sm overflow-hidden">
         <div className="p-4 bg-gray-50 border-b flex justify-between items-center">
           <h3 className="font-semibold text-lg">Recent Certificates</h3>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              placeholder="Search..."
-              className="px-3 py-2 border rounded-lg text-sm"
-              onChange={(e) => {
-                const search = e.target.value.toLowerCase();
-                // Filter logic can be added here
-              }}
-            />
-            <select className="px-3 py-2 border rounded-lg text-sm">
-              <option value="">All Types</option>
-              {certTypes.map(t => (
-                <option key={t.value} value={t.value}>{t.label}</option>
-              ))}
-            </select>
-          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -63791,7 +64047,6 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
               ) : (
                 certificates.map(cert => {
                   const displayDate = cert.issuedDate || cert.createdAt || new Date();
-                  
                   return (
                     <tr key={cert.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-4 py-3 font-mono text-sm">{cert.certificateNumber || 'N/A'}</td>
@@ -63837,17 +64092,6 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
             </tbody>
           </table>
         </div>
-        
-        {/* Footer Summary */}
-        {certificates.length > 0 && (
-          <div className="p-3 bg-gray-50 border-t flex justify-between items-center text-sm text-gray-500">
-            <span>Total: {certificates.length} certificates</span>
-            <span>
-              Issued: {certificates.filter(c => c.status === 'ISSUED').length} | 
-              Draft: {certificates.filter(c => c.status === 'DRAFT').length}
-            </span>
-          </div>
-        )}
       </div>
 
       {/* ==================== CREATE CERTIFICATE MODAL ==================== */}
@@ -63856,37 +64100,23 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl p-6 max-h-[90vh] overflow-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold">Create Certificate</h3>
-              <button 
-                onClick={() => {
-                  setShowCreateModal(false);
-                  setRecipientSearchTerm('');
-                }} 
-                className="text-gray-500 hover:text-gray-700 transition-colors"
-              >
+              <button onClick={() => { setShowCreateModal(false); setRecipientSearchTerm(''); }} className="text-gray-500 hover:text-gray-700 transition-colors">
                 <i className="fas fa-times"></i>
               </button>
             </div>
 
             <form onSubmit={handleGenerateCertificate} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Certificate Type */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Certificate Type *
-                  </label>
-                  <select
-                    value={certType}
-                    onChange={(e) => setCertType(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                    required
-                  >
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Certificate Type *</label>
+                  <select value={certType} onChange={(e) => setCertType(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" required>
                     {certTypes.map(type => (
                       <option key={type.value} value={type.value}>{type.label}</option>
                     ))}
                   </select>
                 </div>
 
-                {/* Recipient Selection - SEARCHABLE */}
                 <div className="col-span-2">
                   <SearchableSelect
                     options={getRecipientOptions()}
@@ -63916,93 +64146,59 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
                   )}
                 </div>
 
-                {/* Certificate Title */}
                 <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Certificate Title
-                  </label>
-                  <input
-                    type="text"
-                    value={certificateTemplate.title}
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Certificate Title</label>
+                  <input type="text" value={certificateTemplate.title}
                     onChange={(e) => setCertificateTemplate({...certificateTemplate, title: e.target.value})}
                     className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                    placeholder="e.g., Certificate of Excellence"
-                  />
+                    placeholder="e.g., Certificate of Excellence" />
                 </div>
 
-                {/* Subtitle */}
                 <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Subtitle
-                  </label>
-                  <input
-                    type="text"
-                    value={certificateTemplate.subtitle}
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Subtitle</label>
+                  <input type="text" value={certificateTemplate.subtitle}
                     onChange={(e) => setCertificateTemplate({...certificateTemplate, subtitle: e.target.value})}
                     className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                    placeholder="e.g., Presented to"
-                  />
+                    placeholder="e.g., Presented to" />
                 </div>
 
-                {/* Description/Body */}
                 <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Description *
-                  </label>
-                  <textarea
-                    value={certificateTemplate.body}
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Description *</label>
+                  <textarea value={certificateTemplate.body}
                     onChange={(e) => setCertificateTemplate({...certificateTemplate, body: e.target.value})}
                     className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                    rows="3"
-                    required
-                    placeholder="e.g., This certificate is awarded to {name} for outstanding performance in {year}."
-                  />
+                    rows="3" required
+                    placeholder="e.g., This certificate is awarded to {name} for outstanding performance in {year}." />
                   <p className="text-xs text-gray-500 mt-1">
                     Use {'{name}'}, {'{year}'}, {'{school}'} as placeholders
                   </p>
                 </div>
 
-                {/* Footer */}
                 <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Footer
-                  </label>
-                  <textarea
-                    value={certificateTemplate.footer}
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Footer</label>
+                  <textarea value={certificateTemplate.footer}
                     onChange={(e) => setCertificateTemplate({...certificateTemplate, footer: e.target.value})}
                     className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                    rows="2"
-                    placeholder="Principal\n{date}"
-                  />
+                    rows="2" placeholder="Principal\n{date}" />
                 </div>
 
-                {/* Template Style */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Border Style
-                  </label>
-                  <select
-                    value={certificateTemplate.borderStyle}
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Border Style</label>
+                  <select value={certificateTemplate.borderStyle}
                     onChange={(e) => setCertificateTemplate({...certificateTemplate, borderStyle: e.target.value})}
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                  >
-                    <option value="classic">Classic</option>
-                    <option value="modern">Modern</option>
-                    <option value="elegant">Elegant</option>
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
+                    <option value="classic">Classic (Double border)</option>
+                    <option value="modern">Modern (Thick side)</option>
+                    <option value="elegant">Elegant (Thin inner)</option>
                     <option value="minimal">Minimal</option>
                   </select>
                 </div>
 
-                {/* Color Scheme */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Color Scheme
-                  </label>
-                  <select
-                    value={certificateTemplate.colorScheme}
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Color Scheme</label>
+                  <select value={certificateTemplate.colorScheme}
                     onChange={(e) => setCertificateTemplate({...certificateTemplate, colorScheme: e.target.value})}
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                  >
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
                     <option value="gold">Gold & Classic</option>
                     <option value="blue">Blue & Modern</option>
                     <option value="green">Green & Natural</option>
@@ -64011,51 +64207,120 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
                 </div>
               </div>
 
-              {/* Preview Section */}
+              {/* LIVE PREVIEW — reflects the selected color scheme + border */}
               <div className="border rounded-lg p-4 bg-gray-50">
                 <h4 className="font-semibold mb-2 text-center">Preview</h4>
-                <div className="text-center p-4 bg-white rounded border-2 border-gray-200">
-                  <div className="text-sm text-gray-500">{currentSchool?.name || 'School Name'}</div>
-                  <div className="text-xl font-bold mt-2">{certificateTemplate.title}</div>
-                  <div className="text-lg mt-1">{certificateTemplate.subtitle}</div>
-                  <div className="text-2xl font-bold mt-2 border-b-2 border-gray-300 pb-2">
-                    {selectedStudent ? `${selectedStudent.firstName} ${selectedStudent.lastName}` : 
-                     selectedStaff ? `${selectedStaff.User?.firstName} ${selectedStaff.User?.lastName}` : 
-                     'Recipient Name'}
-                  </div>
-                  <div className="mt-2 text-gray-700 text-sm">
-                    {certificateTemplate.body
-                      .replace(/{name}/g, selectedStudent?.firstName || selectedStaff?.User?.firstName || 'Student')
-                      .replace(/{year}/g, new Date().getFullYear())
-                      .replace(/{school}/g, currentSchool?.name || 'School')
-                    }
-                  </div>
-                  <div className="mt-4 pt-2 border-t border-gray-300 text-sm whitespace-pre-wrap">
-                    {certificateTemplate.footer.replace(/{date}/g, new Date().toLocaleDateString())}
-                  </div>
-                </div>
+                {(() => {
+                  const scheme = getPreviewScheme();
+                  const isDark = certificateTemplate.colorScheme === 'premium';
+                  const borderStyleKey = certificateTemplate.borderStyle;
+
+                  let outerStyle = {};
+                  let innerStyle = {};
+
+                  if (borderStyleKey === 'classic') {
+                    outerStyle = { border: `4px double ${scheme.borderOuter}` };
+                    innerStyle = { border: `1px solid ${scheme.borderInner}` };
+                  } else if (borderStyleKey === 'modern') {
+                    outerStyle = { border: `12px solid ${scheme.borderOuter}`, borderLeftWidth: 6, borderRightWidth: 6 };
+                    innerStyle = { border: `2px dashed ${scheme.borderInner}` };
+                  } else if (borderStyleKey === 'elegant') {
+                    outerStyle = { border: `2px solid ${scheme.borderOuter}` };
+                    innerStyle = { border: `1px solid ${scheme.borderInner}` };
+                  } else {
+                    outerStyle = { border: `1px solid ${scheme.borderOuter}` };
+                    innerStyle = {};
+                  }
+
+                  const recipientDisplayName = selectedStudent
+                    ? `${selectedStudent.firstName} ${selectedStudent.lastName}`
+                    : selectedStaff
+                    ? `${selectedStaff.User?.firstName || ''} ${selectedStaff.User?.lastName || ''}`.trim()
+                    : 'Recipient Name';
+
+                  return (
+                    <div className="mx-auto p-3" style={{ background: scheme.bg, ...outerStyle, borderRadius: 6 }}>
+                      <div className="p-4" style={innerStyle}>
+                        {/* Left-aligned logo header in preview */}
+                        <div className="flex items-center gap-3 pb-3 mb-3" style={{ borderBottom: `1px solid ${scheme.borderInner}55` }}>
+                          {schoolLogo ? (
+                            <img src={schoolLogo} alt="Logo" className="w-12 h-12 object-contain rounded-full border"
+                              style={{ borderColor: scheme.borderOuter, background: '#fff', padding: 3 }} />
+                          ) : (
+                            <div className="w-12 h-12 rounded-full flex items-center justify-center font-bold"
+                              style={{ background: scheme.primary, color: scheme.sealText, border: `2px solid ${scheme.borderOuter}` }}>
+                              {(schoolName || 'S').charAt(0)}
+                            </div>
+                          )}
+                          <div className="text-left flex-1 min-w-0">
+                            <div className="text-sm font-bold uppercase tracking-wider truncate"
+                              style={{ color: isDark ? scheme.accent : scheme.primaryDark }}>
+                              {schoolName}
+                            </div>
+                            {schoolMotto && (
+                              <div className="text-[10px] italic" style={{ color: scheme.primary, opacity: 0.8 }}>
+                                "{schoolMotto}"
+                              </div>
+                            )}
+                            {(schoolAddress || schoolPhone) && (
+                              <div className="text-[9px] mt-0.5 truncate" style={{ color: scheme.text, opacity: 0.7 }}>
+                                {[schoolAddress, schoolPhone].filter(Boolean).join(' • ')}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="text-center">
+                          <div className="text-lg font-bold tracking-wider"
+                            style={{ color: isDark ? scheme.accent : scheme.primaryDark, fontFamily: "'Playfair Display', serif" }}>
+                            {certificateTemplate.title || 'Certificate of Achievement'}
+                          </div>
+                          <div className="flex items-center justify-center gap-2 my-2">
+                            <span style={{ height: 1, width: 40, background: scheme.accent }}></span>
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: scheme.accent }}></span>
+                            <span style={{ height: 1, width: 40, background: scheme.accent }}></span>
+                          </div>
+                          <div className="text-xs uppercase tracking-widest mb-2" style={{ color: isDark ? scheme.accent : scheme.primary }}>
+                            {certificateTemplate.subtitle || 'Presented to'}
+                          </div>
+                          <div className="text-2xl py-2 mb-2"
+                            style={{
+                              color: isDark ? scheme.accent : scheme.primaryDark,
+                              fontFamily: "'Great Vibes', cursive",
+                              borderBottom: `2px solid ${scheme.accent}44`
+                            }}>
+                            {recipientDisplayName}
+                          </div>
+                          <div className="text-xs px-4 py-1 mb-2" style={{ color: scheme.text }}>
+                            {certificateTemplate.body
+                              .replace(/{name}/g, recipientDisplayName || 'Student')
+                              .replace(/{year}/g, new Date().getFullYear())
+                              .replace(/{school}/g, schoolName)}
+                          </div>
+                          <div className="text-[10px] whitespace-pre-wrap pt-2 mt-2"
+                            style={{ color: scheme.text, borderTop: `1px solid ${scheme.borderInner}55` }}>
+                            {certificateTemplate.footer.replace(/{date}/g, new Date().toLocaleDateString())}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="flex space-x-2 pt-4 border-t">
-                <button
-                  type="submit"
+                <button type="submit"
                   className="flex-1 bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center"
-                  disabled={loading}
-                >
+                  disabled={loading}>
                   {loading ? (
                     <><i className="fas fa-spinner fa-spin mr-2"></i>Generating...</>
                   ) : (
                     <><i className="fas fa-file-alt mr-2"></i>Generate Certificate</>
                   )}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowCreateModal(false);
-                    setRecipientSearchTerm('');
-                  }}
-                  className="bg-gray-500 text-white px-6 py-3 rounded-lg hover:bg-gray-600 transition-colors"
-                >
+                <button type="button"
+                  onClick={() => { setShowCreateModal(false); setRecipientSearchTerm(''); }}
+                  className="bg-gray-500 text-white px-6 py-3 rounded-lg hover:bg-gray-600 transition-colors">
                   Cancel
                 </button>
               </div>
@@ -64066,7 +64331,6 @@ const CertificateModule = ({ students, staff, currentSchool, user }) => {
     </div>
   );
 };
-
 // ==================== ALUMNI MODULE - ADMIN/TEACHER CONTROLLED ====================
 const AlumniModule = ({ students, currentSchool, user, parents }) => {
   // ==================== STATE ====================
