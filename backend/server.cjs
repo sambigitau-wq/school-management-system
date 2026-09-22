@@ -11485,59 +11485,101 @@ app.post('/api/exams', authenticate, async (req, res) => {
     });
   }
 });
-
-// UPDATE EXAM
+// ==================== UPDATE EXAM ====================
 app.put('/api/exams/:id', authenticate, async (req, res) => {
   try {
     console.log('📝 Updating exam:', req.params.id);
-    
+    console.log('📝 Payload:', req.body);
+
     const exam = await Exam.findOne({
-      where: { 
+      where: {
         id: req.params.id,
-        schoolId: req.user.schoolId 
+        schoolId: req.user.schoolId
       }
     });
-    
+
     if (!exam) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Exam not found' 
-      });
+      return res.status(404).json({ success: false, message: 'Exam not found' });
     }
 
-    const oldExam = { ...exam.toJSON() };
-    await exam.update(req.body);
-    
-    // Create audit log
-    if (typeof createAuditLog === 'function') {
-      await createAuditLog(req, 'UPDATE', 'EXAM', exam.id, oldExam, exam);
+    // Get school for category-aware normalization
+    const school = await School.findByPk(exam.schoolId);
+
+    const {
+      name, type, term, academicYear,
+      date, startTime, endTime, maxMarks, weightage,
+      examHall, invigilator, invigilatorId,
+      courseId, facultyId, departmentId, unitId,
+      year, semester, programId, module,
+      classId, subjectId
+    } = req.body;
+
+    // Build update object — only fields present in payload
+    const updateData = {};
+
+    if (name !== undefined)         updateData.name = name;
+    if (type !== undefined)         updateData.type = type;
+    if (academicYear !== undefined) updateData.academicYear = academicYear;
+    if (date !== undefined)         updateData.date = date;
+    if (startTime !== undefined)    updateData.startTime = startTime || null;
+    if (endTime !== undefined)      updateData.endTime = endTime || null;
+    if (maxMarks !== undefined)     updateData.maxMarks = maxMarks;
+    if (weightage !== undefined)    updateData.weightage = weightage;
+    if (examHall !== undefined)     updateData.examHall = examHall || null;
+    if (invigilator !== undefined)  updateData.invigilator = invigilator || null;
+    if (invigilatorId !== undefined) updateData.invigilatorId = invigilatorId || null;
+
+    // Category-aware normalization
+    if (school?.category === 'UNIVERSITY') {
+      if (courseId !== undefined)     updateData.courseId = courseId;
+      if (facultyId !== undefined)    updateData.facultyId = facultyId || null;
+      if (departmentId !== undefined) updateData.departmentId = departmentId || null;
+      if (unitId !== undefined)       updateData.unitId = unitId || null;
+      if (year !== undefined)         updateData.year = year ? parseInt(year) : null;
+      if (semester !== undefined)     updateData.semester = semester ? parseInt(semester) : null;
+      if (term === undefined && semester !== undefined) {
+        updateData.term = `Semester ${semester || 1}`;
+      }
+    } else if (school?.category === 'COLLEGE_TVET') {
+      if (programId !== undefined) updateData.programId = programId;
+      if (unitId !== undefined)    updateData.unitId = unitId || null;
+      if (year !== undefined)      updateData.year = year ? parseInt(year) : null;
+      if (module !== undefined)    updateData.module = module ? parseInt(module) : null;
+      if (term === undefined && module !== undefined) {
+        updateData.term = `Module ${module || 1}`;
+      }
+    } else {
+      if (classId !== undefined)   updateData.classId = classId;
+      if (subjectId !== undefined) updateData.subjectId = subjectId;
     }
-    
-    // Fetch updated exam with associations
+
+    if (term !== undefined) updateData.term = term;
+
+    console.log('📝 Normalized update:', updateData);
+
+    await exam.update(updateData);
+
+    if (typeof createAuditLog === 'function') {
+      await createAuditLog(req, 'UPDATE', 'EXAM', exam.id, null, updateData);
+    }
+
     const updatedExam = await Exam.findByPk(exam.id, {
       include: [
-        { model: Course, as: 'course', required: false },
-        { model: Program, as: 'program', required: false },
-        { model: CourseUnit, as: 'courseUnit', required: false }, // Changed from 'unit'
-        { model: Class, as: 'class', required: false },
-        { model: Subject, as: 'subject', required: false },
-        { model: Faculty, as: 'faculty', required: false },
+        { model: Course,     as: 'course',     required: false },
+        { model: Program,    as: 'program',    required: false },
+        { model: CourseUnit, as: 'courseUnit', required: false },
+        { model: Class,      as: 'class',      required: false },
+        { model: Subject,    as: 'subject',    required: false },
+        { model: Faculty,    as: 'faculty',    required: false },
         { model: Department, as: 'department', required: false }
       ]
     });
-    
+
     console.log('✅ Exam updated successfully');
-    res.json({ 
-      success: true, 
-      exam: updatedExam 
-    });
+    res.json({ success: true, exam: updatedExam });
   } catch (error) {
     console.error('❌ Update exam error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error', 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 });
 
@@ -11862,122 +11904,7 @@ app.post('/api/exams/bulk-delete', authenticate, async (req, res) => {
   }
 });
 
-// ==================== DUPLICATE EXAM ====================
-app.post('/api/exams/:id/duplicate', authenticate, async (req, res) => {
-  try {
-    console.log('📋 Duplicating exam:', req.params.id);
-    
-    const { newName, newDate } = req.body;
-    
-    const sourceExam = await Exam.findOne({
-      where: { 
-        id: req.params.id,
-        schoolId: req.user.schoolId 
-      }
-    });
-    
-    if (!sourceExam) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Exam not found' 
-      });
-    }
 
-    // Create new exam object without the id and timestamps
-    const examData = sourceExam.toJSON();
-    delete examData.id;
-    delete examData.createdAt;
-    delete examData.updatedAt;
-    delete examData.publishedAt;
-    
-    // Update with new values
-    examData.name = newName || `Copy of ${examData.name}`;
-    examData.date = newDate || examData.date;
-    examData.isPublished = false;
-    examData.resultsPublished = false;
-
-    const newExam = await Exam.create(examData);
-
-    // Create audit log
-    if (typeof createAuditLog === 'function') {
-      await createAuditLog(req, 'DUPLICATE', 'EXAM', newExam.id, null, { sourceId: req.params.id });
-    }
-
-    // Fetch with associations
-    const createdExam = await Exam.findByPk(newExam.id, {
-      include: [
-        { model: Course, as: 'course', required: false },
-        { model: Program, as: 'program', required: false },
-        { model: CourseUnit, as: 'unit', required: false },
-        { model: Class, as: 'class', required: false },
-        { model: Subject, as: 'subject', required: false }
-      ]
-    });
-
-    console.log('✅ Exam duplicated successfully');
-    res.json({ 
-      success: true, 
-      exam: createdExam 
-    });
-  } catch (error) {
-    console.error('❌ Duplicate exam error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error', 
-      error: error.message 
-    });
-  }
-});
-
-// ==================== GET EXAMS BY COURSE ====================
-app.get('/api/exams/by-course/:courseId', authenticate, async (req, res) => {
-  try {
-    const exams = await Exam.findAll({
-      where: { 
-        courseId: req.params.courseId,
-        schoolId: req.user.schoolId 
-      },
-      include: [
-        { model: CourseUnit, as: 'unit', required: false }
-      ],
-      order: [['date', 'DESC']]
-    });
-    
-    res.json({ success: true, exams });
-  } catch (error) {
-    console.error('❌ Get exams by course error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error',
-      error: error.message 
-    });
-  }
-});
-
-// ==================== GET EXAMS BY PROGRAM ====================
-app.get('/api/exams/by-program/:programId', authenticate, async (req, res) => {
-  try {
-    const exams = await Exam.findAll({
-      where: { 
-        programId: req.params.programId,
-        schoolId: req.user.schoolId 
-      },
-      include: [
-        { model: CourseUnit, as: 'unit', required: false }
-      ],
-      order: [['date', 'DESC']]
-    });
-    
-    res.json({ success: true, exams });
-  } catch (error) {
-    console.error('❌ Get exams by program error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error',
-      error: error.message 
-    });
-  }
-});
 
 // ==================== GET EXAMS BY CLASS ====================
 app.get('/api/exams/by-class/:classId', authenticate, async (req, res) => {
