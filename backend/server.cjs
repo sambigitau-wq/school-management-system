@@ -1490,42 +1490,27 @@ const School = sequelize.define('School', {
   },
   
   // ==================== FEATURE FLAGS ====================
+  // ✅ Stores an ARRAY of enabled feature keys, e.g.:
+  //    ["dashboard", "settings", "users", "roles", "students",
+  //     "staff", "classes", "subjects", "exams", "results",
+  //     "attendance", "timetable", "fees", "other_income", ...]
+  //
+  // Keys are defined in FEATURE_CATALOG on the backend and are the
+  // SAME keys the frontend uses to gate modules:
+  //   - "dashboard"       → Dashboard
+  //   - "students"        → Students module
+  //   - "other_income"    → Other Income panel inside AccountingModule
+  //   - "fee_collection"  → Fee Collection module
+  //   - "online_exams"    → Online Exams module
+  //   - etc.
+  //
+  // The default is an empty array; the school-creation route seeds
+  // it from FEATURE_PRESETS[category]. The super admin can override
+  // it later via PATCH /api/super-admin/schools/:id/features.
   features: {
     type: DataTypes.JSONB,
-    defaultValue: {
-      // Core Features
-      sms: false,
-      email: false,
-      examPortal: false,
-      parentPortal: true,
-      studentPortal: true,
-      library: true,
-      transport: false,
-      hostel: true,
-      inventory: true,
-      
-      // Advanced Features
-      biometrics: false,
-      whatsapp: false,
-      onlinePayments: false,
-      advancedReports: false,
-      apiAccess: false,
-      customBranding: false,
-      
-      // Communication
-      bulkSMS: false,
-      bulkEmail: false,
-      emailTemplates: false,
-      smsTemplates: false,
-      
-      // SMS Features
-      arrivalAlerts: true,
-      departureAlerts: true,
-      emergencyAlerts: false,
-      dailySummary: false,
-      feeReminders: false,
-      examResults: false
-    }
+    allowNull: false,
+    defaultValue: []
   },
   
   // ==================== SMS USAGE & ANALYTICS ====================
@@ -1639,6 +1624,8 @@ const School = sequelize.define('School', {
     { fields: ['isActive'] },
     { fields: ['smsProvider'] },
     { fields: ['emailProvider'] }
+    // ✅ Optional but useful — GIN index for querying feature membership
+    // { fields: ['features'], using: 'GIN' }
   ]
 });
 
