@@ -10155,21 +10155,20 @@ const CourseUnitsModule = ({
       )}
     </div>
   );
-};
-
-
-// ============================================================================
-//  EXAM MODULE — v4 (Model A: ExamSession + Papers)
+};// ============================================================================
+//  EXAM MODULE — v5 (Model A: ExamSession + Papers)
 //
 //  One "Exam Session" (e.g. "END TERM 1") contains many "Papers",
 //  one per subject. Users create the session once and pick all subjects
 //  in a single flow. Papers render as sub-rows in the exams table.
 //
-//  · Session-level create / edit / delete
-//  · Multi-subject paper selection with per-paper date / time / hall
-//  · Searchable selects, teaching-staff invigilators, conflict detection
-//  · Bulk results entry, single result entry
-//  · Print exams list (grouped by session), print mark sheet
+//  v5 IMPROVEMENTS:
+//   • Robust edit mode — fetches full session with papers from API
+//   • Delete-all + recreate papers strategy (bulletproof against ID drift)
+//   • Per-step error tracking with user-friendly messages
+//   • Detailed console logging for debugging
+//   • Safe null/undefined handling throughout
+//   • Separate loading states for session vs papers
 // ============================================================================
 const ExamModule = ({
   exams, setExams,
@@ -10178,7 +10177,7 @@ const ExamModule = ({
   handleCreate, handleUpdate, handleDelete,
   currentSchool, courses, programs, units, user
 }) => {
-  console.log('📝 ExamModule v4 initialized');
+  console.log('📝 ExamModule v5 initialized');
 
   const SearchableSelect = StudentSearchableSelect;
 
@@ -10206,11 +10205,11 @@ const ExamModule = ({
   const canDeleteSessions = isSuperAdmin || isSchoolAdmin || isPrincipal;
 
   // ============================================================
-  // STATE — sessions list + filters
+  // STATE
   // ============================================================
-  const [sessions, setSessions]             = useState([]);
+  const [sessions, setSessions]               = useState([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
-  const [expandedSessions, setExpandedSessions] = useState(new Set());  // ids of sessions whose papers are expanded
+  const [expandedSessions, setExpandedSessions] = useState(new Set());
 
   const [selectedSessionType, setSelectedSessionType] = useState('');
   const [selectedExamName, setSelectedExamName]       = useState('');
@@ -10220,15 +10219,10 @@ const ExamModule = ({
   const [selectedYear, setSelectedYear]               = useState('');
   const [selectedSemester, setSelectedSemester]       = useState('');
   const [selectedModule, setSelectedModule]           = useState('');
-  const [selectedUnit, setSelectedUnit]               = useState('');
-  const [selectedSubject, setSelectedSubject]         = useState('');
 
-  // ============================================================
-  // STATE — session form (create/edit)
-  // ============================================================
-  const [showSessionForm, setShowSessionForm]       = useState(false);
-  const [editingSession, setEditingSession]         = useState(null);       // null = create
-  const [sessionPapers, setSessionPapers]           = useState([]);         // per-paper overrides
+  const [showSessionForm, setShowSessionForm] = useState(false);
+  const [editingSession, setEditingSession]   = useState(null);
+  const [sessionPapers, setSessionPapers]     = useState([]);
 
   const [sessionForm, setSessionForm] = useState({
     name: '',
@@ -10239,7 +10233,6 @@ const ExamModule = ({
     endDate: '',
     maxMarks: 100,
     notes: '',
-    // scope
     classId: '',
     courseId: '',
     programId: '',
@@ -10248,26 +10241,17 @@ const ExamModule = ({
     module: ''
   });
 
-  // ============================================================
-  // STATE — teaching staff (invigilators)
-  // ============================================================
-  const [teachingStaff, setTeachingStaff] = useState([]);
-  const [loadingStaff, setLoadingStaff]   = useState(false);
+  const [teachingStaff, setTeachingStaff]   = useState([]);
+  const [loadingStaff, setLoadingStaff]     = useState(false);
   const [staffLoadError, setStaffLoadError] = useState('');
 
-  // ============================================================
-  // STATE — single result modal
-  // ============================================================
-  const [showResultForm, setShowResultForm]       = useState(false);
-  const [selectedExamForResults, setSelectedExamForResults] = useState(null);  // paper exam id
+  const [showResultForm, setShowResultForm]                 = useState(false);
+  const [selectedExamForResults, setSelectedExamForResults] = useState(null);
   const [resultForm, setResultForm] = useState({
     studentId: '', examId: '', marks: '', isAbsent: false, remarks: ''
   });
   const [savingResults, setSavingResults] = useState(false);
 
-  // ============================================================
-  // STATE — bulk results
-  // ============================================================
   const [showBulkResultForm, setShowBulkResultForm] = useState(false);
   const [bulkResults, setBulkResults]               = useState([]);
   const [resultSearch, setResultSearch]             = useState('');
@@ -10275,8 +10259,11 @@ const ExamModule = ({
   const [selectedStudentsForMessage, setSelectedStudentsForMessage] = useState([]);
   const [selectAllForMessage, setSelectAllForMessage] = useState(false);
 
-  const [loading, setLoading] = useState(false);
-  const [apiError, setApiError] = useState('');
+  // Loading / error state — separated for clearer UX
+  const [loading, setLoading]       = useState(false);
+  const [savingPhase, setSavingPhase] = useState('');   // 'session' | 'deleting' | 'creating' | ''
+  const [apiError, setApiError]     = useState('');
+  const [saveError, setSaveError]   = useState('');
 
   // ============================================================
   // HELPERS — staff display
@@ -10314,7 +10301,7 @@ const ExamModule = ({
     if (!s) return 'Unknown';
     const u = s.User || s.user || {};
     const first = u.firstName || u.first_name || s.firstName || s.first_name || '';
-    const last = u.lastName || u.last_name || s.lastName || s.last_name || '';
+    const last  = u.lastName  || u.last_name  || s.lastName  || s.last_name  || '';
     return `${first} ${last}`.trim() || s.name || u.email || `Staff ${s.id}`;
   };
 
@@ -10323,7 +10310,8 @@ const ExamModule = ({
     s?.staffType || s?.type || s?.role || 'Teaching Staff';
 
   const fetchTeachingStaff = async () => {
-    setLoadingStaff(true); setStaffLoadError('');
+    setLoadingStaff(true);
+    setStaffLoadError('');
     const endpoints = [];
     if (currentSchool?.id) {
       endpoints.push(`/staff?schoolId=${currentSchool.id}`);
@@ -10332,12 +10320,15 @@ const ExamModule = ({
     endpoints.push('/staff');
 
     let rawStaff = [];
+    let lastError = null;
     for (const url of endpoints) {
       try {
         const res = await api.get(url);
         const arr = extractStaffArray(res.data);
         if (arr.length > 0) { rawStaff = arr; break; }
-      } catch (_) { /* try next */ }
+      } catch (err) {
+        lastError = err;
+      }
     }
 
     const teaching = rawStaff.filter(isTeachingStaff);
@@ -10346,11 +10337,19 @@ const ExamModule = ({
       const key = s?.id ?? s?.staffId ?? s?.userId;
       if (!key) return true;
       if (seen.has(key)) return false;
-      seen.add(key); return true;
+      seen.add(key);
+      return true;
     });
     setTeachingStaff(deduped);
-    if (deduped.length === 0 && rawStaff.length === 0) {
-      setStaffLoadError('No staff records found for this school.');
+
+    if (deduped.length === 0) {
+      if (lastError && rawStaff.length === 0) {
+        setStaffLoadError('Could not load staff. ' + (lastError.response?.data?.message || lastError.message));
+      } else if (rawStaff.length === 0) {
+        setStaffLoadError('No staff records found for this school.');
+      } else {
+        setStaffLoadError('No teaching staff found for this school.');
+      }
     }
     setLoadingStaff(false);
   };
@@ -10360,35 +10359,45 @@ const ExamModule = ({
   // ============================================================
   // HELPERS — lookups
   // ============================================================
-  const getClassName     = (id) => classes?.find(c => c.id === id)?.name || 'N/A';
-  const getSubjectName   = (id) => subjects?.find(s => s.id === id)?.name || 'N/A';
-  const getUnitName      = (id) => units?.find(u => u.id === id)?.name || 'N/A';
-  const getCourseName    = (id) => courses?.find(c => c.id === id)?.name || 'N/A';
-  const getProgramName   = (id) => programs?.find(p => p.id === id)?.name || 'N/A';
-  const getStaffName     = (id) => {
+  const getClassName   = (id) => classes?.find(c => c.id === id)?.name || 'N/A';
+  const getSubjectName = (id) => subjects?.find(s => s.id === id)?.name || 'N/A';
+  const getUnitName    = (id) => units?.find(u => u.id === id)?.name || 'N/A';
+  const getCourseName  = (id) => courses?.find(c => c.id === id)?.name || 'N/A';
+  const getProgramName = (id) => programs?.find(p => p.id === id)?.name || 'N/A';
+  const getStaffName   = (id) => {
     if (!id) return '—';
     const s = teachingStaff.find(x => x.id === id);
     return s ? getStaffDisplayName(s) : '—';
   };
 
   const classOptions = useMemo(
-    () => (classes || []).map(c => ({ value: c.id, label: c.name, subLabel: c.capacity ? `Cap ${c.capacity}` : '' })),
+    () => (classes || []).map(c => ({
+      value: c.id, label: c.name,
+      subLabel: c.capacity ? `Cap ${c.capacity}` : ''
+    })),
     [classes]
   );
   const courseOptions = useMemo(
-    () => (courses || []).map(c => ({ value: c.id, label: c.name, subLabel: c.code || '' })),
+    () => (courses || []).map(c => ({
+      value: c.id, label: c.name, subLabel: c.code || ''
+    })),
     [courses]
   );
   const programOptions = useMemo(
-    () => (programs || []).map(p => ({ value: p.id, label: p.name, subLabel: p.code || '' })),
+    () => (programs || []).map(p => ({
+      value: p.id, label: p.name, subLabel: p.code || ''
+    })),
     [programs]
   );
   const invigilatorOptions = useMemo(
-    () => teachingStaff.map(s => ({ value: s.id, label: getStaffDisplayName(s), subLabel: getStaffSubLabel(s) })),
+    () => teachingStaff.map(s => ({
+      value: s.id,
+      label: getStaffDisplayName(s),
+      subLabel: getStaffSubLabel(s)
+    })),
     [teachingStaff]
   );
 
-  // Subject options scoped to the currently selected class
   const subjectsForSelectedClass = useMemo(() => {
     if (!isRegularSchool || !sessionForm.classId || !subjects) return [];
     return subjects.filter(s => {
@@ -10397,7 +10406,6 @@ const ExamModule = ({
     });
   }, [subjects, sessionForm.classId, isRegularSchool]);
 
-  // Unit options scoped to the currently selected course / program
   const unitsForSelectedScope = useMemo(() => {
     if (!units) return [];
     if (isUniversity && sessionForm.courseId) {
@@ -10410,7 +10418,7 @@ const ExamModule = ({
   }, [units, sessionForm.courseId, sessionForm.programId, isUniversity, isTVET]);
 
   // ============================================================
-  // GRADE CALC (unchanged from original)
+  // GRADE CALC
   // ============================================================
   const calculateGrade = (marks, maxMarks = 100, examCategory = null) => {
     if (marks === '' || marks === null || marks === undefined) return { grade: '', points: 0, remark: '' };
@@ -10472,7 +10480,9 @@ const ExamModule = ({
     setLoadingSessions(true);
     try {
       const res = await api.get('/exam-sessions');
-      setSessions(res.data.sessions || []);
+      const list = res.data?.sessions || res.data?.data || [];
+      console.log(`✅ Loaded ${list.length} exam sessions`);
+      setSessions(Array.isArray(list) ? list : []);
     } catch (err) {
       console.error('❌ Load sessions:', err);
       setApiError('Failed to load exam sessions: ' + (err.response?.data?.message || err.message));
@@ -10487,33 +10497,18 @@ const ExamModule = ({
   // FILTER SESSIONS
   // ============================================================
   const filteredSessions = useMemo(() => {
-    let list = sessions || [];
-
+    let list = Array.isArray(sessions) ? sessions : [];
     if (selectedExamName) {
       const q = selectedExamName.toLowerCase();
       list = list.filter(s => String(s.name || '').toLowerCase().includes(q));
     }
-    if (selectedSessionType) {
-      list = list.filter(s => s.type === selectedSessionType);
-    }
-    if (isUniversity && selectedCourse) {
-      list = list.filter(s => s.courseId === selectedCourse);
-    }
-    if (isTVET && selectedProgram) {
-      list = list.filter(s => s.programId === selectedProgram);
-    }
-    if (isRegularSchool && selectedClass) {
-      list = list.filter(s => s.classId === selectedClass);
-    }
-    if (selectedYear) {
-      list = list.filter(s => String(s.year) === String(selectedYear));
-    }
-    if (selectedSemester) {
-      list = list.filter(s => String(s.semester) === String(selectedSemester));
-    }
-    if (selectedModule) {
-      list = list.filter(s => String(s.module) === String(selectedModule));
-    }
+    if (selectedSessionType) list = list.filter(s => s.type === selectedSessionType);
+    if (isUniversity && selectedCourse)  list = list.filter(s => s.courseId === selectedCourse);
+    if (isTVET && selectedProgram)       list = list.filter(s => s.programId === selectedProgram);
+    if (isRegularSchool && selectedClass) list = list.filter(s => s.classId === selectedClass);
+    if (selectedYear)     list = list.filter(s => String(s.year) === String(selectedYear));
+    if (selectedSemester) list = list.filter(s => String(s.semester) === String(selectedSemester));
+    if (selectedModule)   list = list.filter(s => String(s.module) === String(selectedModule));
     return list;
   }, [
     sessions, selectedExamName, selectedSessionType,
@@ -10523,7 +10518,7 @@ const ExamModule = ({
   ]);
 
   // ============================================================
-  // EXPAND / COLLAPSE SESSION PAPERS
+  // EXPAND / COLLAPSE
   // ============================================================
   const toggleSession = (sessionId) => {
     setExpandedSessions(prev => {
@@ -10535,14 +10530,44 @@ const ExamModule = ({
   };
 
   // ============================================================
-  // OPEN CREATE MODAL
+  // FETCH FULL SESSION WITH PAPERS (used by both view & edit)
+  // ============================================================
+  const fetchFullSession = async (sessionId) => {
+    if (!sessionId) throw new Error('Session ID is required');
+
+    console.log(`🔍 Fetching full session ${sessionId}...`);
+    const res = await api.get(`/exam-sessions/${sessionId}`);
+
+    // Handle multiple possible response shapes
+    const payload = res.data?.session || res.data?.data?.session || res.data?.data || res.data;
+
+    if (!payload || typeof payload !== 'object') {
+      throw new Error('Invalid session payload from server');
+    }
+
+    // Papers can be under several keys depending on backend naming
+    const papers =
+      payload.papers ||
+      payload.exams ||
+      payload.ExamPapers ||
+      payload.examPapers ||
+      payload.Exam ||
+      [];
+
+    console.log(`✅ Fetched session "${payload.name}" with ${Array.isArray(papers) ? papers.length : 0} papers`);
+
+    return {
+      ...payload,
+      papers: Array.isArray(papers) ? papers : []
+    };
+  };
+
+  // ============================================================
+  // OPEN CREATE
   // ============================================================
   const openCreateSession = () => {
     const defaultType = isUniversity ? 'FINAL' : isTVET ? 'PRACTICAL' : 'ENDTERM';
-    const defaultTerm =
-      isUniversity ? 'Semester 1' :
-      isTVET       ? 'Term 1' :
-                     'Term 1';
+    const defaultTerm = isUniversity ? 'Semester 1' : 'Term 1';
 
     setSessionForm({
       name: '',
@@ -10559,65 +10584,90 @@ const ExamModule = ({
     setSessionPapers([]);
     setEditingSession(null);
     setApiError('');
+    setSaveError('');
     setShowSessionForm(true);
   };
 
   // ============================================================
-  // OPEN EDIT MODAL
+  // OPEN EDIT — always fetches fresh
   // ============================================================
-  const openEditSession = (session) => {
-    setSessionForm({
-      name: session.name || '',
-      type: session.type || '',
-      term: session.term || '',
-      academicYear: session.academicYear || new Date().getFullYear().toString(),
-      startDate: session.startDate || '',
-      endDate: session.endDate || '',
-      maxMarks: session.maxMarks || 100,
-      notes: session.notes || '',
-      classId: session.classId || '',
-      courseId: session.courseId || '',
-      programId: session.programId || '',
-      year: session.year?.toString() || '',
-      semester: session.semester?.toString() || '',
-      module: session.module?.toString() || ''
-    });
+  const openEditSession = async (sessionSummary) => {
+    if (!sessionSummary?.id) {
+      alert('❌ Invalid session — missing ID');
+      return;
+    }
 
-    // Preload existing papers
-    setSessionPapers((session.papers || []).map(p => ({
-      id: p.id,                            // existing exam row id
-      subjectId: p.subjectId || '',
-      unitId: p.unitId || '',
-      date: p.date ? new Date(p.date).toISOString().split('T')[0] : '',
-      startTime: p.startTime || '',
-      endTime: p.endTime || '',
-      examHall: p.examHall || '',
-      invigilatorId: p.invigilatorId || '',
-      maxMarks: p.maxMarks || 100,
-      isExisting: true
-    })));
-
-    setEditingSession(session);
+    setLoading(true);
     setApiError('');
-    setShowSessionForm(true);
+    setSaveError('');
+
+    try {
+      const fullSession = await fetchFullSession(sessionSummary.id);
+
+      setSessionForm({
+        name: fullSession.name || '',
+        type: fullSession.type || '',
+        term: fullSession.term || '',
+        academicYear: fullSession.academicYear || new Date().getFullYear().toString(),
+        startDate: fullSession.startDate || '',
+        endDate: fullSession.endDate || '',
+        maxMarks: fullSession.maxMarks || 100,
+        notes: fullSession.notes || '',
+        classId: fullSession.classId || '',
+        courseId: fullSession.courseId || '',
+        programId: fullSession.programId || '',
+        year: fullSession.year?.toString() || '',
+        semester: fullSession.semester?.toString() || '',
+        module: fullSession.module?.toString() || ''
+      });
+
+      const paperRows = fullSession.papers.map(p => ({
+        id: p.id,
+        subjectId: p.subjectId || '',
+        unitId: p.unitId || '',
+        date: p.date ? new Date(p.date).toISOString().split('T')[0] : '',
+        startTime: p.startTime || '',
+        endTime: p.endTime || '',
+        examHall: p.examHall || '',
+        invigilatorId: p.invigilatorId || '',
+        maxMarks: p.maxMarks || 100,
+        isExisting: true
+      }));
+
+      console.log(`📄 Preloaded ${paperRows.length} papers for editing`);
+      setSessionPapers(paperRows);
+
+      // ✅ Use the FULL session (with papers) as editingSession
+      setEditingSession(fullSession);
+      setShowSessionForm(true);
+    } catch (err) {
+      console.error('❌ openEditSession failed:', err);
+      setApiError(
+        'Failed to load session details: ' +
+        (err.response?.data?.message || err.message || 'Unknown error')
+      );
+      alert('❌ Could not load session. ' + (err.response?.data?.message || err.message));
+    } finally {
+      setLoading(false);
+    }
   };
 
   // ============================================================
   // PAPER PICKER LOGIC
   // ============================================================
-  // All the subject/unit IDs that are currently in sessionPapers
-  const paperSubjectIds = useMemo(() => sessionPapers.map(p => p.subjectId).filter(Boolean), [sessionPapers]);
-  const paperUnitIds    = useMemo(() => sessionPapers.map(p => p.unitId).filter(Boolean),    [sessionPapers]);
+  const paperSubjectIds = useMemo(
+    () => sessionPapers.map(p => p.subjectId).filter(Boolean),
+    [sessionPapers]
+  );
+  const paperUnitIds = useMemo(
+    () => sessionPapers.map(p => p.unitId).filter(Boolean),
+    [sessionPapers]
+  );
 
-  // Toggle a subject (regular schools)
   const toggleSubject = (subject) => {
     setSessionPapers(prev => {
       const exists = prev.find(p => p.subjectId === subject.id);
-      if (exists) {
-        // Remove
-        return prev.filter(p => p.subjectId !== subject.id);
-      }
-      // Add with defaults from the session form
+      if (exists) return prev.filter(p => p.subjectId !== subject.id);
       return [...prev, {
         subjectId: subject.id,
         unitId: '',
@@ -10632,7 +10682,6 @@ const ExamModule = ({
     });
   };
 
-  // Toggle a unit (University / TVET)
   const toggleUnit = (unit) => {
     setSessionPapers(prev => {
       const exists = prev.find(p => p.unitId === unit.id);
@@ -10664,35 +10713,89 @@ const ExamModule = ({
       !((p.subjectId && p.subjectId === key) || (p.unitId && p.unitId === key))
     ));
   };
-// ============================================================
-// SUBMIT SESSION (FIXED)
-// ============================================================
-const handleSessionSubmit = async (e) => {
-  e.preventDefault();
-  if (!canCreateSessions) { alert('You do not have permission'); return; }
 
-  if (!sessionForm.name?.trim()) { alert('Exam name is required'); return; }
-  if (!sessionForm.type) { alert('Exam type is required'); return; }
+  // ============================================================
+  // VALIDATION
+  // ============================================================
+  const validateSessionForm = () => {
+    const errors = [];
 
-  if (isRegularSchool && !sessionForm.classId) { alert('Class is required'); return; }
-  if (isUniversity && !sessionForm.courseId)   { alert('Course is required'); return; }
-  if (isTVET && !sessionForm.programId)        { alert('Program is required'); return; }
+    if (!sessionForm.name?.trim()) errors.push('Exam name is required');
+    if (!sessionForm.type)         errors.push('Exam type is required');
 
-  if (sessionPapers.length === 0) {
-    alert('Please select at least one subject/unit to add as a paper');
-    return;
-  }
+    if (isRegularSchool && !sessionForm.classId)   errors.push('Class is required');
+    if (isUniversity && !sessionForm.courseId)     errors.push('Course is required');
+    if (isTVET && !sessionForm.programId)          errors.push('Program is required');
 
-  for (const paper of sessionPapers) {
-    const label = paper.subjectId
-      ? subjects.find(s => s.id === paper.subjectId)?.name
-      : units.find(u => u.id === paper.unitId)?.name;
-    if (!paper.date) { alert(`Paper "${label}": date is required`); return; }
-  }
+    if (sessionPapers.length === 0) {
+      errors.push('Please select at least one subject/unit');
+    }
 
-  setLoading(true);
-  setApiError('');
-  try {
+    for (let i = 0; i < sessionPapers.length; i++) {
+      const paper = sessionPapers[i];
+      const label = paper.subjectId
+        ? subjects.find(s => s.id === paper.subjectId)?.name || `Paper ${i + 1}`
+        : units.find(u => u.id === paper.unitId)?.name || `Paper ${i + 1}`;
+
+      if (!paper.date) {
+        errors.push(`Paper "${label}": date is required`);
+      }
+      if (paper.startTime && paper.endTime && paper.startTime >= paper.endTime) {
+        errors.push(`Paper "${label}": end time must be after start time`);
+      }
+    }
+
+    return errors;
+  };
+
+  // ============================================================
+  // BUILD PAPER PAYLOAD
+  // ============================================================
+  const buildPaperData = (paper, payloadBase, sessionId) => ({
+    sessionId,
+    name: payloadBase.name,
+    type: payloadBase.type,
+    term: payloadBase.term,
+    academicYear: payloadBase.academicYear,
+    classId: payloadBase.classId,
+    courseId: payloadBase.courseId,
+    programId: payloadBase.programId,
+    year: payloadBase.year,
+    semester: payloadBase.semester,
+    module: payloadBase.module,
+    subjectId: paper.subjectId || null,
+    unitId: paper.unitId || null,
+    date: paper.date,
+    startTime: paper.startTime || null,
+    endTime: paper.endTime || null,
+    examHall: paper.examHall || null,
+    invigilatorId: paper.invigilatorId || null,
+    invigilator: paper.invigilatorId ? getStaffName(paper.invigilatorId) : null,
+    maxMarks: Number(paper.maxMarks) || 100
+  });
+
+  // ============================================================
+  // SUBMIT SESSION
+  // ============================================================
+  const handleSessionSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!canCreateSessions) {
+      setSaveError('You do not have permission to create/edit exam sessions');
+      return;
+    }
+
+    // ---------- Validate ----------
+    const validationErrors = validateSessionForm();
+    if (validationErrors.length > 0) {
+      setSaveError(validationErrors.join(' • '));
+      return;
+    }
+
+    setLoading(true);
+    setSaveError('');
+    setApiError('');
+
     const payload = {
       name: sessionForm.name.trim(),
       type: sessionForm.type,
@@ -10707,148 +10810,171 @@ const handleSessionSubmit = async (e) => {
       programId: sessionForm.programId || null,
       year: sessionForm.year ? parseInt(sessionForm.year, 10) : null,
       semester: sessionForm.semester ? parseInt(sessionForm.semester, 10) : null,
-      module: sessionForm.module ? parseInt(sessionForm.module, 10) : null,
-      papers: sessionPapers.map(p => ({
-        subjectId: p.subjectId || null,
-        unitId: p.unitId || null,
-        date: p.date,
-        startTime: p.startTime || null,
-        endTime: p.endTime || null,
-        examHall: p.examHall || null,
-        invigilatorId: p.invigilatorId || null,
-        invigilator: p.invigilatorId ? getStaffName(p.invigilatorId) : null,
-        maxMarks: Number(p.maxMarks) || Number(sessionForm.maxMarks) || 100
-      }))
+      module: sessionForm.module ? parseInt(sessionForm.module, 10) : null
     };
 
-    if (editingSession) {
-      // ============================================================
-      // FIXED: EDIT MODE - Update session and sync papers properly
-      // ============================================================
-      
-      // Step 1: Update the session metadata
-      const sessionRes = await api.patch(`/exam-sessions/${editingSession.id}`, {
-        name: payload.name,
-        type: payload.type,
-        term: payload.term,
-        academicYear: payload.academicYear,
-        startDate: payload.startDate,
-        endDate: payload.endDate,
-        maxMarks: payload.maxMarks,
-        notes: payload.notes,
-        classId: payload.classId,
-        courseId: payload.courseId,
-        programId: payload.programId,
-        year: payload.year,
-        semester: payload.semester,
-        module: payload.module
-      });
-
-      // Step 2: Get existing papers from the editing session
-      const existingPapers = editingSession.papers || [];
-      
-      // Step 3: Create maps for easier lookup
-      const existingPaperMap = new Map(existingPapers.map(p => [p.id, p]));
-      const submittedPaperIds = new Set(sessionPapers.filter(p => p.id).map(p => p.id));
-      
-      // Step 4: Handle deletions - papers that were removed
-      const papersToDelete = existingPapers.filter(p => !submittedPaperIds.has(p.id));
-      for (const paper of papersToDelete) {
-        try {
-          await api.delete(`/exams/${paper.id}`);
-          console.log(`Deleted paper ${paper.id}`);
-        } catch (err) {
-          console.warn(`Failed to delete paper ${paper.id}:`, err);
-        }
-      }
-      
-      // Step 5: Handle updates and creates
-      for (const paper of sessionPapers) {
-        // Build the paper data for API
-        const paperData = {
-          sessionId: editingSession.id,
-          name: payload.name,
-          type: payload.type,
-          term: payload.term,
-          academicYear: payload.academicYear,
-          classId: payload.classId,
-          courseId: payload.courseId,
-          programId: payload.programId,
-          year: payload.year,
-          semester: payload.semester,
-          module: payload.module,
-          subjectId: paper.subjectId || null,
-          unitId: paper.unitId || null,
-          date: paper.date,
-          startTime: paper.startTime || null,
-          endTime: paper.endTime || null,
-          examHall: paper.examHall || null,
-          invigilatorId: paper.invigilatorId || null,
-          invigilator: paper.invigilatorId ? getStaffName(paper.invigilatorId) : null,
-          maxMarks: Number(paper.maxMarks) || 100
-        };
-        
-        if (paper.id && existingPaperMap.has(paper.id)) {
-          // UPDATE existing paper
-          try {
-            await api.put(`/exams/${paper.id}`, paperData);
-            console.log(`Updated paper ${paper.id}`);
-          } catch (err) {
-            console.error(`Failed to update paper ${paper.id}:`, err);
-            throw err;
-          }
-        } else {
-          // CREATE new paper
-          try {
-            const createRes = await api.post('/exams', paperData);
-            console.log(`Created new paper:`, createRes.data);
-          } catch (err) {
-            console.error(`Failed to create paper:`, err);
-            throw err;
-          }
-        }
-      }
-      
-    } else {
-      // CREATE MODE - unchanged
-      await api.post('/exam-sessions', payload);
-    }
-
-    alert(editingSession ? '✅ Exam session updated' : '✅ Exam session created');
-    setShowSessionForm(false);
-    setEditingSession(null);
-    setSessionPapers([]);
-    await loadSessions();
-
-    // Refresh legacy exams list too
     try {
-      const r = await api.get('/exams');
-      if (r.data.exams) setExams(r.data.exams);
-    } catch (_) {}
-  } catch (err) {
-    console.error('❌ Save session:', err);
-    setApiError(err.response?.data?.message || err.message);
-  } finally {
-    setLoading(false);
-  }
-};
+      // ==========================================================
+      // EDIT MODE
+      // ==========================================================
+      if (editingSession) {
+        console.log('✏️ EDIT MODE — session:', editingSession.id);
+
+        // ---- Step 1: Update session metadata ----
+        setSavingPhase('session');
+        try {
+          await api.patch(`/exam-sessions/${editingSession.id}`, payload);
+          console.log('✅ Session metadata updated');
+        } catch (err) {
+          console.error('❌ Step 1 (update session) failed:', err);
+          throw new Error(
+            `Failed to update session: ${err.response?.data?.message || err.message}`
+          );
+        }
+
+        // ---- Step 2: Delete ALL existing papers ----
+        const existingPapers =
+          editingSession.papers ||
+          editingSession.exams ||
+          editingSession.ExamPapers ||
+          [];
+
+        setSavingPhase('deleting');
+        const deleteErrors = [];
+        console.log(`🗑️ Deleting ${existingPapers.length} existing papers...`);
+
+        for (const paper of existingPapers) {
+          if (!paper?.id) continue;
+          try {
+            await api.delete(`/exams/${paper.id}`);
+            console.log(`  ✓ Deleted paper ${paper.id}`);
+          } catch (err) {
+            // 404 = already gone, that's fine
+            if (err.response?.status === 404) {
+              console.log(`  ℹ️ Paper ${paper.id} already deleted`);
+            } else {
+              console.warn(`  ⚠️ Could not delete paper ${paper.id}:`, err.message);
+              deleteErrors.push(paper.id);
+            }
+          }
+        }
+
+        if (deleteErrors.length > 0) {
+          console.warn(`⚠️ ${deleteErrors.length} papers failed to delete — continuing`);
+        }
+
+        // ---- Step 3: Recreate all papers ----
+        setSavingPhase('creating');
+        console.log(`➕ Creating ${sessionPapers.length} papers...`);
+        const createErrors = [];
+
+        for (const paper of sessionPapers) {
+          const paperData = buildPaperData(paper, payload, editingSession.id);
+          try {
+            await api.post('/exams', paperData);
+            console.log(`  ✓ Created paper for subjectId=${paper.subjectId || 'N/A'}, unitId=${paper.unitId || 'N/A'}`);
+          } catch (err) {
+            console.error(`  ❌ Failed to create paper:`, err);
+            const label = paper.subjectId
+              ? subjects.find(s => s.id === paper.subjectId)?.name
+              : units.find(u => u.id === paper.unitId)?.name;
+            createErrors.push(
+              `${label || 'Unknown'}: ${err.response?.data?.message || err.message}`
+            );
+          }
+        }
+
+        if (createErrors.length > 0) {
+          throw new Error(
+            `${createErrors.length} of ${sessionPapers.length} papers failed to save:\n` +
+            createErrors.join('\n')
+          );
+        }
+
+        console.log('✅ All papers recreated successfully');
+
+      // ==========================================================
+      // CREATE MODE
+      // ==========================================================
+      } else {
+        console.log('➕ CREATE MODE');
+        setSavingPhase('session');
+
+        const createPayload = {
+          ...payload,
+          papers: sessionPapers.map(p => ({
+            subjectId: p.subjectId || null,
+            unitId: p.unitId || null,
+            date: p.date,
+            startTime: p.startTime || null,
+            endTime: p.endTime || null,
+            examHall: p.examHall || null,
+            invigilatorId: p.invigilatorId || null,
+            invigilator: p.invigilatorId ? getStaffName(p.invigilatorId) : null,
+            maxMarks: Number(p.maxMarks) || Number(sessionForm.maxMarks) || 100
+          }))
+        };
+
+        try {
+          await api.post('/exam-sessions', createPayload);
+          console.log('✅ Session created');
+        } catch (err) {
+          console.error('❌ Create session failed:', err);
+          throw new Error(
+            `Failed to create session: ${err.response?.data?.message || err.message}`
+          );
+        }
+      }
+
+      // ==========================================================
+      // SUCCESS — reset and reload
+      // ==========================================================
+      alert(editingSession ? '✅ Exam session updated' : '✅ Exam session created');
+      setShowSessionForm(false);
+      setEditingSession(null);
+      setSessionPapers([]);
+      setSavingPhase('');
+      await loadSessions();
+
+      // Refresh legacy exams list
+      try {
+        const r = await api.get('/exams');
+        if (r.data?.exams) setExams(r.data.exams);
+      } catch (_) {}
+
+    } catch (err) {
+      console.error('❌ Save session failed:', err);
+      setSaveError(err.message || 'Failed to save session');
+    } finally {
+      setLoading(false);
+      setSavingPhase('');
+    }
+  };
+
   // ============================================================
   // DELETE SESSION
   // ============================================================
   const handleDeleteSession = async (session) => {
     if (!canDeleteSessions) { alert('You do not have permission'); return; }
-    if (!window.confirm(`Delete exam session "${session.name}" and all its ${session.papers?.length || 0} paper(s)? This cannot be undone.`)) return;
+    if (!session?.id) { alert('❌ Invalid session'); return; }
+
+    const paperCount = session.papers?.length || 0;
+    if (!window.confirm(
+      `Delete exam session "${session.name}" and all ${paperCount} paper(s)?\n\nThis cannot be undone.`
+    )) return;
+
     setLoading(true);
     try {
       await api.delete(`/exam-sessions/${session.id}`);
       await loadSessions();
       try {
         const r = await api.get('/exams');
-        if (r.data.exams) setExams(r.data.exams);
+        if (r.data?.exams) setExams(r.data.exams);
       } catch (_) {}
       alert('✅ Session deleted');
     } catch (err) {
-      alert('❌ Failed: ' + (err.response?.data?.message || err.message));
+      console.error('❌ Delete session failed:', err);
+      alert('❌ Failed to delete: ' + (err.response?.data?.message || err.message));
     } finally {
       setLoading(false);
     }
@@ -10858,18 +10984,17 @@ const handleSessionSubmit = async (e) => {
   // BULK RESULTS
   // ============================================================
   const loadStudentsForBulkResults = async (examId) => {
-    if (!examId) return;
+    if (!examId) { alert('No exam selected'); return; }
+
     setLoading(true);
     setApiError('');
     setSelectedExamForResults(examId);
 
     try {
       const exam = exams.find(e => e.id === examId);
-      if (!exam) { alert('Exam not found'); return; }
+      if (!exam) throw new Error('Exam not found');
 
       let studentList = [];
-
-      // Load by exam scope
       const params = {};
       if (isUniversity && exam.courseId) {
         params.courseId = exam.courseId;
@@ -10883,20 +11008,21 @@ const handleSessionSubmit = async (e) => {
       }
 
       const res = await api.get('/students', { params });
-      studentList = res.data.students || [];
+      studentList = res.data?.students || [];
 
-      // Filter to this school
       if (currentSchool?.id) {
         studentList = studentList.filter(s => !s.schoolId || s.schoolId === currentSchool.id);
       }
 
-      if (studentList.length === 0) { alert('No students found for this exam'); return; }
+      if (studentList.length === 0) {
+        alert('No students found for this exam');
+        return;
+      }
 
-      // Load existing results
       let existingResults = [];
       try {
         const r = await api.get(`/results/exam/${examId}`);
-        existingResults = r.data.results || [];
+        existingResults = r.data?.results || [];
       } catch (_) {}
 
       const itemName = (isUniversity || isTVET)
@@ -10905,10 +11031,13 @@ const handleSessionSubmit = async (e) => {
 
       const bulk = studentList.map(st => {
         const existing = existingResults.find(r => r.studentId === st.id);
-        const hasMarks = existing?.marks !== undefined && existing?.marks !== null && existing?.marks !== '';
+        const hasMarks = existing?.marks !== undefined &&
+                         existing?.marks !== null &&
+                         existing?.marks !== '';
         const gradeInfo = hasMarks
           ? calculateGrade(existing.marks, exam.maxMarks, exam.schoolCategory)
           : { grade: '', points: 0 };
+
         return {
           studentId: st.id,
           studentName: `${st.firstName || ''} ${st.lastName || ''}`.trim() || 'Unknown',
@@ -10928,7 +11057,7 @@ const handleSessionSubmit = async (e) => {
       setBulkResults(bulk);
       setShowBulkResultForm(true);
     } catch (err) {
-      console.error('❌ Bulk load:', err);
+      console.error('❌ loadStudentsForBulkResults:', err);
       setApiError(err.response?.data?.message || err.message);
     } finally {
       setLoading(false);
@@ -10936,24 +11065,37 @@ const handleSessionSubmit = async (e) => {
   };
 
   const handleMarkChange = (studentId, value) => {
-    setBulkResults(prev => prev.map(e => e.studentId === studentId ? { ...e, marks: value } : e));
+    setBulkResults(prev => prev.map(e =>
+      e.studentId === studentId ? { ...e, marks: value } : e
+    ));
   };
+
   const handleAbsentChange = (studentId, checked) => {
-    setBulkResults(prev => prev.map(e => e.studentId === studentId ? { ...e, isAbsent: checked, marks: checked ? 0 : e.marks } : e));
+    setBulkResults(prev => prev.map(e =>
+      e.studentId === studentId
+        ? { ...e, isAbsent: checked, marks: checked ? 0 : e.marks }
+        : e
+    ));
   };
+
   const handleGradeBlur = (studentId, marks) => {
     if (marks === '' || marks === null || marks === undefined) {
-      setBulkResults(prev => prev.map(e => e.studentId === studentId ? { ...e, grade: '', points: 0 } : e));
+      setBulkResults(prev => prev.map(e =>
+        e.studentId === studentId ? { ...e, grade: '', points: 0 } : e
+      ));
       return;
     }
     const exam = exams.find(e => e.id === selectedExamForResults);
     const { grade, points } = calculateGrade(marks, exam?.maxMarks, exam?.schoolCategory);
-    setBulkResults(prev => prev.map(e => e.studentId === studentId ? { ...e, grade, points } : e));
+    setBulkResults(prev => prev.map(e =>
+      e.studentId === studentId ? { ...e, grade, points } : e
+    ));
   };
 
   const saveBulkResults = async () => {
     const hasResults = bulkResults.some(e => e.marks !== '' || e.isAbsent);
     if (!hasResults) { alert('No results to save'); return; }
+
     setLoading(true);
     try {
       const exam = exams.find(e => e.id === selectedExamForResults);
@@ -10965,13 +11107,15 @@ const handleSessionSubmit = async (e) => {
         (r.data?.results || []).forEach(x => { existingByStudentId[x.studentId] = x; });
       } catch (_) {}
 
-      let savedCount = 0, errorCount = 0;
+      let savedCount = 0;
       const errors = [];
 
       for (const entry of bulkResults) {
         if (entry.marks === '' && !entry.isAbsent) continue;
+
         const marks = entry.isAbsent ? 0 : parseFloat(entry.marks) || 0;
         const { grade, points } = calculateGrade(marks, exam.maxMarks, exam.schoolCategory);
+
         const data = {
           studentId: entry.studentId,
           examId: selectedExamForResults,
@@ -10980,19 +11124,23 @@ const handleSessionSubmit = async (e) => {
           isAbsent: entry.isAbsent || false,
           remarks: entry.isAbsent ? 'Absent' : ''
         };
+
         try {
-          const existing = entry.resultId ? { id: entry.resultId } : existingByStudentId[entry.studentId];
+          const existing = entry.resultId
+            ? { id: entry.resultId }
+            : existingByStudentId[entry.studentId];
+
           if (existing?.id) await api.put(`/results/${existing.id}`, data);
           else await api.post('/results', data);
+
           savedCount++;
         } catch (err) {
           errors.push(`${entry.studentName}: ${err.response?.data?.message || err.message}`);
-          errorCount++;
         }
       }
 
       let msg = `✅ ${savedCount} results saved.`;
-      if (errorCount > 0) msg += `\n❌ ${errorCount} errors:\n${errors.join('\n')}`;
+      if (errors.length > 0) msg += `\n❌ ${errors.length} errors:\n${errors.join('\n')}`;
       alert(msg);
 
       if (savedCount > 0) {
@@ -11013,6 +11161,7 @@ const handleSessionSubmit = async (e) => {
     setSelectAllForMessage(checked);
     setSelectedStudentsForMessage(checked ? bulkResults.map(s => s.studentId) : []);
   };
+
   const handleSelectForMessage = (studentId, checked) => {
     setSelectedStudentsForMessage(prev =>
       checked ? [...prev, studentId] : prev.filter(id => id !== studentId)
@@ -11020,25 +11169,32 @@ const handleSessionSubmit = async (e) => {
     setSelectAllForMessage(false);
   };
 
-  const filteredBulkResults = bulkResults.filter(entry =>
-    entry.studentName?.toLowerCase().includes(resultSearch.toLowerCase()) ||
-    entry.admissionNumber?.toLowerCase().includes(resultSearch.toLowerCase())
-  ).filter(entry => !filterGrade || entry.grade === filterGrade);
+  const filteredBulkResults = bulkResults
+    .filter(entry =>
+      entry.studentName?.toLowerCase().includes(resultSearch.toLowerCase()) ||
+      entry.admissionNumber?.toLowerCase().includes(resultSearch.toLowerCase())
+    )
+    .filter(entry => !filterGrade || entry.grade === filterGrade);
 
   const uniqueGrades = [...new Set(bulkResults.map(e => e.grade).filter(Boolean))];
 
   // ============================================================
-  // SINGLE RESULT MODAL
+  // SINGLE RESULT
   // ============================================================
   const handleSingleResultSubmit = async (e) => {
     e.preventDefault();
-    if (!resultForm.studentId || !resultForm.examId) { alert('Student and exam required'); return; }
+    if (!resultForm.studentId || !resultForm.examId) {
+      alert('Student and exam required');
+      return;
+    }
     setSavingResults(true);
     try {
       const exam = exams.find(e => e.id === resultForm.examId);
       if (!exam) throw new Error('Exam not found');
+
       const marks = resultForm.isAbsent ? 0 : parseFloat(resultForm.marks) || 0;
       const { grade, points } = calculateGrade(marks, exam.maxMarks, exam.schoolCategory);
+
       const data = {
         studentId: resultForm.studentId,
         examId: resultForm.examId,
@@ -11047,13 +11203,16 @@ const handleSessionSubmit = async (e) => {
         isAbsent: resultForm.isAbsent || false,
         remarks: resultForm.remarks || ''
       };
+
       let existing = null;
       try {
         const r = await api.get(`/results?examId=${resultForm.examId}&studentId=${resultForm.studentId}`);
-        if (r.data.results?.length > 0) existing = r.data.results[0];
+        if (r.data?.results?.length > 0) existing = r.data.results[0];
       } catch (_) {}
+
       if (existing) await api.put(`/results/${existing.id}`, data);
       else          await api.post('/results', data);
+
       alert('✅ Result saved');
       setShowResultForm(false);
       setResultForm({ studentId: '', examId: '', marks: '', isAbsent: false, remarks: '' });
@@ -11065,13 +11224,13 @@ const handleSessionSubmit = async (e) => {
   };
 
   // ============================================================
-  // PRINT EXAMS — grouped by session
+  // PRINT EXAMS
   // ============================================================
   const handlePrintExams = () => {
     if (filteredSessions.length === 0) { alert('No sessions to print'); return; }
 
     const schoolName = currentSchool?.name || 'School';
- const schoolLogo = resolveLogoUrl(currentSchool);
+    const schoolLogo = resolveLogoUrl(currentSchool);
 
     const escapeHtml = (s) => String(s ?? '')
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -11091,7 +11250,9 @@ const handleSessionSubmit = async (e) => {
         const time = p.startTime && p.endTime
           ? `${String(p.startTime).substring(0, 5)} – ${String(p.endTime).substring(0, 5)}`
           : '—';
-        const date = p.date ? new Date(p.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+        const date = p.date
+          ? new Date(p.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+          : '—';
         return `<tr>
           <td class="num">${i + 1}</td>
           <td>${escapeHtml(paperName)}</td>
@@ -11108,7 +11269,8 @@ const handleSessionSubmit = async (e) => {
             <div>
               <h3>${escapeHtml(session.name)}</h3>
               <p class="session-meta">
-                ${escapeHtml(session.type || '')} • ${escapeHtml(session.term || '')} ${session.academicYear ? '• ' + escapeHtml(session.academicYear) : ''}
+                ${escapeHtml(session.type || '')} • ${escapeHtml(session.term || '')}
+                ${session.academicYear ? '• ' + escapeHtml(session.academicYear) : ''}
                 ${scope ? ' • ' + escapeHtml(scope) : ''}
               </p>
             </div>
@@ -11118,10 +11280,7 @@ const handleSessionSubmit = async (e) => {
             <thead><tr>
               <th>#</th>
               <th>${isUniversity || isTVET ? 'Unit' : 'Subject'}</th>
-              <th>Date</th>
-              <th>Time</th>
-              <th>Hall</th>
-              <th>Invigilator</th>
+              <th>Date</th><th>Time</th><th>Hall</th><th>Invigilator</th>
             </tr></thead>
             <tbody>${rows}</tbody>
           </table>
@@ -11169,7 +11328,7 @@ const handleSessionSubmit = async (e) => {
   };
 
   // ============================================================
-  // PRINT RESULTS (single exam paper)
+  // PRINT RESULTS
   // ============================================================
   const handlePrintResults = () => {
     if (!selectedExamForResults) return;
@@ -11177,16 +11336,19 @@ const handleSessionSubmit = async (e) => {
     if (!exam) return;
 
     const schoolName = currentSchool?.name || 'School';
-   const schoolLogo = resolveLogoUrl(currentSchool);
-    const paperName = (isUniversity || isTVET) ? getUnitName(exam.unitId) : getSubjectName(exam.subjectId);
-    const rowsToPrint = filteredBulkResults;
+    const schoolLogo = resolveLogoUrl(currentSchool);
+    const paperName = (isUniversity || isTVET)
+      ? getUnitName(exam.unitId)
+      : getSubjectName(exam.subjectId);
 
     const escapeHtml = (s) => String(s ?? '')
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-    const rows = rowsToPrint.map((e, i) => {
-      const marks = e.isAbsent ? 'ABS' : (e.marks === '' || e.marks === null ? '—' : e.marks);
+    const rows = filteredBulkResults.map((e, i) => {
+      const marks = e.isAbsent
+        ? 'ABS'
+        : (e.marks === '' || e.marks === null ? '—' : e.marks);
       return `<tr>
         <td class="num">${i + 1}</td>
         <td class="mono">${escapeHtml(e.admissionNumber)}</td>
@@ -11245,9 +11407,11 @@ const handleSessionSubmit = async (e) => {
       )}
 
       {apiError && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-          <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
-          <button onClick={() => setApiError('')} className="float-right text-red-500 hover:text-red-700"><i className="fas fa-times" /></button>
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex justify-between items-center">
+          <span><i className="fas fa-exclamation-circle mr-2"></i>{apiError}</span>
+          <button onClick={() => setApiError('')} className="text-red-500 hover:text-red-700">
+            <i className="fas fa-times"></i>
+          </button>
         </div>
       )}
 
@@ -11297,7 +11461,8 @@ const handleSessionSubmit = async (e) => {
             label="Exam Name"
             value={selectedExamName}
             onChange={(e) => setSelectedExamName(e.target.value)}
-            options={[...new Set((sessions || []).map(s => s.name))].map(n => ({ value: n, label: n }))}
+            options={[...new Set((sessions || []).map(s => s.name).filter(Boolean))]
+              .map(n => ({ value: n, label: n }))}
             placeholder="All exam names"
             emptyMessage="No exam names yet"
           />
@@ -11349,22 +11514,22 @@ const handleSessionSubmit = async (e) => {
           )}
 
           {isUniversity && (
-            <SearchableSelect
-              label="Year"
-              value={selectedYear}
-              onChange={(e) => setSelectedYear(e.target.value)}
-              options={[1, 2, 3, 4, 5, 6].map(y => ({ value: String(y), label: `Year ${y}` }))}
-              placeholder="All years"
-            />
-          )}
-          {isUniversity && (
-            <SearchableSelect
-              label="Semester"
-              value={selectedSemester}
-              onChange={(e) => setSelectedSemester(e.target.value)}
-              options={[1, 2, 3].map(s => ({ value: String(s), label: `Semester ${s}` }))}
-              placeholder="All semesters"
-            />
+            <>
+              <SearchableSelect
+                label="Year"
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(e.target.value)}
+                options={[1, 2, 3, 4, 5, 6].map(y => ({ value: String(y), label: `Year ${y}` }))}
+                placeholder="All years"
+              />
+              <SearchableSelect
+                label="Semester"
+                value={selectedSemester}
+                onChange={(e) => setSelectedSemester(e.target.value)}
+                options={[1, 2, 3].map(s => ({ value: String(s), label: `Semester ${s}` }))}
+                placeholder="All semesters"
+              />
+            </>
           )}
           {isTVET && (
             <SearchableSelect
@@ -11379,7 +11544,9 @@ const handleSessionSubmit = async (e) => {
         <div className="mt-4 flex justify-between items-center">
           <p className="text-sm text-gray-500">
             <strong className="text-indigo-600">{filteredSessions.length}</strong> session(s),
-            <strong className="text-indigo-600 ml-1">{filteredSessions.reduce((s, x) => s + (x.papers?.length || 0), 0)}</strong> paper(s)
+            <strong className="text-indigo-600 ml-1">
+              {filteredSessions.reduce((s, x) => s + (x.papers?.length || 0), 0)}
+            </strong> paper(s)
           </p>
           <button
             onClick={() => {
@@ -11433,7 +11600,9 @@ const handleSessionSubmit = async (e) => {
                     </td>
                     <td className="px-4 py-3 font-medium">{session.name}</td>
                     <td className="px-4 py-3">
-                      <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">{session.type}</span>
+                      <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
+                        {session.type}
+                      </span>
                     </td>
                     <td className="px-4 py-3 text-sm">{session.term || '—'}</td>
                     <td className="px-4 py-3 text-sm">
@@ -11456,16 +11625,21 @@ const handleSessionSubmit = async (e) => {
                     <td className="px-4 py-3 text-right">
                       <div className="flex flex-wrap gap-1 justify-end">
                         {canEditSessions && (
-                          <button onClick={() => openEditSession(session)}
-                            className="text-xs px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100"
-                            title="Edit session">
-                            Edit
+                          <button
+                            onClick={() => openEditSession(session)}
+                            disabled={loading}
+                            className="text-xs px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100 disabled:opacity-50"
+                            title="Edit session"
+                          >
+                            {loading ? <i className="fas fa-spinner fa-spin"></i> : 'Edit'}
                           </button>
                         )}
                         {canDeleteSessions && (
-                          <button onClick={() => handleDeleteSession(session)}
+                          <button
+                            onClick={() => handleDeleteSession(session)}
                             className="text-xs px-3 py-1.5 bg-red-50 text-red-700 rounded hover:bg-red-100"
-                            title="Delete session">
+                            title="Delete session"
+                          >
                             Delete
                           </button>
                         )}
@@ -11473,7 +11647,6 @@ const handleSessionSubmit = async (e) => {
                     </td>
                   </tr>
 
-                  {/* Expanded: papers sub-rows */}
                   {isExpanded && papers.map(paper => {
                     const paperName = (isUniversity || isTVET)
                       ? getUnitName(paper.unitId)
@@ -11539,12 +11712,28 @@ const handleSessionSubmit = async (e) => {
               <h3 className="text-xl font-bold">
                 {editingSession ? '✏️ Edit Exam Session' : '➕ Create Exam Session'}
               </h3>
-              <button onClick={() => setShowSessionForm(false)} className="text-gray-500 hover:text-gray-700 text-xl">
+              <button
+                onClick={() => {
+                  setShowSessionForm(false);
+                  setEditingSession(null);
+                  setSessionPapers([]);
+                  setSaveError('');
+                }}
+                disabled={loading}
+                className="text-gray-500 hover:text-gray-700 text-xl disabled:opacity-50"
+              >
                 <i className="fas fa-times"></i>
               </button>
             </div>
 
             <form onSubmit={handleSessionSubmit} className="p-6 space-y-5">
+              {saveError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg whitespace-pre-wrap text-sm">
+                  <i className="fas fa-exclamation-circle mr-2"></i>
+                  {saveError}
+                </div>
+              )}
+
               {/* Session-level fields */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="md:col-span-2">
@@ -11554,7 +11743,9 @@ const handleSessionSubmit = async (e) => {
                     onChange={(e) => setSessionForm({ ...sessionForm, name: e.target.value })}
                     placeholder='e.g. "END TERM 1 2026"'
                     className="w-full px-3 py-2 border rounded-lg"
-                    required />
+                    required
+                    disabled={loading}
+                  />
                   <p className="text-xs text-gray-500 mt-1">
                     All subject papers you add below will be grouped under this name.
                   </p>
@@ -11564,7 +11755,9 @@ const handleSessionSubmit = async (e) => {
                   <label className="block text-sm font-medium mb-1">Exam Type *</label>
                   <select value={sessionForm.type}
                     onChange={(e) => setSessionForm({ ...sessionForm, type: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg" required>
+                    className="w-full px-3 py-2 border rounded-lg"
+                    required
+                    disabled={loading}>
                     <option value="">-- Select Type --</option>
                     {isUniversity && (<>
                       <option value="MIDTERM">Midterm</option>
@@ -11594,7 +11787,8 @@ const handleSessionSubmit = async (e) => {
                   <label className="block text-sm font-medium mb-1">Term</label>
                   <select value={sessionForm.term}
                     onChange={(e) => setSessionForm({ ...sessionForm, term: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg">
+                    className="w-full px-3 py-2 border rounded-lg"
+                    disabled={loading}>
                     <option value="">-- Select --</option>
                     {isUniversity ? (<>
                       <option value="Semester 1">Semester 1</option>
@@ -11611,20 +11805,26 @@ const handleSessionSubmit = async (e) => {
                   <label className="block text-sm font-medium mb-1">Academic Year</label>
                   <input type="text" value={sessionForm.academicYear}
                     onChange={(e) => setSessionForm({ ...sessionForm, academicYear: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg" />
+                    className="w-full px-3 py-2 border rounded-lg"
+                    disabled={loading}
+                  />
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium mb-1">Start Date</label>
                   <input type="date" value={sessionForm.startDate}
                     onChange={(e) => setSessionForm({ ...sessionForm, startDate: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg" />
+                    className="w-full px-3 py-2 border rounded-lg"
+                    disabled={loading}
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">End Date</label>
                   <input type="date" value={sessionForm.endDate}
                     onChange={(e) => setSessionForm({ ...sessionForm, endDate: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg" />
+                    className="w-full px-3 py-2 border rounded-lg"
+                    disabled={loading}
+                  />
                 </div>
               </div>
 
@@ -11636,11 +11836,12 @@ const handleSessionSubmit = async (e) => {
                     value={sessionForm.classId}
                     onChange={(e) => {
                       setSessionForm({ ...sessionForm, classId: e.target.value });
-                      setSessionPapers([]);   // reset papers when class changes
+                      setSessionPapers([]);
                     }}
                     options={classOptions}
                     placeholder="Select class..."
                     required
+                    disabled={loading}
                   />
                 </div>
               )}
@@ -11649,21 +11850,29 @@ const handleSessionSubmit = async (e) => {
                   <SearchableSelect
                     label="Course *"
                     value={sessionForm.courseId}
-                    onChange={(e) => { setSessionForm({ ...sessionForm, courseId: e.target.value }); setSessionPapers([]); }}
+                    onChange={(e) => {
+                      setSessionForm({ ...sessionForm, courseId: e.target.value });
+                      setSessionPapers([]);
+                    }}
                     options={courseOptions}
                     placeholder="Select course..."
                     required
+                    disabled={loading}
                   />
                   <SearchableSelect label="Year"
                     value={sessionForm.year}
                     onChange={(e) => setSessionForm({ ...sessionForm, year: e.target.value })}
                     options={[1,2,3,4,5,6].map(y => ({ value: String(y), label: `Year ${y}` }))}
-                    placeholder="Select year" />
+                    placeholder="Select year"
+                    disabled={loading}
+                  />
                   <SearchableSelect label="Semester"
                     value={sessionForm.semester}
                     onChange={(e) => setSessionForm({ ...sessionForm, semester: e.target.value })}
                     options={[1,2,3].map(s => ({ value: String(s), label: `Semester ${s}` }))}
-                    placeholder="Select semester" />
+                    placeholder="Select semester"
+                    disabled={loading}
+                  />
                 </div>
               )}
               {isTVET && (
@@ -11671,21 +11880,29 @@ const handleSessionSubmit = async (e) => {
                   <SearchableSelect
                     label="Program *"
                     value={sessionForm.programId}
-                    onChange={(e) => { setSessionForm({ ...sessionForm, programId: e.target.value }); setSessionPapers([]); }}
+                    onChange={(e) => {
+                      setSessionForm({ ...sessionForm, programId: e.target.value });
+                      setSessionPapers([]);
+                    }}
                     options={programOptions}
                     placeholder="Select program..."
                     required
+                    disabled={loading}
                   />
                   <SearchableSelect label="Year"
                     value={sessionForm.year}
                     onChange={(e) => setSessionForm({ ...sessionForm, year: e.target.value })}
                     options={[1,2,3].map(y => ({ value: String(y), label: `Year ${y}` }))}
-                    placeholder="Select year" />
+                    placeholder="Select year"
+                    disabled={loading}
+                  />
                   <SearchableSelect label="Module"
                     value={sessionForm.module}
                     onChange={(e) => setSessionForm({ ...sessionForm, module: e.target.value })}
                     options={[1,2,3,4].map(m => ({ value: String(m), label: `Module ${m}` }))}
-                    placeholder="Select module" />
+                    placeholder="Select module"
+                    disabled={loading}
+                  />
                 </div>
               )}
 
@@ -11702,7 +11919,6 @@ const handleSessionSubmit = async (e) => {
                   </div>
                 </div>
 
-                {/* Subject / unit picker */}
                 <div className="bg-white rounded-lg p-4 border border-indigo-100 mb-4">
                   <p className="text-sm font-medium text-gray-700 mb-2">
                     Available {isRegularSchool ? 'Subjects' : 'Units'}:
@@ -11720,7 +11936,8 @@ const handleSessionSubmit = async (e) => {
                         return (
                           <button type="button" key={subj.id}
                             onClick={() => toggleSubject(subj)}
-                            className={`text-sm text-left px-3 py-2 rounded-lg border-2 transition-all ${
+                            disabled={loading}
+                            className={`text-sm text-left px-3 py-2 rounded-lg border-2 transition-all disabled:opacity-50 ${
                               isSelected
                                 ? 'bg-indigo-600 text-white border-indigo-600'
                                 : 'bg-white text-gray-700 border-gray-200 hover:border-indigo-300'
@@ -11748,7 +11965,8 @@ const handleSessionSubmit = async (e) => {
                             return (
                               <button type="button" key={u.id}
                                 onClick={() => toggleUnit(u)}
-                                className={`text-sm text-left px-3 py-2 rounded-lg border-2 transition-all ${
+                                disabled={loading}
+                                className={`text-sm text-left px-3 py-2 rounded-lg border-2 transition-all disabled:opacity-50 ${
                                   isSelected
                                     ? 'bg-indigo-600 text-white border-indigo-600'
                                     : 'bg-white text-gray-700 border-gray-200 hover:border-indigo-300'
@@ -11764,7 +11982,6 @@ const handleSessionSubmit = async (e) => {
                   )}
                 </div>
 
-                {/* Per-paper details */}
                 {sessionPapers.length > 0 && (
                   <div className="space-y-3">
                     <p className="text-sm font-medium text-indigo-700">Paper Details:</p>
@@ -11782,7 +11999,8 @@ const handleSessionSubmit = async (e) => {
                             </span>
                             <button type="button"
                               onClick={() => removePaper(paperKey)}
-                              className="text-xs text-red-500 hover:text-red-700">
+                              disabled={loading}
+                              className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50">
                               <i className="fas fa-trash mr-1"></i>Remove
                             </button>
                           </div>
@@ -11791,32 +12009,44 @@ const handleSessionSubmit = async (e) => {
                               <label className="text-xs text-gray-500 block mb-0.5">Date *</label>
                               <input type="date" value={paper.date || ''}
                                 onChange={(e) => updatePaper(paperKey, { date: e.target.value })}
-                                className="w-full px-2 py-1 text-sm border rounded" required />
+                                className="w-full px-2 py-1 text-sm border rounded"
+                                required
+                                disabled={loading}
+                              />
                             </div>
                             <div>
                               <label className="text-xs text-gray-500 block mb-0.5">Start</label>
                               <input type="time" value={paper.startTime || ''}
                                 onChange={(e) => updatePaper(paperKey, { startTime: e.target.value })}
-                                className="w-full px-2 py-1 text-sm border rounded" />
+                                className="w-full px-2 py-1 text-sm border rounded"
+                                disabled={loading}
+                              />
                             </div>
                             <div>
                               <label className="text-xs text-gray-500 block mb-0.5">End</label>
                               <input type="time" value={paper.endTime || ''}
                                 onChange={(e) => updatePaper(paperKey, { endTime: e.target.value })}
-                                className="w-full px-2 py-1 text-sm border rounded" />
+                                className="w-full px-2 py-1 text-sm border rounded"
+                                disabled={loading}
+                              />
                             </div>
                             <div>
                               <label className="text-xs text-gray-500 block mb-0.5">Hall</label>
                               <input type="text" value={paper.examHall || ''}
                                 onChange={(e) => updatePaper(paperKey, { examHall: e.target.value })}
                                 placeholder="Hall A"
-                                className="w-full px-2 py-1 text-sm border rounded" />
+                                className="w-full px-2 py-1 text-sm border rounded"
+                                disabled={loading}
+                              />
                             </div>
                             <div>
                               <label className="text-xs text-gray-500 block mb-0.5">Max Marks</label>
                               <input type="number" value={paper.maxMarks || 100}
                                 onChange={(e) => updatePaper(paperKey, { maxMarks: e.target.value })}
-                                className="w-full px-2 py-1 text-sm border rounded" min="1" />
+                                className="w-full px-2 py-1 text-sm border rounded"
+                                min="1"
+                                disabled={loading}
+                              />
                             </div>
                             <div className="md:col-span-5">
                               <label className="text-xs text-gray-500 block mb-0.5">Invigilator</label>
@@ -11825,6 +12055,7 @@ const handleSessionSubmit = async (e) => {
                                 onChange={(e) => updatePaper(paperKey, { invigilatorId: e.target.value })}
                                 options={invigilatorOptions}
                                 placeholder={loadingStaff ? 'Loading staff...' : 'Select invigilator'}
+                                disabled={loading}
                               />
                             </div>
                           </div>
@@ -11841,18 +12072,33 @@ const handleSessionSubmit = async (e) => {
                   onChange={(e) => setSessionForm({ ...sessionForm, notes: e.target.value })}
                   rows="2"
                   className="w-full px-3 py-2 border rounded-lg"
-                  placeholder="Any additional information about this exam session" />
+                  placeholder="Any additional information about this exam session"
+                  disabled={loading}
+                />
               </div>
 
               <div className="flex justify-end gap-2 pt-4 border-t">
-                <button type="button" onClick={() => setShowSessionForm(false)}
-                  className="bg-gray-500 text-white px-5 py-2 rounded-lg hover:bg-gray-600">
+                <button type="button"
+                  onClick={() => {
+                    setShowSessionForm(false);
+                    setEditingSession(null);
+                    setSessionPapers([]);
+                    setSaveError('');
+                  }}
+                  disabled={loading}
+                  className="bg-gray-500 text-white px-5 py-2 rounded-lg hover:bg-gray-600 disabled:opacity-50">
                   Cancel
                 </button>
                 <button type="submit" disabled={loading}
                   className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2">
                   {loading
-                    ? <><i className="fas fa-spinner fa-spin"></i>Saving...</>
+                    ? <>
+                        <i className="fas fa-spinner fa-spin"></i>
+                        {savingPhase === 'session'  ? 'Saving session...'
+                          : savingPhase === 'deleting' ? 'Replacing papers...'
+                          : savingPhase === 'creating' ? 'Creating papers...'
+                          : 'Saving...'}
+                      </>
                     : <><i className="fas fa-save"></i>{editingSession ? 'Update Session' : 'Create Session'}</>}
                 </button>
               </div>
@@ -11867,21 +12113,28 @@ const handleSessionSubmit = async (e) => {
           <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-bold">Add Single Result</h3>
-              <button onClick={() => setShowResultForm(false)} className="text-gray-500"><i className="fas fa-times" /></button>
+              <button onClick={() => setShowResultForm(false)} className="text-gray-500">
+                <i className="fas fa-times" />
+              </button>
             </div>
             <form onSubmit={handleSingleResultSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Exam</label>
                 <input type="text" disabled
                   value={exams.find(e => e.id === resultForm.examId)?.name || ''}
-                  className="w-full px-3 py-2 bg-gray-100 border rounded-lg" />
+                  className="w-full px-3 py-2 bg-gray-100 border rounded-lg"
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Student *</label>
                 <SearchableSelect
                   value={resultForm.studentId}
                   onChange={(e) => setResultForm({ ...resultForm, studentId: e.target.value })}
-                  options={(students || []).map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}`, subLabel: s.admissionNumber }))}
+                  options={(students || []).map(s => ({
+                    value: s.id,
+                    label: `${s.firstName} ${s.lastName}`,
+                    subLabel: s.admissionNumber
+                  }))}
                   placeholder="Search student..."
                   required
                 />
@@ -11891,22 +12144,29 @@ const handleSessionSubmit = async (e) => {
                 <input type="number" value={resultForm.marks}
                   onChange={(e) => setResultForm({ ...resultForm, marks: e.target.value })}
                   disabled={resultForm.isAbsent}
-                  className="w-full px-3 py-2 border rounded-lg" min="0" />
+                  className="w-full px-3 py-2 border rounded-lg"
+                  min="0"
+                />
               </div>
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={resultForm.isAbsent}
-                  onChange={(e) => setResultForm({ ...resultForm, isAbsent: e.target.checked, marks: '' })} />
+                  onChange={(e) => setResultForm({
+                    ...resultForm, isAbsent: e.target.checked, marks: ''
+                  })} />
                 Student was absent
               </label>
               <div>
                 <label className="block text-sm font-medium mb-1">Remarks</label>
                 <textarea rows="2" value={resultForm.remarks}
                   onChange={(e) => setResultForm({ ...resultForm, remarks: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg" />
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
               </div>
               <div className="flex justify-end gap-2 pt-4 border-t">
                 <button type="button" onClick={() => setShowResultForm(false)}
-                  className="bg-gray-500 text-white px-4 py-2 rounded-lg">Cancel</button>
+                  className="bg-gray-500 text-white px-4 py-2 rounded-lg">
+                  Cancel
+                </button>
                 <button type="submit" disabled={savingResults}
                   className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50">
                   {savingResults ? 'Saving...' : 'Save'}
@@ -11937,11 +12197,14 @@ const handleSessionSubmit = async (e) => {
 
             <div className="p-6">
               <div className="mb-4 flex flex-wrap gap-3">
-                <input type="text" placeholder="Search students..." value={resultSearch}
+                <input type="text" placeholder="Search students..."
+                  value={resultSearch}
                   onChange={(e) => setResultSearch(e.target.value)}
-                  className="flex-1 px-3 py-2 border rounded-lg" />
+                  className="flex-1 px-3 py-2 border rounded-lg"
+                />
                 {uniqueGrades.length > 0 && (
-                  <select value={filterGrade} onChange={(e) => setFilterGrade(e.target.value)}
+                  <select value={filterGrade}
+                    onChange={(e) => setFilterGrade(e.target.value)}
                     className="px-3 py-2 border rounded-lg">
                     <option value="">All Grades</option>
                     {uniqueGrades.map(g => <option key={g} value={g}>{g}</option>)}
@@ -11973,7 +12236,8 @@ const handleSessionSubmit = async (e) => {
                         <td className="px-4 py-2">
                           <input type="checkbox"
                             checked={selectedStudentsForMessage.includes(entry.studentId)}
-                            onChange={(e) => handleSelectForMessage(entry.studentId, e.target.checked)} />
+                            onChange={(e) => handleSelectForMessage(entry.studentId, e.target.checked)}
+                          />
                         </td>
                         <td className="px-4 py-2 font-mono text-xs">{entry.admissionNumber}</td>
                         <td className="px-4 py-2">{entry.studentName}</td>
@@ -11982,7 +12246,8 @@ const handleSessionSubmit = async (e) => {
                             onChange={(e) => handleMarkChange(entry.studentId, e.target.value)}
                             onBlur={(e) => handleGradeBlur(entry.studentId, e.target.value)}
                             disabled={entry.isAbsent}
-                            className="w-20 px-2 py-1 border rounded" />
+                            className="w-20 px-2 py-1 border rounded"
+                          />
                         </td>
                         <td className="px-4 py-2">
                           <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(entry.grade)}`}>
@@ -11992,7 +12257,8 @@ const handleSessionSubmit = async (e) => {
                         <td className="px-4 py-2">{(entry.points || 0).toFixed(1)}</td>
                         <td className="px-4 py-2">
                           <input type="checkbox" checked={entry.isAbsent}
-                            onChange={(e) => handleAbsentChange(entry.studentId, e.target.checked)} />
+                            onChange={(e) => handleAbsentChange(entry.studentId, e.target.checked)}
+                          />
                         </td>
                       </tr>
                     ))}
@@ -12002,7 +12268,9 @@ const handleSessionSubmit = async (e) => {
 
               <div className="mt-4 flex justify-end gap-2">
                 <button onClick={() => setShowBulkResultForm(false)}
-                  className="bg-gray-500 text-white px-4 py-2 rounded-lg">Cancel</button>
+                  className="bg-gray-500 text-white px-4 py-2 rounded-lg">
+                  Cancel
+                </button>
                 <button onClick={saveBulkResults} disabled={loading}
                   className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50">
                   {loading ? 'Saving...' : 'Save All Results'}
@@ -12015,7 +12283,6 @@ const handleSessionSubmit = async (e) => {
     </div>
   );
 };
-
 // ============================================================================
 //  RESULTS MODULE — v6
 //
