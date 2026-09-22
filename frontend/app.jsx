@@ -6005,26 +6005,36 @@ const TERM_LABEL = isUniversity ? 'Semester' : 'Term';
       const idStr = String(f.id);
       if (!feeById.has(idStr)) feeById.set(idStr, f);
     });
+const getTermKey = (fee) => {
+  if (!fee) return 'General Payments';
 
-    const getTermKey = (fee) => {
-      if (!fee) return 'General Payments';
-      if (isUniversity) {
-        if (fee.semester) return `Semester ${fee.semester}`;
-        if (fee.term && /semester/i.test(String(fee.term))) return fee.term;
-         if (fee.term && /^sem\s*\d/i.test(String(fee.term))) return fee.term;   // "Sem 1"
-    if (fee.term && /^\d+$/.test(String(fee.term).trim())) {
-      return `Semester ${String(fee.term).trim()}`;    
-        return 'General Payments';
-      }
-      if (isTVET) {
-        if (fee.module) return `Module ${fee.module}`;
-        if (fee.term && /module/i.test(String(fee.term))) return fee.term;
-         if (fee.term && /term\s*\d/i.test(String(fee.term))) return fee.term;
-        return 'General Payments';
-      }
-      if (fee.term && /term\s*\d/i.test(String(fee.term))) return fee.term;
-      return 'General Payments';
-    };
+  // ────────────────────────────────────────────────
+  //  UNIVERSITY → "Semester 1", "Semester 2", "Semester 3"
+  // ────────────────────────────────────────────────
+  if (isUniversity) {
+    if (fee.semester) return `Semester ${fee.semester}`;
+
+    if (fee.term) {
+      const t = String(fee.term).trim();
+      if (/semester\s*\d/i.test(t)) return t;          // "Semester 1"
+      if (/^sem\s*\d/i.test(t))     return t;          // "Sem 1"
+      if (/^\d+$/.test(t))          return `Semester ${t}`;  // "1" → "Semester 1"
+    }
+
+    return 'General Payments';
+  }
+
+  // ────────────────────────────────────────────────
+  //  TVET / SECONDARY / PRIMARY → "Term 1", "Term 2", "Term 3"
+  // ────────────────────────────────────────────────
+  if (fee.term) {
+    const t = String(fee.term).trim();
+    if (/term\s*\d/i.test(t)) return t;                // "Term 1"
+    if (/^\d+$/.test(t))      return `Term ${t}`;      // "1" → "Term 1"
+  }
+
+  return 'General Payments';
+};
 
     const termGroups = new Map();
     const ensureTermGroup = (term) => {
