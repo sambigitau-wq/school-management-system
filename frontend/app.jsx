@@ -5322,7 +5322,7 @@ const TERM_LABEL = isUniversity ? 'Semester' : 'Term';
     currentSchool?.schoolName?.trim() ||
     '';
 
-  const schoolLogo = currentSchool?.contact?.logo || '';
+const schoolLogo = resolveLogoUrl(currentSchool);
   const schoolAddress = currentSchool?.contact?.address || '';
   const schoolPhone = currentSchool?.contact?.phone || '';
   const schoolEmail = currentSchool?.contact?.email || '';
@@ -11033,7 +11033,7 @@ const ExamModule = ({
     if (filteredSessions.length === 0) { alert('No sessions to print'); return; }
 
     const schoolName = currentSchool?.name || 'School';
-    const schoolLogo = currentSchool?.contact?.logo || '';
+ const schoolLogo = resolveLogoUrl(currentSchool);
 
     const escapeHtml = (s) => String(s ?? '')
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -11139,7 +11139,7 @@ const ExamModule = ({
     if (!exam) return;
 
     const schoolName = currentSchool?.name || 'School';
-    const schoolLogo = currentSchool?.contact?.logo || '';
+   const schoolLogo = resolveLogoUrl(currentSchool);
     const paperName = (isUniversity || isTVET) ? getUnitName(exam.unitId) : getSubjectName(exam.subjectId);
     const rowsToPrint = filteredBulkResults;
 
@@ -46505,7 +46505,7 @@ const FeeStatementPrintModal = ({ feeStatement, student, currentSchool, onClose 
   const handlePrint = () => {
     const printWindow = window.open('', '_blank');
     const schoolName = currentSchool?.name || 'School Name';
-    const schoolLogo = currentSchool?.contact?.logo || '';
+   const schoolLogo = resolveLogoUrl(currentSchool);
     const schoolAddress = currentSchool?.contact?.address || '';
     const schoolPhone = currentSchool?.contact?.phone || '';
     const schoolEmail = currentSchool?.contact?.email || '';
@@ -49381,7 +49381,7 @@ const SchemesOfWorkModule = ({
   const printSchemePDF = () => {
     const printWindow = window.open('', '_blank');
     const schoolName = currentSchool?.name || 'School Name';
-    const schoolLogo = currentSchool?.contact?.logo || '';
+  const schoolLogo = resolveLogoUrl(currentSchool);
     const schoolAddress = currentSchool?.contact?.address || '';
     const schoolMotto = currentSchool?.motto || '';
     
@@ -53046,7 +53046,7 @@ const ReceiptHistoryModule = ({ payments, students, currentSchool, user, dateRan
     
     const receiptNo = receipt.receiptNo || `RCP-${String(receipt.id).padStart(6, '0')}`;
     const amountInWords = numberToWords(receipt.amount);
-    const schoolLogo = currentSchool?.contact?.logo || '';
+const schoolLogo = resolveLogoUrl(currentSchool);
     
     printWindow.document.write(`
       <!DOCTYPE html>
@@ -54464,7 +54464,7 @@ const FeeCollectionModule = ({
   // ==================== PRINT RECEIPT ====================
   const handlePrintReceipt = (receipt) => {
     const printWindow = window.open('', '_blank', 'width=800,height=900');
-    const schoolLogo = currentSchool?.contact?.logo || '';
+  const schoolLogo = resolveLogoUrl(currentSchool);
     const receiptNo = receipt.receiptNo || receipt.receiptNumber || `RCP-${String(receipt.id).padStart(6, '0')}`;
     const amountInWords = numberToWords(receipt.amount);
 
