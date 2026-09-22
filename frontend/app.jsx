@@ -11968,14 +11968,14 @@ const ExamModule = ({
 };
 
 // ============================================================================
-//  RESULTS MODULE — v4
+//  RESULTS MODULE — v5
 //
-//  · Session-aware: reports and matrices work on exam names / sessions
-//  · Termly class matrix: students × subjects, per-term, with exam-type filter
-//  · Detailed student report with school header + signature block
-//  · KNEC aptitude analysis
-//  · Marks entry, single result, bulk entry
-//  · Print-scoped: only the report area prints
+//  · Session-aware reports + termly class matrix
+//  · Centered school name + logo on printouts
+//  · Clean white background design (no dark slate)
+//  · Category-aware term options (Primary: Term 1-3, Uni: Semester 1-2)
+//  · Print-only captures the report — nothing else
+//  · Class Matrix tab removed (termly covers the use case)
 // ============================================================================
 const ResultsModule = ({
   exams, setExams, results, students, subjects, classes, courses, programs,
@@ -11993,20 +11993,55 @@ const ResultsModule = ({
   const isPrimary      = schoolCategory === 'ECDE_PRIMARY_JSS';
   const isRegularSchool = !isUniversity && !isTVET;
 
-  const isCBCSeniorLevel = (level) => !!level && /^grade\s*1[0-2]$/i.test(String(level).trim());
-  const isFormLevel      = (level) => !!level && /^form\s*[1-4]$/i.test(String(level).trim());
+  // ✅ School identity — same approach as CardManagementModule
+  const schoolName =
+    currentSchool?.name?.trim() ||
+    currentSchool?.schoolName?.trim() ||
+    currentSchool?.school?.name?.trim() ||
+    '';
+  const schoolLogo =
+    currentSchool?.contact?.logo ||
+    currentSchool?.branding?.logo ||
+    currentSchool?.logo ||
+    '';
+  const schoolMotto =
+    currentSchool?.motto ||
+    currentSchool?.schoolMotto ||
+    '';
+  const schoolAddress = currentSchool?.contact?.address || '';
+  const schoolPhone   = currentSchool?.contact?.phone   || '';
+  const schoolEmail   = currentSchool?.contact?.email   || '';
 
-  const resolveGradingFlavor = (category, levelHint) => {
-    if (category === 'COLLEGE_TVET')    return 'TVET';
-    if (category === 'UNIVERSITY')      return 'UNI';
-    if (category === 'ECDE_PRIMARY_JSS') return 'CBC';
-    if (category === 'SENIOR_SECONDARY') {
-      if (levelHint && isCBCSeniorLevel(levelHint)) return 'CBC';
-      if (levelHint && isFormLevel(levelHint))      return '844';
-      return '844';
+  // ✅ Category-aware term options
+  const termOptions = useMemo(() => {
+    if (isUniversity) {
+      return [
+        { value: '',           label: 'All Semesters' },
+        { value: 'Semester 1', label: 'Semester 1' },
+        { value: 'Semester 2', label: 'Semester 2' }
+      ];
     }
-    return 'CBC';
-  };
+    if (isTVET) {
+      return [
+        { value: '',         label: 'All Terms' },
+        { value: 'Term 1',   label: 'Term 1' },
+        { value: 'Term 2',   label: 'Term 2' },
+        { value: 'Term 3',   label: 'Term 3' }
+      ];
+    }
+    // Primary, Secondary
+    return [
+      { value: '',       label: 'All Terms' },
+      { value: 'Term 1', label: 'Term 1' },
+      { value: 'Term 2', label: 'Term 2' },
+      { value: 'Term 3', label: 'Term 3' }
+    ];
+  }, [isUniversity, isTVET]);
+
+  const defaultTermValue = useMemo(() => {
+    if (isUniversity) return 'Semester 1';
+    return 'Term 1';
+  }, [isUniversity]);
 
   // ============================================================
   // ROLE
@@ -12025,26 +12060,22 @@ const ResultsModule = ({
   const isStudent         = user?.role === 'STUDENT';
   const isParent          = user?.role === 'PARENT';
 
-  const canAddResults      = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal ||
-                             isSeniorTeacher || isClassTeacher || isSubjectTeacher ||
-                             isLecturer || isInstructor || isDean || isHOD;
-  const canPublishResults  = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || isDean;
-  const canSendMessages    = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal ||
-                             isSeniorTeacher || isClassTeacher || isDean || isHOD;
-  const canViewAllResults  = canAddResults;
-  const canPrintAllResults = canAddResults;
-  const canViewClassMatrix = canAddResults;
+  const canAddResults     = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal ||
+                            isSeniorTeacher || isClassTeacher || isSubjectTeacher ||
+                            isLecturer || isInstructor || isDean || isHOD;
+  const canPublishResults = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal || isDean;
+  const canSendMessages   = isSuperAdmin || isSchoolAdmin || isPrincipal || isDeputyPrincipal ||
+                            isSeniorTeacher || isClassTeacher || isDean || isHOD;
+  const canViewAllResults = canAddResults;
 
   const SearchableSelect = StudentSearchableSelect;
 
   // ============================================================
-  // STATE — top-level view
+  // STATE
   // ============================================================
-  const [viewMode, setViewMode] = useState('marks'); // 'marks' | 'report' | 'class-matrix' | 'term-matrix'
+  const [viewMode, setViewMode] = useState('marks'); // 'marks' | 'report' | 'term-matrix'
 
-  // ============================================================
-  // STATE — marks entry
-  // ============================================================
+  // Marks entry
   const [selectedExam, setSelectedExam]         = useState('');
   const [selectedClass, setSelectedClass]       = useState('');
   const [selectedCourse, setSelectedCourse]     = useState('');
@@ -12066,41 +12097,25 @@ const ResultsModule = ({
   const [messageType, setMessageType]                               = useState('SMS');
   const [messageTemplate, setMessageTemplate]                       = useState('');
   const [sendingMessages, setSendingMessages]                       = useState(false);
-  const [messageLog, setMessageLog]                                 = useState([]);
 
-  // ============================================================
-  // STATE — detailed report (per student)
-  // ============================================================
+  // Detailed report
   const [reportClassId, setReportClassId]               = useState('');
   const [reportStudentId, setReportStudentId]           = useState('');
   const [reportTermFilter, setReportTermFilter]         = useState('');
   const [reportYearFilter, setReportYearFilter]         = useState('');
   const [reportExamTypeFilter, setReportExamTypeFilter] = useState('');
-  const [reportSessionFilter, setReportSessionFilter]   = useState('');  // exam name (session)
   const [reportData, setReportData]                     = useState(null);
   const [loadingReport, setLoadingReport]               = useState(false);
 
-  // ============================================================
-  // STATE — class matrix (single exam)
-  // ============================================================
-  const [matrixClassId, setMatrixClassId]       = useState('');
-  const [matrixExamId, setMatrixExamId]         = useState('');
-  const [matrixData, setMatrixData]             = useState(null);
-  const [loadingMatrix, setLoadingMatrix]       = useState(false);
-
-  // ============================================================
-  // STATE — ✅ NEW termly class matrix
-  // ============================================================
+  // Term matrix
   const [termMatrixClassId, setTermMatrixClassId]     = useState('');
-  const [termMatrixTerm, setTermMatrixTerm]           = useState('Term 1');
-  const [termMatrixExamType, setTermMatrixExamType]   = useState('');   // '' = all types
-  const [termMatrixSession, setTermMatrixSession]     = useState('');   // '' = any exam name
+  const [termMatrixTerm, setTermMatrixTerm]           = useState(defaultTermValue);
+  const [termMatrixExamType, setTermMatrixExamType]   = useState('');
+  const [termMatrixSession, setTermMatrixSession]     = useState('');
   const [termMatrixData, setTermMatrixData]           = useState(null);
   const [loadingTermMatrix, setLoadingTermMatrix]     = useState(false);
 
-  // ============================================================
-  // STATE — student / parent view
-  // ============================================================
+  // Student/parent view
   const [myResults, setMyResults]               = useState([]);
   const [myStudentRecord, setMyStudentRecord]   = useState(null);
   const [loadingMyData, setLoadingMyData]       = useState(false);
@@ -12116,136 +12131,97 @@ const ResultsModule = ({
 
   const hasLoadedStudentData  = useRef(false);
   const hasLoadedChildrenData = useRef(false);
-
   const [loading, setLoading] = useState(false);
 
-  // ============================================================
-  // HELPERS
-  // ============================================================
-  const resolveStudentId = (id) => {
-    if (!id) return null;
-    if (students.some(s => s.id === id)) return id;
-    const byUser = students.find(s => s.userId === id);
-    if (byUser) return byUser.id;
-    const byAdm = students.find(s => s.admissionNumber === id);
-    if (byAdm) return byAdm.id;
-    return null;
-  };
-
-  const getClassName   = (id) => classes?.find(c => c.id === id)?.name || '—';
-  const getSubjectName = (id) => subjects?.find(s => s.id === id)?.name || '—';
-  const getUnitName    = (id) => units?.find(u => u.id === id)?.name || '—';
-  const getCourseName  = (id) => courses?.find(c => c.id === id)?.name || '—';
-  const getProgramName = (id) => programs?.find(p => p.id === id)?.name || '—';
-
-  const formatDate = (value) => {
-    if (!value) return '—';
-    const d = new Date(value);
-    if (isNaN(d.getTime())) return '—';
-    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-  };
+  // Reset term default when school changes
+  useEffect(() => {
+    setTermMatrixTerm(defaultTermValue);
+  }, [defaultTermValue]);
 
   // ============================================================
   // GRADE LOGIC
   // ============================================================
-  const calculateGrade = (marks, maxMarks = 100, examCategory = null, levelHint = null) => {
-    if (marks === '' || marks === null || marks === undefined) return { grade: '', points: 0, remark: '' };
-    const numeric = parseFloat(marks);
-    if (isNaN(numeric)) return { grade: '', points: 0, remark: '' };
-    const percentage = maxMarks > 0 ? (numeric / maxMarks) * 100 : 0;
+  const calculateGrade = (marks, maxMarks = 100, examCategory = null) => {
+    if (marks === '' || marks === null || marks === undefined) return { grade: '', points: 0 };
+    const n = parseFloat(marks);
+    if (isNaN(n)) return { grade: '', points: 0 };
+    const pct = maxMarks > 0 ? (n / maxMarks) * 100 : 0;
+    const cat = examCategory || schoolCategory;
 
     if (currentSchool?.gradingConfig?.scale?.length > 0) {
-      const band = currentSchool.gradingConfig.scale.find(b => percentage >= b.min && percentage <= b.max);
-      if (band) return {
-        grade: band.code || band.grade || '',
-        points: band.points || 0,
-        remark: band.label || band.code || ''
-      };
+      const band = currentSchool.gradingConfig.scale.find(b => pct >= b.min && pct <= b.max);
+      if (band) return { grade: band.code || band.grade || '', points: band.points || 0 };
     }
 
-    const category = examCategory || schoolCategory;
-    const flavor = resolveGradingFlavor(category, levelHint);
-
-    if (flavor === 'TVET') {
-      if (percentage >= 80) return { grade: 'DISTINCTION', points: 5, remark: 'Excellent' };
-      if (percentage >= 65) return { grade: 'CREDIT',      points: 4, remark: 'Very Good' };
-      if (percentage >= 50) return { grade: 'MERIT',       points: 3, remark: 'Good' };
-      if (percentage >= 40) return { grade: 'PASS',        points: 2, remark: 'Satisfactory' };
-      return                     { grade: 'FAIL',          points: 1, remark: 'Needs Improvement' };
+    if (cat === 'UNIVERSITY') {
+      if (pct >= 70) return { grade: 'A', points: 5.0 };
+      if (pct >= 60) return { grade: 'B', points: 4.0 };
+      if (pct >= 50) return { grade: 'C', points: 3.0 };
+      if (pct >= 40) return { grade: 'D', points: 2.0 };
+      return { grade: 'E', points: 1.0 };
     }
-    if (flavor === 'UNI') {
-      if (percentage >= 70) return { grade: 'A', points: 5.0, remark: 'Excellent' };
-      if (percentage >= 60) return { grade: 'B', points: 4.0, remark: 'Very Good' };
-      if (percentage >= 50) return { grade: 'C', points: 3.0, remark: 'Good' };
-      if (percentage >= 40) return { grade: 'D', points: 2.0, remark: 'Fair' };
-      return                     { grade: 'E', points: 1.0, remark: 'Poor' };
+    if (cat === 'COLLEGE_TVET') {
+      if (pct >= 80) return { grade: 'DISTINCTION', points: 5 };
+      if (pct >= 65) return { grade: 'CREDIT', points: 4 };
+      if (pct >= 50) return { grade: 'MERIT', points: 3 };
+      if (pct >= 40) return { grade: 'PASS', points: 2 };
+      return { grade: 'FAIL', points: 1 };
     }
-    if (flavor === 'CBC') {
-      if (percentage >= 80) return { grade: 'EE', points: 4, remark: 'Exceeding Expectations' };
-      if (percentage >= 65) return { grade: 'ME', points: 3, remark: 'Meeting Expectations' };
-      if (percentage >= 50) return { grade: 'AE', points: 2, remark: 'Approaching Expectations' };
-      if (percentage >= 30) return { grade: 'BE', points: 1, remark: 'Below Expectations' };
-      return                     { grade: 'NI', points: 0, remark: 'Needs Improvement' };
+    if (cat === 'ECDE_PRIMARY_JSS') {
+      if (pct >= 80) return { grade: 'EE', points: 4 };
+      if (pct >= 65) return { grade: 'ME', points: 3 };
+      if (pct >= 50) return { grade: 'AE', points: 2 };
+      if (pct >= 30) return { grade: 'BE', points: 1 };
+      return { grade: 'NI', points: 0 };
     }
-    if (percentage >= 80) return { grade: 'A',  points: 12, remark: 'Excellent' };
-    if (percentage >= 75) return { grade: 'A-', points: 11, remark: 'Very Good' };
-    if (percentage >= 70) return { grade: 'B+', points: 10, remark: 'Good' };
-    if (percentage >= 65) return { grade: 'B',  points: 9,  remark: 'Above Average' };
-    if (percentage >= 60) return { grade: 'B-', points: 8,  remark: 'Average' };
-    if (percentage >= 55) return { grade: 'C+', points: 7,  remark: 'Below Average' };
-    if (percentage >= 50) return { grade: 'C',  points: 6,  remark: 'Fair' };
-    if (percentage >= 45) return { grade: 'C-', points: 5,  remark: 'Below Expectations' };
-    if (percentage >= 40) return { grade: 'D+', points: 4,  remark: 'Needs Improvement' };
-    if (percentage >= 35) return { grade: 'D',  points: 3,  remark: 'Poor' };
-    if (percentage >= 30) return { grade: 'D-', points: 2,  remark: 'Very Poor' };
-    return                     { grade: 'E',  points: 1,  remark: 'Needs Intervention' };
+    // 8-4-4
+    if (pct >= 80) return { grade: 'A',  points: 12 };
+    if (pct >= 75) return { grade: 'A-', points: 11 };
+    if (pct >= 70) return { grade: 'B+', points: 10 };
+    if (pct >= 65) return { grade: 'B',  points: 9 };
+    if (pct >= 60) return { grade: 'B-', points: 8 };
+    if (pct >= 55) return { grade: 'C+', points: 7 };
+    if (pct >= 50) return { grade: 'C',  points: 6 };
+    if (pct >= 45) return { grade: 'C-', points: 5 };
+    if (pct >= 40) return { grade: 'D+', points: 4 };
+    if (pct >= 35) return { grade: 'D',  points: 3 };
+    if (pct >= 30) return { grade: 'D-', points: 2 };
+    return { grade: 'E', points: 1 };
   };
 
   const getGradeColor = (grade) => {
-    if (!grade) return 'bg-gray-100 text-gray-500';
-    if (['DISTINCTION','EE','A','A-'].includes(grade)) return 'bg-emerald-100 text-emerald-800';
-    if (['CREDIT','ME','B+','B','B-'].includes(grade))  return 'bg-blue-100 text-blue-800';
-    if (['MERIT','AE','C+','C','C-'].includes(grade))   return 'bg-amber-100 text-amber-800';
-    if (['PASS','BE','D+','D','D-'].includes(grade))    return 'bg-orange-100 text-orange-800';
-    if (['FAIL','NI','E'].includes(grade))              return 'bg-red-100 text-red-800';
-    return 'bg-gray-100 text-gray-800';
+    if (!grade) return 'text-gray-400';
+    if (['DISTINCTION','EE','A','A-'].includes(grade)) return 'text-emerald-700 font-semibold';
+    if (['CREDIT','ME','B+','B','B-'].includes(grade))  return 'text-blue-700 font-semibold';
+    if (['MERIT','AE','C+','C','C-'].includes(grade))   return 'text-amber-700 font-semibold';
+    if (['PASS','BE','D+','D','D-'].includes(grade))    return 'text-orange-700 font-semibold';
+    if (['FAIL','NI','E'].includes(grade))              return 'text-red-700 font-semibold';
+    return 'text-gray-700 font-semibold';
   };
 
-  const displayGrade = (grade, marks) => {
-    if (marks === '' || marks === null || marks === undefined) return '—';
-    if (!grade) return '—';
-    return grade;
-  };
-
-  const calculateMeanGrade = (rows, levelHint = null) => {
+  const calculateMeanGrade = (rows) => {
     const valid = (rows || []).filter(r =>
       r.marks !== '' && r.marks !== null && r.marks !== undefined && !isNaN(parseFloat(r.marks))
     );
     if (valid.length === 0) return 'N/A';
     const avgPoints = valid.reduce((s, r) => s + (r.points || 0), 0) / valid.length;
+    const cat = schoolCategory;
 
-    if (currentSchool?.gradingConfig?.scale?.length > 0) {
-      const sorted = [...currentSchool.gradingConfig.scale].sort((a, b) => (b.points || 0) - (a.points || 0));
-      for (const b of sorted) if (avgPoints >= (b.points || 0)) return b.code || b.grade;
-      return sorted[sorted.length - 1]?.code || 'N/A';
-    }
-
-    const flavor = resolveGradingFlavor(schoolCategory, levelHint);
-    if (flavor === 'TVET') {
-      if (avgPoints >= 4.5) return 'DISTINCTION';
-      if (avgPoints >= 3.5) return 'CREDIT';
-      if (avgPoints >= 2.5) return 'MERIT';
-      if (avgPoints >= 1.5) return 'PASS';
-      return 'FAIL';
-    }
-    if (flavor === 'UNI') {
+    if (cat === 'UNIVERSITY') {
       if (avgPoints >= 4.5) return 'A';
       if (avgPoints >= 3.5) return 'B';
       if (avgPoints >= 2.5) return 'C';
       if (avgPoints >= 1.5) return 'D';
       return 'E';
     }
-    if (flavor === 'CBC') {
+    if (cat === 'COLLEGE_TVET') {
+      if (avgPoints >= 4.5) return 'DISTINCTION';
+      if (avgPoints >= 3.5) return 'CREDIT';
+      if (avgPoints >= 2.5) return 'MERIT';
+      if (avgPoints >= 1.5) return 'PASS';
+      return 'FAIL';
+    }
+    if (cat === 'ECDE_PRIMARY_JSS') {
       if (avgPoints >= 3.5) return 'EE';
       if (avgPoints >= 2.5) return 'ME';
       if (avgPoints >= 1.5) return 'AE';
@@ -12268,43 +12244,19 @@ const ResultsModule = ({
 
   const getItemName = (result, exam) => {
     if (isTVET || isUniversity) {
-      if (result?.unitId) {
-        const u = units?.find(x => x.id === result.unitId);
-        if (u?.name) return u.name;
-      }
-      if (exam?.unitId) {
-        const u = units?.find(x => x.id === exam.unitId);
+      const uid = result?.unitId || exam?.unitId;
+      if (uid) {
+        const u = units?.find(x => x.id === uid);
         if (u?.name) return u.name;
       }
     } else {
-      if (result?.subjectId) {
-        const s = subjects?.find(x => x.id === result.subjectId);
-        if (s?.name) return s.name;
-      }
-      if (exam?.subjectId) {
-        const s = subjects?.find(x => x.id === exam.subjectId);
+      const sid = result?.subjectId || exam?.subjectId;
+      if (sid) {
+        const s = subjects?.find(x => x.id === sid);
         if (s?.name) return s.name;
       }
     }
     return exam?.name || 'Unknown';
-  };
-
-  const getLevelHint = (exam, student, explicitClass = null) => {
-    if (explicitClass) {
-      const cls = classes?.find(c => c.id === explicitClass);
-      if (cls?.name) return cls.name;
-    }
-    if (student?.classId) {
-      const cls = classes?.find(c => c.id === student.classId);
-      if (cls?.name) return cls.name;
-    }
-    if (exam?.classId) {
-      const cls = classes?.find(c => c.id === exam.classId);
-      if (cls?.name) return cls.name;
-    }
-    if (exam?.class?.name) return exam.class.name;
-    if (exam?.Class?.name) return exam.Class.name;
-    return null;
   };
 
   // ============================================================
@@ -12322,23 +12274,20 @@ const ResultsModule = ({
       const enhancedResults = studentResults.map(result => {
         const exam = exams?.find(e => e.id === result.examId);
         const hasMarks = result.marks !== null && result.marks !== undefined && result.marks !== '';
-        const levelHint = getLevelHint(exam, studentInfo);
         const gradeInfo = hasMarks
           ? calculateGrade(result.marks, exam?.maxMarks || result.maxMarks || 100,
-                           exam?.schoolCategory || schoolCategory, levelHint)
+                           exam?.schoolCategory || schoolCategory)
           : { grade: '', points: 0 };
         return {
           ...result,
           grade: gradeInfo.grade,
           points: gradeInfo.points,
-          displayGrade: gradeInfo.grade,
           itemName: getItemName(result, exam),
           examName: result.examName || result.exam?.name || exam?.name || 'Unknown',
           examDate: result.examDate || result.exam?.date || exam?.date,
           examType: exam?.type || result.examType || '',
           examTerm: exam?.term || result.term || '',
-          academicYear: exam?.academicYear || result.academicYear || '',
-          levelHint
+          academicYear: exam?.academicYear || result.academicYear || ''
         };
       });
 
@@ -12361,45 +12310,22 @@ const ResultsModule = ({
     const totalPoints = valid.reduce((s, r) => s + (r.points || 0), 0);
     const totalMarks  = valid.reduce((s, r) => s + (parseFloat(r.marks) || 0), 0);
     const average = valid.length > 0 ? (totalMarks / valid.length).toFixed(2) : 0;
-    const levelHint = enhancedResults[0]?.levelHint || null;
     return {
       total: valid.length,
-      totalRecords: enhancedResults.length,
       average,
       totalPoints,
-      meanGrade: calculateMeanGrade(enhancedResults, levelHint)
+      meanGrade: calculateMeanGrade(enhancedResults)
     };
   };
 
   // ============================================================
-  // KNEC streams
-  // ============================================================
-  const KnecStreams = {
-    STEM: ['mathematics','maths','math','physics','chemistry','biology','general science','science','computer','computer studies','technical drawing','metalwork','woodwork','electricity','electronics'],
-    LANGUAGES: ['english','kiswahili','literature','french','german','arabic','chinese','foreign language','language'],
-    SOCIAL: ['history','geography','cre','ire','social studies','citizenship','civics','government'],
-    ARTS: ['art','fine art','music','drama','creative arts','theatre'],
-    BUSINESS: ['business','business studies','commerce','accounts','accounting','economics'],
-    APPLIED: ['agriculture','home science','home science & technology','clothing','foods','nutrition']
-  };
-  const classifySubjectStream = (name) => {
-    if (!name) return null;
-    const s = String(name).toLowerCase();
-    for (const [stream, keys] of Object.entries(KnecStreams)) {
-      if (keys.some(k => s.includes(k))) return stream;
-    }
-    return null;
-  };
-
-  // ============================================================
-  // DETAILED REPORT BUILDER (single student, term-scoped)
+  // DETAILED REPORT
   // ============================================================
   const buildDetailedReport = (studentResults) => {
     const filtered = studentResults.filter(r => {
       if (reportTermFilter && r.examTerm !== reportTermFilter) return false;
       if (reportYearFilter && r.academicYear !== reportYearFilter) return false;
       if (!reportTermFilter && reportExamTypeFilter && r.examType !== reportExamTypeFilter) return false;
-      if (reportSessionFilter && r.examName !== reportSessionFilter) return false;
       return true;
     });
 
@@ -12407,7 +12333,6 @@ const ResultsModule = ({
 
     filtered.forEach(r => {
       let key, termLabel, yearLabel;
-
       if (reportTermFilter) {
         key = reportTermFilter;
         termLabel = reportTermFilter;
@@ -12421,8 +12346,7 @@ const ResultsModule = ({
       if (!termGroups.has(key)) {
         termGroups.set(key, {
           key, term: termLabel, year: yearLabel,
-          subjects: new Map(),
-          examTypeColumns: new Set()
+          subjects: new Map(), examTypeColumns: new Set()
         });
       }
       const g = termGroups.get(key);
@@ -12430,11 +12354,7 @@ const ResultsModule = ({
 
       if (!g.subjects.has(subjKey)) {
         g.subjects.set(subjKey, {
-          subjectName: subjKey,
-          stream: classifySubjectStream(subjKey),
-          cells: {},
-          sumMarks: 0,
-          count: 0
+          subjectName: subjKey, cells: {}, sumMarks: 0, count: 0
         });
       }
       const subj = g.subjects.get(subjKey);
@@ -12444,12 +12364,7 @@ const ResultsModule = ({
       const m = parseFloat(r.marks);
       if (!isNaN(m)) {
         subj.cells[typeKey] = {
-          marks: m,
-          grade: r.grade,
-          points: r.points,
-          examId: r.examId,
-          examDate: r.examDate,
-          examName: r.examName
+          marks: m, grade: r.grade, points: r.points, examId: r.examId
         };
         subj.sumMarks += m;
         subj.count += 1;
@@ -12461,26 +12376,7 @@ const ResultsModule = ({
       const subjectList = [];
       for (const subj of g.subjects.values()) {
         const avg = subj.count > 0 ? subj.sumMarks / subj.count : 0;
-        const orderedTypes = ['OPENER','MIDTERM','ENDTERM','MOCK','PRE_MOCK','FINAL','CAT'];
-        const cellsArr = Object.entries(subj.cells)
-          .map(([type, cell]) => ({ type, ...cell }))
-          .filter(c => !isNaN(c.marks))
-          .sort((a, b) => {
-            const da = a.examDate ? new Date(a.examDate).getTime() : 0;
-            const db = b.examDate ? new Date(b.examDate).getTime() : 0;
-            if (da && db && da !== db) return da - db;
-            return orderedTypes.indexOf(a.type) - orderedTypes.indexOf(b.type);
-          });
-
-        let trend = 'flat';
-        if (cellsArr.length >= 2) {
-          const last = cellsArr[cellsArr.length - 1].marks;
-          const prev = cellsArr[cellsArr.length - 2].marks;
-          if (last > prev) trend = 'up';
-          else if (last < prev) trend = 'down';
-        }
-
-        subjectList.push({ ...subj, avg, trend, cellsArr });
+        subjectList.push({ ...subj, avg });
       }
 
       const validAvgs = subjectList.filter(s => s.count > 0).map(s => s.avg);
@@ -12490,14 +12386,11 @@ const ResultsModule = ({
 
       termCards.push({
         ...g,
-        examTypeColumns: Array.from(g.examTypeColumns).sort((a, b) => {
-          const ordered = ['OPENER','MIDTERM','ENDTERM','MOCK','PRE_MOCK','FINAL','CAT'];
-          return ordered.indexOf(a) - ordered.indexOf(b);
-        }),
+        examTypeColumns: Array.from(g.examTypeColumns),
         subjects: subjectList.sort((a, b) => a.subjectName.localeCompare(b.subjectName)),
         termAverage,
         termGrade: calculateMeanGrade(
-          subjectList.flatMap(s => s.cellsArr.map(c => ({ marks: c.marks, points: c.points })))
+          subjectList.flatMap(s => Object.values(s.cells).map(c => ({ marks: c.marks, points: c.points })))
         )
       });
     }
@@ -12512,25 +12405,7 @@ const ResultsModule = ({
     const allAvgs = termCards.flatMap(tc => tc.subjects.map(s => s.avg)).filter(v => v > 0);
     const overallAverage = allAvgs.length > 0 ? allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length : 0;
 
-    const streamTotals = {};
-    termCards.forEach(card => {
-      card.subjects.forEach(s => {
-        if (!s.stream) return;
-        if (!streamTotals[s.stream]) streamTotals[s.stream] = { sum: 0, count: 0 };
-        streamTotals[s.stream].sum += s.avg * s.count;
-        streamTotals[s.stream].count += s.count;
-      });
-    });
-
-    const streamAverages = Object.entries(streamTotals).map(([stream, t]) => ({
-      stream,
-      avg: t.count > 0 ? t.sum / t.count : 0,
-      count: t.count
-    })).sort((a, b) => b.avg - a.avg);
-
-    const topStreams = streamAverages.slice(0, 2).map(s => s.stream);
-
-    return { termCards, overallAverage, streamAverages, topStreams };
+    return { termCards, overallAverage };
   };
 
   const loadDetailedReport = async () => {
@@ -12544,11 +12419,8 @@ const ResultsModule = ({
       const enriched = rawResults.map(r => {
         const exam = exams?.find(e => e.id === r.examId);
         const hasMarks = r.marks !== null && r.marks !== undefined && r.marks !== '';
-        const student = students.find(s => s.id === reportStudentId);
-        const levelHint = getLevelHint(exam, student);
         const gradeInfo = hasMarks
-          ? calculateGrade(r.marks, exam?.maxMarks || 100,
-                           exam?.schoolCategory || schoolCategory, levelHint)
+          ? calculateGrade(r.marks, exam?.maxMarks || 100, exam?.schoolCategory || schoolCategory)
           : { grade: '', points: 0 };
         return {
           ...r,
@@ -12559,14 +12431,13 @@ const ResultsModule = ({
           examDate: exam?.date || r.examDate,
           examType: exam?.type || '',
           examTerm: exam?.term || '',
-          academicYear: exam?.academicYear || '',
-          levelHint
+          academicYear: exam?.academicYear || ''
         };
       });
 
       const student = students.find(s => s.id === reportStudentId);
       const built = buildDetailedReport(enriched);
-      setReportData({ student, ...built, allEnriched: enriched });
+      setReportData({ student, ...built });
     } catch (err) {
       console.error('Failed to load report:', err);
       setApiError('Failed to load detailed report');
@@ -12576,99 +12447,7 @@ const ResultsModule = ({
   };
 
   // ============================================================
-  // CLASS MATRIX BUILDER (single exam)
-  // ============================================================
-  const buildClassMatrix = async () => {
-    if (!matrixClassId) { alert('Please select a class'); return; }
-    if (!matrixExamId)  { alert('Please select an exam'); return; }
-
-    setLoadingMatrix(true);
-    setMatrixData(null);
-    try {
-      const exam = exams.find(e => e.id === matrixExamId);
-      if (!exam) { alert('Exam not found'); return; }
-
-      let examResults = [];
-      try {
-        const r = await api.get(`/results/exam/${matrixExamId}`);
-        examResults = r.data.results || [];
-      } catch (_) {}
-
-      let studentList = [];
-      try {
-        const s = await api.get('/students', { params: { classId: matrixClassId } });
-        studentList = s.data.students || [];
-      } catch (_) {}
-
-      if (studentList.length === 0) { alert('No students found'); return; }
-
-      const levelHint = getLevelHint(exam, null, matrixClassId);
-
-      const rows = studentList.map(st => {
-        const result = examResults.find(r => r.studentId === st.id);
-        const hasMarks = result?.marks !== undefined && result?.marks !== null && result?.marks !== '';
-        const marks = hasMarks ? parseFloat(result.marks) : null;
-        const gradeInfo = hasMarks
-          ? calculateGrade(marks, exam.maxMarks || 100,
-                           exam.schoolCategory || schoolCategory, levelHint)
-          : { grade: '', points: 0 };
-        return {
-          studentId: st.id,
-          admissionNumber: st.admissionNumber,
-          studentName: `${st.firstName} ${st.lastName}`,
-          marks: hasMarks ? marks : '',
-          grade: gradeInfo.grade,
-          points: gradeInfo.points,
-          isAbsent: result?.isAbsent || false,
-          position: null
-        };
-      });
-
-      const scored = rows
-        .filter(r => typeof r.marks === 'number' && !r.isAbsent)
-        .sort((a, b) => b.marks - a.marks);
-      let rank = 1, prev = null;
-      scored.forEach((r, i) => {
-        if (prev !== null && r.marks < prev) rank = i + 1;
-        prev = r.marks;
-        r.position = rank;
-      });
-
-      const validMarks = rows.filter(r => typeof r.marks === 'number' && !r.isAbsent).map(r => r.marks);
-      const average = validMarks.length ? validMarks.reduce((a, b) => a + b, 0) / validMarks.length : 0;
-      const highest = validMarks.length ? Math.max(...validMarks) : 0;
-      const lowest  = validMarks.length ? Math.min(...validMarks) : 0;
-      const passThreshold = (exam.maxMarks || 100) * 0.5;
-      const passCount = validMarks.filter(m => m >= passThreshold).length;
-      const passRate  = validMarks.length ? (passCount / validMarks.length) * 100 : 0;
-
-      setMatrixData({
-        exam,
-        itemName: getItemName({}, exam),
-        rows,
-        average,
-        highest,
-        lowest,
-        passRate,
-        passCount,
-        totalScored: validMarks.length,
-        className: classes.find(c => c.id === matrixClassId)?.name || 'Class'
-      });
-    } catch (err) {
-      console.error('Matrix build error:', err);
-      alert('Failed to build class matrix: ' + (err.response?.data?.message || err.message));
-    } finally {
-      setLoadingMatrix(false);
-    }
-  };
-
-  // ============================================================
-  // ✅ TERMLY CLASS MATRIX BUILDER
-  //
-  // Rows: students in selected class
-  // Cols: all subjects
-  // Cells: student's average for that subject across all exams in
-  //        the selected term (or matching exam type / session)
+  // TERMLY CLASS MATRIX
   // ============================================================
   const buildTermMatrix = async () => {
     if (!termMatrixClassId) { alert('Please select a class'); return; }
@@ -12677,11 +12456,9 @@ const ResultsModule = ({
     setLoadingTermMatrix(true);
     setTermMatrixData(null);
     try {
-      // 1. Class subjects
       const classSubjects = (subjects || []).filter(s => s.classId === termMatrixClassId);
       if (classSubjects.length === 0) { alert('No subjects for this class'); return; }
 
-      // 2. Class students
       let studentList = (students || []).filter(s => s.classId === termMatrixClassId);
       if (studentList.length === 0) {
         try {
@@ -12691,7 +12468,6 @@ const ResultsModule = ({
       }
       if (studentList.length === 0) { alert('No students in this class'); return; }
 
-      // 3. Exams in this class + term (+ optional exam type + session name)
       const termExams = (exams || []).filter(e => {
         if (e.classId !== termMatrixClassId) return false;
         if (String(e.term || '').toLowerCase() !== String(termMatrixTerm).toLowerCase()) return false;
@@ -12704,19 +12480,16 @@ const ResultsModule = ({
         return;
       }
 
-      // 4. Fetch all results across those exams
       const allResults = [];
       for (const exam of termExams) {
         try {
           const r = await api.get(`/results/exam/${exam.id}`);
-          const rows = r.data.results || [];
-          rows.forEach(row => allResults.push({ ...row, __exam: exam }));
+          (r.data.results || []).forEach(row => allResults.push({ ...row, __exam: exam }));
         } catch (_) {}
       }
 
       const classObj = classes.find(c => c.id === termMatrixClassId);
 
-      // 5. Group results by studentId → subjectId
       const byStudent = new Map();
       allResults.forEach(r => {
         if (!byStudent.has(r.studentId)) byStudent.set(r.studentId, new Map());
@@ -12725,33 +12498,22 @@ const ResultsModule = ({
         if (!subjKey) return;
         if (!subjMap.has(subjKey)) subjMap.set(subjKey, []);
         subjMap.get(subjKey).push({
-          marks: parseFloat(r.marks),
-          grade: r.grade,
-          points: r.points,
-          examType: r.__exam?.type,
-          examName: r.__exam?.name,
-          isAbsent: r.isAbsent
+          marks: parseFloat(r.marks), grade: r.grade, points: r.points, isAbsent: r.isAbsent
         });
       });
 
-      // 6. Build rows
       const rows = studentList.map(st => {
         const subjMap = byStudent.get(st.id) || new Map();
         const cells = classSubjects.map(subj => {
           const entries = (subjMap.get(subj.id) || []).filter(e => !isNaN(e.marks));
           if (entries.length === 0) {
-            return { subjectId: subj.id, subjectName: subj.name, marks: null, grade: '', points: 0, breakdown: [] };
+            return { subjectId: subj.id, subjectName: subj.name, marks: null, grade: '', points: 0 };
           }
           const avg = entries.reduce((s, e) => s + e.marks, 0) / entries.length;
-          const levelHint = classObj?.name;
-          const gi = calculateGrade(avg, 100, schoolCategory, levelHint);
+          const gi = calculateGrade(avg, 100, schoolCategory);
           return {
-            subjectId: subj.id,
-            subjectName: subj.name,
-            marks: Number(avg.toFixed(1)),
-            grade: gi.grade,
-            points: gi.points,
-            breakdown: entries
+            subjectId: subj.id, subjectName: subj.name,
+            marks: Number(avg.toFixed(1)), grade: gi.grade, points: gi.points
           };
         });
 
@@ -12760,8 +12522,7 @@ const ResultsModule = ({
         const totalPoints = validCells.reduce((s, c) => s + (c.points || 0), 0);
         const average = validCells.length > 0 ? totalMarks / validCells.length : 0;
         const meanGrade = calculateMeanGrade(
-          cells.map(c => ({ marks: c.marks, points: c.points })),
-          classObj?.name
+          cells.map(c => ({ marks: c.marks, points: c.points }))
         );
 
         return {
@@ -12769,15 +12530,11 @@ const ResultsModule = ({
           admissionNumber: st.admissionNumber,
           studentName: `${st.firstName} ${st.lastName}`,
           cells,
-          totalMarks,
-          totalPoints,
-          average,
-          meanGrade,
+          totalMarks, totalPoints, average, meanGrade,
           scoredSubjects: validCells.length
         };
       });
 
-      // 7. Positions
       const ranked = [...rows]
         .filter(r => r.scoredSubjects > 0)
         .sort((a, b) => b.average - a.average);
@@ -12788,7 +12545,6 @@ const ResultsModule = ({
         r.position = rank;
       });
 
-      // 8. Class summary
       const validRows = rows.filter(r => r.scoredSubjects > 0);
       const classAverage = validRows.length > 0
         ? validRows.reduce((s, r) => s + r.average, 0) / validRows.length
@@ -12804,9 +12560,7 @@ const ResultsModule = ({
         sessionName: termMatrixSession || '',
         subjects: classSubjects.map(s => ({ id: s.id, name: s.name })),
         rows: rows.sort((a, b) => a.studentName.localeCompare(b.studentName)),
-        classAverage,
-        passRate,
-        passCount,
+        classAverage, passRate, passCount,
         totalScored: validRows.length
       });
     } catch (err) {
@@ -12818,9 +12572,9 @@ const ResultsModule = ({
   };
 
   // ============================================================
-  // STUDENT/PARENT LOADERS
+  // STUDENT / PARENT LOADERS
   // ============================================================
-  React.useEffect(() => {
+  useEffect(() => {
     if (!isStudent) return;
     if (hasLoadedStudentData.current) return;
     const run = async () => {
@@ -12837,25 +12591,13 @@ const ResultsModule = ({
           return;
         }
       }
-      if (propAdmissionNumber && propAdmissionNumber !== 'null') {
-        setAdmissionNumber(propAdmissionNumber);
-        const { enhancedResults, studentInfo } = await loadResultsWithAdmission(propAdmissionNumber);
-        if (enhancedResults.length > 0 || studentInfo) {
-          setMyResults(enhancedResults);
-          setMyStudentRecord(studentInfo);
-          setMyResultsSummary(buildSummary(enhancedResults));
-          setShowAdmissionModal(false);
-          hasLoadedStudentData.current = true;
-          return;
-        }
-      }
       setShowAdmissionModal(true);
     };
     run();
     return () => { if (!isStudent) hasLoadedStudentData.current = false; };
   }, [isStudent]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (isParent && !hasLoadedChildrenData.current) {
       loadMyChildren();
       hasLoadedChildrenData.current = true;
@@ -12874,7 +12616,6 @@ const ResultsModule = ({
         await loadChildResults(list[0].admissionNumber);
       }
     } catch (err) {
-      console.error('Error loading children:', err);
       setApiError('Failed to load your children');
     } finally {
       setLoadingChildren(false);
@@ -12909,7 +12650,7 @@ const ResultsModule = ({
       setShowAdmissionModal(false);
       hasLoadedStudentData.current = true;
     } catch (err) {
-      setApiError('Student not found. Please check your admission number.');
+      setApiError('Student not found.');
     } finally {
       setLoadingMyData(false);
     }
@@ -12918,7 +12659,7 @@ const ResultsModule = ({
   // ============================================================
   // FILTERS
   // ============================================================
-  React.useEffect(() => {
+  useEffect(() => {
     if (isUniversity && selectedCourse && units) {
       setFilteredUnits(units.filter(u => u.courseId === selectedCourse));
     } else if (isTVET && selectedProgram && units) {
@@ -12929,7 +12670,7 @@ const ResultsModule = ({
     }
   }, [selectedCourse, selectedProgram, selectedModule, units, isUniversity, isTVET]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (isRegularSchool && selectedClass && subjects) {
       setFilteredSubjects(subjects.filter(s => s.classId === selectedClass));
     } else {
@@ -12986,21 +12727,11 @@ const ResultsModule = ({
     { value: 'PRE_MOCK', label: 'Pre-Mock' },
     { value: 'FINAL', label: 'Final Exam' }
   ];
-  const examTypeLabel = (t) => examTypeOptions.find(o => o.value === t)?.label || t;
-
-  const termOptions = [
-    { value: '', label: 'All Terms' },
-    { value: 'Term 1', label: 'Term 1' },
-    { value: 'Term 2', label: 'Term 2' },
-    { value: 'Term 3', label: 'Term 3' },
-    { value: 'Semester 1', label: 'Semester 1' },
-    { value: 'Semester 2', label: 'Semester 2' }
-  ];
 
   // ============================================================
   // PRINT — stylesheet injected once
   // ============================================================
-  React.useEffect(() => {
+  useEffect(() => {
     const id = '__results_print_style__';
     if (document.getElementById(id)) return;
     const style = document.createElement('style');
@@ -13078,9 +12809,8 @@ const ResultsModule = ({
         const existing = existingResults.find(r => r.studentId === student.id);
         const hasMarks = existing?.marks !== undefined && existing?.marks !== null && existing?.marks !== '';
         const marks = hasMarks ? existing.marks : '';
-        const levelHint = getLevelHint(exam, student);
         const gradeInfo = hasMarks
-          ? calculateGrade(marks, exam.maxMarks || 100, exam.schoolCategory || schoolCategory, levelHint)
+          ? calculateGrade(marks, exam.maxMarks || 100, exam.schoolCategory || schoolCategory)
           : { grade: '', points: 0 };
         return {
           studentId: student.id,
@@ -13123,8 +12853,7 @@ const ResultsModule = ({
         const student = students.find(s => s.id === entry.studentId);
         if (!student) { errors++; continue; }
 
-        const levelHint = getLevelHint(exam, student);
-        const { grade, points } = calculateGrade(marks, exam.maxMarks || 100, exam.schoolCategory || schoolCategory, levelHint);
+        const { grade, points } = calculateGrade(marks, exam.maxMarks || 100, exam.schoolCategory || schoolCategory);
         const data = {
           studentId: student.id, examId: selectedExam,
           marks, grade, points,
@@ -13227,19 +12956,19 @@ const ResultsModule = ({
           <div id="student-results-print" className="space-y-6">
             {/* School header (centered) */}
             <div className="text-center border-b-2 border-slate-300 pb-4">
-              {currentSchool?.contact?.logo && (
-                <img src={currentSchool.contact.logo} alt="" className="w-16 h-16 object-cover rounded-full mx-auto mb-2 border" />
+              {schoolLogo && (
+                <img src={schoolLogo} alt="" className="w-16 h-16 object-cover rounded-full mx-auto mb-2 border" />
               )}
               <h1 className="text-2xl font-black text-slate-800 uppercase tracking-wider">
-                {currentSchool?.name || 'School'}
+                {schoolName || 'School'}
               </h1>
-              {currentSchool?.motto && (
-                <p className="text-xs italic text-slate-500 mt-1">"{currentSchool.motto}"</p>
+              {schoolMotto && (
+                <p className="text-xs italic text-slate-500 mt-1">"{schoolMotto}"</p>
               )}
               <p className="text-xs uppercase tracking-widest text-slate-500 mt-2">Student Results Report</p>
             </div>
 
-            <div className={`rounded-xl p-6 text-white ${isTVET ? 'bg-gradient-to-r from-purple-600 to-pink-600' : 'bg-gradient-to-r from-indigo-600 to-blue-600'}`}>
+            <div className="rounded-xl p-6 text-white bg-gradient-to-r from-indigo-600 to-blue-600">
               <div className="flex items-center gap-4">
                 <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center text-2xl font-bold text-indigo-600">
                   {myStudentRecord.firstName?.[0]}{myStudentRecord.lastName?.[0]}
@@ -13299,7 +13028,7 @@ const ResultsModule = ({
                         <td className="px-4 py-3 text-center font-bold">{r.marks ?? '—'}</td>
                         <td className="px-4 py-3 text-center">
                           <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradeColor(r.grade)}`}>
-                            {displayGrade(r.grade, r.marks)}
+                            {r.grade || '—'}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-center">{r.points}</td>
@@ -13375,16 +13104,19 @@ const ResultsModule = ({
             {selectedChild && myStudentRecord && (
               <div id="parent-results-print" className="space-y-6">
                 <div className="text-center border-b-2 border-slate-300 pb-4">
-                  {currentSchool?.contact?.logo && (
-                    <img src={currentSchool.contact.logo} alt="" className="w-16 h-16 object-cover rounded-full mx-auto mb-2 border" />
+                  {schoolLogo && (
+                    <img src={schoolLogo} alt="" className="w-16 h-16 object-cover rounded-full mx-auto mb-2 border" />
                   )}
                   <h1 className="text-2xl font-black text-slate-800 uppercase tracking-wider">
-                    {currentSchool?.name || 'School'}
+                    {schoolName || 'School'}
                   </h1>
+                  {schoolMotto && (
+                    <p className="text-xs italic text-slate-500 mt-1">"{schoolMotto}"</p>
+                  )}
                   <p className="text-xs uppercase tracking-widest text-slate-500 mt-2">Student Results Report</p>
                 </div>
 
-                <div className={`rounded-xl p-6 text-white ${isTVET ? 'bg-gradient-to-r from-purple-500 to-pink-600' : 'bg-gradient-to-r from-indigo-500 to-purple-600'}`}>
+                <div className="rounded-xl p-6 text-white bg-gradient-to-r from-indigo-500 to-purple-600">
                   <h3 className="text-2xl font-bold">{myStudentRecord.firstName} {myStudentRecord.lastName}</h3>
                   <p className="text-purple-100">Admission: {myStudentRecord.admissionNumber}</p>
                 </div>
@@ -13410,7 +13142,7 @@ const ResultsModule = ({
                             <td className="px-4 py-3 text-center font-bold">{r.marks ?? '—'}</td>
                             <td className="px-4 py-3 text-center">
                               <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradeColor(r.grade)}`}>
-                                {displayGrade(r.grade, r.marks)}
+                                {r.grade || '—'}
                               </span>
                             </td>
                           </tr>
@@ -13444,7 +13176,7 @@ const ResultsModule = ({
   // ============================================================
   return (
     <div className="space-y-6">
-      {(loading || loadingReport || loadingMatrix || loadingTermMatrix) && (
+      {(loading || loadingReport || loadingTermMatrix) && (
         <div className="h-1 bg-indigo-600 animate-pulse fixed top-0 left-0 w-full z-50 no-print" />
       )}
       {apiError && (
@@ -13477,22 +13209,12 @@ const ResultsModule = ({
               }`}>
               <i className="fas fa-user-graduate mr-1.5"></i>Student Report
             </button>
-            {canViewClassMatrix && (
-              <button onClick={() => setViewMode('class-matrix')}
-                className={`px-4 py-1.5 rounded-md font-medium transition-colors ${
-                  viewMode === 'class-matrix' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-                }`}>
-                <i className="fas fa-table mr-1.5"></i>Class Matrix
-              </button>
-            )}
-            {canViewClassMatrix && (
-              <button onClick={() => setViewMode('term-matrix')}
-                className={`px-4 py-1.5 rounded-md font-medium transition-colors ${
-                  viewMode === 'term-matrix' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-                }`}>
-                <i className="fas fa-th mr-1.5"></i>Termly Matrix
-              </button>
-            )}
+            <button onClick={() => setViewMode('term-matrix')}
+              className={`px-4 py-1.5 rounded-md font-medium transition-colors ${
+                viewMode === 'term-matrix' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}>
+              <i className="fas fa-th mr-1.5"></i>Termly Matrix
+            </button>
           </div>
         )}
       </div>
@@ -13552,13 +13274,13 @@ const ResultsModule = ({
             <div id="detailed-report-print" className="space-y-6">
               {/* School header */}
               <div className="text-center border-b-2 border-slate-300 pb-4">
-                {currentSchool?.contact?.logo && (
-                  <img src={currentSchool.contact.logo} alt="" className="w-16 h-16 object-cover rounded-full mx-auto mb-2 border" />
+                {schoolLogo && (
+                  <img src={schoolLogo} alt="" className="w-16 h-16 object-cover rounded-full mx-auto mb-2 border" />
                 )}
                 <h1 className="text-2xl font-black text-slate-800 uppercase tracking-wider">
-                  {currentSchool?.name || 'School'}
+                  {schoolName || 'School'}
                 </h1>
-                {currentSchool?.motto && <p className="text-xs italic text-slate-500 mt-1">"{currentSchool.motto}"</p>}
+                {schoolMotto && <p className="text-xs italic text-slate-500 mt-1">"{schoolMotto}"</p>}
                 <p className="text-xs uppercase tracking-widest text-slate-500 mt-2">Student Report Card</p>
               </div>
 
@@ -13597,7 +13319,7 @@ const ResultsModule = ({
                           {card.term}{card.year && ` • ${card.year}`}
                         </h4>
                         <p className="text-xs text-slate-500">
-                          {card.subjects.length} subject{card.subjects.length !== 1 ? 's' : ''} • {card.examTypeColumns.length} exam type{card.examTypeColumns.length !== 1 ? 's' : ''}
+                          {card.subjects.length} subject{card.subjects.length !== 1 ? 's' : ''}
                         </p>
                       </div>
                       <div className="flex items-center gap-4">
@@ -13624,19 +13346,13 @@ const ResultsModule = ({
                             </th>
                           ))}
                           <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase border-r">Average</th>
-                          <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Trend</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
                         {card.subjects.map((s, si) => (
                           <tr key={si} className={si % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
                             <td className="px-4 py-3 font-medium text-slate-800 border-r">
-                              <div>{s.subjectName}</div>
-                              {s.stream && (
-                                <span className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 uppercase tracking-wide">
-                                  {s.stream}
-                                </span>
-                              )}
+                              {s.subjectName}
                             </td>
                             {card.examTypeColumns.map(type => {
                               const cell = s.cells[type];
@@ -13656,62 +13372,18 @@ const ResultsModule = ({
                               );
                             })}
                             <td className="px-4 py-3 text-center font-bold text-indigo-700 border-r">{s.avg.toFixed(1)}</td>
-                            <td className="px-4 py-3 text-center">
-                              {s.trend === 'up' && <span className="text-green-600 font-bold">▲</span>}
-                              {s.trend === 'down' && <span className="text-red-600 font-bold">▼</span>}
-                              {s.trend === 'flat' && <span className="text-gray-300 text-xs">●</span>}
-                            </td>
                           </tr>
                         ))}
                       </tbody>
                       <tfoot>
                         <tr className="bg-slate-100 border-t-2 border-slate-300">
                           <td colSpan={card.examTypeColumns.length + 1} className="px-4 py-3 font-bold text-right text-slate-700 border-r">Term Average</td>
-                          <td className="px-4 py-3 text-center font-bold text-indigo-700 border-r">{card.termAverage.toFixed(1)}</td>
-                          <td className="px-4 py-3 text-center text-xs text-slate-500">
-                            Grade: <strong className="text-slate-700">{card.termGrade}</strong>
-                          </td>
+                          <td className="px-4 py-3 text-center font-bold text-indigo-700">{card.termAverage.toFixed(1)}</td>
                         </tr>
                       </tfoot>
                     </table>
                   </div>
                 ))
-              )}
-
-              {/* KNEC aptitude */}
-              {reportData.streamAverages.length > 0 && (
-                <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-                  <div className="bg-gradient-to-r from-violet-600 to-indigo-600 px-6 py-4">
-                    <h4 className="text-white font-bold text-lg flex items-center gap-2">
-                      <i className="fas fa-brain"></i>KNEC Aptitude Analysis
-                    </h4>
-                  </div>
-                  <div className="p-6">
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                      {reportData.streamAverages.map(s => {
-                        const isTop = reportData.topStreams.includes(s.stream);
-                        return (
-                          <div key={s.stream}
-                            className={`p-4 rounded-xl border-2 text-center ${
-                              isTop ? 'border-violet-400 bg-violet-50 shadow-md' : 'border-slate-200 bg-slate-50'
-                            }`}>
-                            <p className="text-xs font-bold text-slate-600 uppercase tracking-wider">{s.stream}</p>
-                            <p className={`text-2xl font-black mt-2 ${isTop ? 'text-violet-700' : 'text-slate-700'}`}>{s.avg.toFixed(0)}%</p>
-                            <p className="text-[10px] text-slate-500 mt-1">{s.count} subject{s.count !== 1 ? 's' : ''}</p>
-                            {isTop && <p className="text-[10px] text-violet-600 font-semibold mt-2">⭐ Likely to thrive</p>}
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {reportData.topStreams.length > 0 && (
-                      <div className="mt-5 p-4 bg-violet-50 rounded-xl border border-violet-200">
-                        <p className="text-sm text-violet-900">
-                          <strong>💡 Recommendation:</strong> This student shows strongest potential in <strong className="text-violet-700">{reportData.topStreams.join(' and ')}</strong>. Consider encouraging further development in these areas.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
               )}
 
               {/* Print-only signature block */}
@@ -13737,121 +13409,9 @@ const ResultsModule = ({
       )}
 
       {/* ============================================================ */}
-      {/* CLASS MATRIX VIEW (single exam)                              */}
+      {/* TERMLY CLASS MATRIX VIEW                                     */}
       {/* ============================================================ */}
-      {viewMode === 'class-matrix' && canViewClassMatrix && (
-        <>
-          <div className="bg-white p-6 rounded-xl shadow-sm border no-print">
-            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <i className="fas fa-table text-indigo-600"></i>Class Results Matrix
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <SearchableSelect label="Class" value={matrixClassId}
-                onChange={(e) => { setMatrixClassId(e.target.value); setMatrixExamId(''); }}
-                options={getClassOptions()} placeholder="Select class..." />
-              <SearchableSelect label="Exam" value={matrixExamId}
-                onChange={(e) => setMatrixExamId(e.target.value)}
-                options={(exams || []).filter(e => !matrixClassId || e.classId === matrixClassId).map(e => ({
-                  value: e.id, label: e.name,
-                  subLabel: `${e.type || ''} • ${e.date ? new Date(e.date).toLocaleDateString() : ''}`
-                }))}
-                placeholder="Select exam..."
-                disabled={!matrixClassId} />
-              <div className="flex items-end">
-                <button onClick={buildClassMatrix} disabled={!matrixClassId || !matrixExamId || loadingMatrix}
-                  className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium flex items-center justify-center gap-2">
-                  {loadingMatrix ? <><i className="fas fa-spinner fa-spin"></i>Building...</> : <><i className="fas fa-sync-alt"></i>Build Matrix</>}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {matrixData && (
-            <div id="class-matrix-print" className="bg-white rounded-xl shadow-sm border overflow-hidden">
-              <div className="bg-slate-800 text-white px-6 py-5">
-                <div className="text-center mb-4">
-                  <h1 className="text-2xl font-black uppercase tracking-wider">{currentSchool?.name || 'School'}</h1>
-                  {currentSchool?.motto && <p className="text-slate-300 text-sm italic mt-1">"{currentSchool.motto}"</p>}
-                  <p className="text-slate-400 text-xs mt-2">Class Results Matrix</p>
-                </div>
-                <div className="flex justify-between items-start flex-wrap gap-3 border-t border-slate-700 pt-4">
-                  <div>
-                    <p className="text-xs uppercase tracking-widest text-slate-300">Class</p>
-                    <h3 className="text-2xl font-bold">{matrixData.className}</h3>
-                    <p className="text-slate-300 text-sm mt-1">{matrixData.exam.name} • {matrixData.itemName}</p>
-                  </div>
-                  <div className="flex gap-3">
-                    <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
-                      <p className="text-[10px] uppercase text-slate-300">Avg</p>
-                      <p className="text-xl font-bold">{matrixData.average.toFixed(1)}%</p>
-                    </div>
-                    <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
-                      <p className="text-[10px] uppercase text-slate-300">Highest</p>
-                      <p className="text-xl font-bold">{matrixData.highest}</p>
-                    </div>
-                    <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
-                      <p className="text-[10px] uppercase text-slate-300">Pass</p>
-                      <p className="text-xl font-bold">{matrixData.passRate.toFixed(0)}%</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <table className="w-full">
-                <thead className="bg-slate-100 border-b-2 border-slate-300">
-                  <tr>
-                    <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r w-12">#</th>
-                    <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Admission</th>
-                    <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Student</th>
-                    <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">{matrixData.itemName}</th>
-                    <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">Grade</th>
-                    <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">Points</th>
-                    <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase">Pos</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {matrixData.rows.map((r, i) => (
-                    <tr key={r.studentId} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
-                      <td className="px-3 py-3 text-center text-slate-500 font-mono text-xs border-r">{i + 1}</td>
-                      <td className="px-3 py-3 font-mono text-xs border-r">{r.admissionNumber}</td>
-                      <td className="px-3 py-3 font-medium border-r">{r.studentName}</td>
-                      <td className="px-3 py-3 text-center font-bold border-r">
-                        {r.isAbsent ? <span className="text-red-500">ABS</span> : (r.marks ?? '—')}
-                      </td>
-                      <td className="px-3 py-3 text-center border-r">
-                        {r.grade ? <span className={`px-2 py-1 rounded-full text-xs font-bold ${getGradeColor(r.grade)}`}>{r.grade}</span> : '—'}
-                      </td>
-                      <td className="px-3 py-3 text-center border-r">{r.points || '—'}</td>
-                      <td className="px-3 py-3 text-center">
-                        {r.position ? (
-                          <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
-                            r.position === 1 ? 'bg-amber-100 text-amber-700' :
-                            r.position === 2 ? 'bg-slate-200 text-slate-700' :
-                            r.position === 3 ? 'bg-orange-100 text-orange-700' :
-                            'bg-slate-100 text-slate-600'
-                          }`}>{r.position}</span>
-                        ) : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              <div className="px-6 py-4 bg-slate-50 border-t flex justify-end no-print">
-                <button onClick={() => handlePrintArea('class-matrix-print')}
-                  className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
-                  <i className="fas fa-print"></i>Print Matrix
-                </button>
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* ============================================================ */}
-      {/* ✅ TERMLY CLASS MATRIX VIEW                                   */}
-      {/* ============================================================ */}
-      {viewMode === 'term-matrix' && canViewClassMatrix && (
+      {viewMode === 'term-matrix' && canViewAllResults && (
         <>
           <div className="bg-white p-6 rounded-xl shadow-sm border no-print">
             <h3 className="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">
@@ -13871,26 +13431,13 @@ const ResultsModule = ({
                 label="Term"
                 value={termMatrixTerm}
                 onChange={(e) => setTermMatrixTerm(e.target.value)}
-                options={[
-                  { value: 'Term 1', label: 'Term 1' },
-                  { value: 'Term 2', label: 'Term 2' },
-                  { value: 'Term 3', label: 'Term 3' }
-                ]}
+                options={termOptions.filter(t => t.value !== '')}
                 placeholder="Select term..." />
               <SearchableSelect
                 label="Exam Type"
                 value={termMatrixExamType}
                 onChange={(e) => setTermMatrixExamType(e.target.value)}
-                options={[
-                  { value: '', label: 'All Types (average)' },
-                  { value: 'OPENER', label: 'Opener' },
-                  { value: 'MIDTERM', label: 'Mid-Term' },
-                  { value: 'ENDTERM', label: 'End Term' },
-                  { value: 'CAT', label: 'CAT' },
-                  { value: 'MOCK', label: 'Mock' },
-                  { value: 'PRE_MOCK', label: 'Pre-Mock' },
-                  { value: 'FINAL', label: 'Final Exam' }
-                ]}
+                options={examTypeOptions}
                 placeholder="All Exam Types" />
               <SearchableSelect
                 label="Exam Name"
@@ -13921,10 +13468,10 @@ const ResultsModule = ({
               <div className="bg-slate-800 text-white px-6 py-5">
                 <div className="text-center mb-4">
                   <h1 className="text-2xl font-black uppercase tracking-wider">
-                    {currentSchool?.name || 'School'}
+                    {schoolName || 'School'}
                   </h1>
-                  {currentSchool?.motto && (
-                    <p className="text-slate-300 text-sm italic mt-1">"{currentSchool.motto}"</p>
+                  {schoolMotto && (
+                    <p className="text-slate-300 text-sm italic mt-1">"{schoolMotto}"</p>
                   )}
                   <p className="text-slate-400 text-xs mt-2">
                     {termMatrixData.term} • {termMatrixData.examType}
@@ -14190,8 +13737,7 @@ const ResultsModule = ({
                             onBlur={(e) => {
                               if (e.target.value !== '') {
                                 const exam = exams.find(x => x.id === selectedExam);
-                                const levelHint = getLevelHint(exam, null, exam?.classId || selectedClass);
-                                const gi = calculateGrade(e.target.value, exam?.maxMarks || 100, exam?.schoolCategory || schoolCategory, levelHint);
+                                const gi = calculateGrade(e.target.value, exam?.maxMarks || 100, exam?.schoolCategory || schoolCategory);
                                 setResultEntries(prev => prev.map(x =>
                                   x.studentId === entry.studentId ? { ...x, grade: gi.grade, points: gi.points } : x
                                 ));
@@ -14202,7 +13748,7 @@ const ResultsModule = ({
                         </td>
                         <td className="px-4 py-3 text-center border-r">
                           <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradeColor(entry.grade)}`}>
-                            {displayGrade(entry.grade, entry.marks)}
+                            {entry.grade || '—'}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-center border-r">{(entry.points || 0).toFixed(1)}</td>
@@ -14295,7 +13841,7 @@ const ResultsModule = ({
                             .replace(/{subject}/g, itemName)
                             .replace(/{marks}/g, student.marks)
                             .replace(/{grade}/g, student.grade)
-                            .replace(/{school_name}/g, currentSchool?.name || 'School');
+                            .replace(/{school_name}/g, schoolName || 'School');
                           if ((messageType === 'SMS' || messageType === 'BOTH') && parent.User?.phone) {
                             await api.post('/messages', { type: 'SMS', content: msg, recipientType: 'PARENT',
                               recipients: [{ type: 'user', id: parent.userId }], sendNow: true, schoolId: currentSchool?.id });
