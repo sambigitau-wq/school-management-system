@@ -22989,24 +22989,28 @@ const TransportModule = ({ vehicles, setVehicles, routes, setRoutes, form, setFo
     serviceDue: '', 
     fuelType: 'Diesel' 
   });
+
+  // ✅ FIX: Keep pickup/dropoff as raw STRINGS while editing.
+  // We split them into arrays only when submitting to the backend.
   const [routeForm, setRouteForm] = useState({
     name: '',
     vehicleId: '',
-    pickupPoints: [],
-    pickupTimes: [],
-    dropoffPoints: [],
+    pickupPoints: '',    // <-- string, one per line
+    pickupTimes: '',     // <-- string, one per line
+    dropoffPoints: '',   // <-- string, one per line
     fee: 0,
     autoAllocate: true
   });
+
   const [loading, setLoading] = useState(false);
   const [vehicleSearch, setVehicleSearch] = useState('');
   const [routeSearch, setRouteSearch] = useState('');
 
-  // Determine user permissions
   const canAddVehicle = ['SCHOOL_ADMIN', 'TRANSPORT_MANAGER'].includes(user?.role);
   const canAddRoute = ['SCHOOL_ADMIN', 'TRANSPORT_MANAGER'].includes(user?.role);
-  const canView = true; // Everyone can view
+  const canView = true;
 
+  // ==================== VEHICLE HANDLERS ====================
   const handleCreateVehicle = async (e) => {
     e.preventDefault();
     if (!canAddVehicle) {
@@ -23018,8 +23022,11 @@ const TransportModule = ({ vehicles, setVehicles, routes, setRoutes, form, setFo
       const res = await api.post('/vehicles', vehicleForm);
       setVehicles([...vehicles, res.data.vehicle]);
       setShowVehicleForm(false);
-      setVehicleForm({ registration: '', type: '', capacity: 0, driver: '', driverPhone: '', insuranceExpiry: '', serviceDue: '', fuelType: 'Diesel' });
-      alert('Vehicle added successfully!');
+      setVehicleForm({
+        registration: '', type: '', capacity: 0, driver: '',
+        driverPhone: '', insuranceExpiry: '', serviceDue: '', fuelType: 'Diesel'
+      });
+      alert('✅ Vehicle added successfully!');
     } catch (err) {
       console.error('Create vehicle error:', err);
       alert(err.response?.data?.message || 'Failed to create vehicle');
@@ -23028,19 +23035,66 @@ const TransportModule = ({ vehicles, setVehicles, routes, setRoutes, form, setFo
     }
   };
 
+  // ==================== ROUTE HANDLERS ====================
   const handleCreateRoute = async (e) => {
     e.preventDefault();
     if (!canAddRoute) {
       alert('You do not have permission to create routes');
       return;
     }
+
+    // ✅ Convert the newline-separated strings into clean arrays
+    const pickupPointsArray = (routeForm.pickupPoints || '')
+      .split('\n')
+      .map(p => p.trim())
+      .filter(p => p.length > 0);
+
+    const pickupTimesArray = (routeForm.pickupTimes || '')
+      .split('\n')
+      .map(t => t.trim())
+      .filter(t => t.length > 0);
+
+    const dropoffPointsArray = (routeForm.dropoffPoints || '')
+      .split('\n')
+      .map(p => p.trim())
+      .filter(p => p.length > 0);
+
+    if (pickupPointsArray.length === 0) {
+      alert('Please enter at least one pickup point.');
+      return;
+    }
+
+    // Optional: warn if times count doesn't match points count
+    if (pickupTimesArray.length > 0 && pickupTimesArray.length !== pickupPointsArray.length) {
+      const proceed = window.confirm(
+        `You have ${pickupPointsArray.length} pickup point(s) but ${pickupTimesArray.length} time(s). ` +
+        `Continue anyway?`
+      );
+      if (!proceed) return;
+    }
+
     setLoading(true);
     try {
-      const res = await api.post('/transport-routes', routeForm);
+      const payload = {
+        name: routeForm.name,
+        vehicleId: routeForm.vehicleId || null,
+        pickupPoints: pickupPointsArray,
+        pickupTimes: pickupTimesArray,
+        dropoffPoints: dropoffPointsArray,
+        fee: parseFloat(routeForm.fee) || 0,
+        autoAllocate: !!routeForm.autoAllocate
+      };
+
+      console.log('📤 POST /transport-routes payload:', payload);
+
+      const res = await api.post('/transport-routes', payload);
       setRoutes([...routes, res.data.route]);
       setShowRouteForm(false);
-      setRouteForm({ name: '', vehicleId: '', pickupPoints: [], pickupTimes: [], dropoffPoints: [], fee: 0, autoAllocate: true });
-      alert('Route created successfully!');
+      setRouteForm({
+        name: '', vehicleId: '', pickupPoints: '', pickupTimes: '',
+        dropoffPoints: '', fee: 0, autoAllocate: true
+      });
+      alert('✅ Route created successfully!');
     } catch (err) {
       console.error('Create route error:', err);
       alert(err.response?.data?.message || 'Failed to create route');
@@ -23049,28 +23103,29 @@ const TransportModule = ({ vehicles, setVehicles, routes, setRoutes, form, setFo
     }
   };
 
-  // Filter vehicles based on search
-  const filteredVehicles = vehicles.filter(v => 
-    v.registration.toLowerCase().includes(vehicleSearch.toLowerCase()) ||
-    v.type?.toLowerCase().includes(vehicleSearch.toLowerCase()) ||
-    v.driver?.toLowerCase().includes(vehicleSearch.toLowerCase()) ||
-    v.status?.toLowerCase().includes(vehicleSearch.toLowerCase())
+  // ==================== FILTERS ====================
+  const filteredVehicles = vehicles.filter(v =>
+    (v.registration || '').toLowerCase().includes(vehicleSearch.toLowerCase()) ||
+    (v.type || '').toLowerCase().includes(vehicleSearch.toLowerCase()) ||
+    (v.driver || '').toLowerCase().includes(vehicleSearch.toLowerCase()) ||
+    (v.status || '').toLowerCase().includes(vehicleSearch.toLowerCase())
   );
 
-  // Filter routes based on search
   const filteredRoutes = routes.filter(r => {
     const vehicle = vehicles.find(v => v.id === r.vehicleId);
-    return r.name.toLowerCase().includes(routeSearch.toLowerCase()) ||
-           vehicle?.registration.toLowerCase().includes(routeSearch.toLowerCase()) ||
-           vehicle?.type?.toLowerCase().includes(routeSearch.toLowerCase());
+    return (
+      (r.name || '').toLowerCase().includes(routeSearch.toLowerCase()) ||
+      (vehicle?.registration || '').toLowerCase().includes(routeSearch.toLowerCase()) ||
+      (vehicle?.type || '').toLowerCase().includes(routeSearch.toLowerCase())
+    );
   });
 
   return (
     <div className="space-y-6">
       {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse"></div>}
-      
+
       <h2 className="text-2xl font-bold">Transport Management</h2>
-      
+
       <div className="flex space-x-2 border-b">
         <button onClick={() => setActiveTab('vehicles')} className={`px-4 py-2 ${activeTab === 'vehicles' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500'}`}>Vehicles</button>
         <button onClick={() => setActiveTab('routes')} className={`px-4 py-2 ${activeTab === 'routes' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500'}`}>Routes</button>
@@ -23079,14 +23134,14 @@ const TransportModule = ({ vehicles, setVehicles, routes, setRoutes, form, setFo
       {activeTab === 'vehicles' && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           {canAddVehicle && (
-            <button 
-              onClick={() => setShowVehicleForm(!showVehicleForm)} 
+            <button
+              onClick={() => setShowVehicleForm(!showVehicleForm)}
               className="mb-4 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
             >
               {showVehicleForm ? 'Cancel' : 'Add Vehicle'}
             </button>
           )}
-          
+
           {showVehicleForm && canAddVehicle && (
             <form onSubmit={handleCreateVehicle} className="grid grid-cols-2 gap-4 mb-6">
               <InputField label="Registration" value={vehicleForm.registration} onChange={(e) => setVehicleForm({...vehicleForm, registration: e.target.value})} required />
@@ -23103,10 +23158,9 @@ const TransportModule = ({ vehicles, setVehicles, routes, setRoutes, form, setFo
               </div>
             </form>
           )}
-          
+
           <h4 className="font-medium mb-2">Vehicles</h4>
-          
-          {/* Vehicle Search */}
+
           <div className="mb-4">
             <input
               type="text"
@@ -23116,7 +23170,7 @@ const TransportModule = ({ vehicles, setVehicles, routes, setRoutes, form, setFo
               onChange={(e) => setVehicleSearch(e.target.value)}
             />
           </div>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-96 overflow-y-auto">
             {filteredVehicles.length === 0 ? (
               <div className="col-span-2 text-center py-8 text-gray-500">
@@ -23143,8 +23197,8 @@ const TransportModule = ({ vehicles, setVehicles, routes, setRoutes, form, setFo
                       )}
                     </div>
                     <span className={`px-2 py-1 rounded-full text-xs ${
-                      v.status === 'ACTIVE' ? 'bg-green-100 text-green-800' : 
-                      v.status === 'MAINTENANCE' ? 'bg-yellow-100 text-yellow-800' : 
+                      v.status === 'ACTIVE' ? 'bg-green-100 text-green-800' :
+                      v.status === 'MAINTENANCE' ? 'bg-yellow-100 text-yellow-800' :
                       'bg-gray-100 text-gray-800'
                     }`}>
                       {v.status || 'Unknown'}
@@ -23160,79 +23214,115 @@ const TransportModule = ({ vehicles, setVehicles, routes, setRoutes, form, setFo
       {activeTab === 'routes' && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
           {canAddRoute && (
-            <button 
-              onClick={() => setShowRouteForm(!showRouteForm)} 
+            <button
+              onClick={() => setShowRouteForm(!showRouteForm)}
               className="mb-4 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
             >
               {showRouteForm ? 'Cancel' : 'Create Route'}
             </button>
           )}
-          
+
           {showRouteForm && canAddRoute && (
             <form onSubmit={handleCreateRoute} className="space-y-4 mb-6">
               <div className="grid grid-cols-2 gap-4">
-                <InputField label="Route Name" value={routeForm.name} onChange={(e) => setRouteForm({...routeForm, name: e.target.value})} required />
-                
-                <SearchableSelect 
-                  label="Vehicle" 
-                  value={routeForm.vehicleId} 
-                  onChange={(e) => setRouteForm({...routeForm, vehicleId: e.target.value})} 
+                <InputField
+                  label="Route Name"
+                  value={routeForm.name}
+                  onChange={(e) => setRouteForm({...routeForm, name: e.target.value})}
+                  required
+                />
+
+                <SearchableSelect
+                  label="Vehicle"
+                  value={routeForm.vehicleId}
+                  onChange={(e) => setRouteForm({...routeForm, vehicleId: e.target.value})}
                   options={[
                     { value: '', label: '-- Select Vehicle --', subLabel: '' },
-                    ...vehicles.map(v => ({ 
-                      value: v.id, 
+                    ...vehicles.map(v => ({
+                      value: v.id,
                       label: `${v.registration} - ${v.type || 'No type'}`,
                       subLabel: `Driver: ${v.driver || 'No driver'} • Status: ${v.status || 'Unknown'}`
                     }))
-                  ]} 
+                  ]}
                   placeholder="Search vehicle by registration or driver..."
                 />
-                
-                <InputField label="Fee (KES)" type="number" value={routeForm.fee} onChange={(e) => setRouteForm({...routeForm, fee: parseFloat(e.target.value)})} required />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium mb-1">Pickup Points (one per line)</label>
-                <textarea 
-                  className="w-full border rounded-lg p-2" 
-                  rows="3"
-                  value={routeForm.pickupPoints.join('\n')}
-                  onChange={(e) => setRouteForm({...routeForm, pickupPoints: e.target.value.split('\n').filter(p => p.trim())})}
-                  placeholder="e.g., Stop 1&#10;Stop 2&#10;Stop 3"
+
+                <InputField
+                  label="Fee (KES)"
+                  type="number"
+                  value={routeForm.fee}
+                  onChange={(e) => setRouteForm({...routeForm, fee: parseFloat(e.target.value)})}
+                  required
                 />
               </div>
-              
+
+              {/* ✅ FIXED: textarea bound to a plain string, splits only on submit */}
               <div>
-                <label className="block text-sm font-medium mb-1">Pickup Times (one per line, same order as points)</label>
-                <textarea 
-                  className="w-full border rounded-lg p-2" 
+                <label className="block text-sm font-medium mb-1">
+                  Pickup Points (one per line)
+                </label>
+                <textarea
+                  className="w-full border rounded-lg p-2 font-mono text-sm"
+                  rows="4"
+                  value={routeForm.pickupPoints}
+                  onChange={(e) => setRouteForm({ ...routeForm, pickupPoints: e.target.value })}
+                  placeholder={"Main Gate\nMarket Square\nHospital Junction\nEstate Entrance"}
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Press <kbd className="px-1 bg-gray-100 rounded">Enter</kbd> after each stop. Each line becomes a separate pickup point.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Pickup Times (one per line, same order as points)
+                </label>
+                <textarea
+                  className="w-full border rounded-lg p-2 font-mono text-sm"
+                  rows="4"
+                  value={routeForm.pickupTimes}
+                  onChange={(e) => setRouteForm({ ...routeForm, pickupTimes: e.target.value })}
+                  placeholder={"07:00\n07:15\n07:30\n07:45"}
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Should match the number of pickup points above.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Drop-off Points (one per line, optional)
+                </label>
+                <textarea
+                  className="w-full border rounded-lg p-2 font-mono text-sm"
                   rows="3"
-                  value={routeForm.pickupTimes.join('\n')}
-                  onChange={(e) => setRouteForm({...routeForm, pickupTimes: e.target.value.split('\n').filter(t => t.trim())})}
-                  placeholder="e.g., 07:00&#10;07:15&#10;07:30"
+                  value={routeForm.dropoffPoints}
+                  onChange={(e) => setRouteForm({ ...routeForm, dropoffPoints: e.target.value })}
+                  placeholder={"School Gate\nEstate Entrance\nMarket Square"}
                 />
               </div>
-              
+
               <div className="flex items-center space-x-2">
-                <input 
-                  type="checkbox" 
-                  checked={routeForm.autoAllocate} 
-                  onChange={(e) => setRouteForm({...routeForm, autoAllocate: e.target.checked})} 
-                  className="rounded" 
+                <input
+                  type="checkbox"
+                  checked={routeForm.autoAllocate}
+                  onChange={(e) => setRouteForm({...routeForm, autoAllocate: e.target.checked})}
+                  className="rounded"
                 />
                 <label>Auto-allocate transport fee to students on this route</label>
               </div>
-              
+
               <div className="flex space-x-2">
-                <button type="submit" className="bg-indigo-600 text-white px-4 py-2 rounded-lg">Create Route</button>
+                <button type="submit" disabled={loading} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                  {loading ? 'Creating...' : 'Create Route'}
+                </button>
                 <button type="button" onClick={() => setShowRouteForm(false)} className="bg-gray-500 text-white px-4 py-2 rounded-lg">Cancel</button>
               </div>
             </form>
           )}
-          
+
           <h4 className="font-medium mb-2">Routes</h4>
-          
-          {/* Route Search */}
+
           <div className="mb-4">
             <input
               type="text"
@@ -23242,7 +23332,7 @@ const TransportModule = ({ vehicles, setVehicles, routes, setRoutes, form, setFo
               onChange={(e) => setRouteSearch(e.target.value)}
             />
           </div>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-96 overflow-y-auto">
             {filteredRoutes.length === 0 ? (
               <div className="col-span-2 text-center py-8 text-gray-500">
@@ -23260,8 +23350,8 @@ const TransportModule = ({ vehicles, setVehicles, routes, setRoutes, form, setFo
                           <p className="text-sm">
                             Vehicle: {vehicle.registration} ({vehicle.type || 'No type'})
                             <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${
-                              vehicle.status === 'ACTIVE' ? 'bg-green-100 text-green-800' : 
-                              vehicle.status === 'MAINTENANCE' ? 'bg-yellow-100 text-yellow-800' : 
+                              vehicle.status === 'ACTIVE' ? 'bg-green-100 text-green-800' :
+                              vehicle.status === 'MAINTENANCE' ? 'bg-yellow-100 text-yellow-800' :
                               'bg-gray-100 text-gray-800'
                             }`}>
                               {vehicle.status || 'Unknown'}
@@ -23270,8 +23360,7 @@ const TransportModule = ({ vehicles, setVehicles, routes, setRoutes, form, setFo
                         )}
                         <p className="text-sm font-medium text-green-600">Fee: KES {r.fee?.toLocaleString() || 0}</p>
                         <p className="text-sm text-gray-600">Pickup points: {r.pickupPoints?.length || 0}</p>
-                        
-                        {/* Show first few pickup points */}
+
                         {r.pickupPoints && r.pickupPoints.length > 0 && (
                           <div className="mt-2">
                             <p className="text-xs font-medium text-gray-500">Stops:</p>
@@ -34784,10 +34873,6 @@ const FeesModule = ({
   };
 
   // ==================== 6a. DISCOUNT RESOLUTION HELPERS ====================
-  // Same approach as ReportsModule — loop over ALL matching discount records
-  // (no .find()), percentages based on the student's bill, and cap at the bill.
-
-  // Get the list of fees a specific student is liable for
   const getApplicableFeesForStudent = (student) => {
     if (!student) return [];
     return (fees || []).filter(f => {
@@ -34797,7 +34882,6 @@ const FeesModule = ({
     });
   };
 
-  // Treat null, undefined, 0, 'false', '0' as inactive; anything else = active
   const isDiscountActive = (d) => {
     if (!d) return false;
     const v = d.isActive;
@@ -34808,8 +34892,6 @@ const FeesModule = ({
     return true;
   };
 
-  // Get ALL active discount records for a student (mirrors ReportsModule's
-  // getStudentDiscounts, but does NOT filter to a single fee unless asked)
   const getStudentDiscounts = (studentId, feeId = null) => {
     if (!Array.isArray(discounts)) return [];
     const sid = String(studentId);
@@ -34817,7 +34899,6 @@ const FeesModule = ({
       if (!isDiscountActive(d)) return false;
       if (String(d.studentId) !== sid) return false;
       if (feeId !== null && feeId !== undefined) {
-        // Scoped to a specific fee: include fee-specific AND student-wide
         if (d.feeId !== null && d.feeId !== undefined) {
           if (String(d.feeId) !== String(feeId)) return false;
         }
@@ -34826,12 +34907,6 @@ const FeesModule = ({
     });
   };
 
-  // ✅ Compute total discount (in KES) for a student's bill.
-  // EXACTLY mirrors ReportsModule's computeDiscountKES:
-  //   - loops over ALL matching discount records
-  //   - percentages are based on the student's gross bill
-  //   - caps at the gross bill
-  //   - handles both 'PERCENT' and 'PERCENTAGE' type strings
   const computeDiscountKES = (studentDiscounts, grossBilled) => {
     if (!Array.isArray(studentDiscounts) || studentDiscounts.length === 0) return 0;
     let total = 0;
@@ -34842,17 +34917,12 @@ const FeesModule = ({
       if (type === 'PERCENTAGE' || type === 'PERCENT') {
         total += (grossBilled * value) / 100;
       } else {
-        // FIXED / AMOUNT / anything else
         total += value;
       }
     });
     return Math.min(total, grossBilled);
   };
 
-  // ✅ Single source of truth: get a student's total resolved discount.
-  // Uses the same precedence as ReportsModule:
-  //   1. per-student discount records (all of them, added together)
-  //   2. fall back to fee-level default discounts if no student records exist
   const getResolvedDiscountForStudent = (student) => {
     if (!student) return 0;
     const applicable = getApplicableFeesForStudent(student);
@@ -34860,15 +34930,12 @@ const FeesModule = ({
       (s, f) => s + (parseFloat(f.amount) || 0), 0
     );
 
-    // Get every active discount record for this student
     const studentDiscounts = getStudentDiscounts(student.id);
 
-    // If the student has explicit discount records, use them
     if (studentDiscounts.length > 0) {
       return computeDiscountKES(studentDiscounts, grossBilled);
     }
 
-    // Otherwise fall back to fee-level defaults
     let feeLevelTotal = 0;
     applicable.forEach(fee => {
       const amount = parseFloat(fee.amount) || 0;
@@ -34882,12 +34949,10 @@ const FeesModule = ({
     return Math.min(feeLevelTotal, grossBilled);
   };
 
-  // Per-fee resolver — kept for the table and for the discount modal preview
   const getResolvedDiscount = (fee, studentId) => {
     if (!fee || !studentId) return 0;
     const feeAmount = parseFloat(fee.amount) || 0;
 
-    // Sum ALL active discount records for this student+fee
     const records = getStudentDiscounts(studentId, fee.id);
     if (records.length > 0) {
       let total = 0;
@@ -34903,7 +34968,6 @@ const FeesModule = ({
       return Math.min(total, feeAmount);
     }
 
-    // Fee-level default
     if (parseFloat(fee.discountPercent) > 0) {
       return feeAmount * (parseFloat(fee.discountPercent) / 100);
     }
@@ -34914,7 +34978,6 @@ const FeesModule = ({
     return 0;
   };
 
-  // Fee-level default only (used in the table's "Default Discount" column)
   const getFeeLevelDiscount = (fee) => {
     if (!fee) return 0;
     const amount = parseFloat(fee.amount) || 0;
@@ -35010,11 +35073,35 @@ const FeesModule = ({
     if (!canManage) { alert('You do not have permission to create fees'); return; }
     setLoading(true); setApiError(''); setAllocationMessage('');
     try {
-      if (isUniversity && !form.courseId) { alert('Please select a course'); setLoading(false); return; }
-      if (isTVET && !form.programId) { alert('Please select a program'); setLoading(false); return; }
-      if (isPrimarySecondary && !form.classId) { alert('Please select a class'); setLoading(false); return; }
+      // ✅ FIXED: Accept any valid scope (class, course, program, OR transport route)
       if (!form.name) { alert('Please enter a fee name'); setLoading(false); return; }
       if (!form.amount || parseFloat(form.amount) <= 0) { alert('Please enter a valid amount'); setLoading(false); return; }
+
+      const hasScope =
+        form.classId ||
+        form.courseId ||
+        form.programId ||
+        form.transportRouteId;
+
+      if (!hasScope) {
+        alert('Please set a scope: select a Class, Course, Program, or Transport Route.');
+        setLoading(false);
+        return;
+      }
+
+      // Category-specific "soft" checks — only warn if the scope was missed
+      if (isUniversity && !form.courseId && !form.transportRouteId) {
+        alert('University fees must be scoped to a Course (or Transport Route).');
+        setLoading(false); return;
+      }
+      if (isTVET && !form.programId && !form.transportRouteId) {
+        alert('TVET fees must be scoped to a Program (or Transport Route).');
+        setLoading(false); return;
+      }
+      if (isPrimarySecondary && !form.classId && !form.transportRouteId) {
+        alert('School fees must be scoped to a Class (or Transport Route).');
+        setLoading(false); return;
+      }
 
       const submitData = { ...form, allocationType };
       const uuidFields = ['classId', 'courseId', 'programId', 'facultyId', 'departmentId', 'transportRouteId'];
@@ -35097,7 +35184,6 @@ const FeesModule = ({
     setShowDiscountModal(true);
   };
 
-  // Auto-fill existing discount when student/fee changes inside modal
   useEffect(() => {
     if (!showDiscountModal) return;
     if (!discountStudent) return;
@@ -35205,11 +35291,6 @@ const FeesModule = ({
   };
 
   // ==================== 8. COMPUTED TOTALS (mirrors ReportsModule) ====================
-  // - Gross Billed = sum of every student's applicable fees
-  // - Discounts    = sum of every student's resolved discount (all records summed)
-  // - Net Billed   = Gross − Discounts (clamped at 0)
-  // - Collected    = sum of all payments
-  // - Outstanding  = sum of per-student (net − paid), clamped at 0 per student
   const totals = useMemo(() => {
     let grossBilled = 0;
     let totalDiscounts = 0;
@@ -35222,7 +35303,6 @@ const FeesModule = ({
       );
       grossBilled += studentGross;
 
-      // Single discount for this student's whole bill
       const studentDiscount = getResolvedDiscountForStudent(student);
       totalDiscounts += studentDiscount;
 
@@ -35245,7 +35325,6 @@ const FeesModule = ({
       (sum, p) => sum + (parseFloat(p.amount) || 0), 0
     );
 
-    // Per-student outstanding — each row clamped at 0, sum not clamped
     const outstandingPerStudent = (students || []).map(student => {
       const applicable = getApplicableFeesForStudent(student);
       const studentGross = applicable.reduce(
@@ -35499,11 +35578,60 @@ const FeesModule = ({
                   </div>
                 </div>
               </div>
+
+              {/* ✅ NEW: Live allocation preview */}
+              {allocationType === 'AUTO' && (form.classId || form.courseId || form.programId || form.transportRouteId) && (
+                <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <h4 className="font-medium text-blue-800 mb-2">
+                    <i className="fas fa-users mr-2"></i>
+                    This fee will be auto-allocated to:
+                  </h4>
+                  <p className="text-sm text-blue-700">
+                    {form.transportRouteId ? (
+                      <>
+                        Students assigned to the <strong>{routes?.find(r => r.id === form.transportRouteId)?.name || 'selected'}</strong> transport route
+                      </>
+                    ) : isUniversity && form.courseId ? (
+                      <>
+                        Students in the <strong>{courses?.find(c => c.id === form.courseId)?.name || 'selected'}</strong> course
+                        {form.year ? ` (Year ${form.year})` : ''}
+                      </>
+                    ) : isTVET && form.programId ? (
+                      <>
+                        Students in the <strong>{programs?.find(p => p.id === form.programId)?.name || 'selected'}</strong> program
+                        {form.term ? ` (Module ${form.term})` : ''}
+                      </>
+                    ) : isPrimarySecondary && form.classId ? (
+                      <>
+                        Students in <strong>{classes?.find(c => c.id === form.classId)?.name || 'selected'}</strong>
+                      </>
+                    ) : (
+                      <span className="text-orange-600">⚠️ No scope set — nothing will be allocated</span>
+                    )}
+                  </p>
+                  {(() => {
+                    const matchingCount = (students || []).filter(s => {
+                      if (form.transportRouteId) return String(s.transportRouteId) === String(form.transportRouteId);
+                      if (isUniversity && form.courseId) return String(s.courseId) === String(form.courseId);
+                      if (isTVET && form.programId) return String(s.programId) === String(form.programId);
+                      if (isPrimarySecondary && form.classId) return String(s.classId) === String(form.classId);
+                      return false;
+                    }).length;
+                    return (
+                      <p className="text-xs text-blue-600 mt-1">
+                        <i className="fas fa-info-circle mr-1"></i>
+                        Matches <strong>{matchingCount}</strong> student{matchingCount !== 1 ? 's' : ''} in your school
+                      </p>
+                    );
+                  })()}
+                </div>
+              )}
+
               <div className="mt-3 p-3 bg-gray-50 rounded-lg">
                 <p className="text-xs text-gray-500">
                   <i className="fas fa-info-circle mr-1"></i>
                   {allocationType === 'AUTO'
-                    ? "🔹 Auto: Fee will appear on ALL students' fee statements immediately after creation."
+                    ? "🔹 Auto: Fee will appear on ALL eligible students' fee statements immediately after creation."
                     : '🔸 Manual: Fee will NOT appear until manually allocated.'}
                 </p>
               </div>
@@ -35707,7 +35835,7 @@ const FeesModule = ({
         </div>
       )}
 
-      {/* ==================== SUMMARY CARDS (6 cards, no minus sign) ==================== */}
+      {/* ==================== SUMMARY CARDS ==================== */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <div className="bg-white p-4 rounded-xl shadow-sm">
           <p className="text-sm text-gray-500">Fee Definitions</p>
