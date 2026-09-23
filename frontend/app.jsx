@@ -55404,7 +55404,6 @@ const FeeCollectionModule = ({
       .filter(p => p.studentId === studentId && p.feeId === fee.id)
       .reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
   };
-
   // ==================== LOAD STUDENT FEE INFO ====================
   const loadStudentFeeInfo = async (studentId) => {
     setLoading(true);
@@ -55414,15 +55413,27 @@ const FeeCollectionModule = ({
       if (!student) { setApiError('Student not found'); return; }
       setStudentDetails(student);
 
-      let feeParams = {};
-      if (isTVET && student.programId) feeParams.programId = student.programId;
-      else if (isUniversity && student.courseId) feeParams.courseId = student.courseId;
-      else if (student.classId) feeParams.classId = student.classId;
-
-      const feesRes = await api.get('/fees', { params: feeParams });
-      const studentFees = feesRes.data.fees || [];
+      // ✅ Use the fee-statement endpoint — it uses FeeAllocation as the
+      //    source of truth, so route fees, class fees, and course fees
+      //    are all included automatically.
+      let studentFees = [];
+      try {
+        const stmtRes = await api.get(`/students/${student.id}/fee-statement`);
+        const stmt = stmtRes.data?.statement;
+        studentFees = stmt?.fees || [];
+      } catch (err) {
+        // Fallback: if the statement endpoint fails, fall back to class-based fetch
+        console.warn('Fee statement endpoint failed, falling back to /fees:', err.message);
+        let feeParams = {};
+        if (isTVET && student.programId) feeParams.programId = student.programId;
+        else if (isUniversity && student.courseId) feeParams.courseId = student.courseId;
+        else if (student.classId) feeParams.classId = student.classId;
+        const feesRes = await api.get('/fees', { params: feeParams });
+        studentFees = feesRes.data.fees || [];
+      }
       setFeeStructure(studentFees);
 
+      // Load payments
       const payRes = await api.get('/payments', { params: { studentId: student.id } });
       const studentPayments = payRes.data.payments || [];
       const totalPaidAmount = studentPayments.reduce(
@@ -55430,6 +55441,7 @@ const FeeCollectionModule = ({
       );
       setTotalPaid(totalPaidAmount);
 
+      // Load discounts
       let list = [];
       try {
         const dRes = await api.get('/discounts', { params: { studentId: student.id } });
@@ -55440,6 +55452,7 @@ const FeeCollectionModule = ({
       }
       setStudentDiscounts(list);
 
+      // Compute totals
       const grossFees = studentFees.reduce((s, f) => s + (parseFloat(f.amount) || 0), 0);
 
       let totalDiscountAmount = 0;
@@ -55449,8 +55462,13 @@ const FeeCollectionModule = ({
       });
       setTotalDiscounts(totalDiscountAmount);
 
+      // ✅ Include B/F from payments in the outstanding calc
+      const totalBF = studentPayments.reduce(
+        (s, p) => s + (parseFloat(p.balanceBroughtForward) || 0), 0
+      );
+
       const netFees = Math.max(0, grossFees - totalDiscountAmount);
-      setOutstandingBalance(Math.max(0, netFees - totalPaidAmount));
+      setOutstandingBalance(Math.max(0, netFees + totalBF - totalPaidAmount));
 
       const sorted = [...studentPayments].sort((a, b) => new Date(b.date) - new Date(a.date));
       setRecentPayments(sorted.slice(0, 5));
@@ -55461,7 +55479,6 @@ const FeeCollectionModule = ({
       setLoading(false);
     }
   };
-
   const handleStudentSelect = (studentId) => {
     setSelectedStudent(studentId);
     if (studentId) {
