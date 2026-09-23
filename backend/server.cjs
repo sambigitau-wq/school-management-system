@@ -8820,8 +8820,11 @@ app.get('/api/fees/by-admission/:admissionNumber/statement', authenticate, async
       feeWhere.classId = student.classId;
     }
 
-    const fees = await Fee.findAll({ where: feeWhere });
-
+    const allocations = await FeeAllocation.findAll({
+  where: { studentId: student.id, schoolId: req.user.schoolId, isActive: true },
+  include: [{ model: Fee, required: true }]
+});
+const fees = allocations.map(a => a.Fee).filter(Boolean);
     const payments = await Payment.findAll({
       where: { studentId: student.id },
       include: [{ model: Fee }],
@@ -9492,7 +9495,11 @@ app.get('/api/exam-cards/by-admission/:admissionNumber', authenticate, async (re
       }
     }
 
-    const fees = await Fee.findAll({ where: feeWhere });
+    const allocations = await FeeAllocation.findAll({
+  where: { studentId: student.id, schoolId: req.user.schoolId, isActive: true },
+  include: [{ model: Fee, required: true }]
+});
+const fees = allocations.map(a => a.Fee).filter(Boolean);
     const totalFees = fees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
 
     // ==================== GET PAYMENTS ====================
@@ -9762,8 +9769,11 @@ app.get('/api/exam-cards/zero-balance-students', authenticate, async (req, res) 
     else if (classId) {
       feeWhere.classId = classId;
     }
-    
-    const fees = await Fee.findAll({ where: feeWhere });
+    const allocations = await FeeAllocation.findAll({
+  where: { studentId: student.id, schoolId: req.user.schoolId, isActive: true },
+  include: [{ model: Fee, required: true }]
+});
+const fees = allocations.map(a => a.Fee).filter(Boolean);
     const totalFeesAmount = fees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
 
     // ==================== GET UNITS/SUBJECTS FOR EACH STUDENT ====================
@@ -9912,8 +9922,11 @@ app.get('/api/fee-statement/by-admission/:admissionNumber', authenticate, async 
     else {
       if (student.classId) feeWhere.classId = student.classId;
     }
-    
-    const fees = await Fee.findAll({ where: feeWhere });
+    const allocations = await FeeAllocation.findAll({
+  where: { studentId: student.id, schoolId: req.user.schoolId, isActive: true },
+  include: [{ model: Fee, required: true }]
+});
+const fees = allocations.map(a => a.Fee).filter(Boolean);
     
     // Get payments
     let paymentWhere = { studentId: student.id };
@@ -10349,8 +10362,11 @@ app.get('/api/parents/me/children/:admissionNumber/fees', authenticate, async (r
     } else {
       feeWhere.classId = student.classId;
     }
-
-    const fees = await Fee.findAll({ where: feeWhere });
+const allocations = await FeeAllocation.findAll({
+  where: { studentId: student.id, schoolId: req.user.schoolId, isActive: true },
+  include: [{ model: Fee, required: true }]
+});
+const fees = allocations.map(a => a.Fee).filter(Boolean);
     const payments = await Payment.findAll({
       where: { studentId: student.id, isOtherIncome: false },
       order: [['date', 'DESC']],
@@ -10413,8 +10429,11 @@ app.get('/api/parents/me/children/:admissionNumber/exam-card', authenticate, asy
     } else {
       feeWhere.classId = student.classId;
     }
-
-    const fees = await Fee.findAll({ where: feeWhere });
+const allocations = await FeeAllocation.findAll({
+  where: { studentId: student.id, schoolId: req.user.schoolId, isActive: true },
+  include: [{ model: Fee, required: true }]
+});
+const fees = allocations.map(a => a.Fee).filter(Boolean);
     const totalFees = fees.reduce((s, f) => s + parseFloat(f.amount || 0), 0);
     const totalPaid = (await Payment.sum('amount', { where: { studentId: student.id } })) || 0;
     const balance = totalFees - totalPaid;
@@ -14379,9 +14398,11 @@ app.get('/api/discounts/student/:studentId/statement', authenticate, async (req,
       feeWhere.programId = student.programId;
     } else if (student.classId) {
       feeWhere.classId = student.classId;
-    }
-
-    const fees = await Fee.findAll({ where: feeWhere });
+    }const allocations = await FeeAllocation.findAll({
+  where: { studentId: student.id, schoolId: req.user.schoolId, isActive: true },
+  include: [{ model: Fee, required: true }]
+});
+const fees = allocations.map(a => a.Fee).filter(Boolean);
 
     // Get this student's discounts and payments
     const discounts = await Discount.findAll({
@@ -14696,6 +14717,86 @@ app.get('/api/students/:studentId/fee-allocations', authenticate, async (req, re
   }
 });
 
+
+
+// ==================== GET STUDENT FEE STATEMENT ====================
+// Uses FeeAllocation as the source of truth so route fees, class fees,
+// and course fees are all included.
+app.get('/api/students/:studentId/fee-statement', authenticate, async (req, res) => {
+  try {
+    const studentId = req.params.studentId;
+
+    // Access check
+    let hasAccess = false;
+    if (req.user.role === 'SUPER_ADMIN') hasAccess = true;
+    else if (['SCHOOL_ADMIN', 'PRINCIPAL', 'ACCOUNTANT'].includes(req.user.role)) {
+      const s = await Student.findOne({ where: { id: studentId, schoolId: req.user.schoolId } });
+      hasAccess = !!s;
+    } else if (req.user.role === 'STUDENT') {
+      const s = await Student.findOne({ where: { userId: req.user.id } });
+      hasAccess = s && s.id === studentId;
+    } else if (req.user.role === 'PARENT') {
+      const p = await Parent.findOne({ where: { userId: req.user.id, studentId } });
+      hasAccess = !!p;
+    }
+    if (!hasAccess) return res.status(403).json({ success: false, message: 'Access denied' });
+
+    const student = await Student.findOne({ where: { id: studentId, schoolId: req.user.schoolId } });
+    if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
+
+    // ✅ Read fees from FeeAllocation (source of truth)
+    const allocations = await FeeAllocation.findAll({
+      where: { studentId, schoolId: req.user.schoolId, isActive: true },
+      include: [{ model: Fee, required: true }]
+    });
+    const fees = allocations.map(a => a.Fee).filter(Boolean);
+
+    // Payments
+    const payments = await Payment.findAll({
+      where: { studentId, schoolId: req.user.schoolId, isOtherIncome: false },
+      include: [{ model: Fee, required: false }],
+      order: [['createdAt', 'DESC']]
+    });
+
+    // Totals
+    const totalFees = fees.reduce((s, f) => s + parseFloat(f.amount || 0), 0);
+    const totalPaid = payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+    const totalDiscounts = payments.reduce((s, p) => s + parseFloat(p.discountAmount || 0), 0);
+    const totalBF = payments.reduce((s, p) => s + parseFloat(p.balanceBroughtForward || 0), 0);
+    const balance = (totalFees + totalBF) - totalDiscounts - totalPaid;
+
+    res.json({
+      success: true,
+      statement: {
+        student: {
+          id: student.id,
+          firstName: student.firstName,
+          lastName: student.lastName,
+          admissionNumber: student.admissionNumber,
+          classId: student.classId,
+          courseId: student.courseId,
+          programId: student.programId,
+          transportRouteId: student.transportRouteId
+        },
+        fees,
+        allocations,
+        payments,
+        summary: {
+          totalFees,
+          totalPaid,
+          totalDiscounts,
+          totalBalanceBroughtForward: totalBF,
+          balance,
+          displayBalance: Math.max(0, balance)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('❌ Get fee statement error:', error);
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+});
+// ==================== END GET STUDENT FEE STATEMENT ====================
 // ==================== GET FEE ALLOCATIONS FOR A FEE ====================
 app.get('/api/fees/:feeId/allocations', authenticate, async (req, res) => {
   try {
