@@ -16745,6 +16745,7 @@ app.delete('/api/vehicles/:id', authenticate, requireSchoolAdmin, async (req, re
 });
 
 // ==================== TRANSPORT ROUTES ====================
+// ==================== TRANSPORT ROUTES ====================
 
 app.post('/api/transport-routes', authenticate, requireSchoolAdmin, async (req, res) => {
   try {
@@ -16753,21 +16754,140 @@ app.post('/api/transport-routes', authenticate, requireSchoolAdmin, async (req, 
       dropoffPoints, fee, students, autoAllocate
     } = req.body;
 
+    // ────────────────────────────────────────────────────────────
+    //  1. Create the route (unchanged behaviour)
+    // ────────────────────────────────────────────────────────────
     const route = await TransportRoute.create({
       name,
-      vehicleId,
-      pickupPoints,
-      pickupTimes,
-      dropoffPoints,
-      fee,
-      students,
-      autoAllocate,
+      vehicleId: vehicleId || null,
+      pickupPoints: pickupPoints || [],
+      pickupTimes: pickupTimes || [],
+      dropoffPoints: dropoffPoints || [],
+      fee: parseFloat(fee) || 0,
+      students: students || [],
+      autoAllocate: !!autoAllocate,
       schoolId: req.user.schoolId
     });
 
     await createAuditLog(req, 'CREATE', 'TRANSPORT_ROUTE', route.id, null, route);
 
-    res.status(201).json({ success: true, route });
+    // ────────────────────────────────────────────────────────────
+    //  2. If autoAllocate is ON and fee > 0, also create the
+    //     corresponding FEE record and allocate it to students
+    //     on this route.
+    // ────────────────────────────────────────────────────────────
+    let createdFee = null;
+    let allocatedCount = 0;
+    let allocationError = null;
+
+    if (autoAllocate && parseFloat(fee) > 0) {
+      try {
+        const school = await School.findByPk(req.user.schoolId, {
+          attributes: ['id', 'category']
+        });
+
+        // Determine term identifier based on school category
+        let term = null;
+        let semester = null;
+        let module = null;
+
+        if (school.category === 'UNIVERSITY') {
+          semester = 1; // default semester
+        } else if (school.category === 'COLLEGE_TVET') {
+          module = 1;   // default module
+        } else {
+          term = 'Term 1'; // default term
+        }
+
+        // ────────────────────────────────────────────────
+        //  Create the fee, scoped to THIS transport route
+        // ────────────────────────────────────────────────
+        createdFee = await Fee.create({
+          name: `${name} Transport Fee`,
+          amount: parseFloat(fee),
+          category: 'TRANSPORT',
+          allocationType: 'AUTO',
+          transportRouteId: route.id,   // ✅ KEY — scope by route
+          classId: null,
+          courseId: null,
+          programId: null,
+          facultyId: null,
+          departmentId: null,
+          term,
+          semester,
+          module,
+          academicYear: new Date().getFullYear().toString(),
+          dueDate: null,
+          schoolId: req.user.schoolId,
+          isRecurring: false,
+          discountAmount: 0,
+          discountPercent: 0
+        });
+
+        console.log(`✅ Auto-created transport fee ${createdFee.id} for route "${name}"`);
+
+        await createAuditLog(req, 'CREATE', 'FEE', createdFee.id, null, {
+          autoCreatedFromRoute: route.id,
+          routeName: name
+        });
+
+        // ────────────────────────────────────────────────
+        //  Auto-allocate the fee to students on this route
+        // ────────────────────────────────────────────────
+        const eligibleStudents = await Student.findAll({
+          where: {
+            schoolId: req.user.schoolId,
+            transportRouteId: route.id,
+            isActive: true
+          }
+        });
+
+        console.log(`📋 Matched ${eligibleStudents.length} students on route "${name}"`);
+
+        for (const student of eligibleStudents) {
+          const existing = await FeeAllocation.findOne({
+            where: {
+              studentId: student.id,
+              feeId: createdFee.id,
+              isActive: true
+            }
+          });
+
+          if (!existing) {
+            await FeeAllocation.create({
+              studentId: student.id,
+              feeId: createdFee.id,
+              amount: parseFloat(fee),
+              allocatedBy: req.user.id,
+              schoolId: req.user.schoolId,
+              allocationType: 'AUTO',
+              notes: `Auto-allocated via transport route "${name}"`
+            });
+            allocatedCount++;
+          }
+        }
+
+        console.log(`✅ Allocated fee to ${allocatedCount} students`);
+      } catch (feeErr) {
+        console.error('⚠️ Route created but fee auto-creation failed:', feeErr.message);
+        allocationError = feeErr.message;
+        // Don't fail the route creation — just log and report
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────
+    //  3. Return the route (+ fee info when applicable)
+    // ────────────────────────────────────────────────────────────
+    res.status(201).json({
+      success: true,
+      route,
+      fee: createdFee,
+      allocatedCount,
+      allocationError,
+      message: createdFee
+        ? `Route created and transport fee auto-created & allocated to ${allocatedCount} student${allocatedCount === 1 ? '' : 's'}.`
+        : 'Route created successfully'
+    });
   } catch (error) {
     console.error('Create transport route error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -16787,6 +16907,8 @@ app.get('/api/transport-routes', authenticate, async (req, res) => {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
+
+
 
 // ==================== HOSTEL ROUTES ====================
 
