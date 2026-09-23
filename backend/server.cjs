@@ -7680,7 +7680,6 @@ app.get('/api/students/next-admission-number', authenticate, async (req, res) =>
 });
 
 
-
 // ==================== CREATE STUDENT (transaction-safe + hardened) ====================
 app.post('/api/students', authenticate, async (req, res) => {
   const transaction = await sequelize.transaction();
@@ -8102,6 +8101,57 @@ app.post('/api/students', authenticate, async (req, res) => {
       console.warn('Audit log failed (non-critical):', logErr.message);
     }
 
+    // ================================================================
+    //  ✅ Auto-allocate transport route fees (non-blocking)
+    //  Runs AFTER commit so a failure here doesn't roll back the student.
+    // ================================================================
+    if (student.transportRouteId) {
+      try {
+        const routeFees = await Fee.findAll({
+          where: {
+            transportRouteId: student.transportRouteId,
+            schoolId,
+            allocationType: 'AUTO'
+          }
+        });
+
+        let allocatedCount = 0;
+        for (const fee of routeFees) {
+          const exists = await FeeAllocation.findOne({
+            where: {
+              studentId: student.id,
+              feeId: fee.id,
+              isActive: true
+            }
+          });
+
+          if (!exists) {
+            await FeeAllocation.create({
+              studentId: student.id,
+              feeId: fee.id,
+              amount: fee.amount,
+              allocatedBy: req.user.id,
+              schoolId,
+              allocationType: 'AUTO',
+              notes: 'Auto-allocated on student registration'
+            });
+            allocatedCount++;
+            console.log(
+              `✅ Auto-allocated route fee "${fee.name}" to new student ` +
+              `${student.firstName} ${student.lastName}`
+            );
+          }
+        }
+
+        if (allocatedCount > 0) {
+          console.log(`✅ Total ${allocatedCount} route fee(s) auto-allocated for new student ${student.id}`);
+        }
+      } catch (allocErr) {
+        console.warn('⚠️ Route-fee auto-allocation failed (student was created):', allocErr.message);
+        // Non-critical — the student exists, allocation can be re-run manually
+      }
+    }
+
     res.status(201).json({ success: true, student: fullStudent });
   } catch (error) {
     await transaction.rollback();
@@ -8440,7 +8490,6 @@ app.get('/api/students/:id', authenticate, async (req, res) => {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
-
 // UPDATE student
 app.put('/api/students/:id', authenticate, async (req, res) => {
   try {
@@ -8456,7 +8505,54 @@ app.put('/api/students/:id', authenticate, async (req, res) => {
       return res.status(403).json({ message: 'Access denied' });
     }
     
+    // ✅ Capture old values BEFORE updating
+    const oldStudent = { ...student.toJSON() };
+    
     await student.update(req.body);
+    
+    // ✅ Auto-allocate route fees if transportRouteId changed
+    if (req.body.transportRouteId !== undefined) {
+      const newRouteId = req.body.transportRouteId || null;
+      const oldRouteId = oldStudent.transportRouteId || null;
+      const wasRouteChanged = String(newRouteId) !== String(oldRouteId);
+      
+      if (wasRouteChanged && newRouteId) {
+        try {
+          const routeFees = await Fee.findAll({
+            where: {
+              transportRouteId: newRouteId,
+              schoolId: student.schoolId,
+              allocationType: 'AUTO'
+            }
+          });
+          
+          for (const fee of routeFees) {
+            const exists = await FeeAllocation.findOne({
+              where: {
+                studentId: student.id,
+                feeId: fee.id,
+                isActive: true
+              }
+            });
+            
+            if (!exists) {
+              await FeeAllocation.create({
+                studentId: student.id,
+                feeId: fee.id,
+                amount: fee.amount,
+                allocatedBy: req.user.id,
+                schoolId: student.schoolId,
+                allocationType: 'AUTO',
+                notes: 'Auto-allocated on student route change'
+              });
+              console.log(`✅ Auto-allocated route fee "${fee.name}" to ${student.firstName} ${student.lastName}`);
+            }
+          }
+        } catch (allocErr) {
+          console.warn('⚠️ Route-change auto-allocation failed:', allocErr.message);
+        }
+      }
+    }
     
     res.json({ success: true, student });
     
@@ -15123,183 +15219,56 @@ app.get('/api/payments/:id', authenticate, async (req, res) => {
     });
   }
 });
-
-app.get('/api/students/:studentId/fee-statement', authenticate, async (req, res) => {
+const loadStudentFeeInfo = async (studentId) => {
+  setLoading(true);
+  setApiError('');
   try {
-    const studentId = req.params.studentId;
+    const student = students.find(s => s.id === studentId);
+    if (!student) { setApiError('Student not found'); return; }
+    setStudentDetails(student);
 
-    // Check access
-    let hasAccess = false;
-    if (req.user.role === 'SUPER_ADMIN') {
-      hasAccess = true;
-    } else if (req.user.role === 'SCHOOL_ADMIN' || req.user.role === 'PRINCIPAL' || req.user.role === 'ACCOUNTANT') {
-      const student = await Student.findOne({
-        where: { 
-          id: studentId, 
-          schoolId: req.user.schoolId 
-        }
-      });
-      hasAccess = !!student;
-    } else if (req.user.role === 'STUDENT') {
-      const student = await Student.findOne({ 
-        where: { userId: req.user.id } 
-      });
-      hasAccess = student && student.id === studentId;
-    } else if (req.user.role === 'PARENT') {
-      const parent = await Parent.findOne({
-        where: { 
-          userId: req.user.id, 
-          studentId: studentId 
-        }
-      });
-      hasAccess = !!parent;
+    // ✅ Fetch the fee statement — includes ALL allocated fees (route, class, etc.)
+    const stmtRes = await api.get(`/students/${student.id}/fee-statement`);
+    const stmt = stmtRes.data?.statement;
+    setFeeStructure(stmt?.fees || []);
+
+    // Payments
+    const payRes = await api.get('/payments', { params: { studentId: student.id } });
+    const studentPayments = payRes.data.payments || [];
+    setTotalPaid(studentPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0));
+
+    // Discounts
+    let list = [];
+    try {
+      const dRes = await api.get('/discounts', { params: { studentId: student.id } });
+      list = dRes.data.discounts || [];
+    } catch (err) {
+      list = (discounts || []).filter(d => d.studentId === student.id);
     }
+    setStudentDiscounts(list);
 
-    if (!hasAccess) {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'Access denied' 
-      });
-    }
-
-    const student = await Student.findOne({
-      where: { 
-        id: studentId,
-        schoolId: req.user.schoolId 
-      }
+    // Totals
+    const grossFees = (stmt?.fees || []).reduce((s, f) => s + (parseFloat(f.amount) || 0), 0);
+    let totalDiscountAmount = 0;
+    (stmt?.fees || []).forEach(fee => {
+      const { amount } = resolveDiscount(fee, student.id);
+      totalDiscountAmount += amount;
     });
+    setTotalDiscounts(totalDiscountAmount);
 
-    if (!student) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Student not found' 
-      });
-    }
+    const totalBF = studentPayments.reduce((s, p) => s + (parseFloat(p.balanceBroughtForward) || 0), 0);
+    const netFees = Math.max(0, grossFees - totalDiscountAmount);
+    setOutstandingBalance(Math.max(0, netFees + totalBF - (stmt?.summary?.totalPaid || 0)));
 
-    const school = await School.findByPk(req.user.schoolId);
-    
-    // Get applicable fees
-    let feeWhere = { schoolId: req.user.schoolId };
-    if (school.category === 'UNIVERSITY') {
-      if (student.courseId) feeWhere.courseId = student.courseId;
-      if (student.currentYear) feeWhere.year = student.currentYear;
-    } else if (school.category === 'COLLEGE_TVET') {
-      if (student.programId) feeWhere.programId = student.programId;
-    } else {
-      if (student.classId) feeWhere.classId = student.classId;
-    }
-
-    const fees = await Fee.findAll({ where: feeWhere });
-
-    // Get payments
-    const payments = await Payment.findAll({
-      where: { 
-        studentId, 
-        isOtherIncome: false 
-      },
-      include: [{ model: Fee }],
-      order: [['createdAt', 'DESC']]
-    });
-// ==================== BALANCE CALCULATION (WITH B/F) ====================
-
-// 1. Sum all fees the student is liable for
-const totalFees = fees.reduce((sum, fee) => sum + parseFloat(fee.amount || 0), 0);
-
-// 2. Sum all payments made by the student
-const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-
-// 3. Sum all discounts applied to the student
-const totalDiscounts = payments.reduce((sum, p) => sum + parseFloat(p.discountAmount || 0), 0);
-
-// 4. ✅ NEW: Sum every Balance Brought Forward entry recorded for this student
-const totalBalanceBroughtForward = payments.reduce(
-  (sum, p) => sum + parseFloat(p.balanceBroughtForward || 0), 0
-);
-
-// 5. ✅ UPDATED: Add B/F to the total owed before subtracting payments
-const balance = (totalFees + totalBalanceBroughtForward) - totalDiscounts - totalPaid;
-
-// 6. Optional: Prevent negative balance display
-const displayBalance = Math.max(0, balance);
-    res.json({
-      success: true,
-      statement: {
-        student: {
-          id: student.id,
-          firstName: student.firstName,
-          lastName: student.lastName,
-          admissionNumber: student.admissionNumber,
-          classId: student.classId,
-          courseId: student.courseId
-        },
-        fees,
-        payments,
-        summary: {
-          totalFees,
-          totalPaid,
-          balance
-        }
-      }
-    });
-  } catch (error) {
-    console.error('❌ Get fee statement error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error', 
-      error: error.message 
-    });
+    const sorted = [...studentPayments].sort((a, b) => new Date(b.date) - new Date(a.date));
+    setRecentPayments(sorted.slice(0, 5));
+  } catch (err) {
+    console.error('Error loading student fee info:', err);
+    setApiError('Failed to load student information');
+  } finally {
+    setLoading(false);
   }
-});
-app.get('/api/students/:studentId/fee-statement', authenticate, async (req, res) => {
-  try {
-    const studentId = req.params.studentId;
-
-    if (!await checkStudentAccess(studentId, req.user)) {
-      return res.status(403).json({ message: 'Access denied' });
-    }
-
-    const student = await Student.findByPk(studentId);
-    const school = await School.findByPk(req.user.schoolId);
-    
-    let feeWhere = { schoolId: req.user.schoolId };
-    if (school.category === 'UNIVERSITY') {
-      feeWhere.courseId = student.courseId;
-    } else if (school.category === 'COLLEGE_TVET') {
-      feeWhere.programId = student.programId;
-    } else {
-      feeWhere.classId = student.classId;
-    }
-
-    const fees = await Fee.findAll({ where: feeWhere });
-
-    const payments = await Payment.findAll({
-      where: { studentId },
-      include: [{ model: Fee }]
-    });
-
-    const totalFees = fees.reduce((sum, fee) => sum + parseFloat(fee.amount), 0);
-    const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
-    const balance = totalFees - totalPaid;
-
-    res.json({
-      success: true,
-      statement: {
-        student,
-        fees,
-        payments,
-        summary: {
-          totalFees,
-          totalPaid,
-          balance
-        }
-      }
-    });
-  } catch (error) {
-    console.error('Get fee statement error:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
-});
-
+};
 // ==================== EXPENSE ROUTES ====================
 
 app.post('/api/expenses', authenticate, requireSchoolAdmin, async (req, res) => {
