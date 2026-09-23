@@ -16744,6 +16744,8 @@ app.delete('/api/vehicles/:id', authenticate, requireSchoolAdmin, async (req, re
   }
 });
 
+
+
 // ==================== TRANSPORT ROUTES ====================
 // ==================== TRANSPORT ROUTES ====================
 
