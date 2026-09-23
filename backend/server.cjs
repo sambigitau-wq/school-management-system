@@ -13443,6 +13443,61 @@ app.delete('/api/attendance/:id', authenticate, async (req, res) => {
   }
 });
 
+// ============================================================
+//  AUTO-ALLOCATION SCOPE BUILDER — CATEGORY-AWARE
+//
+//  Returns a `where` clause for Student.findAll() that correctly
+//  matches who should receive an AUTO-allocated fee.
+//
+//  Rules (in priority order):
+//    1. If the fee is scoped to a TRANSPORT ROUTE → use that.
+//       (Transport routes apply across ALL school categories)
+//    2. Otherwise, scope by the school's category:
+//       - UNIVERSITY  → courseId (+ year)
+//       - COLLEGE_TVET → programId (+ module)
+//       - all others   → classId
+//
+//  Returns null if no valid scope exists — callers MUST handle this
+//  by refusing to allocate, rather than accidentally allocating to
+//  every student in the school.
+// ============================================================
+function buildAutoAllocationWhere({ fee, school, schoolId }) {
+  if (!fee || !school || !schoolId) return null;
+
+  const base = { schoolId, isActive: true };
+
+  // ── PRIORITY 1: Transport route (works for ANY category) ──
+  if (fee.transportRouteId) {
+    return { ...base, transportRouteId: fee.transportRouteId };
+  }
+
+  const category = school.category;
+
+  // ── PRIORITY 2: University → courseId (+ optional year) ──
+  if (category === 'UNIVERSITY') {
+    if (!fee.courseId) return null;
+    const where = { ...base, courseId: fee.courseId };
+    if (fee.year) where.currentYear = fee.year;
+    return where;
+  }
+
+  // ── PRIORITY 3: TVET → programId (+ optional module) ──
+  if (category === 'COLLEGE_TVET') {
+    if (!fee.programId) return null;
+    const where = { ...base, programId: fee.programId };
+    if (fee.module) where.currentModule = `Module ${fee.module}`;
+    return where;
+  }
+
+  // ── PRIORITY 4: Regular school (ECDE/PRIMARY/JSS/SECONDARY) → classId ──
+  if (fee.classId) {
+    return { ...base, classId: fee.classId };
+  }
+
+  // ── No valid scope → refuse (return null) ──
+  return null;
+}
+
 // ==================== GET ALL FEES ====================
 app.get('/api/fees', authenticate, async (req, res) => {
   try {
@@ -13723,57 +13778,56 @@ app.post('/api/fees', authenticate, requireSchoolAdmin, async (req, res) => {
       ]
     });
 
-    // ────────────────────────────────────────────────────────────
-    //  Auto-allocate if requested
+     // ────────────────────────────────────────────────────────────
+    //  Auto-allocate if requested (category-aware)
     // ────────────────────────────────────────────────────────────
     let autoAllocated = 0;
 
     if (feeData.allocationType === 'AUTO') {
       try {
-        let where = { schoolId: req.user.schoolId, isActive: true };
+        const studentWhere = buildAutoAllocationWhere({
+          fee: feeData,
+          school,
+          schoolId: req.user.schoolId
+        });
 
-        if (isUniversity) {
-          if (feeData.courseId) where.courseId = feeData.courseId;
-          if (feeData.year) where.currentYear = feeData.year;
-        } else if (isTVET) {
-          if (feeData.programId) where.programId = feeData.programId;
-          if (feeData.module) where.currentModule = `Module ${feeData.module}`;
+        if (!studentWhere) {
+          console.warn(
+            `⚠️ AUTO allocation skipped for fee ${fee.id}: ` +
+            `no valid scope (class/course/program/transportRoute) for ${school.category}.`
+          );
         } else {
-          if (feeData.classId) where.classId = feeData.classId;
-        }
+          const students = await Student.findAll({ where: studentWhere });
+          console.log(
+            `📋 AUTO allocation matched ${students.length} students for fee ${fee.id} ` +
+            `[category=${school.category}, scope=${JSON.stringify(studentWhere)}]`
+          );
 
-        const students = await Student.findAll({ where });
-
-        for (const student of students) {
-          const existing = await FeeAllocation.findOne({
-            where: {
-              studentId: student.id,
-              feeId: fee.id,
-              isActive: true
-            }
-          });
-
-          if (!existing) {
-            await FeeAllocation.create({
-              studentId: student.id,
-              feeId: fee.id,
-              amount: feeData.amount,
-              allocatedBy: req.user.id,
-              schoolId: req.user.schoolId,
-              allocationType: 'AUTO',
-              notes: 'Auto-allocated on creation'
+          for (const student of students) {
+            const existing = await FeeAllocation.findOne({
+              where: { studentId: student.id, feeId: fee.id, isActive: true }
             });
-            autoAllocated++;
+
+            if (!existing) {
+              await FeeAllocation.create({
+                studentId: student.id,
+                feeId: fee.id,
+                amount: feeData.amount,
+                allocatedBy: req.user.id,
+                schoolId: req.user.schoolId,
+                allocationType: 'AUTO',
+                notes: `Auto-allocated on creation (${school.category})`
+              });
+              autoAllocated++;
+            }
           }
         }
 
         console.log(`✅ Auto-allocated fee ${fee.id} to ${autoAllocated} students`);
       } catch (autoError) {
         console.error('⚠️ Auto-allocation failed (fee was created):', autoError.message);
-        // Deliberately do not throw — the fee itself was created successfully
       }
     }
-
     res.status(201).json({
       success: true,
       fee: createdFee,
@@ -14325,49 +14379,51 @@ app.get('/api/discounts/student/:studentId/statement', authenticate, async (req,
     res.status(500).json({ success: false, message: error.message });
   }
 });
+
 // ==================== AUTO-ALLOCATE FEE (FOR EXISTING FEES) ====================
 app.post('/api/fees/:id/auto-allocate', authenticate, requireSchoolAdmin, async (req, res) => {
   try {
-    const fee = await Fee.findByPk(req.params.id);
-    
+    const fee = await Fee.findOne({
+      where: { id: req.params.id, schoolId: req.user.schoolId }
+    });
+
     if (!fee) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Fee not found' 
+      return res.status(404).json({ success: false, message: 'Fee not found' });
+    }
+
+    const school = await School.findByPk(req.user.schoolId, {
+      attributes: ['id', 'category', 'name']
+    });
+    if (!school) {
+      return res.status(404).json({ success: false, message: 'School not found' });
+    }
+
+    // ✅ Build category-aware filter
+    const studentWhere = buildAutoAllocationWhere({
+      fee,
+      school,
+      schoolId: req.user.schoolId
+    });
+
+    if (!studentWhere) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot auto-allocate: fee has no valid scope for a ${school.category} school. ` +
+                 `Please set a class, course, program, or transport route.`
       });
     }
 
-    const school = await School.findByPk(req.user.schoolId);
-    
-    // Find students who should get this fee
-    let where = { schoolId: req.user.schoolId, isActive: true };
-    
-    if (school.category === 'UNIVERSITY') {
-      if (fee.courseId) where.courseId = fee.courseId;
-      if (fee.year) where.currentYear = fee.year;
-    } else if (school.category === 'COLLEGE_TVET') {
-      if (fee.programId) where.programId = fee.programId;
-      if (fee.module) where.currentModule = `Module ${fee.module}`;
-    } else {
-      if (fee.classId) where.classId = fee.classId;
-    }
+    const students = await Student.findAll({ where: studentWhere });
 
-    const students = await Student.findAll({ where });
-    
     let allocated = 0;
     let skipped = 0;
     const results = [];
-    
+
     for (const student of students) {
-      // Check if already allocated
       const existing = await FeeAllocation.findOne({
-        where: { 
-          studentId: student.id, 
-          feeId: fee.id,
-          isActive: true
-        }
+        where: { studentId: student.id, feeId: fee.id, isActive: true }
       });
-      
+
       if (!existing) {
         await FeeAllocation.create({
           studentId: student.id,
@@ -14376,7 +14432,7 @@ app.post('/api/fees/:id/auto-allocate', authenticate, requireSchoolAdmin, async 
           allocatedBy: req.user.id,
           schoolId: req.user.schoolId,
           allocationType: 'AUTO',
-          notes: `Auto-allocated on ${new Date().toLocaleDateString()}`
+          notes: `Auto-allocated via /auto-allocate (${school.category})`
         });
         allocated++;
         results.push({ studentId: student.id, status: 'allocated' });
@@ -14386,26 +14442,30 @@ app.post('/api/fees/:id/auto-allocate', authenticate, requireSchoolAdmin, async 
       }
     }
 
-    // Create audit log
-    await createAuditLog(req, 'AUTO_ALLOCATE', 'FEE', fee.id, null, { 
-      allocated, 
-      skipped,
-      totalStudents: students.length 
-    });
+    try {
+      await createAuditLog(req, 'AUTO_ALLOCATE', 'FEE', fee.id, null, {
+        allocated,
+        skipped,
+        totalStudents: students.length,
+        category: school.category,
+        scope: studentWhere
+      });
+    } catch (logErr) { /* non-critical */ }
 
-    res.json({ 
-      success: true, 
-      message: `Fee auto-allocated to ${allocated} students (${skipped} already had it)`,
+    res.json({
+      success: true,
+      message: `Fee auto-allocated to ${allocated} student(s) [${school.category}] (${skipped} already had it)`,
       allocated,
       skipped,
+      category: school.category,
       results
     });
   } catch (error) {
-    console.error('Auto-allocate error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error', 
-      error: error.message 
+    console.error('❌ Auto-allocate error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
     });
   }
 });
