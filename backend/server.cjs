@@ -28967,35 +28967,32 @@ app.use((err, req, res, next) => {
 });
 const PORT = process.env.PORT || 5000;
 
+// ============================================================
+//  1. Start HTTP server IMMEDIATELY (so Render detects the port)
+// ============================================================
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server listening on port ${PORT}`);
+});
+
+// ============================================================
+//  2. Run DB setup in the background (does NOT block the port)
+// ============================================================
 (async () => {
   try {
-    // ============================================================
-    //  1. Verify DB connection
-    // ============================================================
     await sequelize.authenticate();
     console.log('✅ Database connection established');
 
-    // ============================================================
-    //  2. Sync models (create missing tables only — no ALTER)
-    // ============================================================
     await sequelize.sync({ alter: false, force: false });
     console.log('✅ Database synced successfully');
 
-    // ============================================================
-    //  3. IDEMPOTENT MIGRATIONS
-    //     Safe to run on every boot. Each block checks first,
-    //     then adds only what's missing.
-    // ============================================================
     const queryInterface = sequelize.getQueryInterface();
 
-    // ---------- Helper: does a table exist? ----------
     const tableExists = async (tableName) => {
       const tables = await queryInterface.showAllTables();
       const names = tables.map(t => (typeof t === 'string' ? t : t.tableName));
       return names.includes(tableName);
     };
 
-    // ---------- Helper: does a column exist? ----------
     const columnExists = async (tableName, columnName) => {
       try {
         const desc = await queryInterface.describeTable(tableName);
@@ -29005,83 +29002,61 @@ const PORT = process.env.PORT || 5000;
       }
     };
 
-    // ============================================================
-    //  3A. School — Unit Registration columns
-    // ============================================================
+    // ─── 2A. School — Unit Registration columns ───
     try {
-      const hasSchool = await tableExists('Schools');
-      if (hasSchool) {
-        if (!(await columnExists('Schools', 'paymentPercentageRequired'))) {
-          await queryInterface.addColumn('Schools', 'paymentPercentageRequired', {
-            type: DataTypes.INTEGER,
-            allowNull: false,
-            defaultValue: 30
-          });
-          console.log('✅ Migration: added Schools.paymentPercentageRequired');
+      if (await tableExists('Schools')) {
+        const cols = [
+          ['paymentPercentageRequired', { type: DataTypes.INTEGER, allowNull: false, defaultValue: 30 }],
+          ['requiresPaymentForUnits',   { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true }],
+          ['unitApprovalRequired',      { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true }],
+        ];
+        for (const [name, def] of cols) {
+          if (!(await columnExists('Schools', name))) {
+            await queryInterface.addColumn('Schools', name, def);
+            console.log(`✅ Migration: added Schools.${name}`);
+          }
         }
-
-        if (!(await columnExists('Schools', 'requiresPaymentForUnits'))) {
-          await queryInterface.addColumn('Schools', 'requiresPaymentForUnits', {
-            type: DataTypes.BOOLEAN,
-            allowNull: false,
-            defaultValue: true
-          });
-          console.log('✅ Migration: added Schools.requiresPaymentForUnits');
-        }
-
-        if (!(await columnExists('Schools', 'unitApprovalRequired'))) {
-          await queryInterface.addColumn('Schools', 'unitApprovalRequired', {
-            type: DataTypes.BOOLEAN,
-            allowNull: false,
-            defaultValue: true
-          });
-          console.log('✅ Migration: added Schools.unitApprovalRequired');
-        }
-      } else {
-        console.log('ℹ️  Schools table not found yet — skipping School migrations');
       }
     } catch (err) {
       console.error('⚠️  School migration failed:', err.message);
     }
-// ============================================================
-//  3D. School — Subscription columns
-// ============================================================
-try {
-  const hasSchool = await tableExists('Schools');
-  if (hasSchool) {
-    const cols = [
-      ['trialEndsAt',        { type: DataTypes.DATE, allowNull: true }],
-      ['subscriptionEndsAt', { type: DataTypes.DATE, allowNull: true }],
-      ['subscriptionStatus', { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'TRIAL' }],
-      ['subscriptionPlan',   { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'FREE' }],
-      ['maxStudents',        { type: DataTypes.INTEGER, allowNull: false, defaultValue: 100 }],
-      ['maxStaff',           { type: DataTypes.INTEGER, allowNull: false, defaultValue: 20 }],
-      ['lastPaymentAt',      { type: DataTypes.DATE, allowNull: true }],
-      ['lastPaymentAmount',  { type: DataTypes.DECIMAL(10, 2), allowNull: true }],
-      ['billingNotes',       { type: DataTypes.TEXT, allowNull: true }]
-    ];
-    for (const [name, def] of cols) {
-      if (!(await columnExists('Schools', name))) {
-        await queryInterface.addColumn('Schools', name, def);
-        console.log(`✅ Migration: added Schools.${name}`);
-      }
-    }
-  }
-} catch (err) {
-  console.error('⚠️  Subscription migration failed:', err.message);
-}
 
-try {
-  if (!(await tableExists('SubscriptionPayments'))) {
-    await SubscriptionPayment.sync();
-    console.log('✅ Migration: created SubscriptionPayments table');
-  }
-} catch (err) {
-  console.error('⚠️  SubscriptionPayments migration failed:', err.message);
-}
-    // ============================================================
-    //  3B. ExamCardOverrides table
-    // ============================================================
+    // ─── 2B. School — Subscription columns ───
+    try {
+      if (await tableExists('Schools')) {
+        const cols = [
+          ['trialEndsAt',        { type: DataTypes.DATE, allowNull: true }],
+          ['subscriptionEndsAt', { type: DataTypes.DATE, allowNull: true }],
+          ['subscriptionStatus', { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'TRIAL' }],
+          ['subscriptionPlan',   { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'FREE' }],
+          ['maxStudents',        { type: DataTypes.INTEGER, allowNull: false, defaultValue: 100 }],
+          ['maxStaff',           { type: DataTypes.INTEGER, allowNull: false, defaultValue: 20 }],
+          ['lastPaymentAt',      { type: DataTypes.DATE, allowNull: true }],
+          ['lastPaymentAmount',  { type: DataTypes.DECIMAL(10, 2), allowNull: true }],
+          ['billingNotes',       { type: DataTypes.TEXT, allowNull: true }],
+        ];
+        for (const [name, def] of cols) {
+          if (!(await columnExists('Schools', name))) {
+            await queryInterface.addColumn('Schools', name, def);
+            console.log(`✅ Migration: added Schools.${name}`);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('⚠️  Subscription migration failed:', err.message);
+    }
+
+    // ─── 2C. SubscriptionPayments table ───
+    try {
+      if (!(await tableExists('SubscriptionPayments'))) {
+        await SubscriptionPayment.sync();
+        console.log('✅ Migration: created SubscriptionPayments table');
+      }
+    } catch (err) {
+      console.error('⚠️  SubscriptionPayments migration failed:', err.message);
+    }
+
+    // ─── 2D. ExamCardOverrides table ───
     try {
       if (!(await tableExists('ExamCardOverrides'))) {
         await ExamCardOverride.sync();
@@ -29091,84 +29066,50 @@ try {
       console.error('⚠️  ExamCardOverrides migration failed:', err.message);
     }
 
-    // ============================================================
-    //  3C. Homework tables
-    // ============================================================
+    // ─── 2E. Homework tables ───
     try {
-      if (!(await tableExists('Homeworks'))) {
-        await Homework.sync();
-        console.log('✅ Migration: created Homeworks table');
-      }
-      if (!(await tableExists('HomeworkQuestions'))) {
-        await HomeworkQuestion.sync();
-        console.log('✅ Migration: created HomeworkQuestions table');
-      }
-      if (!(await tableExists('HomeworkSubmissions'))) {
-        await HomeworkSubmission.sync();
-        console.log('✅ Migration: created HomeworkSubmissions table');
-      }
+      if (!(await tableExists('Homeworks')))           await Homework.sync();
+      if (!(await tableExists('HomeworkQuestions')))   await HomeworkQuestion.sync();
+      if (!(await tableExists('HomeworkSubmissions'))) await HomeworkSubmission.sync();
+      console.log('✅ Migration: Homeworks tables verified');
     } catch (err) {
       console.error('⚠️  Homework migration failed:', err.message);
     }
 
-
-    // ============================================================
-//  3F. School — custom grading config
-// ============================================================
-try {
-  if (await tableExists('Schools')) {
-    if (!(await columnExists('Schools', 'gradingConfig'))) {
-      await queryInterface.addColumn('Schools', 'gradingConfig', {
-        type: DataTypes.JSONB,
-        allowNull: true,
-        defaultValue: null
-      });
-      console.log('✅ Migration: added Schools.gradingConfig');
+    // ─── 2F. School — custom grading config ───
+    try {
+      if (await tableExists('Schools')) {
+        if (!(await columnExists('Schools', 'gradingConfig'))) {
+          await queryInterface.addColumn('Schools', 'gradingConfig', {
+            type: DataTypes.JSONB,
+            allowNull: true,
+            defaultValue: null,
+          });
+          console.log('✅ Migration: added Schools.gradingConfig');
+        }
+      }
+    } catch (err) {
+      console.error('⚠️  gradingConfig migration failed:', err.message);
     }
-  }
-} catch (err) {
-  console.error('⚠️  gradingConfig migration failed:', err.message);
-}
-// Add sessionId column to Exams table (no FK constraint — safer)
-try {
-  if (await tableExists('Exams')) {
-    if (!(await columnExists('Exams', 'sessionId'))) {
-      await queryInterface.addColumn('Exams', 'sessionId', {
-        type: DataTypes.UUID,
-        allowNull: true
-        // ❌ REMOVE the references/onUpdate/onDelete block
-      });
-      console.log('✅ Migration: added Exams.sessionId');
-    } else {
-      console.log('ℹ️  Exams.sessionId already exists');
-    }
-  }
-} catch (err) {
-  console.error('❌ Exams.sessionId migration FAILED:', err.message);
-  console.error(err.stack);
-}
 
-
-// Add sessionId column to Exams table
-try {
-  if (await tableExists('Exams')) {
-    if (!(await columnExists('Exams', 'sessionId'))) {
-      await queryInterface.addColumn('Exams', 'sessionId', {
-        type: DataTypes.UUID,
-        allowNull: true,
-        references: { model: 'ExamSessions', key: 'id' },
-        onUpdate: 'CASCADE',
-        onDelete: 'SET NULL'
-      });
-      console.log('✅ Migration: added Exams.sessionId');
+    // ─── 2G. Exams — sessionId column (ONLY ONE BLOCK NOW) ───
+    try {
+      if (await tableExists('Exams')) {
+        if (!(await columnExists('Exams', 'sessionId'))) {
+          await queryInterface.addColumn('Exams', 'sessionId', {
+            type: DataTypes.UUID,
+            allowNull: true,
+          });
+          console.log('✅ Migration: added Exams.sessionId');
+        } else {
+          console.log('ℹ️  Exams.sessionId already exists');
+        }
+      }
+    } catch (err) {
+      console.error('❌ Exams.sessionId migration FAILED:', err.message);
     }
-  }
-} catch (err) {
-  console.error('⚠️  Exams.sessionId migration failed:', err.message);
-}
-    // ============================================================
-    //  4. Startup summary
-    // ============================================================
+
+    // ─── Startup summary ───
     console.log('📊 Grading Systems Loaded:');
     console.log('   - CBC (ECDE & Primary)');
     console.log('   - 8-4-4 (Secondary)');
@@ -29178,16 +29119,10 @@ try {
     console.log('   - Cambridge IGCSE');
     console.log('   - American System');
 
-    // ============================================================
-    //  5. Boot the HTTP server
-    // ============================================================
-    app.listen(PORT, () => {
-      console.log(`🚀 Server running on http://localhost:${PORT}`);
-      console.log(`📚 API Documentation: http://localhost:${PORT}/api`);
-    });
-
+    console.log('✅ All migrations complete — server is ready');
   } catch (err) {
     console.error('❌ Startup error:', err);
-    process.exit(1);
+    // NOTE: We do NOT call process.exit(1) — the HTTP server is already
+    // listening, so Render won't kill the container.
   }
 })();
