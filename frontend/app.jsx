@@ -2144,6 +2144,7 @@ const PrintHeader = ({ school, title, subtitle }) => {
   `;
 };
 
+// ==================== DASHBOARD MODULE — v2 (Rich Real-Data) ====================
 const DashboardModule = ({ 
   setActiveModule, 
   user, 
@@ -2182,16 +2183,13 @@ const DashboardModule = ({
   courseEnrollments,
   schools,
 }) => {
-  
-  // ==================== IMPORT REACT HOOKS ====================
+  // ==================== HOOKS ====================
   const { useState, useEffect, useMemo, useRef } = React;
-  
+
   // ==================== STATE ====================
   const [studentData, setStudentData] = useState(null);
   const [loadingStudent, setLoadingStudent] = useState(true);
   const [studentError, setStudentError] = useState(null);
-  
-  // NEW: Payment and approval states
   const [paymentStatus, setPaymentStatus] = useState(null);
   const [canRegisterUnits, setCanRegisterUnits] = useState(false);
   const [pendingUnitRegistrations, setPendingUnitRegistrations] = useState(0);
@@ -2202,10 +2200,36 @@ const DashboardModule = ({
   const [requiresApproval, setRequiresApproval] = useState(true);
   const [approvalRoles, setApprovalRoles] = useState(['admin', 'hod', 'dean']);
 
-  // ==================== FIX: Prevent Infinite Loop ====================
   const hasFetchedStudent = useRef(false);
 
-  // ==================== DETECT USER ROLE ====================
+  // ==================== SAFE ARRAY HELPERS ====================
+  const safeArr = (v) => Array.isArray(v) ? v : [];
+  const S = safeArr(students);
+  const C = safeArr(classes);
+  const P = safeArr(payments);
+  const ST = safeArr(staff);
+  const RES = safeArr(results);
+  const ATT = safeArr(attendance);
+  const EXAMS = safeArr(exams);
+  const SUBJ = safeArr(subjects);
+  const FEES = safeArr(fees);
+  const EXP = safeArr(expenses);
+  const VEH = safeArr(vehicles);
+  const ROUTES = safeArr(routes);
+  const INV = safeArr(inventory);
+  const BOOKS = safeArr(books);
+  const BORROWS = safeArr(borrows);
+  const HOSTELS = safeArr(hostels);
+  const PARENTS = safeArr(parents);
+  const HEALTH = safeArr(healthRecords);
+  const STAFF_ATT = safeArr(staffAttendance);
+  const UNIT_REGS = safeArr(unitRegistrations);
+  const COURSE_ENR = safeArr(courseEnrollments);
+  const COURSES = safeArr(courses);
+  const PROGRAMS = safeArr(programs);
+  const UNITS = safeArr(units);
+
+  // ==================== ROLE DETECTION ====================
   const userRole = useMemo(() => {
     if (!user?.role) return null;
     const role = user.role;
@@ -2230,7 +2254,6 @@ const DashboardModule = ({
     };
   }, [user?.role]);
 
-  // ==================== DETECT SCHOOL CATEGORY ====================
   const schoolCategory = useMemo(() => {
     const category = currentSchool?.category || 'SENIOR_SECONDARY';
     return {
@@ -2246,23 +2269,42 @@ const DashboardModule = ({
   useEffect(() => {
     if (currentSchool) {
       setRequiresPayment(currentSchool.requiresPaymentForUnits !== false);
-     setPaymentRequiredPercentage(currentSchool.paymentPercentageRequired ?? 30);
+      setPaymentRequiredPercentage(currentSchool.paymentPercentageRequired ?? 30);
       setRequiresApproval(currentSchool.unitApprovalRequired !== false);
       setApprovalRoles(currentSchool.unitApprovalRoles || ['admin', 'hod', 'dean']);
     }
   }, [currentSchool]);
 
-  // ==================== FORMAT CURRENCY ====================
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-KE', {
-      style: 'currency',
-      currency: 'KES',
-      minimumFractionDigits: 0
-    }).format(amount || 0);
+  // ==================== FORMATTERS ====================
+  const formatCurrency = (amount) =>
+    new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 })
+      .format(amount || 0);
+
+  const formatNumber = (n) => new Intl.NumberFormat('en-KE').format(n || 0);
+
+  const formatDate = (d) => {
+    if (!d) return '—';
+    const date = new Date(d);
+    if (isNaN(date.getTime())) return '—';
+    return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
-  // ==================== STAT CARD COMPONENT ====================
-  const StatCard = ({ title, value, icon, color, trend, subtitle }) => {
+  const getMonthKey = (d) => {
+    const date = new Date(d);
+    if (isNaN(date.getTime())) return null;
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  };
+
+  const getMonthLabel = (d) => {
+    const date = new Date(d);
+    if (isNaN(date.getTime())) return '';
+    return date.toLocaleString('en-GB', { month: 'short' });
+  };
+
+  // ==================== COMPONENTS ====================
+
+  // ------ Stat Card with trend ------
+  const StatCard = ({ title, value, icon, color = 'blue', trend, subtitle, onClick }) => {
     const colors = {
       blue: 'from-blue-500 to-blue-600',
       green: 'from-green-500 to-green-600',
@@ -2274,29 +2316,152 @@ const DashboardModule = ({
       yellow: 'from-yellow-500 to-yellow-600',
       teal: 'from-teal-500 to-teal-600',
       amber: 'from-amber-500 to-amber-600',
-      emerald: 'from-emerald-500 to-emerald-600'
+      emerald: 'from-emerald-500 to-emerald-600',
+      slate: 'from-slate-600 to-slate-700'
     };
 
+    const trendUp = trend !== undefined && trend >= 0;
+
     return (
-      <div className="bg-white rounded-xl shadow-sm hover:shadow-md transition-all p-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className={`w-12 h-12 bg-gradient-to-r ${colors[color]} rounded-lg flex items-center justify-center shadow-lg`}>
-            <i className={`fas fa-${icon} text-white text-xl`}></i>
+      <div
+        onClick={onClick}
+        className={`bg-white rounded-xl shadow-sm hover:shadow-md transition-all p-5 ${onClick ? 'cursor-pointer' : ''}`}
+      >
+        <div className="flex items-start justify-between mb-3">
+          <div className={`w-11 h-11 bg-gradient-to-r ${colors[color]} rounded-lg flex items-center justify-center shadow`}>
+            <i className={`fas fa-${icon} text-white`}></i>
           </div>
           {trend !== undefined && (
-            <span className={`text-sm font-semibold ${trend > 0 ? 'text-green-600 bg-green-100' : 'text-red-600 bg-red-100'} px-2.5 py-1 rounded-full`}>
-              {trend > 0 ? '+' : ''}{trend}%
+            <span className={`text-xs font-bold px-2 py-1 rounded-full ${
+              trendUp ? 'text-green-700 bg-green-100' : 'text-red-700 bg-red-100'
+            }`}>
+              <i className={`fas fa-arrow-${trendUp ? 'up' : 'down'} mr-1`}></i>
+              {Math.abs(trend)}%
             </span>
           )}
         </div>
-        <h3 className="text-gray-600 text-sm font-medium">{title}</h3>
-        <p className="text-3xl font-bold mt-1">{value}</p>
-        {subtitle && <p className="text-xs text-gray-500 mt-1">{subtitle}</p>}
+        <h3 className="text-gray-500 text-xs font-semibold uppercase tracking-wide">{title}</h3>
+        <p className="text-2xl font-bold text-gray-800 mt-1">{value}</p>
+        {subtitle && <p className="text-xs text-gray-400 mt-1">{subtitle}</p>}
       </div>
     );
   };
 
-  // ==================== QUICK ACTION CARD ====================
+  // ------ Mini Bar Chart (inline SVG) ------
+  const MiniBarChart = ({ data, height = 80, color = '#4f46e5', valueFormatter = (v) => v }) => {
+    if (!data || data.length === 0) {
+      return <div className="text-center text-xs text-gray-400 py-8">No data yet</div>;
+    }
+    const max = Math.max(...data.map(d => d.value), 1);
+    const barWidth = 100 / data.length;
+
+    return (
+      <div className="w-full">
+        <svg viewBox="0 0 100 ${height}" preserveAspectRatio="none" className="w-full" style={{ height }}>
+          {data.map((d, i) => {
+            const barHeight = (d.value / max) * (height - 20);
+            const x = i * barWidth + barWidth * 0.15;
+            const y = height - barHeight - 12;
+            return (
+              <g key={i}>
+                <rect
+                  x={x}
+                  y={y}
+                  width={barWidth * 0.7}
+                  height={barHeight}
+                  fill={color}
+                  rx="2"
+                  opacity="0.85"
+                />
+              </g>
+            );
+          })}
+        </svg>
+        <div className="flex justify-between mt-1 text-[10px] text-gray-400">
+          {data.map((d, i) => (
+            <span key={i} className="flex-1 text-center">{d.label}</span>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // ------ Mini Line Chart (inline SVG) ------
+  const MiniLineChart = ({ data, height = 80, color = '#10b981' }) => {
+    if (!data || data.length === 0) {
+      return <div className="text-center text-xs text-gray-400 py-8">No data yet</div>;
+    }
+    const max = Math.max(...data.map(d => d.value), 1);
+    const min = Math.min(...data.map(d => d.value), 0);
+    const range = max - min || 1;
+    const stepX = 100 / Math.max(data.length - 1, 1);
+
+    const points = data.map((d, i) => {
+      const x = i * stepX;
+      const y = height - ((d.value - min) / range) * (height - 20) - 10;
+      return `${x},${y}`;
+    }).join(' ');
+
+    return (
+      <div className="w-full">
+        <svg viewBox={`0 0 100 ${height}`} preserveAspectRatio="none" className="w-full" style={{ height }}>
+          <polyline
+            points={points}
+            fill="none"
+            stroke={color}
+            strokeWidth="2"
+            vectorEffect="non-scaling-stroke"
+          />
+          {data.map((d, i) => {
+            const x = i * stepX;
+            const y = height - ((d.value - min) / range) * (height - 20) - 10;
+            return <circle key={i} cx={x} cy={y} r="2" fill={color} />;
+          })}
+        </svg>
+        <div className="flex justify-between mt-1 text-[10px] text-gray-400">
+          {data.map((d, i) => (
+            <span key={i} className="flex-1 text-center">{d.label}</span>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // ------ Progress Bar ------
+  const ProgressBar = ({ value, max = 100, color = 'indigo' }) => {
+    const pct = Math.min(100, (value / max) * 100);
+    const colors = {
+      indigo: 'bg-indigo-500',
+      green: 'bg-green-500',
+      red: 'bg-red-500',
+      yellow: 'bg-yellow-500',
+      orange: 'bg-orange-500',
+      purple: 'bg-purple-500'
+    };
+    return (
+      <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full ${colors[color]}`} style={{ width: `${pct}%` }}></div>
+      </div>
+    );
+  };
+
+  // ------ Card wrapper ------
+  const Card = ({ title, icon, action, children, className = '' }) => (
+    <div className={`bg-white rounded-xl shadow-sm ${className}`}>
+      {title && (
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+            {icon && <i className={`fas fa-${icon} text-indigo-500`}></i>}
+            {title}
+          </h3>
+          {action}
+        </div>
+      )}
+      <div className="p-5">{children}</div>
+    </div>
+  );
+
+  // ------ Quick Action ------
   const QuickActionCard = ({ icon, label, color, moduleId }) => {
     const colors = {
       blue: 'bg-blue-50 text-blue-600 hover:bg-blue-100 border-blue-200',
@@ -2308,10 +2473,9 @@ const DashboardModule = ({
       teal: 'bg-teal-50 text-teal-600 hover:bg-teal-100 border-teal-200',
       amber: 'bg-amber-50 text-amber-600 hover:bg-amber-100 border-amber-200'
     };
-
     return (
-      <button 
-        onClick={() => setActiveModule?.(moduleId)} 
+      <button
+        onClick={() => setActiveModule?.(moduleId)}
         className={`flex flex-col items-center p-4 rounded-xl border-2 ${colors[color]} transition-all hover:scale-105 cursor-pointer`}
       >
         <i className={`fas fa-${icon} text-2xl mb-2`}></i>
@@ -2320,13 +2484,11 @@ const DashboardModule = ({
     );
   };
 
-  // ==================== PAYMENT STATUS CARD ====================
+  // ==================== STUDENT: PAYMENT STATUS CARD ====================
   const PaymentStatusCard = () => {
-    if (!requiresPayment) return null;
-    if (!paymentStatus) return null;
-    
+    if (!requiresPayment || !paymentStatus) return null;
     const isEligible = paymentStatus.paymentPercentage >= paymentRequiredPercentage;
-    
+
     return (
       <div className={`rounded-xl p-6 ${isEligible ? 'bg-green-50 border border-green-200' : 'bg-yellow-50 border border-yellow-200'}`}>
         <div className="flex items-start">
@@ -2336,19 +2498,14 @@ const DashboardModule = ({
               <h3 className={`font-semibold ${isEligible ? 'text-green-800' : 'text-yellow-800'}`}>
                 Fee Status: {paymentStatus.paymentPercentage}% Paid
               </h3>
-              <span className="text-sm font-medium">
-                Required: {paymentRequiredPercentage}%
-              </span>
+              <span className="text-sm font-medium">Required: {paymentRequiredPercentage}%</span>
             </div>
-            
-            {/* Progress Bar */}
             <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden mb-3">
-              <div 
+              <div
                 className={`h-full rounded-full ${isEligible ? 'bg-green-500' : 'bg-yellow-500'}`}
                 style={{ width: `${Math.min(100, paymentStatus.paymentPercentage)}%` }}
               />
             </div>
-            
             <div className="grid grid-cols-3 gap-3 text-center text-sm mb-3">
               <div>
                 <p className="text-gray-500 text-xs">Total Fees</p>
@@ -2365,33 +2522,24 @@ const DashboardModule = ({
                 </p>
               </div>
             </div>
-            
             {!isEligible && (
               <div className="mt-2 p-3 bg-white rounded-lg">
                 <p className="text-sm text-yellow-800">
                   <i className="fas fa-info-circle mr-1"></i>
-                  You need to pay {formatCurrency(paymentStatus.totalFees * paymentRequiredPercentage / 100)} ({paymentRequiredPercentage}%) to register units.
-                  Current: {formatCurrency(paymentStatus.totalPaid)} paid.
+                  You need to pay {formatCurrency(paymentStatus.totalFees * paymentRequiredPercentage / 100)} ({paymentRequiredPercentage}%) to register units. Current: {formatCurrency(paymentStatus.totalPaid)} paid.
                 </p>
-                <button 
-                  onClick={() => setActiveModule?.('fee-statement')}
-                  className="mt-2 text-indigo-600 text-sm hover:text-indigo-800 font-medium"
-                >
+                <button onClick={() => setActiveModule?.('fee-statement')} className="mt-2 text-indigo-600 text-sm hover:text-indigo-800 font-medium">
                   View Fee Statement →
                 </button>
               </div>
             )}
-            
             {isEligible && (
               <div className="mt-2 p-3 bg-white rounded-lg">
                 <p className="text-sm text-green-800">
                   <i className="fas fa-check-circle mr-1"></i>
                   You have met the payment requirement. You can now register units.
                 </p>
-                <button 
-                  onClick={() => setActiveModule?.('unit-registration')}
-                  className="mt-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700"
-                >
+                <button onClick={() => setActiveModule?.('unit-registration')} className="mt-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700">
                   Register Units →
                 </button>
               </div>
@@ -2402,11 +2550,11 @@ const DashboardModule = ({
     );
   };
 
-  // ==================== APPROVAL STATUS CARD ====================
+  // ==================== STUDENT: APPROVAL STATUS CARD ====================
   const ApprovalStatusCard = () => {
     if (!requiresApproval) return null;
     if (pendingUnitRegistrations === 0 && pendingCourseEnrollments === 0) return null;
-    
+
     return (
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
         <div className="flex items-start">
@@ -2418,40 +2566,27 @@ const DashboardModule = ({
                 <div className="bg-white rounded-lg p-3 text-center">
                   <p className="text-2xl font-bold text-blue-600">{pendingUnitRegistrations}</p>
                   <p className="text-xs text-gray-600">Unit Registrations</p>
-                  <button 
-                    onClick={() => setActiveModule?.('unit-registration')}
-                    className="mt-2 text-blue-600 text-sm hover:text-blue-800"
-                  >
-                    View →
-                  </button>
+                  <button onClick={() => setActiveModule?.('unit-registration')} className="mt-2 text-blue-600 text-sm hover:text-blue-800">View →</button>
                 </div>
               )}
               {pendingCourseEnrollments > 0 && (
                 <div className="bg-white rounded-lg p-3 text-center">
                   <p className="text-2xl font-bold text-blue-600">{pendingCourseEnrollments}</p>
                   <p className="text-xs text-gray-600">Course Enrollments</p>
-                  <button 
-                    onClick={() => setActiveModule?.('course-enrollment')}
-                    className="mt-2 text-blue-600 text-sm hover:text-blue-800"
-                  >
-                    View →
-                  </button>
+                  <button onClick={() => setActiveModule?.('course-enrollment')} className="mt-2 text-blue-600 text-sm hover:text-blue-800">View →</button>
                 </div>
               )}
             </div>
-            <p className="text-xs text-blue-600 mt-3">
-              Waiting for approval from: {approvalRoles.join(', ')}
-            </p>
+            <p className="text-xs text-blue-600 mt-3">Waiting for approval from: {approvalRoles.join(', ')}</p>
           </div>
         </div>
       </div>
     );
   };
 
-  // ==================== APPROVED UNITS CARD ====================
+  // ==================== STUDENT: APPROVED UNITS CARD ====================
   const ApprovedUnitsCard = () => {
     if (approvedUnits.length === 0) return null;
-    
     return (
       <div className="bg-white rounded-xl shadow-sm p-6">
         <h3 className="font-semibold text-lg mb-3 flex items-center">
@@ -2460,136 +2595,84 @@ const DashboardModule = ({
         </h3>
         <div className="flex flex-wrap gap-2">
           {approvedUnits.slice(0, 6).map(unit => (
-            <span key={unit.id} className="px-3 py-1 bg-green-50 text-green-700 rounded-full text-sm">
-              {unit.name}
-            </span>
+            <span key={unit.id} className="px-3 py-1 bg-green-50 text-green-700 rounded-full text-sm">{unit.name}</span>
           ))}
           {approvedUnits.length > 6 && (
-            <span className="px-3 py-1 bg-gray-100 text-gray-600 rounded-full text-sm">
-              +{approvedUnits.length - 6} more
-            </span>
+            <span className="px-3 py-1 bg-gray-100 text-gray-600 rounded-full text-sm">+{approvedUnits.length - 6} more</span>
           )}
         </div>
-        <button 
-          onClick={() => setActiveModule?.('exam-cards')}
-          className="mt-4 text-indigo-600 text-sm hover:text-indigo-800 font-medium"
-        >
+        <button onClick={() => setActiveModule?.('exam-cards')} className="mt-4 text-indigo-600 text-sm hover:text-indigo-800 font-medium">
           View Exam Card →
         </button>
       </div>
     );
   };
 
-  // ==================== FETCH STUDENT PAYMENT STATUS ====================
+  // ==================== STUDENT DATA FETCH ====================
   const fetchPaymentStatus = async (student) => {
     if (!student) return;
-    
     try {
-      // Get applicable fees for this student
       let applicableFees = [];
       if (schoolCategory.isTVET && student.programId) {
-        applicableFees = fees?.filter(f => f.programId === student.programId) || [];
+        applicableFees = FEES.filter(f => f.programId === student.programId);
       } else if (schoolCategory.isUniversity && student.courseId) {
-        applicableFees = fees?.filter(f => f.courseId === student.courseId) || [];
+        applicableFees = FEES.filter(f => f.courseId === student.courseId);
       } else if (student.classId) {
-        applicableFees = fees?.filter(f => f.classId === student.classId) || [];
+        applicableFees = FEES.filter(f => f.classId === student.classId);
       }
-      
       const totalFees = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
-      
-      // Get payments for this student
-      const studentPayments = payments?.filter(p => p.studentId === student.id) || [];
+      const studentPayments = P.filter(p => p.studentId === student.id);
       const totalPaid = studentPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
       const balance = totalFees - totalPaid;
       const paymentPercentage = totalFees > 0 ? (totalPaid / totalFees) * 100 : 100;
       const canRegister = !requiresPayment || paymentPercentage >= paymentRequiredPercentage;
-      
       setPaymentStatus({
-        totalFees,
-        totalPaid,
-        balance,
+        totalFees, totalPaid, balance,
         paymentPercentage: paymentPercentage.toFixed(1),
         canRegister
       });
       setCanRegisterUnits(canRegister);
-      
     } catch (error) {
       console.error('Error fetching payment status:', error);
     }
   };
 
-  // ==================== FETCH PENDING APPROVALS ====================
   const fetchPendingApprovals = async (studentId) => {
     try {
-      // Get pending unit registrations
-      const pendingUnits = unitRegistrations?.filter(r => 
-        r.studentId === studentId && r.status === 'PENDING'
-      ) || [];
+      const pendingUnits = UNIT_REGS.filter(r => r.studentId === studentId && r.status === 'PENDING');
       setPendingUnitRegistrations(pendingUnits.length);
-      
-      // Get pending course enrollments
-      const pendingCourses = courseEnrollments?.filter(e => 
-        e.studentId === studentId && e.status === 'PENDING'
-      ) || [];
+      const pendingCourses = COURSE_ENR.filter(e => e.studentId === studentId && e.status === 'PENDING');
       setPendingCourseEnrollments(pendingCourses.length);
-      
-      // Get approved units
-      const approved = unitRegistrations?.filter(r => 
-        r.studentId === studentId && r.status === 'APPROVED'
-      ) || [];
-      
-      // Get unit details for approved units
+      const approved = UNIT_REGS.filter(r => r.studentId === studentId && r.status === 'APPROVED');
       const approvedUnitDetails = approved.map(reg => {
-        const unit = units?.find(u => u.id === reg.unitId);
+        const unit = UNITS.find(u => u.id === reg.unitId);
         return unit ? { ...unit, registrationId: reg.id } : null;
       }).filter(Boolean);
       setApprovedUnits(approvedUnitDetails);
-      
     } catch (error) {
       console.error('Error fetching pending approvals:', error);
     }
   };
 
-  // ==================== FETCH STUDENT DATA - FIXED (No Infinite Loop) ====================
   useEffect(() => {
     const fetchStudentData = async () => {
-      // ✅ Skip if not a student or already fetched
       if (!userRole?.isStudent || hasFetchedStudent.current) return;
-      
       setLoadingStudent(true);
       setStudentError(null);
-      
       try {
         let foundStudent = null;
-        
-        // Method 1: Try to find by userId
-        if (user?.id) {
-          foundStudent = students?.find(s => s.userId === user.id);
-        }
-        
-        // Method 2: Try localStorage
+        if (user?.id) foundStudent = S.find(s => s.userId === user.id);
         if (!foundStudent) {
           const savedAdmission = localStorage.getItem('studentAdmissionNumber');
-          if (savedAdmission) {
-            foundStudent = students?.find(s => s.admissionNumber === savedAdmission);
-          }
+          if (savedAdmission) foundStudent = S.find(s => s.admissionNumber === savedAdmission);
         }
-        
-        // Method 3: Try to find by email
-        if (!foundStudent && user?.email) {
-          foundStudent = students?.find(s => s.email === user.email);
-        }
-        
+        if (!foundStudent && user?.email) foundStudent = S.find(s => s.email === user.email);
         if (foundStudent) {
-          console.log('✅ Found student:', foundStudent.firstName, foundStudent.lastName);
           setStudentData(foundStudent);
-          
-          // Fetch payment status and pending approvals
           await fetchPaymentStatus(foundStudent);
           await fetchPendingApprovals(foundStudent.id);
-          hasFetchedStudent.current = true;  // ✅ Mark as fetched
+          hasFetchedStudent.current = true;
         } else {
-          console.log('❌ No student found');
           setStudentError('No student record found');
         }
       } catch (error) {
@@ -2599,31 +2682,205 @@ const DashboardModule = ({
         setLoadingStudent(false);
       }
     };
-    
     fetchStudentData();
-    
-    // ✅ Reset the ref when user changes (so it can fetch again)
     return () => {
-      // Only reset if we're no longer a student
-      if (!userRole?.isStudent) {
-        hasFetchedStudent.current = false;
-      }
+      if (!userRole?.isStudent) hasFetchedStudent.current = false;
     };
-  }, [user?.id, userRole?.isStudent]);  // ✅ Remove 'students' from dependencies
+  }, [user?.id, userRole?.isStudent]);
 
-  // ✅ Reset when students array changes (but only if we have a student that disappeared)
   useEffect(() => {
-    if (studentData && students?.length > 0 && hasFetchedStudent.current) {
-      const stillExists = students.some(s => s.id === studentData.id);
+    if (studentData && S.length > 0 && hasFetchedStudent.current) {
+      const stillExists = S.some(s => s.id === studentData.id);
       if (!stillExists) {
         hasFetchedStudent.current = false;
         setStudentData(null);
         setStudentError('Student no longer exists');
       }
     }
-  }, [students, studentData]);
+  }, [S, studentData]);
 
-  // ==================== LOADING STATE ====================
+  // ==================== SCHOOL ADMIN ANALYTICS ====================
+  // All computed only for admin view (memoized)
+  const adminAnalytics = useMemo(() => {
+    const now = new Date();
+    const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastMonth = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, '0')}`;
+
+    // --- Students ---
+    const totalStudents = S.filter(s => s.isActive !== false).length;
+    const studentsThisMonth = S.filter(s => {
+      const d = s.enrollmentDate || s.admissionDate || s.createdAt;
+      return d && getMonthKey(d) === thisMonth;
+    }).length;
+    const studentsLastMonth = S.filter(s => {
+      const d = s.enrollmentDate || s.admissionDate || s.createdAt;
+      return d && getMonthKey(d) === lastMonth;
+    }).length;
+    const studentGrowth = studentsLastMonth > 0
+      ? Math.round(((studentsThisMonth - studentsLastMonth) / studentsLastMonth) * 100)
+      : (studentsThisMonth > 0 ? 100 : 0);
+
+    // --- Staff ---
+    const totalStaff = ST.length;
+    const teachingStaff = ST.filter(s => s.staffType === 'TEACHING').length;
+    const nonTeachingStaff = ST.filter(s => s.staffType === 'NON_TEACHING').length;
+
+    // --- Fees ---
+    const totalFeesAmount = FEES.reduce((s, f) => s + parseFloat(f.amount || 0), 0);
+    const totalCollected = P.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+    const totalExpenses = EXP.reduce((s, e) => s + parseFloat(e.amount || 0), 0);
+    const collectionRate = totalFeesAmount > 0
+      ? Math.round((totalCollected / totalFeesAmount) * 100)
+      : 0;
+    const outstanding = Math.max(0, totalFeesAmount - totalCollected);
+
+    // --- Fees this month vs last month ---
+    const collectedThisMonth = P
+      .filter(p => getMonthKey(p.date || p.createdAt) === thisMonth)
+      .reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+    const collectedLastMonth = P
+      .filter(p => getMonthKey(p.date || p.createdAt) === lastMonth)
+      .reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+    const feeGrowth = collectedLastMonth > 0
+      ? Math.round(((collectedThisMonth - collectedLastMonth) / collectedLastMonth) * 100)
+      : (collectedThisMonth > 0 ? 100 : 0);
+
+    // --- Fee collection trend (last 6 months) ---
+    const monthBuckets = {};
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      monthBuckets[key] = { label: getMonthLabel(d), value: 0 };
+    }
+    P.forEach(p => {
+      const key = getMonthKey(p.date || p.createdAt);
+      if (key && monthBuckets[key]) {
+        monthBuckets[key].value += parseFloat(p.amount || 0);
+      }
+    });
+    const feeTrend = Object.values(monthBuckets);
+
+    // --- Enrollment by class (top 5) ---
+    const enrollmentByClass = C.map(c => ({
+      name: c.name,
+      count: S.filter(s => s.classId === c.id && s.isActive !== false).length,
+      id: c.id
+    })).sort((a, b) => b.count - a.count).slice(0, 5);
+
+    // --- Attendance (today) ---
+    const todayStr = now.toISOString().split('T')[0];
+    const todayRecords = ATT.filter(a => a.date === todayStr);
+    const presentToday = todayRecords.filter(a => a.status === 'PRESENT').length;
+    const totalTodayMarked = todayRecords.length;
+    const attendanceRate = totalTodayMarked > 0
+      ? Math.round((presentToday / totalTodayMarked) * 100)
+      : 0;
+
+    // --- Attendance trend (last 14 days) ---
+    const dayBuckets = {};
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().split('T')[0];
+      dayBuckets[key] = { label: String(d.getDate()), value: 0, total: 0 };
+    }
+    ATT.forEach(a => {
+      if (dayBuckets[a.date]) {
+        dayBuckets[a.date].total += 1;
+        if (a.status === 'PRESENT') dayBuckets[a.date].value += 1;
+      }
+    });
+    const attendanceTrend = Object.values(dayBuckets).map(b => ({
+      label: b.label,
+      value: b.total > 0 ? Math.round((b.value / b.total) * 100) : 0
+    }));
+
+    // --- Outstanding students (top 5) ---
+    const studentBalances = S.map(s => {
+      const applicableFees = FEES.filter(f => {
+        if (schoolCategory.isTVET && s.programId) return f.programId === s.programId;
+        if (schoolCategory.isUniversity && s.courseId) return f.courseId === s.courseId;
+        return f.classId === s.classId;
+      });
+      const totalFees = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
+      const totalPaid = P.filter(p => p.studentId === s.id)
+        .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+      const balance = Math.max(0, totalFees - totalPaid);
+      return { ...s, balance, totalFees, totalPaid };
+    }).filter(s => s.balance > 0).sort((a, b) => b.balance - a.balance).slice(0, 5);
+
+    // --- Pending approvals count ---
+    const pendingUnits = UNIT_REGS.filter(r => r.status === 'PENDING').length;
+    const pendingCourses = COURSE_ENR.filter(e => e.status === 'PENDING').length;
+    const pendingApprovals = pendingUnits + pendingCourses;
+
+    // --- Vehicles needing service (next 30 days or overdue) ---
+    const thirtyDaysFromNow = new Date();
+    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+    const vehiclesNeedingService = VEH.filter(v => {
+      if (!v.serviceDue) return false;
+      const due = new Date(v.serviceDue);
+      return due <= thirtyDaysFromNow;
+    });
+
+    // --- Overdue books ---
+    const overdueBooks = BORROWS.filter(b =>
+      b.status === 'BORROWED' && b.dueDate && new Date(b.dueDate) < now
+    ).length;
+
+    // --- Low stock inventory ---
+    const lowStock = INV.filter(i => (i.quantity || 0) <= (i.reorderLevel || 0)).length;
+
+    // --- Recent payments (last 5) ---
+    const recentPayments = [...P]
+      .sort((a, b) => new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt))
+      .slice(0, 5);
+
+    // --- Recent admissions (last 5) ---
+    const recentAdmissions = [...S]
+      .sort((a, b) => new Date(b.enrollmentDate || b.admissionDate || b.createdAt) -
+                       new Date(a.enrollmentDate || a.admissionDate || a.createdAt))
+      .slice(0, 5);
+
+    // --- Recent results (last 5) ---
+    const recentResults = [...RES]
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+      .slice(0, 5);
+
+    // --- Low-performing classes ---
+    const classAverages = C.map(c => {
+      const classStudents = S.filter(s => s.classId === c.id);
+      const studentIds = new Set(classStudents.map(s => s.id));
+      const classResults = RES.filter(r => studentIds.has(r.studentId));
+      const avg = classResults.length > 0
+        ? Math.round(classResults.reduce((sum, r) => sum + (parseFloat(r.marks) || 0), 0) / classResults.length)
+        : null;
+      return { id: c.id, name: c.name, avg, count: classResults.length };
+    }).filter(c => c.avg !== null).sort((a, b) => a.avg - b.avg);
+
+    const lowPerformingClasses = classAverages.filter(c => c.avg < 50).slice(0, 3);
+
+    // --- Gender split ---
+    const males = S.filter(s => s.gender === 'MALE' && s.isActive !== false).length;
+    const females = S.filter(s => s.gender === 'FEMALE' && s.isActive !== false).length;
+
+    return {
+      totalStudents, studentsThisMonth, studentGrowth,
+      totalStaff, teachingStaff, nonTeachingStaff,
+      totalFeesAmount, totalCollected, collectionRate, outstanding,
+      collectedThisMonth, feeGrowth,
+      feeTrend, enrollmentByClass,
+      attendanceRate, totalTodayMarked, attendanceTrend,
+      studentBalances, pendingApprovals, pendingUnits, pendingCourses,
+      vehiclesNeedingService: vehiclesNeedingService.length,
+      overdueBooks, lowStock,
+      recentPayments, recentAdmissions, recentResults,
+      lowPerformingClasses, males, females
+    };
+  }, [S, C, P, ST, RES, ATT, FEES, EXP, VEH, INV, BORROWS, UNIT_REGS, COURSE_ENR, schoolCategory]);
+
+  // ==================== LOADING ====================
   if (externalLoading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -2648,71 +2905,56 @@ const DashboardModule = ({
       );
     }
     if (!studentData || studentError) {
-  return (
-    <div className="bg-white rounded-xl shadow-sm p-12 text-center">
-      <i className="fas fa-user-graduate text-6xl text-gray-300 mb-4"></i>
-      <h2 className="text-2xl font-bold text-gray-700 mb-2">Student Dashboard</h2>
-      <p className="text-gray-500">{studentError || 'No student record found for your account.'}</p>
-      <p className="text-sm text-gray-400 mt-2">Please enter your admission number to continue.</p>
-      <button 
-        onClick={async () => {
-          const admission = prompt('Please enter your admission number:');
-          if (admission) {
-            try {
-              // ✅ REMOVED the interceptor - it's already in api.js
-              // Just call the API directly
-            const response = await api.get(`/students/by-admission/${encodeURIComponent(admission.toUpperCase())}`);
-              if (response.data.student) {
-                const student = response.data.student;
-                localStorage.setItem('studentAdmissionNumber', admission.toUpperCase());
-                localStorage.setItem('studentData', JSON.stringify(student));
-                hasFetchedStudent.current = false;  // ✅ Reset so it can fetch again
-                window.location.reload();
-              } else {
-                alert('Student not found with that admission number');
+      return (
+        <div className="bg-white rounded-xl shadow-sm p-12 text-center">
+          <i className="fas fa-user-graduate text-6xl text-gray-300 mb-4"></i>
+          <h2 className="text-2xl font-bold text-gray-700 mb-2">Student Dashboard</h2>
+          <p className="text-gray-500">{studentError || 'No student record found for your account.'}</p>
+          <p className="text-sm text-gray-400 mt-2">Please enter your admission number to continue.</p>
+          <button
+            onClick={async () => {
+              const admission = prompt('Please enter your admission number:');
+              if (admission) {
+                try {
+                  const response = await api.get(`/students/by-admission/${encodeURIComponent(admission.toUpperCase())}`);
+                  if (response.data.student) {
+                    const student = response.data.student;
+                    localStorage.setItem('studentAdmissionNumber', admission.toUpperCase());
+                    localStorage.setItem('studentData', JSON.stringify(student));
+                    hasFetchedStudent.current = false;
+                    window.location.reload();
+                  } else {
+                    alert('Student not found with that admission number');
+                  }
+                } catch (err) {
+                  console.error('Error fetching student:', err);
+                  alert('Error fetching student: ' + (err.response?.data?.message || 'Server error'));
+                }
               }
-            } catch (err) {
-              console.error('Error fetching student:', err);
-              alert('Error fetching student: ' + (err.response?.data?.message || 'Server error'));
-            }
-          }
-        }}
-        className="mt-4 bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 transition-colors"
-      >
-        <i className="fas fa-search mr-2"></i> Enter Admission Number
-      </button>
-    </div>
-  );
-}
-    // Get student-specific data
-    const myResults = results?.filter(r => r.studentId === studentData.id) || [];
-    const myAttendance = attendance?.filter(a => a.studentId === studentData.id) || [];
-    const myPayments = payments?.filter(p => p.studentId === studentData.id) || [];
-
-    // Get program/course/class name
-    let entityName = '';
-    if (schoolCategory.isTVET && studentData.programId) {
-      const program = programs?.find(p => p.id === studentData.programId);
-      entityName = program?.name || 'No Program';
-    } else if (schoolCategory.isUniversity && studentData.courseId) {
-      const course = courses?.find(c => c.id === studentData.courseId);
-      entityName = course?.name || 'No Course';
-    } else if (studentData.classId) {
-      const classObj = classes?.find(c => c.id === studentData.classId);
-      entityName = classObj?.name || 'No Class';
+            }}
+            className="mt-4 bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 transition-colors"
+          >
+            <i className="fas fa-search mr-2"></i> Enter Admission Number
+          </button>
+        </div>
+      );
     }
 
-    // Get module info for TVET
-    let moduleInfo = '';
-    if (schoolCategory.isTVET && studentData.currentModule) {
-      moduleInfo = studentData.currentModule;
-    } else if (schoolCategory.isUniversity && studentData.currentYear) {
-      moduleInfo = `Year ${studentData.currentYear}${studentData.currentSemester ? `, Sem ${studentData.currentSemester}` : ''}`;
+    const myResults = RES.filter(r => r.studentId === studentData.id);
+    const myAttendance = ATT.filter(a => a.studentId === studentData.id);
+    const myPayments = P.filter(p => p.studentId === studentData.id);
+
+    let entityName = '';
+    if (schoolCategory.isTVET && studentData.programId) {
+      entityName = PROGRAMS.find(p => p.id === studentData.programId)?.name || 'No Program';
+    } else if (schoolCategory.isUniversity && studentData.courseId) {
+      entityName = COURSES.find(c => c.id === studentData.courseId)?.name || 'No Course';
+    } else if (studentData.classId) {
+      entityName = C.find(c => c.id === studentData.classId)?.name || 'No Class';
     }
 
     return (
       <div className="space-y-6">
-        {/* Welcome Header */}
         <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl p-6 text-white">
           <div className="flex items-center space-x-4">
             <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center">
@@ -2723,163 +2965,78 @@ const DashboardModule = ({
             <div>
               <h2 className="text-3xl font-bold">Welcome back, {studentData.firstName}!</h2>
               <p className="text-indigo-100">Admission: {studentData.admissionNumber}</p>
-              <p className="text-indigo-200 text-sm mt-1">
-                {entityName}
-                {moduleInfo && ` • ${moduleInfo}`}
-              </p>
+              <p className="text-indigo-200 text-sm mt-1">{entityName}</p>
             </div>
           </div>
         </div>
 
-        {/* Payment Status Card - NEW */}
         <PaymentStatusCard />
-        
-        {/* Approval Status Card - NEW */}
         <ApprovalStatusCard />
-        
-        {/* Approved Units Card - NEW */}
         <ApprovedUnitsCard />
 
-        {/* Quick Actions */}
         <div className="bg-white rounded-xl shadow-sm p-6">
           <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <button onClick={() => setActiveModule?.('results')} className="flex flex-col items-center p-4 rounded-xl border-2 bg-blue-50 text-blue-600 hover:bg-blue-100 border-blue-200 transition-all hover:scale-105">
-              <i className="fas fa-file-alt text-2xl mb-2"></i>
-              <span className="text-sm font-medium">My Results</span>
-            </button>
-            <button onClick={() => setActiveModule?.('attendance')} className="flex flex-col items-center p-4 rounded-xl border-2 bg-green-50 text-green-600 hover:bg-green-100 border-green-200 transition-all hover:scale-105">
-              <i className="fas fa-calendar-check text-2xl mb-2"></i>
-              <span className="text-sm font-medium">My Attendance</span>
-            </button>
-            <button onClick={() => setActiveModule?.('exam-cards')} className="flex flex-col items-center p-4 rounded-xl border-2 bg-orange-50 text-orange-600 hover:bg-orange-100 border-orange-200 transition-all hover:scale-105">
-              <i className="fas fa-id-card text-2xl mb-2"></i>
-              <span className="text-sm font-medium">Exam Card</span>
-            </button>
-            <button onClick={() => setActiveModule?.('timetable')} className="flex flex-col items-center p-4 rounded-xl border-2 bg-purple-50 text-purple-600 hover:bg-purple-100 border-purple-200 transition-all hover:scale-105">
-              <i className="fas fa-clock text-2xl mb-2"></i>
-              <span className="text-sm font-medium">Timetable</span>
-            </button>
+            <QuickActionCard icon="file-alt" label="My Results" color="blue" moduleId="results" />
+            <QuickActionCard icon="calendar-check" label="My Attendance" color="green" moduleId="attendance" />
+            <QuickActionCard icon="id-card" label="Exam Card" color="orange" moduleId="exam-cards" />
+            <QuickActionCard icon="clock" label="Timetable" color="purple" moduleId="timetable" />
             {canRegisterUnits && (
-              <button onClick={() => setActiveModule?.('unit-registration')} className="flex flex-col items-center p-4 rounded-xl border-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border-indigo-200 transition-all hover:scale-105">
-                <i className="fas fa-book text-2xl mb-2"></i>
-                <span className="text-sm font-medium">Register Units</span>
-              </button>
+              <QuickActionCard icon="book" label="Register Units" color="indigo" moduleId="unit-registration" />
             )}
           </div>
         </div>
 
-        {/* Stats Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="w-12 h-12 bg-blue-500 rounded-lg flex items-center justify-center shadow-lg mb-4">
-              <i className="fas fa-file-alt text-white text-xl"></i>
-            </div>
-            <h3 className="text-gray-600 text-sm font-medium">Results</h3>
-            <p className="text-3xl font-bold mt-1">{myResults.length}</p>
-          </div>
-          
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="w-12 h-12 bg-green-500 rounded-lg flex items-center justify-center shadow-lg mb-4">
-              <i className="fas fa-calendar-check text-white text-xl"></i>
-            </div>
-            <h3 className="text-gray-600 text-sm font-medium">Attendance Days</h3>
-            <p className="text-3xl font-bold mt-1">{myAttendance.length}</p>
-          </div>
-          
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="w-12 h-12 bg-purple-500 rounded-lg flex items-center justify-center shadow-lg mb-4">
-              <i className="fas fa-money-bill text-white text-xl"></i>
-            </div>
-            <h3 className="text-gray-600 text-sm font-medium">Payments Made</h3>
-            <p className="text-3xl font-bold mt-1">{myPayments.length}</p>
-          </div>
-          
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className={`w-12 h-12 ${paymentStatus?.balance > 0 ? 'bg-orange-500' : 'bg-green-500'} rounded-lg flex items-center justify-center shadow-lg mb-4`}>
-              <i className="fas fa-clock text-white text-xl"></i>
-            </div>
-            <h3 className="text-gray-600 text-sm font-medium">Balance</h3>
-            <p className={`text-3xl font-bold mt-1 ${paymentStatus?.balance > 0 ? 'text-orange-600' : 'text-green-600'}`}>
-              {formatCurrency(paymentStatus?.balance || 0)}
-            </p>
-          </div>
+          <StatCard title="Results" value={myResults.length} icon="file-alt" color="blue" />
+          <StatCard title="Attendance Days" value={myAttendance.length} icon="calendar-check" color="green" />
+          <StatCard title="Payments Made" value={myPayments.length} icon="money-bill" color="purple" />
+          <StatCard
+            title="Balance"
+            value={formatCurrency(paymentStatus?.balance || 0)}
+            icon="clock"
+            color={paymentStatus?.balance > 0 ? 'orange' : 'green'}
+          />
         </div>
 
-        {/* Approved Units Preview */}
-        {approvedUnits.length > 0 && (
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <h3 className="font-semibold text-lg mb-3 flex items-center">
-              <i className="fas fa-check-circle text-green-500 mr-2"></i>
-              Your Approved Units ({approvedUnits.length})
-            </h3>
-            <div className="flex flex-wrap gap-2">
-              {approvedUnits.slice(0, 8).map(unit => (
-                <span key={unit.id} className="px-3 py-1 bg-green-50 text-green-700 rounded-full text-sm">
-                  {unit.name}
-                </span>
-              ))}
-              {approvedUnits.length > 8 && (
-                <span className="px-3 py-1 bg-gray-100 text-gray-600 rounded-full text-sm">
-                  +{approvedUnits.length - 8} more
-                </span>
-              )}
-            </div>
-            <button 
-              onClick={() => setActiveModule?.('exam-cards')}
-              className="mt-4 text-indigo-600 text-sm hover:text-indigo-800 font-medium"
-            >
-              View Exam Card →
-            </button>
-          </div>
-        )}
-
-        {/* Recent Results Preview */}
         {myResults.length > 0 && (
-          <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-            <div className="px-6 py-4 bg-gray-50 border-b">
-              <h3 className="font-semibold text-lg">Recent Results</h3>
-            </div>
+          <Card title="Recent Results" icon="file-alt" action={
+            <button onClick={() => setActiveModule?.('results')} className="text-sm text-indigo-600 hover:text-indigo-800">View all →</button>
+          }>
             <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
+              <table className="w-full text-sm">
+                <thead className="text-xs text-gray-500 uppercase">
                   <tr>
-                    <th className="px-4 py-2 text-left">Exam</th>
-                    <th className="px-4 py-2 text-left">Subject/Unit</th>
-                    <th className="px-4 py-2 text-left">Marks</th>
-                    <th className="px-4 py-2 text-left">Grade</th>
+                    <th className="text-left py-2">Exam</th>
+                    <th className="text-left py-2">Subject/Unit</th>
+                    <th className="text-left py-2">Marks</th>
+                    <th className="text-left py-2">Grade</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {myResults.slice(0, 5).map(result => {
-                    const exam = exams?.find(e => e.id === result.examId);
+                    const exam = EXAMS.find(e => e.id === result.examId);
                     let itemName = '';
                     if (schoolCategory.isUniversity || schoolCategory.isTVET) {
-                      const unit = units?.find(u => u.id === result.unitId);
-                      itemName = unit?.name || 'Unknown';
+                      itemName = UNITS.find(u => u.id === result.unitId)?.name || 'Unknown';
                     } else {
-                      const subject = subjects?.find(s => s.id === result.subjectId);
-                      itemName = subject?.name || 'Unknown';
+                      itemName = SUBJ.find(s => s.id === result.subjectId)?.name || 'Unknown';
                     }
-                    
-                    const getGradeColor = (grade) => {
-                      if (!grade) return 'bg-gray-100 text-gray-800';
-                      if (grade === 'A' || grade === 'A-' || grade === 'Exceeding Expectations') return 'bg-green-100 text-green-800';
-                      if (grade === 'B+' || grade === 'B' || grade === 'B-') return 'bg-blue-100 text-blue-800';
-                      if (grade === 'C+' || grade === 'C' || grade === 'C-') return 'bg-yellow-100 text-yellow-800';
-                      if (grade === 'D+' || grade === 'D' || grade === 'D-') return 'bg-orange-100 text-orange-800';
+                    const getGradeColor = (g) => {
+                      if (!g) return 'bg-gray-100 text-gray-800';
+                      if (['A', 'A-', 'Exceeding Expectations'].includes(g)) return 'bg-green-100 text-green-800';
+                      if (['B+', 'B', 'B-'].includes(g)) return 'bg-blue-100 text-blue-800';
+                      if (['C+', 'C', 'C-'].includes(g)) return 'bg-yellow-100 text-yellow-800';
+                      if (['D+', 'D', 'D-'].includes(g)) return 'bg-orange-100 text-orange-800';
                       return 'bg-red-100 text-red-800';
                     };
-                    
                     return (
-                      <tr key={result.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-2">{exam?.name || 'Unknown'}</td>
-                        <td className="px-4 py-2">{itemName}</td>
-                        <td className="px-4 py-2 font-bold">{result.marks}</td>
-                        <td className="px-4 py-2">
-                          <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(result.grade)}`}>
-                            {result.grade}
-                          </span>
+                      <tr key={result.id}>
+                        <td className="py-2">{exam?.name || 'Unknown'}</td>
+                        <td className="py-2">{itemName}</td>
+                        <td className="py-2 font-bold">{result.marks}</td>
+                        <td className="py-2">
+                          <span className={`px-2 py-1 rounded-full text-xs ${getGradeColor(result.grade)}`}>{result.grade}</span>
                         </td>
                       </tr>
                     );
@@ -2887,17 +3044,7 @@ const DashboardModule = ({
                 </tbody>
               </table>
             </div>
-            {myResults.length > 5 && (
-              <div className="px-6 py-3 bg-gray-50 text-center">
-                <button 
-                  onClick={() => setActiveModule?.('results')}
-                  className="text-indigo-600 hover:text-indigo-800 text-sm"
-                >
-                  View all {myResults.length} results →
-                </button>
-              </div>
-            )}
-          </div>
+          </Card>
         )}
       </div>
     );
@@ -2905,10 +3052,10 @@ const DashboardModule = ({
 
   // ==================== PARENT DASHBOARD ====================
   if (userRole?.isParent) {
-    const myChildren = parents?.filter(p => p.userId === user.id).map(p => {
-      const student = students?.find(s => s.id === p.studentId);
+    const myChildren = PARENTS.filter(p => p.userId === user.id).map(p => {
+      const student = S.find(s => s.id === p.studentId);
       return student ? { ...student, relationship: p.relationship, isPrimary: p.isPrimary } : null;
-    }).filter(Boolean) || [];
+    }).filter(Boolean);
 
     if (myChildren.length === 0) {
       return (
@@ -2943,12 +3090,18 @@ const DashboardModule = ({
         <h3 className="text-xl font-semibold mt-4">My Children</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {myChildren.map(child => {
-            const childResults = results?.filter(r => r.studentId === child.id) || [];
-            const childAttendance = attendance?.filter(a => a.studentId === child.id) || [];
-            const avgScore = childResults.length > 0 
+            const childResults = RES.filter(r => r.studentId === child.id);
+            const childAttendance = ATT.filter(a => a.studentId === child.id);
+            const avgScore = childResults.length > 0
               ? (childResults.reduce((sum, r) => sum + (r.marks || 0), 0) / childResults.length).toFixed(1)
               : 'N/A';
-            
+
+            const applicableFees = FEES.filter(f => f.classId === child.classId);
+            const totalFees = applicableFees.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0);
+            const totalPaid = P.filter(p => p.studentId === child.id)
+              .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+            const balance = Math.max(0, totalFees - totalPaid);
+
             return (
               <div key={child.id} className="bg-white rounded-xl shadow-sm p-6 hover:shadow-md transition-all">
                 <div className="flex items-center mb-4">
@@ -2958,15 +3111,9 @@ const DashboardModule = ({
                   <div className="ml-4">
                     <h3 className="text-lg font-semibold">{child.firstName} {child.lastName}</h3>
                     <p className="text-sm text-gray-600">Admission: {child.admissionNumber}</p>
-                    {child.relationship && (
-                      <span className="inline-block mt-1 text-xs bg-gray-100 px-2 py-0.5 rounded">
-                        {child.relationship}
-                      </span>
-                    )}
                   </div>
                 </div>
-                
-                <div className="grid grid-cols-2 gap-3 mt-3">
+                <div className="grid grid-cols-3 gap-2">
                   <div className="bg-blue-50 p-2 rounded-lg text-center">
                     <p className="text-xs text-blue-600">Average</p>
                     <p className="text-lg font-bold text-blue-700">{avgScore}%</p>
@@ -2975,19 +3122,18 @@ const DashboardModule = ({
                     <p className="text-xs text-green-600">Attendance</p>
                     <p className="text-lg font-bold text-green-700">{childAttendance.length}</p>
                   </div>
+                  <div className={`${balance > 0 ? 'bg-red-50' : 'bg-emerald-50'} p-2 rounded-lg text-center`}>
+                    <p className={`text-xs ${balance > 0 ? 'text-red-600' : 'text-emerald-600'}`}>Balance</p>
+                    <p className={`text-sm font-bold ${balance > 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                      {balance > 0 ? formatCurrency(balance) : '✓'}
+                    </p>
+                  </div>
                 </div>
-                
                 <div className="mt-4 flex space-x-2">
-                  <button 
-                    onClick={() => setActiveModule?.('attendance', { studentId: child.id })}
-                    className="flex-1 py-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 text-sm font-medium"
-                  >
+                  <button onClick={() => setActiveModule?.('attendance', { studentId: child.id })} className="flex-1 py-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 text-sm font-medium">
                     <i className="fas fa-calendar-check mr-1"></i> Attendance
                   </button>
-                  <button 
-                    onClick={() => setActiveModule?.('results', { studentId: child.id })}
-                    className="flex-1 py-2 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 text-sm font-medium"
-                  >
+                  <button onClick={() => setActiveModule?.('results', { studentId: child.id })} className="flex-1 py-2 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 text-sm font-medium">
                     <i className="fas fa-file-alt mr-1"></i> Results
                   </button>
                 </div>
@@ -2999,206 +3145,13 @@ const DashboardModule = ({
     );
   }
 
-  // ==================== TEACHER DASHBOARD ====================
-  if (userRole?.isTeacher && (schoolCategory.isSecondary || schoolCategory.isPrimary)) {
-    const teacher = staff?.find(s => s.userId === user.id);
-    const mySubjects = subjects?.filter(s => s.teacherId === teacher?.userId || s.teacherId === user.id) || [];
-    const myClasses = [...new Set(mySubjects.map(s => s.classId))].map(id => 
-      classes?.find(c => c.id === id)
-    ).filter(Boolean);
-    
-    const studentsInMyClasses = students?.filter(s => myClasses.some(c => c.id === s.classId)) || [];
-
-    return (
-      <div className="space-y-6">
-        <div className="bg-gradient-to-r from-blue-600 to-cyan-600 rounded-xl p-6 text-white">
-          <h2 className="text-3xl font-bold">Teacher Dashboard</h2>
-          <p className="text-blue-100">Welcome back, {teacher?.user?.firstName || user.firstName}!</p>
-          <p className="text-blue-200 text-sm mt-1">{teacher?.jobTitle || 'Teacher'}</p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <StatCard title="Subjects" value={mySubjects.length} icon="book" color="blue" />
-          <StatCard title="Classes" value={myClasses.length} icon="school" color="green" />
-          <StatCard title="Students" value={studentsInMyClasses.length} icon="users" color="purple" />
-        </div>
-
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <QuickActionCard icon="calendar-check" label="Take Attendance" color="green" moduleId="attendance" />
-            <QuickActionCard icon="edit" label="Enter Results" color="blue" moduleId="results" />
-            <QuickActionCard icon="clock" label="My Timetable" color="purple" moduleId="timetable" />
-            <QuickActionCard icon="users" label="My Students" color="orange" moduleId="students" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ==================== LECTURER DASHBOARD ====================
-  if (userRole?.isLecturer && (schoolCategory.isUniversity || schoolCategory.isTVET)) {
-    const lecturer = staff?.find(s => s.userId === user.id);
-    const myUnits = units?.filter(u => u.lecturerId === lecturer?.id) || [];
-    const myExams = exams?.filter(e => e.lecturerId === lecturer?.id || e.createdBy === user.id) || [];
-    const upcomingExams = myExams?.filter(e => new Date(e.date) > new Date()) || [];
-    const studentCount = students?.filter(s => 
-      myUnits.some(u => u.courseId === s.courseId || u.programId === s.programId)
-    ).length || 0;
-
-    return (
-      <div className="space-y-6">
-        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl p-6 text-white">
-          <h2 className="text-3xl font-bold">Lecturer Dashboard</h2>
-          <p className="text-indigo-100">Welcome back, {lecturer?.user?.firstName || user.firstName}!</p>
-          <p className="text-indigo-200 text-sm mt-1">{lecturer?.jobTitle || 'Lecturer'}</p>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard title="Units" value={myUnits.length} icon="book-open" color="blue" />
-          <StatCard title="Exams" value={myExams.length} icon="file-alt" color="orange" />
-          <StatCard title="Upcoming Exams" value={upcomingExams.length} icon="calendar" color="yellow" />
-          <StatCard title="Students" value={studentCount} icon="users" color="green" />
-        </div>
-
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <QuickActionCard icon="plus-circle" label="Create Exam" color="orange" moduleId="exams" />
-            <QuickActionCard icon="edit" label="Enter Results" color="blue" moduleId="results" />
-            <QuickActionCard icon="calendar-check" label="Take Attendance" color="green" moduleId="attendance" />
-            <QuickActionCard icon="clock" label="My Timetable" color="purple" moduleId="timetable" />
-            <QuickActionCard icon="book-open" label="My Units" color="indigo" moduleId="course-units" />
-          </div>
-        </div>
-
-        {/* Upcoming Exams */}
-        {upcomingExams.length > 0 && (
-          <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-            <div className="px-6 py-4 bg-orange-50 border-b">
-              <h3 className="font-semibold text-lg flex items-center">
-                <i className="fas fa-calendar-alt text-orange-600 mr-2"></i>
-                Upcoming Exams ({upcomingExams.length})
-              </h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-2 text-left">Exam Name</th>
-                    <th className="px-4 py-2 text-left">Date</th>
-                    <th className="px-4 py-2 text-left">Type</th>
-                    <th className="px-4 py-2 text-left">Unit/Module</th>
-                    <th className="px-4 py-2 text-left">Room</th>
-                    <th className="px-4 py-2 text-left">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {upcomingExams.slice(0, 5).map(exam => {
-                    const unitName = units?.find(u => u.id === exam.unitId)?.name || 'N/A';
-                    return (
-                      <tr key={exam.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-2 font-medium">{exam.name}</td>
-                        <td className="px-4 py-2">{new Date(exam.date).toLocaleDateString()}</td>
-                        <td className="px-4 py-2">
-                          <span className="px-2 py-1 bg-orange-100 text-orange-800 rounded-full text-xs">
-                            {exam.type}
-                          </span>
-                        </td>
-                        <td className="px-4 py-2">{unitName}</td>
-                        <td className="px-4 py-2">{exam.examHall || 'TBA'}</td>
-                        <td className="px-4 py-2">
-                          <button 
-                            onClick={() => setActiveModule?.('exams')}
-                            className="text-indigo-600 hover:text-indigo-800 text-sm mr-2"
-                          >
-                            Manage
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {upcomingExams.length > 5 && (
-              <div className="px-6 py-3 bg-gray-50 text-center">
-                <button 
-                  onClick={() => setActiveModule?.('exams')}
-                  className="text-indigo-600 hover:text-indigo-800 text-sm"
-                >
-                  View all {upcomingExams.length} upcoming exams →
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* My Units */}
-        {myUnits.length > 0 && (
-          <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-            <div className="px-6 py-4 bg-blue-50 border-b">
-              <h3 className="font-semibold text-lg">My Units/Modules</h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-2 text-left">Code</th>
-                    <th className="px-4 py-2 text-left">Unit Name</th>
-                    <th className="px-4 py-2 text-left">Year</th>
-                    <th className="px-4 py-2 text-left">Semester/Module</th>
-                    <th className="px-4 py-2 text-left">Credits</th>
-                    <th className="px-4 py-2 text-left">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {myUnits.slice(0, 5).map(unit => (
-                    <tr key={unit.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-2 font-mono">{unit.code || 'N/A'}</td>
-                      <td className="px-4 py-2 font-medium text-indigo-600">{unit.name}</td>
-                      <td className="px-4 py-2">Year {unit.year || 'N/A'}</td>
-                      <td className="px-4 py-2">
-                        {schoolCategory.isUniversity 
-                          ? `Semester ${unit.semester || 'N/A'}` 
-                          : `Module ${unit.module || 'N/A'}`}
-                      </td>
-                      <td className="px-4 py-2">{unit.credits || 'N/A'}</td>
-                      <td className="px-4 py-2">
-                        <button 
-                          onClick={() => setActiveModule?.('course-units')}
-                          className="text-indigo-600 hover:text-indigo-800 text-sm"
-                        >
-                          Manage
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {myUnits.length > 5 && (
-              <div className="px-6 py-3 bg-gray-50 text-center">
-                <button 
-                  onClick={() => setActiveModule?.('course-units')}
-                  className="text-indigo-600 hover:text-indigo-800 text-sm"
-                >
-                  View all {myUnits.length} units →
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
-
   // ==================== NURSE DASHBOARD ====================
   if (userRole?.isNurse) {
-    const totalStudents = students?.length || 0;
-    const recentHealthRecords = healthRecords?.slice(0, 5) || [];
-    const pendingFollowUps = healthRecords?.filter(r => r.status === 'FOLLOW_UP') || [];
-    const todayVisits = healthRecords?.filter(r => r.date === new Date().toISOString().split('T')[0]) || [];
+    const totalStudents = S.length;
+    const recentHealthRecords = HEALTH.slice(0, 5);
+    const pendingFollowUps = HEALTH.filter(r => r.status === 'FOLLOW_UP');
+    const todayStr = new Date().toISOString().split('T')[0];
+    const todayVisits = HEALTH.filter(r => r.date === todayStr);
 
     return (
       <div className="space-y-6">
@@ -3207,14 +3160,12 @@ const DashboardModule = ({
           <p className="text-teal-100">Welcome back, Nurse {user?.firstName} {user?.lastName}!</p>
           <p className="text-teal-200 text-sm mt-1">Student Health Management</p>
         </div>
-
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard title="Total Students" value={totalStudents} icon="users" color="blue" />
           <StatCard title="Today's Visits" value={todayVisits.length} icon="stethoscope" color="green" />
           <StatCard title="Follow-ups" value={pendingFollowUps.length} icon="calendar-check" color="orange" />
-          <StatCard title="Health Records" value={healthRecords?.length || 0} icon="file-alt" color="purple" />
+          <StatCard title="Health Records" value={HEALTH.length} icon="file-alt" color="purple" />
         </div>
-
         <div className="bg-white rounded-xl shadow-sm p-6">
           <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -3223,196 +3174,69 @@ const DashboardModule = ({
             <QuickActionCard icon="bed" label="Sick Bay" color="purple" moduleId="sickbay" />
           </div>
         </div>
-
-        {/* Recent Health Records */}
         {recentHealthRecords.length > 0 && (
-          <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-            <div className="px-6 py-4 bg-gray-50 border-b">
-              <h3 className="font-semibold text-lg">Recent Health Records</h3>
-            </div>
+          <Card title="Recent Health Records" icon="notes-medical">
             <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
+              <table className="w-full text-sm">
+                <thead className="text-xs text-gray-500 uppercase">
                   <tr>
-                    <th className="px-4 py-2 text-left">Date</th>
-                    <th className="px-4 py-2 text-left">Student</th>
-                    <th className="px-4 py-2 text-left">Diagnosis</th>
-                    <th className="px-4 py-2 text-left">Status</th>
-                    <th className="px-4 py-2 text-left">Actions</th>
+                    <th className="text-left py-2">Date</th>
+                    <th className="text-left py-2">Student</th>
+                    <th className="text-left py-2">Diagnosis</th>
+                    <th className="text-left py-2">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {recentHealthRecords.map(record => (
-                    <tr key={record.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-2">{new Date(record.date).toLocaleDateString()}</td>
-                      <td className="px-4 py-2">{record.Student?.firstName} {record.Student?.lastName}</td>
-                      <td className="px-4 py-2 truncate max-w-xs">{record.diagnosis}</td>
-                      <td className="px-4 py-2">
+                    <tr key={record.id}>
+                      <td className="py-2">{formatDate(record.date)}</td>
+                      <td className="py-2">{record.Student?.firstName} {record.Student?.lastName}</td>
+                      <td className="py-2 truncate max-w-xs">{record.diagnosis}</td>
+                      <td className="py-2">
                         <span className={`px-2 py-1 rounded-full text-xs ${
                           record.status === 'TREATED' ? 'bg-green-100 text-green-800' :
                           record.status === 'REFERRED' ? 'bg-yellow-100 text-yellow-800' :
                           record.status === 'FOLLOW_UP' ? 'bg-blue-100 text-blue-800' :
                           record.status === 'ADMITTED' ? 'bg-red-100 text-red-800' :
                           'bg-gray-100 text-gray-800'
-                        }`}>
-                          {record.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2">
-                        <button 
-                          onClick={() => setActiveModule?.('health')}
-                          className="text-indigo-600 hover:text-indigo-800 text-sm"
-                        >
-                          View
-                        </button>
+                        }`}>{record.status}</span>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </div>
+          </Card>
         )}
       </div>
     );
   }
 
-  // ==================== PRINCIPAL DASHBOARD ====================
-  if (userRole?.isPrincipal) {
-    const totalStudents = students?.length || 0;
-    const totalStaff = staff?.length || 0;
-    const totalClasses = classes?.length || 0;
-    const totalFeesAmount = fees?.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0) || 0;
-    const totalPaymentsAmount = payments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
-    const collectionRate = totalFeesAmount > 0 ? ((totalPaymentsAmount / totalFeesAmount) * 100).toFixed(1) : 0;
-    const upcomingExams = exams?.filter(e => new Date(e.date) > new Date()).length || 0;
+  // ==================== LIBRARIAN DASHBOARD ====================
+  if (userRole?.isLibrarian) {
+    const totalBooks = BOOKS.reduce((sum, b) => sum + (b.quantity || 0), 0);
+    const availableBooks = BOOKS.reduce((sum, b) => sum + (b.available || 0), 0);
+    const borrowedBooks = BORROWS.filter(b => b.status === 'BORROWED').length;
+    const overdueBooks = BORROWS.filter(b => b.status === 'BORROWED' && new Date(b.dueDate) < new Date()).length;
 
     return (
       <div className="space-y-6">
-        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl p-6 text-white">
-          <h2 className="text-3xl font-bold">Principal Dashboard</h2>
-          <p className="text-blue-100">Welcome back, {user?.firstName} {user?.lastName}!</p>
-          <p className="text-blue-200 text-sm mt-1">{currentSchool?.name || 'School'}</p>
+        <div className="bg-gradient-to-r from-amber-600 to-orange-600 rounded-xl p-6 text-white">
+          <h2 className="text-3xl font-bold">Library Dashboard</h2>
+          <p className="text-amber-100">Welcome back, {user?.firstName} {user?.lastName}!</p>
         </div>
-
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard title="Students" value={totalStudents} icon="users" color="blue" />
-          <StatCard title="Staff" value={totalStaff} icon="chalkboard-teacher" color="green" />
-          <StatCard title="Classes" value={totalClasses} icon="school" color="purple" />
-          <StatCard title="Collection Rate" value={`${collectionRate}%`} icon="money-bill" color="orange" />
+          <StatCard title="Total Books" value={totalBooks} icon="book" color="blue" />
+          <StatCard title="Available" value={availableBooks} icon="check-circle" color="green" />
+          <StatCard title="Borrowed" value={borrowedBooks} icon="hand-holding" color="orange" />
+          <StatCard title="Overdue" value={overdueBooks} icon="exclamation-triangle" color="red" />
         </div>
-
         <div className="bg-white rounded-xl shadow-sm p-6">
           <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <QuickActionCard icon="user-graduate" label="Students" color="blue" moduleId="students" />
-            <QuickActionCard icon="chalkboard-teacher" label="Staff" color="green" moduleId="staff" />
-            <QuickActionCard icon="file-alt" label="Reports" color="purple" moduleId="reports" />
-            <QuickActionCard icon="bullhorn" label="Announcements" color="orange" moduleId="announcements" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ==================== DEPUTY PRINCIPAL DASHBOARD ====================
-  if (userRole?.isDeputyPrincipal) {
-    const totalStudents = students?.length || 0;
-    const totalClasses = classes?.length || 0;
-    const todayAttendance = attendance?.filter(a => a.date === new Date().toISOString().split('T')[0]).length || 0;
-    const presentToday = attendance?.filter(a => a.date === new Date().toISOString().split('T')[0] && a.status === 'PRESENT').length || 0;
-    const attendanceRate = todayAttendance > 0 ? ((presentToday / todayAttendance) * 100).toFixed(1) : 0;
-    const upcomingExams = exams?.filter(e => new Date(e.date) > new Date()).length || 0;
-
-    return (
-      <div className="space-y-6">
-        <div className="bg-gradient-to-r from-cyan-600 to-teal-600 rounded-xl p-6 text-white">
-          <h2 className="text-3xl font-bold">Deputy Principal Dashboard</h2>
-          <p className="text-cyan-100">Welcome back, {user?.firstName} {user?.lastName}!</p>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard title="Students" value={totalStudents} icon="users" color="blue" />
-          <StatCard title="Classes" value={totalClasses} icon="school" color="green" />
-          <StatCard title="Today's Attendance" value={`${attendanceRate}%`} icon="calendar-check" color="purple" />
-          <StatCard title="Upcoming Exams" value={upcomingExams} icon="file-alt" color="orange" />
-        </div>
-
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <QuickActionCard icon="calendar-check" label="Attendance" color="green" moduleId="attendance" />
-            <QuickActionCard icon="clock" label="Timetable" color="blue" moduleId="timetable" />
-            <QuickActionCard icon="file-alt" label="Exams" color="purple" moduleId="exams" />
-            <QuickActionCard icon="gavel" label="Discipline" color="orange" moduleId="discipline" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ==================== DEAN DASHBOARD ====================
-  if (userRole?.isDean) {
-    const facultiesCount = faculties?.length || 0;
-    const departmentsCount = departments?.length || 0;
-    const coursesCount = courses?.length || 0;
-    const researchCount = research?.length || 0;
-
-    return (
-      <div className="space-y-6">
-        <div className="bg-gradient-to-r from-purple-600 to-pink-600 rounded-xl p-6 text-white">
-          <h2 className="text-3xl font-bold">Dean Dashboard</h2>
-          <p className="text-purple-100">Welcome back, Dean {user?.firstName} {user?.lastName}!</p>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard title="Faculties" value={facultiesCount} icon="building" color="blue" />
-          <StatCard title="Departments" value={departmentsCount} icon="layer-group" color="green" />
-          <StatCard title="Courses" value={coursesCount} icon="graduation-cap" color="purple" />
-          <StatCard title="Research" value={researchCount} icon="flask" color="orange" />
-        </div>
-
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <QuickActionCard icon="building" label="Faculties" color="blue" moduleId="faculties" />
-            <QuickActionCard icon="layer-group" label="Departments" color="green" moduleId="departments" />
-            <QuickActionCard icon="graduation-cap" label="Courses" color="purple" moduleId="courses" />
-            <QuickActionCard icon="flask" label="Research" color="orange" moduleId="research" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ==================== HOD DASHBOARD ====================
-  if (userRole?.isHOD) {
-    const hodStaff = staff?.filter(s => s.departmentId === user?.departmentId) || [];
-    const departmentCourses = courses?.filter(c => c.departmentId === user?.departmentId) || [];
-    const departmentStudents = students?.filter(s => s.departmentId === user?.departmentId) || [];
-    const departmentUnits = units?.filter(u => u.departmentId === user?.departmentId) || [];
-
-    return (
-      <div className="space-y-6">
-        <div className="bg-gradient-to-r from-indigo-600 to-blue-600 rounded-xl p-6 text-white">
-          <h2 className="text-3xl font-bold">Head of Department Dashboard</h2>
-          <p className="text-indigo-100">Welcome back, {user?.firstName} {user?.lastName}!</p>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard title="Staff" value={hodStaff.length} icon="chalkboard-teacher" color="blue" />
-          <StatCard title="Courses" value={departmentCourses.length} icon="book" color="green" />
-          <StatCard title="Students" value={departmentStudents.length} icon="users" color="purple" />
-          <StatCard title="Units" value={departmentUnits.length} icon="book-open" color="orange" />
-        </div>
-
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <QuickActionCard icon="chalkboard-teacher" label="Staff" color="blue" moduleId="staff" />
-            <QuickActionCard icon="book" label="Courses" color="green" moduleId="courses" />
-            <QuickActionCard icon="book-open" label="Units" color="purple" moduleId="course-units" />
-            <QuickActionCard icon="users" label="Students" color="orange" moduleId="students" />
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <QuickActionCard icon="plus" label="Add Book" color="blue" moduleId="library" />
+            <QuickActionCard icon="hand-holding" label="Borrow" color="green" moduleId="library" />
+            <QuickActionCard icon="undo-alt" label="Return" color="orange" moduleId="library" />
           </div>
         </div>
       </div>
@@ -3421,13 +3245,13 @@ const DashboardModule = ({
 
   // ==================== MATRON DASHBOARD ====================
   if (userRole?.isMatron) {
-    const totalHostels = hostels?.length || 0;
-    const totalRooms = hostels?.reduce((sum, h) => sum + (h.rooms?.length || 0), 0) || 0;
-    const totalBeds = hostels?.reduce((sum, h) => sum + (h.capacity || 0), 0) || 0;
-    const occupiedBeds = hostels?.reduce((sum, h) => {
+    const totalHostels = HOSTELS.length;
+    const totalRooms = HOSTELS.reduce((sum, h) => sum + (h.rooms?.length || 0), 0);
+    const totalBeds = HOSTELS.reduce((sum, h) => sum + (h.capacity || 0), 0);
+    const occupiedBeds = HOSTELS.reduce((sum, h) => {
       const occupied = h.rooms?.reduce((s, r) => s + (r.occupied || 0), 0) || 0;
       return sum + occupied;
-    }, 0) || 0;
+    }, 0);
     const occupancyRate = totalBeds > 0 ? ((occupiedBeds / totalBeds) * 100).toFixed(1) : 0;
 
     return (
@@ -3436,14 +3260,12 @@ const DashboardModule = ({
           <h2 className="text-3xl font-bold">Matron Dashboard</h2>
           <p className="text-pink-100">Welcome back, Matron {user?.firstName} {user?.lastName}!</p>
         </div>
-
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard title="Hostels" value={totalHostels} icon="bed" color="blue" />
           <StatCard title="Rooms" value={totalRooms} icon="door-open" color="green" />
           <StatCard title="Occupancy" value={`${occupancyRate}%`} icon="users" color="purple" />
           <StatCard title="Available Beds" value={totalBeds - occupiedBeds} icon="bed-empty" color="orange" />
         </div>
-
         <div className="bg-white rounded-xl shadow-sm p-6">
           <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -3458,11 +3280,11 @@ const DashboardModule = ({
 
   // ==================== TRANSPORT MANAGER DASHBOARD ====================
   if (userRole?.isTransportManager) {
-    const totalVehicles = vehicles?.length || 0;
-    const activeVehicles = vehicles?.filter(v => v.status === 'ACTIVE').length || 0;
-    const maintenanceVehicles = vehicles?.filter(v => v.status === 'MAINTENANCE').length || 0;
-    const totalRoutes = routes?.length || 0;
-    const studentsOnTransport = students?.filter(s => s.transportRouteId).length || 0;
+    const totalVehicles = VEH.length;
+    const activeVehicles = VEH.filter(v => v.status === 'ACTIVE').length;
+    const maintenanceVehicles = VEH.filter(v => v.status === 'MAINTENANCE').length;
+    const totalRoutes = ROUTES.length;
+    const studentsOnTransport = S.filter(s => s.transportRouteId).length;
 
     return (
       <div className="space-y-6">
@@ -3470,14 +3292,12 @@ const DashboardModule = ({
           <h2 className="text-3xl font-bold">Transport Manager Dashboard</h2>
           <p className="text-amber-100">Welcome back, {user?.firstName} {user?.lastName}!</p>
         </div>
-
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard title="Vehicles" value={totalVehicles} icon="bus" color="blue" />
           <StatCard title="Active" value={activeVehicles} icon="check-circle" color="green" />
           <StatCard title="Maintenance" value={maintenanceVehicles} icon="wrench" color="orange" />
-          <StatCard title="Routes" value={totalRoutes} icon="route" color="purple" />
+          <StatCard title="Routes" value={totalRoutes} icon="route" color="purple" subtitle={`${studentsOnTransport} students`} />
         </div>
-
         <div className="bg-white rounded-xl shadow-sm p-6">
           <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -3492,11 +3312,12 @@ const DashboardModule = ({
 
   // ==================== HR MANAGER DASHBOARD ====================
   if (userRole?.isHR) {
-    const totalStaff = staff?.length || 0;
-    const teachingStaff = staff?.filter(s => s.staffType === 'TEACHING').length || 0;
-    const nonTeachingStaff = staff?.filter(s => s.staffType === 'NON_TEACHING').length || 0;
-    const pendingApprovals = staffAttendance?.filter(a => a.approvalStatus === 'PENDING').length || 0;
-    const todayPresent = staffAttendance?.filter(a => a.date === new Date().toISOString().split('T')[0] && a.status === 'PRESENT' && a.approved).length || 0;
+    const totalStaff = ST.length;
+    const teachingStaff = ST.filter(s => s.staffType === 'TEACHING').length;
+    const nonTeachingStaff = ST.filter(s => s.staffType === 'NON_TEACHING').length;
+    const pendingApprovals = STAFF_ATT.filter(a => a.approvalStatus === 'PENDING').length;
+    const todayStr = new Date().toISOString().split('T')[0];
+    const todayPresent = STAFF_ATT.filter(a => a.date === todayStr && a.status === 'PRESENT' && a.approved).length;
 
     return (
       <div className="space-y-6">
@@ -3504,14 +3325,12 @@ const DashboardModule = ({
           <h2 className="text-3xl font-bold">HR Manager Dashboard</h2>
           <p className="text-gray-300">Welcome back, {user?.firstName} {user?.lastName}!</p>
         </div>
-
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard title="Total Staff" value={totalStaff} icon="users" color="blue" />
           <StatCard title="Teaching" value={teachingStaff} icon="chalkboard-teacher" color="green" />
           <StatCard title="Non-Teaching" value={nonTeachingStaff} icon="briefcase" color="purple" />
-          <StatCard title="Pending Approvals" value={pendingApprovals} icon="clock" color="orange" />
+          <StatCard title="Pending Approvals" value={pendingApprovals} icon="clock" color="orange" subtitle={`${todayPresent} present today`} />
         </div>
-
         <div className="bg-white rounded-xl shadow-sm p-6">
           <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -3524,121 +3343,12 @@ const DashboardModule = ({
     );
   }
 
-  // ==================== INSTRUCTOR/TRAINER DASHBOARD ====================
-  if (userRole?.role === 'INSTRUCTOR' || userRole?.role === 'TRAINER' || userRole?.role === 'WORKSHOP_SUPERVISOR') {
-    const instructor = staff?.find(s => s.userId === user.id);
-    const myUnits = units?.filter(u => u.instructorId === instructor?.id) || [];
-    const myExams = exams?.filter(e => e.instructorId === instructor?.id) || [];
-    const upcomingExams = myExams?.filter(e => new Date(e.date) > new Date()) || [];
-    const myLabs = labs?.filter(l => l.incharge === instructor?.user?.firstName) || [];
-
-    return (
-      <div className="space-y-6">
-        <div className="bg-gradient-to-r from-orange-600 to-red-600 rounded-xl p-6 text-white">
-          <h2 className="text-3xl font-bold">Instructor Dashboard</h2>
-          <p className="text-orange-100">Welcome back, {instructor?.user?.firstName || user.firstName}!</p>
-          <p className="text-orange-200 text-sm mt-1">{instructor?.jobTitle || 'Instructor'}</p>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard title="Modules" value={myUnits.length} icon="book-open" color="blue" />
-          <StatCard title="Exams" value={myExams.length} icon="file-alt" color="orange" />
-          <StatCard title="Upcoming Exams" value={upcomingExams.length} icon="calendar" color="yellow" />
-          <StatCard title="Labs" value={myLabs.length} icon="microscope" color="green" />
-        </div>
-
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <QuickActionCard icon="plus-circle" label="Create Exam" color="orange" moduleId="exams" />
-            <QuickActionCard icon="edit" label="Enter Results" color="blue" moduleId="results" />
-            <QuickActionCard icon="calendar-check" label="Take Attendance" color="green" moduleId="attendance" />
-            <QuickActionCard icon="clock" label="My Timetable" color="purple" moduleId="timetable" />
-          </div>
-        </div>
-
-        {/* Upcoming Exams */}
-        {upcomingExams.length > 0 && (
-          <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-            <div className="px-6 py-4 bg-orange-50 border-b">
-              <h3 className="font-semibold text-lg">Upcoming Exams</h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-2 text-left">Exam Name</th>
-                    <th className="px-4 py-2 text-left">Date</th>
-                    <th className="px-4 py-2 text-left">Module</th>
-                    <th className="px-4 py-2 text-left">Room</th>
-                    <th className="px-4 py-2 text-left">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {upcomingExams.slice(0, 5).map(exam => {
-                    const unitName = units?.find(u => u.id === exam.unitId)?.name || 'N/A';
-                    return (
-                      <tr key={exam.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-2 font-medium">{exam.name}</td>
-                        <td className="px-4 py-2">{new Date(exam.date).toLocaleDateString()}</td>
-                        <td className="px-4 py-2">{unitName}</td>
-                        <td className="px-4 py-2">{exam.examHall || 'TBA'}</td>
-                        <td className="px-4 py-2">
-                          <button onClick={() => setActiveModule?.('exams')} className="text-indigo-600 hover:text-indigo-800 text-sm">
-                            Manage
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // ==================== LIBRARIAN DASHBOARD ====================
-  if (userRole?.isLibrarian) {
-    const totalBooks = books?.reduce((sum, b) => sum + (b.quantity || 0), 0) || 0;
-    const availableBooks = books?.reduce((sum, b) => sum + (b.available || 0), 0) || 0;
-    const borrowedBooks = borrows?.filter(b => b.status === 'BORROWED').length || 0;
-    const overdueBooks = borrows?.filter(b => b.status === 'BORROWED' && new Date(b.dueDate) < new Date()).length || 0;
-
-    return (
-      <div className="space-y-6">
-        <div className="bg-gradient-to-r from-amber-600 to-orange-600 rounded-xl p-6 text-white">
-          <h2 className="text-3xl font-bold">Library Dashboard</h2>
-          <p className="text-amber-100">Welcome back, {user?.firstName} {user?.lastName}!</p>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard title="Total Books" value={totalBooks} icon="book" color="blue" />
-          <StatCard title="Available" value={availableBooks} icon="check-circle" color="green" />
-          <StatCard title="Borrowed" value={borrowedBooks} icon="hand-holding" color="orange" />
-          <StatCard title="Overdue" value={overdueBooks} icon="exclamation-triangle" color="red" />
-        </div>
-
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            <QuickActionCard icon="plus" label="Add Book" color="blue" moduleId="library" />
-            <QuickActionCard icon="hand-holding" label="Borrow" color="green" moduleId="library" />
-            <QuickActionCard icon="undo-alt" label="Return" color="orange" moduleId="library" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // ==================== ACCOUNTANT DASHBOARD ====================
   if (userRole?.isAccountant) {
-    const totalFees = fees?.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0) || 0;
-    const totalPayments = payments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
-    const totalExpenses = expenses?.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0) || 0;
-    const collectionRate = totalFees > 0 ? ((totalPayments / totalFees) * 100).toFixed(1) : 0;
+    const totalFees = adminAnalytics.totalFeesAmount;
+    const totalPayments = adminAnalytics.totalCollected;
+    const totalExpenses = EXP.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0);
+    const collectionRate = adminAnalytics.collectionRate;
 
     return (
       <div className="space-y-6">
@@ -3646,12 +3356,39 @@ const DashboardModule = ({
           <h2 className="text-3xl font-bold">Accountant Dashboard</h2>
           <p className="text-green-100">Welcome back, {user?.firstName} {user?.lastName}!</p>
         </div>
-
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard title="Total Fees" value={formatCurrency(totalFees)} icon="money-bill" color="purple" />
-          <StatCard title="Collected" value={formatCurrency(totalPayments)} icon="check-circle" color="green" />
+          <StatCard title="Collected" value={formatCurrency(totalPayments)} icon="check-circle" color="green" trend={adminAnalytics.feeGrowth} />
           <StatCard title="Expenses" value={formatCurrency(totalExpenses)} icon="receipt" color="red" />
           <StatCard title="Collection Rate" value={`${collectionRate}%`} icon="chart-line" color="blue" />
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card title="Fee Collection Trend (6 months)" icon="chart-bar">
+            <MiniBarChart data={adminAnalytics.feeTrend} color="#10b981" />
+          </Card>
+          <Card title="Top Outstanding Balances" icon="exclamation-triangle">
+            {adminAnalytics.studentBalances.length === 0 ? (
+              <p className="text-center text-sm text-gray-500 py-6">🎉 No outstanding balances</p>
+            ) : (
+              <div className="space-y-3">
+                {adminAnalytics.studentBalances.map(s => (
+                  <div key={s.id} className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-8 h-8 bg-red-100 text-red-600 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">
+                        {s.firstName?.[0]}{s.lastName?.[0]}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{s.firstName} {s.lastName}</p>
+                        <p className="text-xs text-gray-500 truncate">{s.admissionNumber}</p>
+                      </div>
+                    </div>
+                    <span className="text-sm font-bold text-red-600 flex-shrink-0">{formatCurrency(s.balance)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm p-6">
@@ -3667,12 +3404,315 @@ const DashboardModule = ({
     );
   }
 
-  // ==================== SCHOOL ADMIN DASHBOARD ====================
-  if (userRole?.isAdmin && !userRole?.isPrincipal && !userRole?.isDean && !userRole?.isHOD) {
-    const totalStudents = students?.length || 0;
-    const totalStaff = staff?.length || 0;
-    const totalFeesAmount = fees?.reduce((sum, f) => sum + parseFloat(f.amount || 0), 0) || 0;
-    const totalPaymentsAmount = payments?.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0) || 0;
+  // ==================== PRINCIPAL DASHBOARD ====================
+  if (userRole?.isPrincipal) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl p-6 text-white">
+          <h2 className="text-3xl font-bold">Principal Dashboard</h2>
+          <p className="text-blue-100">Welcome back, {user?.firstName} {user?.lastName}!</p>
+          <p className="text-blue-200 text-sm mt-1">{currentSchool?.name}</p>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard title="Students" value={adminAnalytics.totalStudents} icon="users" color="blue" trend={adminAnalytics.studentGrowth} subtitle={`${adminAnalytics.studentsThisMonth} new this month`} />
+          <StatCard title="Staff" value={adminAnalytics.totalStaff} icon="chalkboard-teacher" color="green" subtitle={`${adminAnalytics.teachingStaff} teaching`} />
+          <StatCard title="Collection Rate" value={`${adminAnalytics.collectionRate}%`} icon="money-bill" color="orange" />
+          <StatCard title="Attendance Today" value={`${adminAnalytics.attendanceRate}%`} icon="calendar-check" color="purple" />
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card title="Fee Collection (6 months)" icon="chart-bar">
+            <MiniBarChart data={adminAnalytics.feeTrend} color="#4f46e5" />
+          </Card>
+          <Card title="Attendance Trend (14 days)" icon="chart-line">
+            <MiniLineChart data={adminAnalytics.attendanceTrend} color="#10b981" />
+          </Card>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <Card title="Enrollment by Class" icon="users">
+            <div className="space-y-3">
+              {adminAnalytics.enrollmentByClass.map(c => (
+                <div key={c.id}>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="text-gray-700">{c.name}</span>
+                    <span className="font-bold text-gray-800">{c.count}</span>
+                  </div>
+                  <ProgressBar value={c.count} max={Math.max(...adminAnalytics.enrollmentByClass.map(x => x.count), 1)} color="indigo" />
+                </div>
+              ))}
+              {adminAnalytics.enrollmentByClass.length === 0 && <p className="text-center text-sm text-gray-500 py-6">No classes</p>}
+            </div>
+          </Card>
+
+          <Card title="Alerts" icon="bell">
+            <div className="space-y-3 text-sm">
+              {adminAnalytics.pendingApprovals > 0 && (
+                <div className="flex items-center gap-2 text-amber-700">
+                  <i className="fas fa-clock"></i>
+                  <span><strong>{adminAnalytics.pendingApprovals}</strong> pending approvals</span>
+                </div>
+              )}
+              {adminAnalytics.studentBalances.length > 0 && (
+                <div className="flex items-center gap-2 text-red-700">
+                  <i className="fas fa-exclamation-circle"></i>
+                  <span><strong>{adminAnalytics.studentBalances.length}</strong> students with outstanding fees</span>
+                </div>
+              )}
+              {adminAnalytics.lowPerformingClasses.length > 0 && (
+                <div className="flex items-center gap-2 text-orange-700">
+                  <i className="fas fa-chart-line"></i>
+                  <span><strong>{adminAnalytics.lowPerformingClasses.length}</strong> classes below 50% average</span>
+                </div>
+              )}
+              {adminAnalytics.vehiclesNeedingService > 0 && (
+                <div className="flex items-center gap-2 text-amber-700">
+                  <i className="fas fa-wrench"></i>
+                  <span><strong>{adminAnalytics.vehiclesNeedingService}</strong> vehicles need service</span>
+                </div>
+              )}
+              {adminAnalytics.overdueBooks > 0 && (
+                <div className="flex items-center gap-2 text-orange-700">
+                  <i className="fas fa-book"></i>
+                  <span><strong>{adminAnalytics.overdueBooks}</strong> overdue library books</span>
+                </div>
+              )}
+              {adminAnalytics.lowStock > 0 && (
+                <div className="flex items-center gap-2 text-orange-700">
+                  <i className="fas fa-boxes"></i>
+                  <span><strong>{adminAnalytics.lowStock}</strong> low stock items</span>
+                </div>
+              )}
+              {adminAnalytics.pendingApprovals === 0 && adminAnalytics.studentBalances.length === 0 && adminAnalytics.lowPerformingClasses.length === 0 && (
+                <p className="text-center text-green-600 py-6"><i className="fas fa-check-circle mr-2"></i>All clear</p>
+              )}
+            </div>
+          </Card>
+
+          <Card title="Gender Split" icon="venus-mars">
+            <div className="space-y-4">
+              <div>
+                <div className="flex justify-between text-sm mb-1">
+                  <span className="text-blue-700"><i className="fas fa-male mr-1"></i> Male</span>
+                  <span className="font-bold">{adminAnalytics.males}</span>
+                </div>
+                <ProgressBar value={adminAnalytics.males} max={adminAnalytics.totalStudents || 1} color="indigo" />
+              </div>
+              <div>
+                <div className="flex justify-between text-sm mb-1">
+                  <span className="text-pink-700"><i className="fas fa-female mr-1"></i> Female</span>
+                  <span className="font-bold">{adminAnalytics.females}</span>
+                </div>
+                <ProgressBar value={adminAnalytics.females} max={adminAnalytics.totalStudents || 1} color="orange" />
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm p-6">
+          <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <QuickActionCard icon="user-graduate" label="Students" color="blue" moduleId="students" />
+            <QuickActionCard icon="chalkboard-teacher" label="Staff" color="green" moduleId="staff" />
+            <QuickActionCard icon="file-alt" label="Reports" color="purple" moduleId="reports" />
+            <QuickActionCard icon="bullhorn" label="Announcements" color="orange" moduleId="announcements" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ==================== DEPUTY PRINCIPAL ====================
+  if (userRole?.isDeputyPrincipal) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-gradient-to-r from-cyan-600 to-teal-600 rounded-xl p-6 text-white">
+          <h2 className="text-3xl font-bold">Deputy Principal Dashboard</h2>
+          <p className="text-cyan-100">Welcome back, {user?.firstName} {user?.lastName}!</p>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard title="Students" value={adminAnalytics.totalStudents} icon="users" color="blue" />
+          <StatCard title="Classes" value={C.length} icon="school" color="green" />
+          <StatCard title="Today's Attendance" value={`${adminAnalytics.attendanceRate}%`} icon="calendar-check" color="purple" subtitle={`${adminAnalytics.totalTodayMarked} marked`} />
+          <StatCard title="Upcoming Exams" value={EXAMS.filter(e => new Date(e.date) > new Date()).length} icon="file-alt" color="orange" />
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm p-6">
+          <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <QuickActionCard icon="calendar-check" label="Attendance" color="green" moduleId="attendance" />
+            <QuickActionCard icon="clock" label="Timetable" color="blue" moduleId="timetable" />
+            <QuickActionCard icon="file-alt" label="Exams" color="purple" moduleId="exams" />
+            <QuickActionCard icon="gavel" label="Discipline" color="orange" moduleId="discipline" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ==================== DEAN ====================
+  if (userRole?.isDean) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-gradient-to-r from-purple-600 to-pink-600 rounded-xl p-6 text-white">
+          <h2 className="text-3xl font-bold">Dean Dashboard</h2>
+          <p className="text-purple-100">Welcome back, Dean {user?.firstName} {user?.lastName}!</p>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard title="Faculties" value={safeArr(faculties).length} icon="building" color="blue" />
+          <StatCard title="Departments" value={safeArr(departments).length} icon="layer-group" color="green" />
+          <StatCard title="Courses" value={COURSES.length} icon="graduation-cap" color="purple" />
+          <StatCard title="Research" value={safeArr(research).length} icon="flask" color="orange" />
+        </div>
+        <div className="bg-white rounded-xl shadow-sm p-6">
+          <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <QuickActionCard icon="building" label="Faculties" color="blue" moduleId="faculties" />
+            <QuickActionCard icon="layer-group" label="Departments" color="green" moduleId="departments" />
+            <QuickActionCard icon="graduation-cap" label="Courses" color="purple" moduleId="courses" />
+            <QuickActionCard icon="flask" label="Research" color="orange" moduleId="research" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ==================== HOD ====================
+  if (userRole?.isHOD) {
+    const hodStaff = ST.filter(s => s.departmentId === user?.departmentId);
+    const departmentCourses = COURSES.filter(c => c.departmentId === user?.departmentId);
+    const departmentStudents = S.filter(s => s.departmentId === user?.departmentId);
+    const departmentUnits = UNITS.filter(u => u.departmentId === user?.departmentId);
+
+    return (
+      <div className="space-y-6">
+        <div className="bg-gradient-to-r from-indigo-600 to-blue-600 rounded-xl p-6 text-white">
+          <h2 className="text-3xl font-bold">Head of Department Dashboard</h2>
+          <p className="text-indigo-100">Welcome back, {user?.firstName} {user?.lastName}!</p>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard title="Staff" value={hodStaff.length} icon="chalkboard-teacher" color="blue" />
+          <StatCard title="Courses" value={departmentCourses.length} icon="book" color="green" />
+          <StatCard title="Students" value={departmentStudents.length} icon="users" color="purple" />
+          <StatCard title="Units" value={departmentUnits.length} icon="book-open" color="orange" />
+        </div>
+        <div className="bg-white rounded-xl shadow-sm p-6">
+          <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <QuickActionCard icon="chalkboard-teacher" label="Staff" color="blue" moduleId="staff" />
+            <QuickActionCard icon="book" label="Courses" color="green" moduleId="courses" />
+            <QuickActionCard icon="book-open" label="Units" color="purple" moduleId="course-units" />
+            <QuickActionCard icon="users" label="Students" color="orange" moduleId="students" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ==================== TEACHER ====================
+  if (userRole?.isTeacher && (schoolCategory.isSecondary || schoolCategory.isPrimary)) {
+    const teacher = ST.find(s => s.userId === user.id);
+    const mySubjects = SUBJ.filter(s => s.teacherId === teacher?.userId || s.teacherId === user.id);
+    const myClasses = [...new Set(mySubjects.map(s => s.classId))].map(id => C.find(c => c.id === id)).filter(Boolean);
+    const studentsInMyClasses = S.filter(s => myClasses.some(c => c.id === s.classId));
+
+    return (
+      <div className="space-y-6">
+        <div className="bg-gradient-to-r from-blue-600 to-cyan-600 rounded-xl p-6 text-white">
+          <h2 className="text-3xl font-bold">Teacher Dashboard</h2>
+          <p className="text-blue-100">Welcome back, {teacher?.user?.firstName || user.firstName}!</p>
+          <p className="text-blue-200 text-sm mt-1">{teacher?.jobTitle || 'Teacher'}</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <StatCard title="Subjects" value={mySubjects.length} icon="book" color="blue" />
+          <StatCard title="Classes" value={myClasses.length} icon="school" color="green" />
+          <StatCard title="Students" value={studentsInMyClasses.length} icon="users" color="purple" />
+        </div>
+        <div className="bg-white rounded-xl shadow-sm p-6">
+          <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <QuickActionCard icon="calendar-check" label="Take Attendance" color="green" moduleId="attendance" />
+            <QuickActionCard icon="edit" label="Enter Results" color="blue" moduleId="results" />
+            <QuickActionCard icon="clock" label="My Timetable" color="purple" moduleId="timetable" />
+            <QuickActionCard icon="users" label="My Students" color="orange" moduleId="students" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ==================== LECTURER / INSTRUCTOR ====================
+  if (
+    (userRole?.isLecturer && (schoolCategory.isUniversity || schoolCategory.isTVET)) ||
+    ['INSTRUCTOR', 'TRAINER', 'WORKSHOP_SUPERVISOR'].includes(userRole?.role)
+  ) {
+    const isLecturer = userRole?.isLecturer;
+    const me = ST.find(s => s.userId === user.id);
+    const myUnits = isLecturer
+      ? UNITS.filter(u => u.lecturerId === me?.id)
+      : UNITS.filter(u => u.instructorId === me?.id);
+    const myExams = EXAMS.filter(e => (isLecturer ? e.lecturerId : e.instructorId) === me?.id);
+    const upcomingExams = myExams.filter(e => new Date(e.date) > new Date());
+
+    return (
+      <div className="space-y-6">
+        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl p-6 text-white">
+          <h2 className="text-3xl font-bold">{isLecturer ? 'Lecturer' : 'Instructor'} Dashboard</h2>
+          <p className="text-indigo-100">Welcome back, {me?.user?.firstName || user.firstName}!</p>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard title={isLecturer ? 'Units' : 'Modules'} value={myUnits.length} icon="book-open" color="blue" />
+          <StatCard title="Exams" value={myExams.length} icon="file-alt" color="orange" />
+          <StatCard title="Upcoming Exams" value={upcomingExams.length} icon="calendar" color="yellow" />
+          <StatCard title="Students" value={S.length} icon="users" color="green" />
+        </div>
+        <div className="bg-white rounded-xl shadow-sm p-6">
+          <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <QuickActionCard icon="plus-circle" label="Create Exam" color="orange" moduleId="exams" />
+            <QuickActionCard icon="edit" label="Enter Results" color="blue" moduleId="results" />
+            <QuickActionCard icon="calendar-check" label="Take Attendance" color="green" moduleId="attendance" />
+            <QuickActionCard icon="clock" label="My Timetable" color="purple" moduleId="timetable" />
+            <QuickActionCard icon="book-open" label={isLecturer ? 'My Units' : 'My Modules'} color="indigo" moduleId="course-units" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ==================== SUPER ADMIN ====================
+  if (userRole?.isSuperAdmin) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-gradient-to-r from-emerald-600 to-teal-600 rounded-xl p-6 text-white">
+          <h2 className="text-3xl font-bold">Super Admin Dashboard</h2>
+          <p className="text-emerald-100">Welcome back, {user?.firstName} {user?.lastName}!</p>
+          <p className="text-emerald-200 text-sm mt-1">System-wide overview</p>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard title="Schools" value={safeArr(schools).length || 1} icon="university" color="blue" />
+          <StatCard title="Total Students" value={S.length} icon="users" color="green" />
+          <StatCard title="Total Staff" value={ST.length} icon="chalkboard-teacher" color="purple" />
+          <StatCard title="System Status" value="Active" icon="check-circle" color="green" />
+        </div>
+        <div className="bg-white rounded-xl shadow-sm p-6">
+          <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <QuickActionCard icon="university" label="Schools" color="blue" moduleId="schools" />
+            <QuickActionCard icon="users" label="Users" color="green" moduleId="users" />
+            <QuickActionCard icon="chart-line" label="Reports" color="purple" moduleId="reports" />
+            <QuickActionCard icon="cog" label="Settings" color="orange" moduleId="settings" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ==================== SCHOOL ADMIN (RICH) ====================
+  if (userRole?.isAdmin) {
+    const analytics = adminAnalytics;
 
     const getTitle = () => {
       if (schoolCategory.isUniversity) return 'University Dashboard';
@@ -3683,59 +3723,300 @@ const DashboardModule = ({
 
     return (
       <div className="space-y-6">
+        {/* Welcome Header */}
         <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl p-6 text-white">
           <h2 className="text-3xl font-bold">{currentSchool?.name || 'School'} Dashboard</h2>
           <p className="text-indigo-100">Welcome back, {user?.firstName} {user?.lastName}!</p>
           <p className="text-indigo-200 text-sm mt-1">{getTitle()}</p>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard title="Students" value={totalStudents} icon="users" color="blue" />
-          <StatCard title="Staff" value={totalStaff} icon="chalkboard-teacher" color="green" />
-      <StatCard title="Total Fees Allocated" value={formatCurrency(totalFeesAmount)} icon="money-bill" color="purple" />
-          <StatCard title=" Fees Collected" value={formatCurrency(totalPaymentsAmount)} icon="check-circle" color="green" />
+        {/* Top Stat Row — 6 cards */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <StatCard
+            title="Students"
+            value={formatNumber(analytics.totalStudents)}
+            icon="users"
+            color="blue"
+            trend={analytics.studentGrowth}
+            subtitle={`${analytics.studentsThisMonth} new this month`}
+          />
+          <StatCard
+            title="Staff"
+            value={formatNumber(analytics.totalStaff)}
+            icon="chalkboard-teacher"
+            color="green"
+            subtitle={`${analytics.teachingStaff} teaching`}
+          />
+          <StatCard
+            title="Fees Collected"
+            value={formatCurrency(analytics.totalCollected)}
+            icon="money-bill-wave"
+            color="emerald"
+            trend={analytics.feeGrowth}
+            subtitle={`${analytics.collectionRate}% collection rate`}
+          />
+          <StatCard
+            title="Outstanding"
+            value={formatCurrency(analytics.outstanding)}
+            icon="exclamation-triangle"
+            color="red"
+            subtitle={`${analytics.studentBalances.length} students owing`}
+          />
+          <StatCard
+            title="Attendance Today"
+            value={`${analytics.attendanceRate}%`}
+            icon="calendar-check"
+            color="purple"
+            subtitle={`${analytics.totalTodayMarked} marked`}
+          />
+          <StatCard
+            title="Classes"
+            value={formatNumber(C.length)}
+            icon="school"
+            color="orange"
+            subtitle={analytics.enrollmentByClass[0] ? `Largest: ${analytics.enrollmentByClass[0].name}` : 'No classes'}
+          />
         </div>
 
+        {/* Charts Row */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <Card title="Fee Collection (Last 6 Months)" icon="chart-bar">
+            <MiniBarChart data={analytics.feeTrend} color="#10b981" />
+            <p className="text-xs text-gray-500 text-center mt-3">
+              Total: <strong>{formatCurrency(analytics.feeTrend.reduce((s, d) => s + d.value, 0))}</strong>
+            </p>
+          </Card>
+
+          <Card title="Enrollment by Class" icon="users">
+            <div className="space-y-3">
+              {analytics.enrollmentByClass.length === 0 ? (
+                <p className="text-center text-sm text-gray-500 py-6">No classes yet</p>
+              ) : (
+                analytics.enrollmentByClass.map(c => (
+                  <div key={c.id}>
+                    <div className="flex justify-between text-sm mb-1">
+                      <span className="text-gray-700">{c.name}</span>
+                      <span className="font-bold text-gray-800">{c.count} students</span>
+                    </div>
+                    <ProgressBar
+                      value={c.count}
+                      max={Math.max(...analytics.enrollmentByClass.map(x => x.count), 1)}
+                      color="indigo"
+                    />
+                  </div>
+                ))
+              )}
+            </div>
+          </Card>
+
+          <Card title="Attendance Trend (14 Days)" icon="chart-line">
+            <MiniLineChart data={analytics.attendanceTrend} color="#8b5cf6" />
+            <p className="text-xs text-gray-500 text-center mt-3">
+              Average: <strong>
+                {analytics.attendanceTrend.length > 0
+                  ? Math.round(analytics.attendanceTrend.reduce((s, d) => s + d.value, 0) / analytics.attendanceTrend.length)
+                  : 0}%
+              </strong>
+            </p>
+          </Card>
+        </div>
+
+        {/* Alerts + Outstanding + Gender Split */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <Card title="Alerts & Action Items" icon="bell">
+            <div className="space-y-3 text-sm">
+              {analytics.pendingApprovals > 0 && (
+                <div className="flex items-center gap-3 p-2 rounded-lg bg-amber-50 border border-amber-100">
+                  <i className="fas fa-clock text-amber-600"></i>
+                  <span className="text-amber-800"><strong>{analytics.pendingApprovals}</strong> pending approvals</span>
+                </div>
+              )}
+              {analytics.studentBalances.length > 0 && (
+                <div className="flex items-center gap-3 p-2 rounded-lg bg-red-50 border border-red-100">
+                  <i className="fas fa-exclamation-circle text-red-600"></i>
+                  <span className="text-red-800"><strong>{analytics.studentBalances.length}</strong> students with outstanding fees</span>
+                </div>
+              )}
+              {analytics.lowPerformingClasses.length > 0 && (
+                <div className="flex items-center gap-3 p-2 rounded-lg bg-orange-50 border border-orange-100">
+                  <i className="fas fa-chart-line text-orange-600"></i>
+                  <span className="text-orange-800"><strong>{analytics.lowPerformingClasses.length}</strong> classes below 50%</span>
+                </div>
+              )}
+              {analytics.vehiclesNeedingService > 0 && (
+                <div className="flex items-center gap-3 p-2 rounded-lg bg-amber-50 border border-amber-100">
+                  <i className="fas fa-wrench text-amber-600"></i>
+                  <span className="text-amber-800"><strong>{analytics.vehiclesNeedingService}</strong> vehicles need service</span>
+                </div>
+              )}
+              {analytics.overdueBooks > 0 && (
+                <div className="flex items-center gap-3 p-2 rounded-lg bg-orange-50 border border-orange-100">
+                  <i className="fas fa-book text-orange-600"></i>
+                  <span className="text-orange-800"><strong>{analytics.overdueBooks}</strong> overdue library books</span>
+                </div>
+              )}
+              {analytics.lowStock > 0 && (
+                <div className="flex items-center gap-3 p-2 rounded-lg bg-orange-50 border border-orange-100">
+                  <i className="fas fa-boxes text-orange-600"></i>
+                  <span className="text-orange-800"><strong>{analytics.lowStock}</strong> low stock items</span>
+                </div>
+              )}
+              {analytics.pendingApprovals === 0 &&
+               analytics.studentBalances.length === 0 &&
+               analytics.lowPerformingClasses.length === 0 &&
+               analytics.vehiclesNeedingService === 0 &&
+               analytics.overdueBooks === 0 &&
+               analytics.lowStock === 0 && (
+                <div className="text-center py-6">
+                  <i className="fas fa-check-circle text-3xl text-green-500 mb-2"></i>
+                  <p className="text-green-700 font-medium">All systems healthy</p>
+                </div>
+              )}
+            </div>
+          </Card>
+
+          <Card title="Top Outstanding Balances" icon="exclamation-triangle">
+            {analytics.studentBalances.length === 0 ? (
+              <p className="text-center text-sm text-gray-500 py-6">🎉 No outstanding balances</p>
+            ) : (
+              <div className="space-y-3">
+                {analytics.studentBalances.map(s => (
+                  <div key={s.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-9 h-9 bg-red-100 text-red-600 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">
+                        {s.firstName?.[0]}{s.lastName?.[0]}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{s.firstName} {s.lastName}</p>
+                        <p className="text-xs text-gray-500 truncate">{s.admissionNumber}</p>
+                      </div>
+                    </div>
+                    <span className="text-sm font-bold text-red-600 flex-shrink-0">{formatCurrency(s.balance)}</span>
+                  </div>
+                ))}
+                <button
+                  onClick={() => setActiveModule?.('fee-collection')}
+                  className="w-full mt-2 text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+                >
+                  View in Fee Collection →
+                </button>
+              </div>
+            )}
+          </Card>
+
+          <Card title="Student Demographics" icon="venus-mars">
+            <div className="space-y-5">
+              <div>
+                <div className="flex justify-between text-sm mb-1">
+                  <span className="text-blue-700"><i className="fas fa-male mr-1"></i> Male</span>
+                  <span className="font-bold text-gray-700">{analytics.males}</span>
+                </div>
+                <ProgressBar value={analytics.males} max={analytics.totalStudents || 1} color="indigo" />
+              </div>
+              <div>
+                <div className="flex justify-between text-sm mb-1">
+                  <span className="text-pink-700"><i className="fas fa-female mr-1"></i> Female</span>
+                  <span className="font-bold text-gray-700">{analytics.females}</span>
+                </div>
+                <ProgressBar value={analytics.females} max={analytics.totalStudents || 1} color="orange" />
+              </div>
+              <div className="pt-3 border-t">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Total Active</span>
+                  <span className="font-bold text-gray-800">{analytics.totalStudents}</span>
+                </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        {/* Recent Activity */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <Card title="Recent Payments" icon="receipt" action={
+            <button onClick={() => setActiveModule?.('receipt-history')} className="text-sm text-indigo-600 hover:text-indigo-800">View all →</button>
+          }>
+            {analytics.recentPayments.length === 0 ? (
+              <p className="text-center text-sm text-gray-500 py-6">No payments yet</p>
+            ) : (
+              <div className="space-y-3">
+                {analytics.recentPayments.map(p => {
+                  const student = S.find(s => s.id === p.studentId);
+                  return (
+                    <div key={p.id} className="flex items-center justify-between text-sm">
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">{student ? `${student.firstName} ${student.lastName}` : 'Unknown'}</p>
+                        <p className="text-xs text-gray-500">{formatDate(p.date || p.createdAt)}</p>
+                      </div>
+                      <span className="font-bold text-green-600 flex-shrink-0">{formatCurrency(p.amount)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+
+          <Card title="Recent Admissions" icon="user-plus" action={
+            <button onClick={() => setActiveModule?.('students')} className="text-sm text-indigo-600 hover:text-indigo-800">View all →</button>
+          }>
+            {analytics.recentAdmissions.length === 0 ? (
+              <p className="text-center text-sm text-gray-500 py-6">No admissions yet</p>
+            ) : (
+              <div className="space-y-3">
+                {analytics.recentAdmissions.map(s => (
+                  <div key={s.id} className="flex items-center justify-between text-sm">
+                    <div className="min-w-0">
+                      <p className="font-medium truncate">{s.firstName} {s.lastName}</p>
+                      <p className="text-xs text-gray-500 truncate">{s.admissionNumber}</p>
+                    </div>
+                    <span className="text-xs text-gray-500 flex-shrink-0">
+                      {formatDate(s.enrollmentDate || s.admissionDate || s.createdAt)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          <Card title="Recent Results" icon="file-alt" action={
+            <button onClick={() => setActiveModule?.('results')} className="text-sm text-indigo-600 hover:text-indigo-800">View all →</button>
+          }>
+            {analytics.recentResults.length === 0 ? (
+              <p className="text-center text-sm text-gray-500 py-6">No results yet</p>
+            ) : (
+              <div className="space-y-3">
+                {analytics.recentResults.map(r => {
+                  const student = S.find(s => s.id === r.studentId);
+                  return (
+                    <div key={r.id} className="flex items-center justify-between text-sm">
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">{student ? `${student.firstName} ${student.lastName}` : 'Unknown'}</p>
+                        <p className="text-xs text-gray-500">Marks: {r.marks} • {r.grade || '—'}</p>
+                      </div>
+                      <span className={`px-2 py-1 rounded-full text-xs flex-shrink-0 ${
+                        ['A', 'A-'].includes(r.grade) ? 'bg-green-100 text-green-800' :
+                        ['B+', 'B', 'B-'].includes(r.grade) ? 'bg-blue-100 text-blue-800' :
+                        ['C+', 'C', 'C-'].includes(r.grade) ? 'bg-yellow-100 text-yellow-800' :
+                        ['D+', 'D', 'D-'].includes(r.grade) ? 'bg-orange-100 text-orange-800' :
+                        'bg-gray-100 text-gray-800'
+                      }`}>{r.grade || '—'}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+        </div>
+
+        {/* Quick Actions */}
         <div className="bg-white rounded-xl shadow-sm p-6">
           <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
             <QuickActionCard icon="user-graduate" label="Students" color="blue" moduleId="students" />
             <QuickActionCard icon="chalkboard-teacher" label="Staff" color="green" moduleId="staff" />
             <QuickActionCard icon="money-bill" label="Fees" color="purple" moduleId="fees" />
-            <QuickActionCard icon="file-alt" label="Reports" color="orange" moduleId="reports" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ==================== SUPER ADMIN DASHBOARD ====================
-  if (userRole?.isSuperAdmin) {
-    const totalStudentsAll = students?.length || 0;
-    const totalStaffAll = staff?.length || 0;
-
-    return (
-      <div className="space-y-6">
-        <div className="bg-gradient-to-r from-emerald-600 to-teal-600 rounded-xl p-6 text-white">
-          <h2 className="text-3xl font-bold">Super Admin Dashboard</h2>
-          <p className="text-emerald-100">Welcome back, {user?.firstName} {user?.lastName}!</p>
-          <p className="text-emerald-200 text-sm mt-1">System-wide overview</p>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard title="Schools" value={schools?.length || 1} icon="university" color="blue" />
-          <StatCard title="Total Students" value={totalStudentsAll} icon="users" color="green" />
-          <StatCard title="Total Staff" value={totalStaffAll} icon="chalkboard-teacher" color="purple" />
-          <StatCard title="System Status" value="Active" icon="check-circle" color="green" />
-        </div>
-
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <QuickActionCard icon="university" label="Schools" color="blue" moduleId="schools" />
-            <QuickActionCard icon="users" label="Users" color="green" moduleId="users" />
-            <QuickActionCard icon="chart-line" label="Reports" color="purple" moduleId="reports" />
-            <QuickActionCard icon="cog" label="Settings" color="orange" moduleId="settings" />
+            <QuickActionCard icon="credit-card" label="Collect Fees" color="emerald" moduleId="fee-collection" />
+            <QuickActionCard icon="calendar-check" label="Attendance" color="orange" moduleId="attendance" />
+            <QuickActionCard icon="file-alt" label="Reports" color="indigo" moduleId="reports" />
           </div>
         </div>
       </div>
