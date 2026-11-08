@@ -19424,14 +19424,14 @@ app.post('/api/students/upload-photo', authenticate, upload.single('photo'), asy
     res.status(500).json({ success: false, message: error.message });
   }
 });
-// ==================== PHOTO UPLOAD ENDPOINT ====================
-app.post('/api/staff/upload-photo', authenticate, requireSchoolAdmin, upload.single('photo'), async (req, res) => {
+// ✅ FIXED — uses `memoryUpload` (memoryStorage) → req.file.buffer exists
+app.post('/api/staff/upload-photo', authenticate, requireSchoolAdmin, memoryUpload.single('photo'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No photo uploaded' });
     }
 
-    // Convert buffer to Base64 string
+    // req.file.buffer is defined because we used multer.memoryStorage()
     const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
 
     res.json({ 
