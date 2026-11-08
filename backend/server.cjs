@@ -2133,13 +2133,21 @@ const Expense = sequelize.define('Expense', {
   approvedBy: DataTypes.UUID,
   notes: DataTypes.TEXT
 });
+// ==================== STAFF MODEL ====================
 const Staff = sequelize.define('Staff', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
   userId: { type: DataTypes.UUID, allowNull: false },
   schoolId: { type: DataTypes.UUID, allowNull: false },
   employeeId: DataTypes.STRING,
   tscNumber: DataTypes.STRING,
-  
+
+  // ✅ ADDED: Passport Photo (Base64 or URL)
+  passportPhoto: {
+    type: DataTypes.TEXT('long'), // 'long' is required to hold Base64 strings
+    allowNull: true,
+    defaultValue: null
+  },
+
   // Department/Faculty - can be UUID reference or string
   departmentId: { type: DataTypes.UUID, allowNull: true }, // Link to Departments table
   facultyId: { type: DataTypes.UUID, allowNull: true },    // Link to Faculties table
@@ -2324,7 +2332,6 @@ const Staff = sequelize.define('Staff', {
   // Status
   isActive: { type: DataTypes.BOOLEAN, defaultValue: true }
 });
-
 const Payroll = sequelize.define('Payroll', {
   id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
   staffId: { type: DataTypes.UUID, allowNull: false },
@@ -9296,8 +9303,11 @@ app.get('/api/students/:studentId/transferable-balance', authenticate, async (re
     const payments = await Payment.findAll({
       where: { studentId, schoolId: req.user.schoolId, isOtherIncome: false }
     });
-    const totalPaid = payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
-
+    // Only count payments tied to fees that are in this statement
+const feeIdsInStatement = new Set(fees.map(f => f.id));
+const totalPaid = payments
+  .filter(p => feeIdsInStatement.has(p.feeId))
+  .reduce((s, p) => s + parseFloat(p.amount || 0), 0);
     const pendingTransfers = await FeeTransfer.findAll({
       where: { fromStudentId: studentId, schoolId: req.user.schoolId, status: 'PENDING' }
     });
@@ -10373,8 +10383,11 @@ const fees = allocations.map(a => a.Fee).filter(Boolean);
     });
 
     const totalFees = fees.reduce((s, f) => s + parseFloat(f.amount || 0), 0);
-    const totalPaid = payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
-    const totalDiscounts = payments.reduce((s, p) => s + parseFloat(p.discountAmount || 0), 0);
+// Only count payments tied to fees that are in this statement
+const feeIdsInStatement = new Set(fees.map(f => f.id));
+const totalPaid = payments
+  .filter(p => feeIdsInStatement.has(p.feeId))
+  .reduce((s, p) => s + parseFloat(p.amount || 0), 0);    const totalDiscounts = payments.reduce((s, p) => s + parseFloat(p.discountAmount || 0), 0);
    const totalBF = payments.reduce((s, p) => s + parseFloat(p.balanceBroughtForward || 0), 0);
 const balance = (totalFees + totalBF) - totalDiscounts - totalPaid;
 
@@ -14760,8 +14773,11 @@ app.get('/api/students/:studentId/fee-statement', authenticate, async (req, res)
 
     // Totals
     const totalFees = fees.reduce((s, f) => s + parseFloat(f.amount || 0), 0);
-    const totalPaid = payments.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
-    const totalDiscounts = payments.reduce((s, p) => s + parseFloat(p.discountAmount || 0), 0);
+// Only count payments tied to fees that are in this statement
+const feeIdsInStatement = new Set(fees.map(f => f.id));
+const totalPaid = payments
+  .filter(p => feeIdsInStatement.has(p.feeId))
+  .reduce((s, p) => s + parseFloat(p.amount || 0), 0);    const totalDiscounts = payments.reduce((s, p) => s + parseFloat(p.discountAmount || 0), 0);
     const totalBF = payments.reduce((s, p) => s + parseFloat(p.balanceBroughtForward || 0), 0);
     const balance = (totalFees + totalBF) - totalDiscounts - totalPaid;
 
@@ -15420,14 +15436,17 @@ app.get('/api/expenses', authenticate, async (req, res) => {
   }
 });
 
-// ==================== STAFF ROUTES ====================
 
+
+// ==================== CREATE STAFF ====================
 app.post('/api/staff', authenticate, requireSchoolAdmin, async (req, res) => {
   try {
     const {
-      userId, employeeId, tscNumber, department, jobTitle,
+      userId, employeeId, tscNumber, department, departmentId, jobTitle,
       employmentDate, qualifications, specialization, subjects,
-      bankDetails, deductions, salary, staffType
+      bankDetails, deductions, salary, staffType,
+      passportPhoto, // ✅ Extracted for photo saving
+      staffRole      // ✅ Extracted for role saving
     } = req.body;
 
     const schoolId = req.user.schoolId;
@@ -15461,6 +15480,7 @@ app.post('/api/staff', authenticate, requireSchoolAdmin, async (req, res) => {
       employeeId,
       tscNumber,
       department,
+      departmentId, // ✅ Added for University/TVET
       jobTitle,
       employmentDate: parsedDate,
       qualifications: qualifications || [],
@@ -15470,12 +15490,23 @@ app.post('/api/staff', authenticate, requireSchoolAdmin, async (req, res) => {
       deductions: deductions || { nhif: 0, nssf: 0, sacco: 0, helb: 0 },
       salary: salary || { basic: 0, house: 0, transport: 0 },
       staffType: staffType || 'TEACHING',
+      passportPhoto: passportPhoto || null, // ✅ Saved photo
+      staffRole: staffRole || null,         // ✅ Saved role
       schoolId: schoolId
     });
 
     await createAuditLog(req, 'CREATE', 'STAFF', staff.id, null, staff);
 
-    res.status(201).json({ success: true, staff });
+    // ✅ Fetch the newly created staff member WITH the User data included
+    // This ensures the frontend gets the email and name immediately
+    const populatedStaff = await Staff.findByPk(staff.id, {
+      include: [{ 
+        model: User, 
+        attributes: ['id', 'firstName', 'lastName', 'email', 'phone'] 
+      }]
+    });
+
+    res.status(201).json({ success: true, staff: populatedStaff });
   } catch (error) {
     console.error('Create staff error:', error);
     res.status(500).json({ message: error.message });
@@ -15485,22 +15516,19 @@ app.post('/api/staff', authenticate, requireSchoolAdmin, async (req, res) => {
 app.get('/api/staff', authenticate, async (req, res) => {
   try {
     const staff = await Staff.findAll({
-      where: { 
-        schoolId: req.user.schoolId
-      },
+      where: { schoolId: req.user.schoolId },
       include: [{ 
         model: User, 
-        attributes: ['id', 'firstName', 'lastName', 'email', 'phone'] 
+        attributes: ['id', 'firstName', 'lastName', 'email', 'phone'] // ✅ ADD THIS
       }]
     });
-    
     res.json({ success: true, staff });
   } catch (error) {
     console.error('Get staff error:', error);
     res.status(500).json({ message: error.message });
   }
 });
-
+// ==================== GET SINGLE STAFF ====================
 app.get('/api/staff/:id', authenticate, async (req, res) => {
   try {
     const staff = await Staff.findOne({
@@ -15525,6 +15553,7 @@ app.get('/api/staff/:id', authenticate, async (req, res) => {
   }
 });
 
+// ==================== UPDATE STAFF ====================
 app.put('/api/staff/:id', authenticate, requireSchoolAdmin, async (req, res) => {
   try {
     const staff = await Staff.findOne({
@@ -15534,7 +15563,15 @@ app.put('/api/staff/:id', authenticate, requireSchoolAdmin, async (req, res) => 
     if (!staff) return res.status(404).json({ message: 'Staff not found' });
 
     const oldStaff = { ...staff.toJSON() };
-    await staff.update(req.body);
+    
+    // ✅ Ensure passportPhoto and departmentId are updated explicitly
+    const updateData = {
+      ...req.body,
+      passportPhoto: req.body.passportPhoto !== undefined ? req.body.passportPhoto : staff.passportPhoto,
+      departmentId: req.body.departmentId !== undefined ? req.body.departmentId : staff.departmentId
+    };
+
+    await staff.update(updateData);
     await createAuditLog(req, 'UPDATE', 'STAFF', staff.id, oldStaff, staff);
 
     res.json({ success: true, staff });
@@ -15544,6 +15581,7 @@ app.put('/api/staff/:id', authenticate, requireSchoolAdmin, async (req, res) => 
   }
 });
 
+// ==================== DELETE STAFF ====================
 app.delete('/api/staff/:id', authenticate, requireSchoolAdmin, async (req, res) => {
   try {
     const staff = await Staff.findOne({
@@ -15561,7 +15599,6 @@ app.delete('/api/staff/:id', authenticate, requireSchoolAdmin, async (req, res) 
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
-
 // ==================== PAYROLL ROUTES ====================
 
 app.post('/api/payroll/process', authenticate, requireSchoolAdmin, async (req, res) => {
@@ -19334,6 +19371,17 @@ const upload = multer({
     }
   }
 });
+// ✅ NEW: memory uploader for base64-based storage (staff photos, etc.)
+const memoryUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (/^image\/(jpeg|jpg|png|gif|webp)$/i.test(file.mimetype)) {
+      return cb(null, true);
+    }
+    cb(new Error('Only JPG, PNG, GIF, or WEBP images are allowed'));
+  }
+});
 app.post('/api/schools/upload-logo', authenticate, upload.single('logo'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
@@ -19374,6 +19422,25 @@ app.post('/api/students/upload-photo', authenticate, upload.single('photo'), asy
   } catch (error) {
     console.error('❌ Upload photo error:', error);
     res.status(500).json({ success: false, message: error.message });
+  }
+});
+// ==================== PHOTO UPLOAD ENDPOINT ====================
+app.post('/api/staff/upload-photo', authenticate, requireSchoolAdmin, upload.single('photo'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No photo uploaded' });
+    }
+
+    // Convert buffer to Base64 string
+    const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+
+    res.json({ 
+      success: true, 
+      base64: base64Image 
+    });
+  } catch (error) {
+    console.error('Staff photo upload error:', error);
+    res.status(500).json({ success: false, message: 'Server error during upload' });
   }
 });
 
@@ -29079,7 +29146,9 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 //  2. Run DB setup in the background (does NOT block the port)
 // ============================================================
 (async () => {
+  const startTime = Date.now();
   try {
+    // ─── 2A. Parallel: Auth + Sync ───
     await sequelize.authenticate();
     console.log('✅ Database connection established');
 
@@ -29087,130 +29156,82 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     console.log('✅ Database synced successfully');
 
     const queryInterface = sequelize.getQueryInterface();
+    const existingTables = await queryInterface.showAllTables();
+    
+    // Normalize table names into a Set for O(1) lookups
+    const tableSet = new Set(
+      existingTables.map(t => (typeof t === 'string' ? t : t.tableName))
+    );
 
-    const tableExists = async (tableName) => {
-      const tables = await queryInterface.showAllTables();
-      const names = tables.map(t => (typeof t === 'string' ? t : t.tableName));
-      return names.includes(tableName);
-    };
+    const tableExists = (tableName) => tableSet.has(tableName);
 
-    const columnExists = async (tableName, columnName) => {
+    // ─── Helper: Fast column migrations ───
+    // Describe table ONCE, then add missing columns in parallel
+    const migrateColumns = async (tableName, columnsConfig) => {
+      if (!tableExists(tableName)) return;
+
       try {
         const desc = await queryInterface.describeTable(tableName);
-        return Object.prototype.hasOwnProperty.call(desc, columnName);
-      } catch (_) {
-        return false;
+        const missingColumns = [];
+
+        for (const [name, def] of columnsConfig) {
+          if (!Object.prototype.hasOwnProperty.call(desc, name)) {
+            missingColumns.push(queryInterface.addColumn(tableName, name, def));
+          }
+        }
+
+        if (missingColumns.length > 0) {
+          await Promise.all(missingColumns);
+          console.log(`✅ Migration: ${tableName} — added ${missingColumns.length} column(s)`);
+        }
+      } catch (err) {
+        console.error(`⚠️  ${tableName} migration failed:`, err.message);
       }
     };
 
-    // ─── 2A. School — Unit Registration columns ───
-    try {
-      if (await tableExists('Schools')) {
-        const cols = [
-          ['paymentPercentageRequired', { type: DataTypes.INTEGER, allowNull: false, defaultValue: 30 }],
-          ['requiresPaymentForUnits',   { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true }],
-          ['unitApprovalRequired',      { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true }],
-        ];
-        for (const [name, def] of cols) {
-          if (!(await columnExists('Schools', name))) {
-            await queryInterface.addColumn('Schools', name, def);
-            console.log(`✅ Migration: added Schools.${name}`);
-          }
-        }
-      }
-    } catch (err) {
-      console.error('⚠️  School migration failed:', err.message);
-    }
+    // ─── 2B. Define all column migrations ───
+    const migrations = [
+      migrateColumns('Schools', [
+        ['paymentPercentageRequired', { type: DataTypes.INTEGER, allowNull: false, defaultValue: 30 }],
+        ['requiresPaymentForUnits',   { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true }],
+        ['unitApprovalRequired',      { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true }],
+        ['trialEndsAt',               { type: DataTypes.DATE, allowNull: true }],
+        ['subscriptionEndsAt',        { type: DataTypes.DATE, allowNull: true }],
+        ['subscriptionStatus',        { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'TRIAL' }],
+        ['subscriptionPlan',          { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'FREE' }],
+        ['maxStudents',               { type: DataTypes.INTEGER, allowNull: false, defaultValue: 100 }],
+        ['maxStaff',                  { type: DataTypes.INTEGER, allowNull: false, defaultValue: 20 }],
+        ['lastPaymentAt',             { type: DataTypes.DATE, allowNull: true }],
+        ['lastPaymentAmount',         { type: DataTypes.DECIMAL(10, 2), allowNull: true }],
+        ['billingNotes',              { type: DataTypes.TEXT, allowNull: true }],
+        ['gradingConfig',             { type: DataTypes.JSONB, allowNull: true, defaultValue: null }],
+      ]),
+      migrateColumns('Exams', [
+        ['sessionId', { type: DataTypes.UUID, allowNull: true }],
+      ]),
+      // ✅ NEW: Staff Passport Photo (Base64)
+      migrateColumns('Staff', [
+        ['passportPhoto', { type: DataTypes.TEXT('long'), allowNull: true, defaultValue: null }],
+      ]),
+    ];
 
-    // ─── 2B. School — Subscription columns ───
-    try {
-      if (await tableExists('Schools')) {
-        const cols = [
-          ['trialEndsAt',        { type: DataTypes.DATE, allowNull: true }],
-          ['subscriptionEndsAt', { type: DataTypes.DATE, allowNull: true }],
-          ['subscriptionStatus', { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'TRIAL' }],
-          ['subscriptionPlan',   { type: DataTypes.STRING(20), allowNull: false, defaultValue: 'FREE' }],
-          ['maxStudents',        { type: DataTypes.INTEGER, allowNull: false, defaultValue: 100 }],
-          ['maxStaff',           { type: DataTypes.INTEGER, allowNull: false, defaultValue: 20 }],
-          ['lastPaymentAt',      { type: DataTypes.DATE, allowNull: true }],
-          ['lastPaymentAmount',  { type: DataTypes.DECIMAL(10, 2), allowNull: true }],
-          ['billingNotes',       { type: DataTypes.TEXT, allowNull: true }],
-        ];
-        for (const [name, def] of cols) {
-          if (!(await columnExists('Schools', name))) {
-            await queryInterface.addColumn('Schools', name, def);
-            console.log(`✅ Migration: added Schools.${name}`);
-          }
-        }
-      }
-    } catch (err) {
-      console.error('⚠️  Subscription migration failed:', err.message);
-    }
+    await Promise.all(migrations);
 
-    // ─── 2C. SubscriptionPayments table ───
-    try {
-      if (!(await tableExists('SubscriptionPayments'))) {
-        await SubscriptionPayment.sync();
-        console.log('✅ Migration: created SubscriptionPayments table');
-      }
-    } catch (err) {
-      console.error('⚠️  SubscriptionPayments migration failed:', err.message);
-    }
+    // ─── 2C. Parallel: Create missing tables ───
+    const tableSyncs = [];
+    if (!tableExists('SubscriptionPayments')) tableSyncs.push(SubscriptionPayment.sync());
+    if (!tableExists('ExamCardOverrides'))    tableSyncs.push(ExamCardOverride.sync());
+    if (!tableExists('Homeworks'))            tableSyncs.push(Homework.sync());
+    if (!tableExists('HomeworkQuestions'))    tableSyncs.push(HomeworkQuestion.sync());
+    if (!tableExists('HomeworkSubmissions'))  tableSyncs.push(HomeworkSubmission.sync());
 
-    // ─── 2D. ExamCardOverrides table ───
-    try {
-      if (!(await tableExists('ExamCardOverrides'))) {
-        await ExamCardOverride.sync();
-        console.log('✅ Migration: created ExamCardOverrides table');
-      }
-    } catch (err) {
-      console.error('⚠️  ExamCardOverrides migration failed:', err.message);
-    }
-
-    // ─── 2E. Homework tables ───
-    try {
-      if (!(await tableExists('Homeworks')))           await Homework.sync();
-      if (!(await tableExists('HomeworkQuestions')))   await HomeworkQuestion.sync();
-      if (!(await tableExists('HomeworkSubmissions'))) await HomeworkSubmission.sync();
-      console.log('✅ Migration: Homeworks tables verified');
-    } catch (err) {
-      console.error('⚠️  Homework migration failed:', err.message);
-    }
-
-    // ─── 2F. School — custom grading config ───
-    try {
-      if (await tableExists('Schools')) {
-        if (!(await columnExists('Schools', 'gradingConfig'))) {
-          await queryInterface.addColumn('Schools', 'gradingConfig', {
-            type: DataTypes.JSONB,
-            allowNull: true,
-            defaultValue: null,
-          });
-          console.log('✅ Migration: added Schools.gradingConfig');
-        }
-      }
-    } catch (err) {
-      console.error('⚠️  gradingConfig migration failed:', err.message);
-    }
-
-    // ─── 2G. Exams — sessionId column (ONLY ONE BLOCK NOW) ───
-    try {
-      if (await tableExists('Exams')) {
-        if (!(await columnExists('Exams', 'sessionId'))) {
-          await queryInterface.addColumn('Exams', 'sessionId', {
-            type: DataTypes.UUID,
-            allowNull: true,
-          });
-          console.log('✅ Migration: added Exams.sessionId');
-        } else {
-          console.log('ℹ️  Exams.sessionId already exists');
-        }
-      }
-    } catch (err) {
-      console.error('❌ Exams.sessionId migration FAILED:', err.message);
+    if (tableSyncs.length > 0) {
+      await Promise.all(tableSyncs);
+      console.log(`✅ Migration: synced ${tableSyncs.length} missing table(s)`);
     }
 
     // ─── Startup summary ───
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log('📊 Grading Systems Loaded:');
     console.log('   - CBC (ECDE & Primary)');
     console.log('   - 8-4-4 (Secondary)');
@@ -29220,10 +29241,8 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     console.log('   - Cambridge IGCSE');
     console.log('   - American System');
 
-    console.log('✅ All migrations complete — server is ready');
+    console.log(`✅ All migrations complete in ${duration}s — server is ready`);
   } catch (err) {
     console.error('❌ Startup error:', err);
-    // NOTE: We do NOT call process.exit(1) — the HTTP server is already
-    // listening, so Render won't kill the container.
   }
 })();
