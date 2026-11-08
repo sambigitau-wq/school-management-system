@@ -12853,15 +12853,10 @@ const ExamModule = ({
     </div>
   );
 };
+
+
 // ============================================================================
-//  RESULTS MODULE — v15
-//
-//  v15 CHANGES:
-//   • "By Student" shows ALL exam types as columns
-//   • Trend badge INLINE inside each exam cell, comparing to previous exam
-//   • No separate Trend column, no Δ vs Mean column
-//   • Every matrix header uses logo-beside-school-name layout
-//   • Print Report button made robust
+//  RESULTS MODULE — v18 (Hierarchical UI & Category-Aware)
 // ============================================================================
 const ResultsModule = ({
   exams, setExams, results, students, subjects, classes, courses, programs,
@@ -12870,12 +12865,16 @@ const ResultsModule = ({
   admissionNumber: propAdmissionNumber
 }) => {
 
+  // ============================================================
+  // CATEGORY DETECTION
+  // ============================================================
   const schoolCategory   = currentSchool?.category || 'ECDE_PRIMARY_JSS';
   const isUniversity     = schoolCategory === 'UNIVERSITY';
   const isTVET           = schoolCategory === 'COLLEGE_TVET';
   const isSecondary      = schoolCategory === 'SENIOR_SECONDARY';
   const isPrimary        = schoolCategory === 'ECDE_PRIMARY_JSS';
-  const isRegularSchool  = !isUniversity && !isTVET;
+  const isSchoolMode     = isPrimary || isSecondary;
+  const isTertiary       = isUniversity || isTVET;
 
   const schoolName =
     currentSchool?.name?.trim() ||
@@ -12891,7 +12890,7 @@ const ResultsModule = ({
     '';
 
   const subjectColumnLabel =
-    isTVET ? 'Module' : isUniversity ? 'Unit' : 'Subject';
+    isTVET ? 'Module/Unit' : isUniversity ? 'Unit' : 'Subject';
 
   // ============================================================
   // GRADING SYSTEM
@@ -13147,13 +13146,13 @@ const ResultsModule = ({
   const [reportData, setReportData]                     = useState(null);
   const [loadingReport, setLoadingReport]               = useState(false);
 
+  // Term Matrix local state
   const [termMatrixClassId, setTermMatrixClassId]     = useState('');
   const [termMatrixTerm, setTermMatrixTerm]           = useState(defaultTermValue);
   const [termMatrixExamType, setTermMatrixExamType]   = useState('');
   const [termMatrixSubjectId, setTermMatrixSubjectId] = useState('');
   const [termMatrixStudentId, setTermMatrixStudentId] = useState('');
   const [termMatrixView, setTermMatrixView]           = useState('student');
-  const [showTrendArrows, setShowTrendArrows]         = useState(true);
   const [termMatrixData, setTermMatrixData]           = useState(null);
   const [loadingTermMatrix, setLoadingTermMatrix]     = useState(false);
 
@@ -13229,6 +13228,71 @@ const ResultsModule = ({
   }, [isTVET, isUniversity, units, subjects]);
 
   // ============================================================
+  // DYNAMIC DROPDOWN OPTIONS — Derived from `units`
+  // ============================================================
+  const programsWithUnits = useMemo(() => {
+    if (!isTVET) return [];
+    const ids = new Set((units || []).filter(u => u.programId).map(u => u.programId));
+    return (programs || []).filter(p => ids.has(p.id));
+  }, [programs, units, isTVET]);
+
+  const coursesWithUnits = useMemo(() => {
+    if (!isUniversity) return [];
+    const ids = new Set((units || []).filter(u => u.courseId).map(u => u.courseId));
+    return (courses || []).filter(c => ids.has(c.id));
+  }, [courses, units, isUniversity]);
+
+  const programOptions = useMemo(() => programsWithUnits.map(p => ({
+    value: p.id, label: p.name, subLabel: `${(units || []).filter(u => u.programId === p.id).length} module(s)`
+  })), [programsWithUnits, units]);
+
+  const courseOptions = useMemo(() => coursesWithUnits.map(c => ({
+    value: c.id, label: c.name, subLabel: `${(units || []).filter(u => u.courseId === c.id).length} unit(s)`
+  })), [coursesWithUnits, units]);
+
+  const classOptions = useMemo(() => (classes || []).map(c => ({
+    value: c.id, label: c.name, subLabel: c.capacity ? `Cap: ${c.capacity}` : ''
+  })), [classes]);
+
+  const buildModuleOptions = useCallback((programId) => {
+    if (!programId) return [];
+    const scoped = (units || []).filter(u => u.programId === programId && u.module != null);
+    const unique = Array.from(new Set(scoped.map(u => String(u.module)))).sort((a, b) => Number(a) - Number(b));
+    return unique.map(m => ({
+      value: m, label: `Module ${m}`, subLabel: `${scoped.filter(u => String(u.module) === m).length} unit(s)`
+    }));
+  }, [units]);
+
+  const buildYearOptionsForProgram = useCallback((programId, module) => {
+    if (!programId) return [];
+    const scoped = (units || []).filter(u => u.programId === programId && u.year != null);
+    const narrowed = module ? scoped.filter(u => String(u.module) === String(module)) : scoped;
+    const unique = Array.from(new Set(narrowed.map(u => String(u.year)))).sort((a, b) => Number(a) - Number(b));
+    return unique.map(y => ({
+      value: y, label: `Year ${y}`, subLabel: `${narrowed.filter(u => String(u.year) === y).length} unit(s)`
+    }));
+  }, [units]);
+
+  const buildSemesterOptionsForCourse = useCallback((courseId) => {
+    if (!courseId) return [];
+    const scoped = (units || []).filter(u => u.courseId === courseId && u.semester != null);
+    const unique = Array.from(new Set(scoped.map(u => String(u.semester)))).sort((a, b) => Number(a) - Number(b));
+    return unique.map(s => ({
+      value: s, label: `Semester ${s}`, subLabel: `${scoped.filter(u => String(u.semester) === s).length} unit(s)`
+    }));
+  }, [units]);
+
+  const buildYearOptionsForCourse = useCallback((courseId, semester) => {
+    if (!courseId) return [];
+    const scoped = (units || []).filter(u => u.courseId === courseId && u.year != null);
+    const narrowed = semester ? scoped.filter(u => String(u.semester) === String(semester)) : scoped;
+    const unique = Array.from(new Set(narrowed.map(u => String(u.year)))).sort((a, b) => Number(a) - Number(b));
+    return unique.map(y => ({
+      value: y, label: `Year ${y}`, subLabel: `${narrowed.filter(u => String(u.year) === y).length} unit(s)`
+    }));
+  }, [units]);
+
+  // ============================================================
   // KNEC APTITUDE
   // ============================================================
   const KNEC_STREAMS = {
@@ -13262,15 +13326,13 @@ const ResultsModule = ({
     });
     return Object.entries(byStream)
       .map(([stream, t]) => ({
-        stream,
-        average: t.count > 0 ? t.sum / t.count : 0,
-        count: t.count
+        stream, average: t.count > 0 ? t.sum / t.count : 0, count: t.count
       }))
       .sort((a, b) => b.average - a.average);
   }, [classifySubjectToStream]);
 
   // ============================================================
-  // LOAD RESULTS
+  // LOAD RESULTS (Student View)
   // ============================================================
   const loadResultsWithAdmission = async (admNumber) => {
     if (!admNumber) return { enhancedResults: [], studentInfo: null };
@@ -13285,8 +13347,7 @@ const ResultsModule = ({
         const exam = exams?.find(e => e.id === result.examId);
         const hasMarks = result.marks !== null && result.marks !== undefined && result.marks !== '';
         const gradeInfo = hasMarks
-          ? calculateGrade(result.marks, exam?.maxMarks || result.maxMarks || 100,
-                           exam?.schoolCategory || schoolCategory)
+          ? calculateGrade(result.marks, exam?.maxMarks || result.maxMarks || 100, exam?.schoolCategory || schoolCategory)
           : { grade: '', points: 0, remark: '' };
         return {
           ...result,
@@ -13305,9 +13366,7 @@ const ResultsModule = ({
       return { enhancedResults, studentInfo };
     } catch (error) {
       console.error('Error loading results:', error);
-      setApiError(error.response?.status === 404
-        ? 'No results found for this student'
-        : 'Failed to load results');
+      setApiError(error.response?.status === 404 ? 'No results found for this student' : 'Failed to load results');
       return { enhancedResults: [], studentInfo: null };
     } finally {
       setLoadingMyData(false);
@@ -13366,11 +13425,7 @@ const ResultsModule = ({
 
       if (!g.subjects.has(subjKey)) {
         g.subjects.set(subjKey, {
-          subjectName: subjKey,
-          entries: [],
-          cells: {},
-          sumMarks: 0,
-          count: 0
+          subjectName: subjKey, entries: [], cells: {}, sumMarks: 0, count: 0
         });
       }
       const subj = g.subjects.get(subjKey);
@@ -13379,13 +13434,8 @@ const ResultsModule = ({
 
       const m = parseFloat(r.marks);
       if (!isNaN(m)) {
-        subj.cells[typeKey] = {
-          marks: m, grade: r.grade, points: r.points, examId: r.examId
-        };
-        subj.entries.push({
-          type: typeKey, marks: m, grade: r.grade,
-          points: r.points, examDate: r.examDate, examName: r.examName
-        });
+        subj.cells[typeKey] = { marks: m, grade: r.grade, points: r.points, examId: r.examId };
+        subj.entries.push({ type: typeKey, marks: m, grade: r.grade, points: r.points, examDate: r.examDate, examName: r.examName });
         subj.sumMarks += m;
         subj.count += 1;
       }
@@ -13400,9 +13450,7 @@ const ResultsModule = ({
       }
 
       const validAvgs = subjectList.filter(s => s.count > 0).map(s => s.avg);
-      const termAverage = validAvgs.length > 0
-        ? validAvgs.reduce((a, b) => a + b, 0) / validAvgs.length
-        : 0;
+      const termAverage = validAvgs.length > 0 ? validAvgs.reduce((a, b) => a + b, 0) / validAvgs.length : 0;
 
       termCards.push({
         ...g,
@@ -13423,9 +13471,7 @@ const ResultsModule = ({
     });
 
     const allAvgs = termCards.flatMap(tc => tc.subjects.map(s => s.avg)).filter(v => v > 0);
-    const overallAverage = allAvgs.length > 0
-      ? allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length
-      : 0;
+    const overallAverage = allAvgs.length > 0 ? allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length : 0;
 
     const knec = computeKNEC(filtered);
 
@@ -13446,20 +13492,12 @@ const ResultsModule = ({
     const totalPoints = allValid.reduce((s, r) => s + (r.points || 0), 0);
     const meanPoints = allValid.length > 0 ? (totalPoints / allValid.length).toFixed(2) : '0.00';
 
-    return {
-      termCards,
-      overallAverage,
-      knec,
-      positionInfo,
-      meanPoints,
-      merit: getMeritText(overallAverage)
-    };
+    return { termCards, overallAverage, knec, positionInfo, meanPoints, merit: getMeritText(overallAverage) };
   };
 
   const loadDetailedReport = async () => {
     if (!reportStudentId) { alert('Please select a student'); return; }
-    setLoadingReport(true);
-    setApiError('');
+    setLoadingReport(true); setApiError('');
     try {
       const res = await api.get(`/results?studentId=${reportStudentId}`);
       const rawResults = res.data.results || [];
@@ -13467,19 +13505,12 @@ const ResultsModule = ({
       const enriched = rawResults.map(r => {
         const exam = exams?.find(e => e.id === r.examId);
         const hasMarks = r.marks !== null && r.marks !== undefined && r.marks !== '';
-        const gradeInfo = hasMarks
-          ? calculateGrade(r.marks, exam?.maxMarks || 100, exam?.schoolCategory || schoolCategory)
-          : { grade: '', points: 0 };
+        const gradeInfo = hasMarks ? calculateGrade(r.marks, exam?.maxMarks || 100, exam?.schoolCategory || schoolCategory) : { grade: '', points: 0 };
         return {
-          ...r,
-          grade: gradeInfo.grade,
-          points: gradeInfo.points,
-          itemName: getItemName(r, exam),
-          examName: exam?.name || r.examName || 'Unknown',
-          examDate: exam?.date || r.examDate,
-          examType: exam?.type || '',
-          examTerm: exam?.term || '',
-          academicYear: exam?.academicYear || ''
+          ...r, grade: gradeInfo.grade, points: gradeInfo.points,
+          itemName: getItemName(r, exam), examName: exam?.name || r.examName || 'Unknown',
+          examDate: exam?.date || r.examDate, examType: exam?.type || '',
+          examTerm: exam?.term || '', academicYear: exam?.academicYear || ''
         };
       });
 
@@ -13489,55 +13520,71 @@ const ResultsModule = ({
     } catch (err) {
       console.error('Failed to load report:', err);
       setApiError('Failed to load detailed report');
-    } finally {
-      setLoadingReport(false);
-    }
+    } finally { setLoadingReport(false); }
   };
 
   // ============================================================
   // TERMLY MATRIX
   // ============================================================
   const buildTermMatrix = async () => {
+    const activeScopeId = isTVET ? selectedProgram : isUniversity ? selectedCourse : selectedClass;
+    const activeItemId = termMatrixSubjectId;
+
+    if (!activeScopeId) { alert(`Please select a ${isTVET ? 'program' : isUniversity ? 'course' : 'class'}`); return; }
+    if (!termMatrixTerm) { alert('Please select an exam term'); return; }
+
     if (termMatrixView === 'student') {
-      if (!termMatrixClassId)   { alert('Please select a class'); return; }
-      if (!termMatrixTerm)      { alert('Please select a term'); return; }
       if (!termMatrixStudentId) { alert('Please select a student'); return; }
     } else if (termMatrixView === 'subject' || termMatrixView === 'class') {
-      if (!termMatrixClassId)   { alert('Please select a class'); return; }
-      if (!termMatrixTerm)      { alert('Please select a term'); return; }
-      if (!termMatrixSubjectId) { alert('Please select a subject'); return; }
+      if (!activeItemId) { alert(`Please select a ${isTertiary ? 'unit' : 'subject'}`); return; }
     } else if (termMatrixView === 'exam') {
-      if (!termMatrixClassId)   { alert('Please select a class'); return; }
-      if (!termMatrixTerm)      { alert('Please select a term'); return; }
-      if (!termMatrixExamType)  { alert('Please select an exam type'); return; }
+      if (!termMatrixExamType) { alert('Please select an exam type'); return; }
     }
 
     setLoadingTermMatrix(true);
     setTermMatrixData(null);
 
     try {
-      const classSubjects = (subjects || []).filter(s => s.classId === termMatrixClassId);
-      if (classSubjects.length === 0) { alert('No subjects for this class'); return; }
-
-      let studentList = (students || []).filter(s => s.classId === termMatrixClassId);
-      if (studentList.length === 0) {
-        try {
-          const r = await api.get('/students', { params: { classId: termMatrixClassId } });
-          studentList = r.data.students || [];
-        } catch (_) {}
+      let activeItems = [];
+      if (isSchoolMode) {
+        activeItems = subjects.filter(s => s.classId === selectedClass);
+      } else {
+        activeItems = filteredUnits;
       }
-      if (studentList.length === 0) { alert('No students in this class'); return; }
+
+      if (activeItems.length === 0) {
+        alert(`No ${isTertiary ? 'units' : 'subjects'} found for this selection`);
+        return;
+      }
+
+      let studentList = [];
+      if (isTVET && selectedProgram) {
+        studentList = students.filter(s => s.programId === selectedProgram);
+        if (selectedYear) studentList = studentList.filter(s => String(s.currentYear) === String(selectedYear));
+        if (selectedModule) studentList = studentList.filter(s => String(s.currentModule).replace(/\D/g,'') === String(selectedModule));
+      } else if (isUniversity && selectedCourse) {
+        studentList = students.filter(s => s.courseId === selectedCourse);
+        if (selectedYear) studentList = studentList.filter(s => String(s.currentYear) === String(selectedYear));
+        if (selectedSemester) studentList = studentList.filter(s => String(s.currentSemester) === String(selectedSemester));
+      } else if (isSchoolMode && selectedClass) {
+        studentList = students.filter(s => s.classId === selectedClass);
+      }
+
+      if (studentList.length === 0) {
+        alert('No students found in this selection'); return;
+      }
 
       const termExams = (exams || []).filter(e => {
-        if (e.classId !== termMatrixClassId) return false;
+        if (isTVET && e.programId !== selectedProgram) return false;
+        if (isUniversity && e.courseId !== selectedCourse) return false;
+        if (isSchoolMode && e.classId !== selectedClass) return false;
         if (String(e.term || '').toLowerCase() !== String(termMatrixTerm).toLowerCase()) return false;
         if (termMatrixExamType && e.type !== termMatrixExamType) return false;
         return true;
       });
 
       if (termExams.length === 0) {
-        alert(`No exams found for ${termMatrixTerm}`);
-        return;
+        alert(`No exams found for ${termMatrixTerm}`); return;
       }
 
       const sortedExams = [...termExams].sort((a, b) => {
@@ -13554,9 +13601,6 @@ const ResultsModule = ({
         } catch (_) {}
       }
 
-      const classObj = classes.find(c => c.id === termMatrixClassId);
-
-      // Build exam-type order from a fixed canonical order, keeping only present ones
       const CANONICAL_ORDER = ['OPENER', 'MIDTERM', 'CAT', 'PRE_MOCK', 'MOCK', 'ENDTERM', 'FINAL', 'PRACTICAL', 'PROJECT'];
       const presentTypes = [...new Set(sortedExams.map(e => e.type).filter(Boolean))];
       const orderedExamTypes = CANONICAL_ORDER.filter(t => presentTypes.includes(t))
@@ -13569,31 +13613,21 @@ const ResultsModule = ({
 
         const studentResults = allResults.filter(r => r.studentId === studentObj.id);
 
-        const rows = classSubjects.map(subj => {
-          const subjResults = studentResults.filter(r => r.subjectId === subj.id);
+        const rows = activeItems.map(item => {
+          const itemResults = studentResults.filter(r => isSchoolMode ? r.subjectId === item.id : r.unitId === item.id);
+          
           const cells = {};
           let sum = 0, count = 0;
           let prevMarks = null;
 
           orderedExamTypes.forEach(type => {
-            const matches = subjResults.filter(r => r.__exam?.type === type);
-            if (matches.length === 0) {
-              cells[type] = null;
-              prevMarks = null;
-              return;
-            }
+            const matches = itemResults.filter(r => r.__exam?.type === type);
+            if (matches.length === 0) { cells[type] = null; prevMarks = null; return; }
             const avg = matches.reduce((s, r) => s + (parseFloat(r.marks) || 0), 0) / matches.length;
             const gi = calculateGrade(avg, 100, schoolCategory);
-
             let delta = null;
             if (prevMarks != null) delta = Number((avg - prevMarks).toFixed(1));
-
-            cells[type] = {
-              marks: Number(avg.toFixed(1)),
-              grade: gi.grade,
-              points: gi.points,
-              delta
-            };
+            cells[type] = { marks: Number(avg.toFixed(1)), grade: gi.grade, points: gi.points, delta };
             sum += avg; count += 1;
             prevMarks = avg;
           });
@@ -13603,14 +13637,7 @@ const ResultsModule = ({
             Object.values(cells).filter(Boolean).map(c => ({ marks: c.marks, points: c.points }))
           );
 
-          return {
-            subjectId: subj.id,
-            subjectName: subj.name,
-            cells,
-            average,
-            meanGrade,
-            hasData: count > 0
-          };
+          return { itemId: item.id, itemName: item.name, cells, average, meanGrade, hasData: count > 0 };
         });
 
         const columnMeans = {};
@@ -13620,18 +13647,12 @@ const ResultsModule = ({
         });
 
         const validRows = rows.filter(r => r.hasData);
-        const overallAvg = validRows.length > 0
-          ? validRows.reduce((s, r) => s + r.average, 0) / validRows.length
-          : 0;
+        const overallAvg = validRows.length > 0 ? validRows.reduce((s, r) => s + r.average, 0) / validRows.length : 0;
 
         setTermMatrixData({
           view: 'student',
-          className: classObj?.name || 'Class',
-          term: termMatrixTerm,
-          student: studentObj,
-          examTypes: orderedExamTypes,
-          rows,
-          columnMeans,
+          className: isSchoolMode ? classes.find(c => c.id === selectedClass)?.name : isTVET ? programs.find(p => p.id === selectedProgram)?.name : courses.find(c => c.id === selectedCourse)?.name,
+          term: termMatrixTerm, student: studentObj, examTypes: orderedExamTypes, rows, columnMeans,
           overallAverage: overallAvg,
           overallGrade: calculateMeanGradeFromCells(
             validRows.flatMap(r => Object.values(r.cells).filter(Boolean).map(c => ({ marks: c.marks, points: c.points })))
@@ -13641,18 +13662,15 @@ const ResultsModule = ({
 
       // ---------- BY SUBJECT / BY CLASS ----------
       else if (termMatrixView === 'subject' || termMatrixView === 'class') {
-        const subjectObj = classSubjects.find(s => s.id === termMatrixSubjectId);
-        if (!subjectObj) { alert('Subject not found'); return; }
+        const itemObj = activeItems.find(i => i.id === termMatrixSubjectId);
+        if (!itemObj) { alert(`${isTertiary ? 'Unit' : 'Subject'} not found`); return; }
 
-        const subjectExams = sortedExams.filter(e => e.subjectId === subjectObj.id || e.subjectId == null);
-        const subjectTypes = [...new Set(subjectExams.map(e => e.type).filter(Boolean))];
-        const usedExamTypes = CANONICAL_ORDER.filter(t => subjectTypes.includes(t))
-          .concat(subjectTypes.filter(t => !CANONICAL_ORDER.includes(t)));
+        const itemExams = sortedExams.filter(e => isSchoolMode ? (e.subjectId === itemObj.id || e.subjectId == null) : (e.unitId === itemObj.id || e.unitId == null));
+        const itemTypes = [...new Set(itemExams.map(e => e.type).filter(Boolean))];
+        const usedExamTypes = CANONICAL_ORDER.filter(t => itemTypes.includes(t)).concat(itemTypes.filter(t => !CANONICAL_ORDER.includes(t)));
 
         const rows = studentList.map(st => {
-          const stResults = allResults.filter(r =>
-            r.studentId === st.id && r.subjectId === subjectObj.id
-          );
+          const stResults = allResults.filter(r => r.studentId === st.id && (isSchoolMode ? r.subjectId === itemObj.id : r.unitId === itemObj.id));
 
           const cells = {};
           let sum = 0, count = 0;
@@ -13671,24 +13689,12 @@ const ResultsModule = ({
             Object.values(cells).filter(Boolean).map(c => ({ marks: c.marks, points: c.points }))
           );
 
-          return {
-            studentId: st.id,
-            studentName: `${st.firstName} ${st.lastName}`,
-            admissionNumber: st.admissionNumber,
-            cells,
-            average,
-            meanGrade,
-            hasData: count > 0
-          };
+          return { studentId: st.id, studentName: `${st.firstName} ${st.lastName}`, admissionNumber: st.admissionNumber, cells, average, meanGrade, hasData: count > 0 };
         });
 
         const ranked = [...rows].filter(r => r.hasData).sort((a, b) => b.average - a.average);
         let rank = 1, prev = null;
-        ranked.forEach((r, i) => {
-          if (prev !== null && r.average < prev) rank = i + 1;
-          prev = r.average;
-          r.position = rank;
-        });
+        ranked.forEach((r, i) => { if (prev !== null && r.average < prev) rank = i + 1; prev = r.average; r.position = rank; });
 
         const sortedRows = [...rows].sort((a, b) => {
           if (a.position == null && b.position == null) return a.studentName.localeCompare(b.studentName);
@@ -13704,24 +13710,15 @@ const ResultsModule = ({
         });
 
         const validRows = rows.filter(r => r.hasData);
-        const classAverage = validRows.length > 0
-          ? validRows.reduce((s, r) => s + r.average, 0) / validRows.length
-          : 0;
+        const classAverage = validRows.length > 0 ? validRows.reduce((s, r) => s + r.average, 0) / validRows.length : 0;
         const passCount = validRows.filter(r => r.average >= 50).length;
         const passRate = validRows.length > 0 ? (passCount / validRows.length) * 100 : 0;
 
         setTermMatrixData({
           view: 'subject',
-          className: classObj?.name || 'Class',
-          subjectName: subjectObj.name,
-          term: termMatrixTerm,
-          examTypes: usedExamTypes,
-          rows: sortedRows,
-          columnMeans,
-          classAverage,
-          passRate,
-          passCount,
-          totalScored: validRows.length
+          className: isSchoolMode ? classes.find(c => c.id === selectedClass)?.name : isTVET ? programs.find(p => p.id === selectedProgram)?.name : courses.find(c => c.id === selectedCourse)?.name,
+          subjectName: itemObj.name, term: termMatrixTerm, examTypes: usedExamTypes,
+          rows: sortedRows, columnMeans, classAverage, passRate, passCount, totalScored: validRows.length
         });
       }
 
@@ -13729,27 +13726,21 @@ const ResultsModule = ({
       else if (termMatrixView === 'exam') {
         const targetType = termMatrixExamType;
         const examsOfType = sortedExams.filter(e => e.type === targetType);
-        if (examsOfType.length === 0) {
-          alert(`No ${examTypeLabel(targetType)} exams found`);
-          return;
-        }
+        if (examsOfType.length === 0) { alert(`No ${examTypeLabel(targetType)} exams found`); return; }
 
         const examIdsOfType = new Set(examsOfType.map(e => e.id));
 
         const rows = studentList.map(st => {
-          const stResults = allResults.filter(r =>
-            r.studentId === st.id && examIdsOfType.has(r.examId)
-          );
-
+          const stResults = allResults.filter(r => r.studentId === st.id && examIdsOfType.has(r.examId));
           const cells = {};
           let sum = 0, count = 0;
 
-          classSubjects.forEach(subj => {
-            const matches = stResults.filter(r => r.subjectId === subj.id);
-            if (matches.length === 0) { cells[subj.id] = null; return; }
+          activeItems.forEach(item => {
+            const matches = stResults.filter(r => isSchoolMode ? r.subjectId === item.id : r.unitId === item.id);
+            if (matches.length === 0) { cells[item.id] = null; return; }
             const avg = matches.reduce((s, r) => s + (parseFloat(r.marks) || 0), 0) / matches.length;
             const gi = calculateGrade(avg, 100, schoolCategory);
-            cells[subj.id] = { marks: Number(avg.toFixed(1)), grade: gi.grade, points: gi.points };
+            cells[item.id] = { marks: Number(avg.toFixed(1)), grade: gi.grade, points: gi.points };
             sum += avg; count += 1;
           });
 
@@ -13758,24 +13749,12 @@ const ResultsModule = ({
             Object.values(cells).filter(Boolean).map(c => ({ marks: c.marks, points: c.points }))
           );
 
-          return {
-            studentId: st.id,
-            studentName: `${st.firstName} ${st.lastName}`,
-            admissionNumber: st.admissionNumber,
-            cells,
-            average,
-            meanGrade,
-            hasData: count > 0
-          };
+          return { studentId: st.id, studentName: `${st.firstName} ${st.lastName}`, admissionNumber: st.admissionNumber, cells, average, meanGrade, hasData: count > 0 };
         });
 
         const ranked = [...rows].filter(r => r.hasData).sort((a, b) => b.average - a.average);
         let rank = 1, prev = null;
-        ranked.forEach((r, i) => {
-          if (prev !== null && r.average < prev) rank = i + 1;
-          prev = r.average;
-          r.position = rank;
-        });
+        ranked.forEach((r, i) => { if (prev !== null && r.average < prev) rank = i + 1; prev = r.average; r.position = rank; });
 
         const sortedRows = [...rows].sort((a, b) => {
           if (a.position == null && b.position == null) return a.studentName.localeCompare(b.studentName);
@@ -13785,39 +13764,30 @@ const ResultsModule = ({
         });
 
         const columnMeans = {};
-        classSubjects.forEach(subj => {
-          const colMarks = rows.map(r => r.cells[subj.id]?.marks).filter(m => m != null && !isNaN(m));
-          columnMeans[subj.id] = colMarks.length > 0 ? colMarks.reduce((a, b) => a + b, 0) / colMarks.length : 0;
+        activeItems.forEach(item => {
+          const colMarks = rows.map(r => r.cells[item.id]?.marks).filter(m => m != null && !isNaN(m));
+          columnMeans[item.id] = colMarks.length > 0 ? colMarks.reduce((a, b) => a + b, 0) / colMarks.length : 0;
         });
 
         const validRows = rows.filter(r => r.hasData);
-        const classAverage = validRows.length > 0
-          ? validRows.reduce((s, r) => s + r.average, 0) / validRows.length
-          : 0;
+        const classAverage = validRows.length > 0 ? validRows.reduce((s, r) => s + r.average, 0) / validRows.length : 0;
 
         setTermMatrixData({
           view: 'exam',
-          className: classObj?.name || 'Class',
-          term: termMatrixTerm,
-          examType: targetType,
-          subjects: classSubjects.map(s => ({ id: s.id, name: s.name })),
-          rows: sortedRows,
-          columnMeans,
-          classAverage,
-          totalScored: validRows.length
+          className: isSchoolMode ? classes.find(c => c.id === selectedClass)?.name : isTVET ? programs.find(p => p.id === selectedProgram)?.name : courses.find(c => c.id === selectedCourse)?.name,
+          term: termMatrixTerm, examType: targetType, subjects: activeItems.map(i => ({ id: i.id, name: i.name })),
+          rows: sortedRows, columnMeans, classAverage, totalScored: validRows.length
         });
       }
 
     } catch (err) {
       console.error('Term matrix build error:', err);
       alert('Failed: ' + (err.response?.data?.message || err.message));
-    } finally {
-      setLoadingTermMatrix(false);
-    }
+    } finally { setLoadingTermMatrix(false); }
   };
 
   // ============================================================
-  // STUDENT/PARENT LOADERS
+  // LOADERS & EFFECTS
   // ============================================================
   useEffect(() => {
     if (!isStudent) return;
@@ -13828,12 +13798,9 @@ const ResultsModule = ({
         setAdmissionNumber(stored);
         const { enhancedResults, studentInfo } = await loadResultsWithAdmission(stored);
         if (enhancedResults.length > 0 || studentInfo) {
-          setMyResults(enhancedResults);
-          setMyStudentRecord(studentInfo);
+          setMyResults(enhancedResults); setMyStudentRecord(studentInfo);
           setMyResultsSummary(buildSummary(enhancedResults));
-          setShowAdmissionModal(false);
-          hasLoadedStudentData.current = true;
-          return;
+          setShowAdmissionModal(false); hasLoadedStudentData.current = true; return;
         }
       }
       setShowAdmissionModal(true);
@@ -13843,10 +13810,7 @@ const ResultsModule = ({
   }, [isStudent]);
 
   useEffect(() => {
-    if (isParent && !hasLoadedChildrenData.current) {
-      loadMyChildren();
-      hasLoadedChildrenData.current = true;
-    }
+    if (isParent && !hasLoadedChildrenData.current) { loadMyChildren(); hasLoadedChildrenData.current = true; }
     return () => { if (!isParent) hasLoadedChildrenData.current = false; };
   }, [isParent]);
 
@@ -13856,121 +13820,120 @@ const ResultsModule = ({
       const res = await api.get('/parents/me/children');
       const list = res.data.children || [];
       setMyChildren(list);
-      if (list.length > 0) {
-        setSelectedChild(list[0]);
-        await loadChildResults(list[0].admissionNumber);
-      }
-    } catch (err) {
-      setApiError('Failed to load your children');
-    } finally {
-      setLoadingChildren(false);
-    }
+      if (list.length > 0) { setSelectedChild(list[0]); await loadChildResults(list[0].admissionNumber); }
+    } catch (err) { setApiError('Failed to load your children'); }
+    finally { setLoadingChildren(false); }
   };
 
   const loadChildResults = async (childAdmission) => {
     setLoadingMyData(true);
     try {
       const { enhancedResults, studentInfo } = await loadResultsWithAdmission(childAdmission);
-      setChildResults(enhancedResults);
-      setMyStudentRecord(studentInfo);
+      setChildResults(enhancedResults); setMyStudentRecord(studentInfo);
       setMyResultsSummary(buildSummary(enhancedResults));
-    } finally {
-      setLoadingMyData(false);
-    }
+    } finally { setLoadingMyData(false); }
   };
 
   const handleAdmissionSubmit = async () => {
     if (!admissionNumber) { setApiError('Enter your admission number'); return; }
-    setLoadingMyData(true);
-    setApiError('');
+    setLoadingMyData(true); setApiError('');
     try {
       const studentRes = await api.get(`/students/by-admission/${encodeURIComponent(admissionNumber)}`);
       if (!studentRes.data.student) { setApiError('Student not found.'); return; }
       const student = studentRes.data.student;
       localStorage.setItem('studentAdmissionNumber', admissionNumber);
       const { enhancedResults, studentInfo } = await loadResultsWithAdmission(admissionNumber);
-      setMyResults(enhancedResults);
-      setMyStudentRecord(studentInfo || student);
+      setMyResults(enhancedResults); setMyStudentRecord(studentInfo || student);
       setMyResultsSummary(buildSummary(enhancedResults));
-      setShowAdmissionModal(false);
-      hasLoadedStudentData.current = true;
-    } catch (err) {
-      setApiError('Student not found.');
-    } finally {
-      setLoadingMyData(false);
-    }
+      setShowAdmissionModal(false); hasLoadedStudentData.current = true;
+    } catch (err) { setApiError('Student not found.'); }
+    finally { setLoadingMyData(false); }
   };
 
-  // ============================================================
-  // FILTERS & OPTIONS
-  // ============================================================
   useEffect(() => {
-    if (isUniversity && selectedCourse && units) {
-      setFilteredUnits(units.filter(u => u.courseId === selectedCourse));
-    } else if (isTVET && selectedProgram && units) {
-      const programUnits = units.filter(u => u.programId === selectedProgram);
-      setFilteredUnits(selectedModule ? programUnits.filter(u => u.module === parseInt(selectedModule)) : programUnits);
-    } else {
-      setFilteredUnits([]);
+    let scoped = [];
+    if (isUniversity && selectedCourse) {
+      scoped = (units || []).filter(u => u.courseId === selectedCourse);
+      if (selectedSemester) scoped = scoped.filter(u => String(u.semester) === String(selectedSemester));
+      if (selectedYear)     scoped = scoped.filter(u => String(u.year) === String(selectedYear));
+    } else if (isTVET && selectedProgram) {
+      scoped = (units || []).filter(u => u.programId === selectedProgram);
+      if (selectedModule) scoped = scoped.filter(u => String(u.module) === String(selectedModule));
+      if (selectedYear)   scoped = scoped.filter(u => String(u.year) === String(selectedYear));
     }
-  }, [selectedCourse, selectedProgram, selectedModule, units, isUniversity, isTVET]);
+    setFilteredUnits(scoped);
+  }, [selectedCourse, selectedProgram, selectedModule, selectedSemester, selectedYear, units, isUniversity, isTVET]);
 
   useEffect(() => {
-    if (isRegularSchool && selectedClass && subjects) {
+    if (isSchoolMode && selectedClass && subjects) {
       setFilteredSubjects(subjects.filter(s => s.classId === selectedClass));
-    } else {
-      setFilteredSubjects([]);
-    }
-  }, [selectedClass, subjects, isRegularSchool]);
+    } else { setFilteredSubjects([]); }
+  }, [selectedClass, subjects, isSchoolMode]);
 
-  const getProgramOptions = () => (programs || []).map(p => ({ value: p.id, label: p.name, subLabel: p.code || '' }));
-  const getCourseOptions  = () => (courses  || []).map(c => ({ value: c.id, label: c.name, subLabel: c.code || '' }));
-  const getClassOptions   = () => (classes  || []).map(c => ({ value: c.id, label: c.name, subLabel: c.capacity ? `Cap: ${c.capacity}` : '' }));
+  const getProgramOptions = () => programOptions;
+  const getCourseOptions  = () => courseOptions;
+  const getClassOptions   = () => classOptions;
   const getSubjectOptions = () => (filteredSubjects || []).map(s => ({ value: s.id, label: s.name, subLabel: `Code: ${s.code || ''}` }));
-  const getUnitOptions    = () => (filteredUnits || []).map(u => ({
-    value: u.id, label: u.name,
-    subLabel: isUniversity ? `Sem: ${u.semester || 'N/A'}` : `Module: ${u.module || 'N/A'}`
-  }));
+
+  const getUnitOptions = () => (filteredUnits || []).map(u => {
+    const bits = [];
+    if (u.code) bits.push(u.code);
+    if (isTVET && u.module != null) bits.push(`Module ${u.module}`);
+    if (isUniversity && u.semester != null) bits.push(`Sem ${u.semester}`);
+    if (u.year != null) bits.push(`Yr ${u.year}`);
+    return { value: u.id, label: u.name, subLabel: bits.join(' • ') || (isTVET ? 'Module' : 'Unit') };
+  });
 
   const getExamOptions = () => {
     const opts = [];
     (examSessions || []).forEach(session => {
       const papers = session.papers || [];
       if (papers.length === 0) return;
-
-      const dateStr = session.startDate
-        ? new Date(session.startDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
-        : '';
-      const subLabel = [
-        session.type || '',
-        session.term || '',
-        `${papers.length} paper${papers.length === 1 ? '' : 's'}`,
-        dateStr
-      ].filter(Boolean).join(' • ');
-
-      opts.push({
-        value: session.id,
-        label: session.name || 'Untitled Session',
-        subLabel,
-        isSession: true
-      });
+      const dateStr = session.startDate ? new Date(session.startDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
+      const subLabel = [session.type || '', session.term || '', `${papers.length} paper${papers.length === 1 ? '' : 's'}`, dateStr].filter(Boolean).join(' • ');
+      opts.push({ value: session.id, label: session.name || 'Untitled Session', subLabel, isSession: true });
     });
     return opts;
   };
 
-  const getReportStudentOptions = () => (students || [])
-    .filter(s => !reportClassId || s.classId === reportClassId)
-    .map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}`, subLabel: s.admissionNumber }));
+  const getReportStudentOptions = () => {
+    let list = students || [];
+    if (isTVET && selectedProgram) {
+      list = list.filter(s => s.programId === selectedProgram);
+      if (selectedYear) list = list.filter(s => String(s.currentYear) === String(selectedYear));
+      if (selectedModule) list = list.filter(s => String(s.currentModule).replace(/\D/g,'') === String(selectedModule));
+    } else if (isUniversity && selectedCourse) {
+      list = list.filter(s => s.courseId === selectedCourse);
+      if (selectedYear) list = list.filter(s => String(s.currentYear) === String(selectedYear));
+      if (selectedSemester) list = list.filter(s => String(s.currentSemester) === String(selectedSemester));
+    } else if (isSchoolMode && selectedClass) {
+      list = list.filter(s => s.classId === selectedClass);
+    }
+    return list.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}`, subLabel: s.admissionNumber }));
+  };
 
-  const getTermMatrixClassSubjects = () =>
-    (subjects || []).filter(s => s.classId === termMatrixClassId).map(s => ({
-      value: s.id, label: s.name, subLabel: s.code || ''
-    }));
+  const getTermMatrixStudents = () => {
+    let list = [];
+    if (isTVET && selectedProgram) {
+      list = students.filter(s => s.programId === selectedProgram);
+      if (selectedYear) list = list.filter(s => String(s.currentYear) === String(selectedYear));
+      if (selectedModule) list = list.filter(s => String(s.currentModule).replace(/\D/g,'') === String(selectedModule));
+    } else if (isUniversity && selectedCourse) {
+      list = students.filter(s => s.courseId === selectedCourse);
+      if (selectedYear) list = list.filter(s => String(s.currentYear) === String(selectedYear));
+      if (selectedSemester) list = list.filter(s => String(s.currentSemester) === String(selectedSemester));
+    } else if (isSchoolMode && selectedClass) {
+      list = students.filter(s => s.classId === selectedClass);
+    } else { return []; }
+    return list.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}`, subLabel: s.admissionNumber }));
+  };
 
-  const getTermMatrixStudents = () =>
-    (students || []).filter(s => s.classId === termMatrixClassId).map(s => ({
-      value: s.id, label: `${s.firstName} ${s.lastName}`, subLabel: s.admissionNumber
-    }));
+  const getTermMatrixClassSubjects = () => {
+    if (isSchoolMode && selectedClass) {
+      return subjects.filter(s => s.classId === selectedClass).map(s => ({ value: s.id, label: s.name, subLabel: s.code || '' }));
+    }
+    return getUnitOptions();
+  };
 
   // ============================================================
   // PRINT STYLES
@@ -13985,24 +13948,15 @@ const ResultsModule = ({
         body * { visibility: hidden !important; }
         .results-print-area, .results-print-area * { visibility: visible !important; }
         .results-print-area {
-          position: absolute !important;
-          left: 0; top: 0; width: 100% !important;
+          position: absolute !important; left: 0; top: 0; width: 100% !important;
           padding: 10mm !important; background: #fff !important;
           box-shadow: none !important; border: none !important; border-radius: 0 !important;
         }
-        .no-print, .no-print *, nav, aside, header, footer, button, input, select, textarea {
-          display: none !important;
-        }
+        .no-print, .no-print *, nav, aside, header, footer, button, input, select, textarea { display: none !important; }
         table { border-collapse: collapse !important; width: 100% !important; }
         thead { display: table-header-group !important; }
         tr { page-break-inside: avoid !important; }
-        th, td {
-          border: 1px solid #cbd5e1 !important;
-          padding: 6px 8px !important;
-          font-size: 11px !important;
-          color: #111 !important;
-          background: #fff !important;
-        }
+        th, td { border: 1px solid #cbd5e1 !important; padding: 6px 8px !important; font-size: 11px !important; color: #111 !important; background: #fff !important; }
         th { background: #f1f5f9 !important; font-weight: 700 !important; }
         .print-only { display: block !important; }
         @page { size: A4 landscape; margin: 8mm; }
@@ -14010,20 +13964,14 @@ const ResultsModule = ({
       .print-only { display: none; }
     `;
     document.head.appendChild(style);
-    return () => {
-      const el = document.getElementById(id);
-      if (el) el.remove();
-    };
+    return () => { const el = document.getElementById(id); if (el) el.remove(); };
   }, []);
 
   const handlePrintArea = (areaId) => {
     const el = document.getElementById(areaId);
     if (!el) { window.print(); return; }
     el.classList.add('results-print-area');
-    setTimeout(() => {
-      window.print();
-      setTimeout(() => el.classList.remove('results-print-area'), 800);
-    }, 100);
+    setTimeout(() => { window.print(); setTimeout(() => el.classList.remove('results-print-area'), 800); }, 100);
   };
 
   // ============================================================
@@ -14032,34 +13980,47 @@ const ResultsModule = ({
   const loadExamResults = async () => {
     if (!selectedSession) { alert('Please select an exam session'); return; }
     setLoading(true); setApiError('');
-
     try {
       const session = (examSessions || []).find(s => s.id === selectedSession);
       if (!session) { alert('Session not found'); return; }
-
       const papers = session.papers || [];
       if (papers.length === 0) { alert('This session has no papers'); return; }
 
       const firstPaper = papers[0];
       let studentList = [];
       const params = {};
-      if (isUniversity && session.courseId) { params.courseId = session.courseId; if (session.year) params.year = session.year; }
-      else if (isTVET && session.programId) { params.programId = session.programId; if (session.module) params.module = session.module; if (session.year) params.year = session.year; }
-      else if (session.classId || firstPaper.classId) { params.classId = session.classId || firstPaper.classId; }
+      if (isUniversity && session.courseId) {
+        params.courseId = session.courseId;
+        if (session.year) params.year = session.year;
+      } else if (isTVET && session.programId) {
+        params.programId = session.programId;
+        if (session.module) params.module = session.module;
+        if (session.year) params.year = session.year;
+      } else if (session.classId || firstPaper.classId) {
+        params.classId = session.classId || firstPaper.classId;
+      }
 
       const res = await api.get('/students', { params });
       studentList = res.data.students || [];
 
       if (studentList.length === 0) { alert('No students found for this session'); return; }
 
+      if (isTVET && session.module) {
+        studentList = studentList.filter(s => s.currentModule == null || String(s.currentModule).replace(/[^\d]/g, '') === String(session.module));
+      }
+      if (isUniversity && session.semester) {
+        studentList = studentList.filter(s => s.currentSemester == null || String(s.currentSemester) === String(session.semester));
+      }
+      if (session.year) {
+        studentList = studentList.filter(s => s.currentYear == null || String(s.currentYear) === String(session.year));
+      }
+
       const existingByPaper = {};
       for (const paper of papers) {
         try {
           const r = await api.get(`/results/exam/${paper.id}`);
           existingByPaper[paper.id] = r.data.results || [];
-        } catch (_) {
-          existingByPaper[paper.id] = [];
-        }
+        } catch (_) { existingByPaper[paper.id] = []; }
       }
 
       const entries = [];
@@ -14068,9 +14029,7 @@ const ResultsModule = ({
           const existing = existingByPaper[paper.id].find(r => r.studentId === student.id);
           const hasMarks = existing?.marks !== undefined && existing?.marks !== null && existing?.marks !== '';
           const marks = hasMarks ? existing.marks : '';
-          const gradeInfo = hasMarks
-            ? calculateGrade(marks, paper.maxMarks || 100, schoolCategory)
-            : { grade: '', points: 0 };
+          const gradeInfo = hasMarks ? calculateGrade(marks, paper.maxMarks || 100, schoolCategory) : { grade: '', points: 0 };
 
           entries.push({
             studentId: student.id,
@@ -14080,9 +14039,7 @@ const ResultsModule = ({
             sessionId: session.id,
             sessionName: session.name,
             unitName: getItemName({}, paper) || paper.name || 'Paper',
-            marks,
-            grade: gradeInfo.grade,
-            points: gradeInfo.points,
+            marks, grade: gradeInfo.grade, points: gradeInfo.points,
             isAbsent: existing?.isAbsent || false,
             resultId: existing?.id
           });
@@ -14091,9 +14048,7 @@ const ResultsModule = ({
       setResultEntries(entries);
     } catch (error) {
       setApiError('Failed to load results: ' + (error.response?.data?.message || error.message));
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   const saveAllResults = async () => {
@@ -14113,9 +14068,7 @@ const ResultsModule = ({
           const r = await api.get(`/results/exam/${examId}`);
           existingByExam[examId] = {};
           (r.data?.results || []).forEach(x => { existingByExam[examId][x.studentId] = x; });
-        } catch (_) {
-          existingByExam[examId] = {};
-        }
+        } catch (_) { existingByExam[examId] = {}; }
       }
 
       for (const entry of toSave) {
@@ -14134,10 +14087,7 @@ const ResultsModule = ({
         if (isUniversity || isTVET) data.unitId = paper.unitId;
         else data.subjectId = paper.subjectId;
 
-        const existing = entry.resultId
-          ? { id: entry.resultId }
-          : existingByExam[entry.examId]?.[student.id];
-
+        const existing = entry.resultId ? { id: entry.resultId } : existingByExam[entry.examId]?.[student.id];
         try {
           if (existing?.id) await api.put(`/results/${existing.id}`, data);
           else await api.post('/results', data);
@@ -14149,22 +14099,14 @@ const ResultsModule = ({
       if (saved > 0) await loadExamResults();
     } catch (err) {
       alert('Failed to save: ' + (err.response?.data?.message || err.message));
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   const handleMarkChange = (studentId, examId, value) => {
-    setResultEntries(prev => prev.map(e =>
-      (e.studentId === studentId && e.examId === examId) ? { ...e, marks: value } : e
-    ));
+    setResultEntries(prev => prev.map(e => (e.studentId === studentId && e.examId === examId) ? { ...e, marks: value } : e));
   };
   const handleAbsentChange = (studentId, examId, checked) => {
-    setResultEntries(prev => prev.map(e =>
-      (e.studentId === studentId && e.examId === examId)
-        ? { ...e, isAbsent: checked, marks: checked ? 0 : e.marks }
-        : e
-    ));
+    setResultEntries(prev => prev.map(e => (e.studentId === studentId && e.examId === examId) ? { ...e, isAbsent: checked, marks: checked ? 0 : e.marks } : e));
   };
   const handleSelectAllForMessage = (checked) => {
     setSelectAllForMessage(checked);
@@ -14175,42 +14117,17 @@ const ResultsModule = ({
     setSelectAllForMessage(false);
   };
 
-  const filteredResultEntries = resultEntries
-    .filter(e =>
-      !studentSearch ||
-      e.studentName?.toLowerCase().includes(studentSearch.toLowerCase()) ||
-      e.admissionNumber?.toLowerCase().includes(studentSearch.toLowerCase())
-    )
-    .filter(e => !filterGrade || e.grade === filterGrade);
-
+  const filteredResultEntries = resultEntries.filter(e => !studentSearch || e.studentName?.toLowerCase().includes(studentSearch.toLowerCase()) || e.admissionNumber?.toLowerCase().includes(studentSearch.toLowerCase())).filter(e => !filterGrade || e.grade === filterGrade);
   const uniqueGrades = [...new Set(resultEntries.map(e => e.grade).filter(Boolean))];
 
-  // ============================================================
-  // PRINT HEADER — logo beside school name (MATCHING SCREENSHOT)
-  // ============================================================
   const PrintHeader = ({ title, subtitle }) => (
     <div className="flex items-center gap-6 border-b-2 border-slate-300 pb-5 mb-5">
-      {schoolLogo && (
-        <img
-          src={schoolLogo}
-          alt=""
-          className="w-24 h-24 object-contain rounded-full border-2 border-slate-200 flex-shrink-0 bg-white"
-          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-        />
-      )}
+      {schoolLogo && <img src={schoolLogo} alt="" className="w-24 h-24 object-contain rounded-full border-2 border-slate-200 flex-shrink-0 bg-white" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
       <div className="flex-1 text-left">
-        <h1 className="text-3xl font-black text-slate-800 uppercase tracking-wider leading-tight">
-          {schoolName}
-        </h1>
-        {schoolMotto && (
-          <p className="text-sm italic text-slate-500 mt-1">"{schoolMotto}"</p>
-        )}
-        {title && (
-          <p className="text-lg font-bold text-slate-700 mt-2 uppercase tracking-wider">{title}</p>
-        )}
-        {subtitle && (
-          <p className="text-sm text-slate-500 mt-1">{subtitle}</p>
-        )}
+        <h1 className="text-3xl font-black text-slate-800 uppercase tracking-wider leading-tight">{schoolName}</h1>
+        {schoolMotto && <p className="text-sm italic text-slate-500 mt-1">"{schoolMotto}"</p>}
+        {title && <p className="text-lg font-bold text-slate-700 mt-2 uppercase tracking-wider">{title}</p>}
+        {subtitle && <p className="text-sm text-slate-500 mt-1">{subtitle}</p>}
       </div>
     </div>
   );
@@ -14228,18 +14145,10 @@ const ResultsModule = ({
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Admission Number</label>
-                  <input type="text"
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                    value={admissionNumber}
-                    onChange={(e) => { setAdmissionNumber(e.target.value.toUpperCase()); hasLoadedStudentData.current = false; }}
-                    placeholder="e.g., ADM/2026/0001"
-                    autoFocus />
+                  <input type="text" className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500" value={admissionNumber} onChange={(e) => { setAdmissionNumber(e.target.value.toUpperCase()); hasLoadedStudentData.current = false; }} placeholder="e.g., ADM/2026/0001" autoFocus />
                 </div>
                 {apiError && <div className="bg-red-50 p-3 rounded-lg text-red-600 text-sm">{apiError}</div>}
-                <button onClick={handleAdmissionSubmit} disabled={loadingMyData || !admissionNumber}
-                  className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-                  {loadingMyData ? 'Loading...' : 'View Results'}
-                </button>
+                <button onClick={handleAdmissionSubmit} disabled={loadingMyData || !admissionNumber} className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">{loadingMyData ? 'Loading...' : 'View Results'}</button>
               </div>
             </div>
           </div>
@@ -14250,27 +14159,16 @@ const ResultsModule = ({
         <div className="flex justify-between items-center no-print">
           <h2 className="text-2xl font-bold">My Results</h2>
           {myStudentRecord && (
-            <button onClick={() => {
-              localStorage.removeItem('studentAdmissionNumber');
-              setAdmissionNumber(''); setMyStudentRecord(null); setMyResults([]);
-              hasLoadedStudentData.current = false;
-              setShowAdmissionModal(true);
-            }}
-              className="text-indigo-600 hover:text-indigo-800 text-sm">
-              <i className="fas fa-exchange-alt mr-1"></i>Switch Account
-            </button>
+            <button onClick={() => { localStorage.removeItem('studentAdmissionNumber'); setAdmissionNumber(''); setMyStudentRecord(null); setMyResults([]); hasLoadedStudentData.current = false; setShowAdmissionModal(true); }} className="text-indigo-600 hover:text-indigo-800 text-sm"><i className="fas fa-exchange-alt mr-1"></i>Switch Account</button>
           )}
         </div>
 
         {myStudentRecord ? (
           <div id="student-results-print" className="space-y-6">
             <PrintHeader title="Student Results Report" />
-
             <div className="rounded-xl p-6 text-white bg-gradient-to-r from-indigo-600 to-blue-600">
               <div className="flex items-center gap-4">
-                <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center text-2xl font-bold text-indigo-600">
-                  {myStudentRecord.firstName?.[0]}{myStudentRecord.lastName?.[0]}
-                </div>
+                <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center text-2xl font-bold text-indigo-600">{myStudentRecord.firstName?.[0]}{myStudentRecord.lastName?.[0]}</div>
                 <div>
                   <h3 className="text-2xl font-bold">{myStudentRecord.firstName} {myStudentRecord.lastName}</h3>
                   <p className="text-indigo-100">Admission: {myStudentRecord.admissionNumber}</p>
@@ -14280,30 +14178,16 @@ const ResultsModule = ({
 
             {myResultsSummary && (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-blue-50 p-4 rounded-xl text-center border border-blue-100">
-                  <p className="text-xs uppercase tracking-wider text-blue-700 font-bold">Exams</p>
-                  <p className="text-3xl font-black text-blue-700 mt-1">{myResultsSummary.total}</p>
-                </div>
-                <div className="bg-emerald-50 p-4 rounded-xl text-center border border-emerald-100">
-                  <p className="text-xs uppercase tracking-wider text-emerald-700 font-bold">Average</p>
-                  <p className="text-3xl font-black text-emerald-700 mt-1">{myResultsSummary.average}%</p>
-                </div>
-                <div className="bg-purple-50 p-4 rounded-xl text-center border border-purple-100">
-                  <p className="text-xs uppercase tracking-wider text-purple-700 font-bold">Points</p>
-                  <p className="text-3xl font-black text-purple-700 mt-1">{myResultsSummary.totalPoints}</p>
-                </div>
-                <div className="bg-amber-50 p-4 rounded-xl text-center border border-amber-100">
-                  <p className="text-xs uppercase tracking-wider text-amber-700 font-bold">Mean</p>
-                  <p className="text-3xl font-black text-amber-700 mt-1">{myResultsSummary.meanGrade}</p>
-                </div>
+                <div className="bg-blue-50 p-4 rounded-xl text-center border border-blue-100"><p className="text-xs uppercase tracking-wider text-blue-700 font-bold">Exams</p><p className="text-3xl font-black text-blue-700 mt-1">{myResultsSummary.total}</p></div>
+                <div className="bg-emerald-50 p-4 rounded-xl text-center border border-emerald-100"><p className="text-xs uppercase tracking-wider text-emerald-700 font-bold">Average</p><p className="text-3xl font-black text-emerald-700 mt-1">{myResultsSummary.average}%</p></div>
+                <div className="bg-purple-50 p-4 rounded-xl text-center border border-purple-100"><p className="text-xs uppercase tracking-wider text-purple-700 font-bold">Points</p><p className="text-3xl font-black text-purple-700 mt-1">{myResultsSummary.totalPoints}</p></div>
+                <div className="bg-amber-50 p-4 rounded-xl text-center border border-amber-100"><p className="text-xs uppercase tracking-wider text-amber-700 font-bold">Mean</p><p className="text-3xl font-black text-amber-700 mt-1">{myResultsSummary.meanGrade}</p></div>
               </div>
             )}
 
             {myResults.length > 0 && (
               <div className="bg-white rounded-xl shadow-sm overflow-hidden border">
-                <div className="px-6 py-4 bg-slate-50 border-b">
-                  <h3 className="font-semibold text-lg">Detailed Results</h3>
-                </div>
+                <div className="px-6 py-4 bg-slate-50 border-b"><h3 className="font-semibold text-lg">Detailed Results</h3></div>
                 <table className="w-full">
                   <thead className="bg-slate-100">
                     <tr>
@@ -14322,11 +14206,7 @@ const ResultsModule = ({
                         <td className="px-4 py-3 text-sm border-r">{r.examDate ? new Date(r.examDate).toLocaleDateString() : '—'}</td>
                         <td className="px-4 py-3 border-r">{r.itemName}</td>
                         <td className="px-4 py-3 text-center font-bold border-r">{r.marks ?? '—'}</td>
-                        <td className="px-4 py-3 text-center border-r">
-                          <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradePillClasses(r.grade)}`}>
-                            {r.grade || '—'}
-                          </span>
-                        </td>
+                        <td className="px-4 py-3 text-center border-r"><span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradePillClasses(r.grade)}`}>{r.grade || '—'}</span></td>
                         <td className="px-4 py-3 text-center">{r.points}</td>
                       </tr>
                     ))}
@@ -14336,10 +14216,7 @@ const ResultsModule = ({
             )}
 
             <div className="flex justify-end no-print">
-              <button onClick={() => handlePrintArea('student-results-print')}
-                className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2">
-                <i className="fas fa-print"></i>Print My Results
-              </button>
+              <button onClick={() => handlePrintArea('student-results-print')} className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2"><i className="fas fa-print"></i>Print My Results</button>
             </div>
           </div>
         ) : (
@@ -14359,48 +14236,26 @@ const ResultsModule = ({
     return (
       <div className="space-y-6">
         {loadingChildren && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50" />}
-        {apiError && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg no-print">
-            <i className="fas fa-exclamation-circle mr-2"></i>{apiError}
-          </div>
-        )}
-
+        {apiError && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg no-print"><i className="fas fa-exclamation-circle mr-2"></i>{apiError}</div>}
         <h2 className="text-2xl font-bold no-print">My Children's Results</h2>
 
         {loadingChildren ? (
-          <div className="bg-white p-12 rounded-xl shadow-sm text-center">
-            <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-4"></div>
-            <p className="text-gray-500">Loading...</p>
-          </div>
+          <div className="bg-white p-12 rounded-xl shadow-sm text-center"><div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-4"></div><p className="text-gray-500">Loading...</p></div>
         ) : myChildren.length === 0 ? (
-          <div className="bg-white p-12 rounded-xl shadow-sm text-center">
-            <i className="fas fa-child text-6xl text-gray-300 mb-4"></i>
-            <p className="text-gray-500">No children linked.</p>
-          </div>
+          <div className="bg-white p-12 rounded-xl shadow-sm text-center"><i className="fas fa-child text-6xl text-gray-300 mb-4"></i><p className="text-gray-500">No children linked.</p></div>
         ) : (
           <div className="space-y-6">
             <div className="bg-white p-6 rounded-xl shadow-sm no-print">
               <label className="block text-sm font-medium text-gray-700 mb-2">Select Child</label>
-              <select value={selectedChild?.id || ''}
-                onChange={(e) => {
-                  const c = myChildren.find(x => x.id === e.target.value);
-                  setSelectedChild(c);
-                  if (c) loadChildResults(c.admissionNumber);
-                }}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
+              <select value={selectedChild?.id || ''} onChange={(e) => { const c = myChildren.find(x => x.id === e.target.value); setSelectedChild(c); if (c) loadChildResults(c.admissionNumber); }} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
                 <option value="">-- Select --</option>
-                {myChildren.map(c => (
-                  <option key={c.id} value={c.id}>
-                    {c.firstName} {c.lastName} ({c.admissionNumber})
-                  </option>
-                ))}
+                {myChildren.map(c => <option key={c.id} value={c.id}>{c.firstName} {c.lastName} ({c.admissionNumber})</option>)}
               </select>
             </div>
 
             {selectedChild && myStudentRecord && (
               <div id="parent-results-print" className="space-y-6">
                 <PrintHeader title="Student Results Report" />
-
                 <div className="rounded-xl p-6 text-white bg-gradient-to-r from-indigo-500 to-purple-600">
                   <h3 className="text-2xl font-bold">{myStudentRecord.firstName} {myStudentRecord.lastName}</h3>
                   <p className="text-purple-100">Admission: {myStudentRecord.admissionNumber}</p>
@@ -14425,28 +14280,17 @@ const ResultsModule = ({
                             <td className="px-4 py-3 text-sm border-r">{r.examDate ? new Date(r.examDate).toLocaleDateString() : '—'}</td>
                             <td className="px-4 py-3 border-r">{r.itemName}</td>
                             <td className="px-4 py-3 text-center font-bold border-r">{r.marks ?? '—'}</td>
-                            <td className="px-4 py-3 text-center">
-                              <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradePillClasses(r.grade)}`}>
-                                {r.grade || '—'}
-                              </span>
-                            </td>
+                            <td className="px-4 py-3 text-center"><span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradePillClasses(r.grade)}`}>{r.grade || '—'}</span></td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
                 ) : (
-                  <div className="bg-white p-12 rounded-xl shadow-sm text-center">
-                    <i className="fas fa-file-alt text-6xl text-gray-300 mb-4"></i>
-                    <p className="text-gray-500">No results yet.</p>
-                  </div>
+                  <div className="bg-white p-12 rounded-xl shadow-sm text-center"><i className="fas fa-file-alt text-6xl text-gray-300 mb-4"></i><p className="text-gray-500">No results yet.</p></div>
                 )}
-
                 <div className="flex justify-end no-print">
-                  <button onClick={() => handlePrintArea('parent-results-print')}
-                    className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2">
-                    <i className="fas fa-print"></i>Print
-                  </button>
+                  <button onClick={() => handlePrintArea('parent-results-print')} className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2"><i className="fas fa-print"></i>Print</button>
                 </div>
               </div>
             )}
@@ -14484,24 +14328,9 @@ const ResultsModule = ({
 
         {canViewAllResults && (
           <div className="flex items-center bg-slate-100 rounded-lg p-1 text-sm">
-            <button onClick={() => setViewMode('marks')}
-              className={`px-4 py-1.5 rounded-md font-medium transition-colors ${
-                viewMode === 'marks' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-              }`}>
-              <i className="fas fa-pen mr-1.5"></i>Marks Entry
-            </button>
-            <button onClick={() => setViewMode('report')}
-              className={`px-4 py-1.5 rounded-md font-medium transition-colors ${
-                viewMode === 'report' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-              }`}>
-              <i className="fas fa-user-graduate mr-1.5"></i>Student Report
-            </button>
-            <button onClick={() => setViewMode('term-matrix')}
-              className={`px-4 py-1.5 rounded-md font-medium transition-colors ${
-                viewMode === 'term-matrix' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-              }`}>
-              <i className="fas fa-th mr-1.5"></i>Termly Matrix
-            </button>
+            <button onClick={() => setViewMode('marks')} className={`px-4 py-1.5 rounded-md font-medium transition-colors ${viewMode === 'marks' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}><i className="fas fa-pen mr-1.5"></i>Marks Entry</button>
+            <button onClick={() => setViewMode('report')} className={`px-4 py-1.5 rounded-md font-medium transition-colors ${viewMode === 'report' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}><i className="fas fa-user-graduate mr-1.5"></i>Student Report</button>
+            <button onClick={() => setViewMode('term-matrix')} className={`px-4 py-1.5 rounded-md font-medium transition-colors ${viewMode === 'term-matrix' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}><i className="fas fa-th mr-1.5"></i>Termly Matrix</button>
           </div>
         )}
       </div>
@@ -14510,123 +14339,74 @@ const ResultsModule = ({
       {viewMode === 'report' && canViewAllResults && (
         <>
           <div className="bg-white p-6 rounded-xl shadow-sm border no-print">
-            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <i className="fas fa-filter text-indigo-600"></i>Report Filters
-            </h3>
+            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><i className="fas fa-filter text-indigo-600"></i>Report Filters</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <SearchableSelect
-                label="Class"
-                value={reportClassId}
-                onChange={(e) => { setReportClassId(e.target.value); setReportStudentId(''); }}
-                options={getClassOptions()}
-                placeholder="All classes" />
-              <SearchableSelect
-                label="Student"
-                value={reportStudentId}
-                onChange={(e) => setReportStudentId(e.target.value)}
-                options={getReportStudentOptions()}
-                placeholder="Select student..."
-                disabled={!reportClassId} />
-              <SearchableSelect
-                label="Term"
-                value={reportTermFilter}
-                onChange={(e) => setReportTermFilter(e.target.value)}
-                options={termOptions}
-                placeholder="All terms" />
-              <SearchableSelect
-                label="Exam Type"
-                value={reportExamTypeFilter}
-                onChange={(e) => setReportExamTypeFilter(e.target.value)}
-                options={examTypeOptions}
-                placeholder="All types"
-                disabled={!!reportTermFilter} />
+              {isTVET && (<>
+                <SearchableSelect label="Program" value={selectedProgram} onChange={(e) => { setSelectedProgram(e.target.value); setSelectedModule(''); setSelectedYear(''); setReportStudentId(''); }} options={getProgramOptions()} placeholder="All programs" />
+                <SearchableSelect label="Module" value={selectedModule} onChange={(e) => { setSelectedModule(e.target.value); setSelectedYear(''); setReportStudentId(''); }} options={buildModuleOptions(selectedProgram)} placeholder="All modules" />
+                <SearchableSelect label="Year" value={selectedYear} onChange={(e) => { setSelectedYear(e.target.value); setReportStudentId(''); }} options={buildYearOptionsForProgram(selectedProgram, selectedModule)} placeholder="All years" />
+                <SearchableSelect label="Unit" value={selectedUnit} onChange={(e) => setSelectedUnit(e.target.value)} options={getUnitOptions()} placeholder="All units" />
+              </>)}
+              {isUniversity && (<>
+                <SearchableSelect label="Course" value={selectedCourse} onChange={(e) => { setSelectedCourse(e.target.value); setSelectedSemester(''); setSelectedYear(''); setReportStudentId(''); }} options={getCourseOptions()} placeholder="All courses" />
+                <SearchableSelect label="Semester" value={selectedSemester} onChange={(e) => { setSelectedSemester(e.target.value); setSelectedYear(''); setReportStudentId(''); }} options={buildSemesterOptionsForCourse(selectedCourse)} placeholder="All semesters" />
+                <SearchableSelect label="Year" value={selectedYear} onChange={(e) => { setSelectedYear(e.target.value); setReportStudentId(''); }} options={buildYearOptionsForCourse(selectedCourse, selectedSemester)} placeholder="All years" />
+                <SearchableSelect label="Unit" value={selectedUnit} onChange={(e) => setSelectedUnit(e.target.value)} options={getUnitOptions()} placeholder="All units" />
+              </>)}
+              {isSchoolMode && (
+                <SearchableSelect label="Class" value={selectedClass} onChange={(e) => { setSelectedClass(e.target.value); setReportStudentId(''); }} options={getClassOptions()} placeholder="All classes" />
+              )}
+              <SearchableSelect label="Student" value={reportStudentId} onChange={(e) => setReportStudentId(e.target.value)} options={getReportStudentOptions()} placeholder="Select student..." />
+              <SearchableSelect label="Exam Term" value={reportTermFilter} onChange={(e) => setReportTermFilter(e.target.value)} options={termOptions} placeholder="All terms" />
+              <SearchableSelect label="Exam Type" value={reportExamTypeFilter} onChange={(e) => setReportExamTypeFilter(e.target.value)} options={examTypeOptions} placeholder="All types" disabled={!!reportTermFilter} />
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
-              <button onClick={loadDetailedReport} disabled={!reportStudentId || loadingReport}
-                className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium flex items-center gap-2">
-                {loadingReport ? <><i className="fas fa-spinner fa-spin"></i>Loading...</> : <><i className="fas fa-chart-line"></i>Generate Report</>}
-              </button>
-              {reportData && (
-                <button onClick={() => handlePrintArea('detailed-report-print')}
-                  className="bg-slate-800 text-white px-5 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
-                  <i className="fas fa-print"></i>Print Report
-                </button>
-              )}
+              <button onClick={loadDetailedReport} disabled={!reportStudentId || loadingReport} className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium flex items-center gap-2">{loadingReport ? <><i className="fas fa-spinner fa-spin"></i>Loading...</> : <><i className="fas fa-chart-line"></i>Generate Report</>}</button>
+              {reportData && <button onClick={() => handlePrintArea('detailed-report-print')} className="bg-slate-800 text-white px-5 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium"><i className="fas fa-print"></i>Print Report</button>}
             </div>
           </div>
 
           {reportData && (
             <div id="detailed-report-print" className="space-y-6">
               <PrintHeader title="Student Report Card" />
-
               <div className="bg-slate-800 text-white rounded-xl p-6">
                 <div className="flex flex-wrap justify-between items-start gap-4">
                   <div>
                     <p className="text-xs uppercase tracking-widest text-slate-300 mb-1">Student</p>
-                    <h3 className="text-3xl font-bold">
-                      {reportData.student.firstName} {reportData.student.lastName}
-                    </h3>
+                    <h3 className="text-3xl font-bold">{reportData.student.firstName} {reportData.student.lastName}</h3>
                     <p className="text-slate-300 font-mono mt-1">{reportData.student.admissionNumber}</p>
                     <p className="text-slate-400 text-sm mt-1">
-                      {classes.find(c => c.id === reportData.student.classId)?.name || '—'}
+                      {isUniversity ? courses.find(c => c.id === reportData.student.courseId)?.name || '—'
+                        : isTVET ? programs.find(p => p.id === reportData.student.programId)?.name || '—'
+                        : classes.find(c => c.id === reportData.student.classId)?.name || '—'}
                     </p>
                   </div>
                   <div className="text-right">
                     <p className="text-xs uppercase tracking-widest text-slate-300">Overall Average</p>
                     <p className="text-5xl font-black">{reportData.overallAverage.toFixed(1)}%</p>
-                    {reportData.positionInfo && (
-                      <p className="text-sm text-slate-300 mt-2">
-                        <i className="fas fa-trophy text-amber-400 mr-1"></i>
-                        Position: <strong>{reportData.positionInfo.position}</strong> out of {reportData.positionInfo.total}
-                      </p>
-                    )}
-                    {reportData.merit && (
-                      <p className="text-xs text-emerald-300 mt-1">{reportData.merit}</p>
-                    )}
+                    {reportData.positionInfo && <p className="text-sm text-slate-300 mt-2"><i className="fas fa-trophy text-amber-400 mr-1"></i>Position: <strong>{reportData.positionInfo.position}</strong> out of {reportData.positionInfo.total}</p>}
+                    {reportData.merit && <p className="text-xs text-emerald-300 mt-1">{reportData.merit}</p>}
                   </div>
                 </div>
               </div>
 
               {reportData.termCards.length === 0 ? (
-                <div className="bg-white p-12 rounded-xl shadow-sm text-center border">
-                  <i className="fas fa-file-alt text-6xl text-gray-300 mb-4"></i>
-                  <p className="text-gray-500">No results match the filters.</p>
-                </div>
+                <div className="bg-white p-12 rounded-xl shadow-sm text-center border"><i className="fas fa-file-alt text-6xl text-gray-300 mb-4"></i><p className="text-gray-500">No results match the filters.</p></div>
               ) : (
                 reportData.termCards.map((card, ci) => (
                   <div key={ci} className="bg-white rounded-xl shadow-sm border overflow-hidden">
                     <div className="bg-slate-50 px-6 py-4 border-b flex justify-between items-center flex-wrap gap-2">
-                      <div>
-                        <h4 className="font-bold text-slate-800 text-lg">
-                          {card.term}{card.year && ` • ${card.year}`}
-                        </h4>
-                        <p className="text-xs text-slate-500">
-                          {card.subjects.length} {subjectColumnLabel.toLowerCase()}{card.subjects.length !== 1 ? 's' : ''}
-                        </p>
-                      </div>
+                      <div><h4 className="font-bold text-slate-800 text-lg">{card.term}{card.year && ` • ${card.year}`}</h4><p className="text-xs text-slate-500">{card.subjects.length} {subjectColumnLabel.toLowerCase()}{card.subjects.length !== 1 ? 's' : ''}</p></div>
                       <div className="flex items-center gap-4">
-                        <div className="text-right">
-                          <p className="text-xs text-slate-500">Term Average</p>
-                          <p className="text-2xl font-bold text-indigo-600">{card.termAverage.toFixed(1)}%</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-xs text-slate-500">Mean Grade</p>
-                          <span className={`inline-block px-3 py-1 rounded-full text-sm font-bold ${getGradePillClasses(card.termGrade)}`}>
-                            {card.termGrade}
-                          </span>
-                        </div>
+                        <div className="text-right"><p className="text-xs text-slate-500">Term Average</p><p className="text-2xl font-bold text-indigo-600">{card.termAverage.toFixed(1)}%</p></div>
+                        <div className="text-right"><p className="text-xs text-slate-500">Mean Grade</p><span className={`inline-block px-3 py-1 rounded-full text-sm font-bold ${getGradePillClasses(card.termGrade)}`}>{card.termGrade}</span></div>
                       </div>
                     </div>
-
                     <table className="w-full border-collapse">
                       <thead>
                         <tr className="bg-slate-100 border-b">
                           <th className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase border-r">{subjectColumnLabel}</th>
-                          {card.examTypeColumns.map(type => (
-                            <th key={type} className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase border-r">
-                              {examTypeLabel(type)}
-                            </th>
-                          ))}
+                          {card.examTypeColumns.map(type => <th key={type} className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase border-r">{examTypeLabel(type)}</th>)}
                           <th className="px-4 py-3 text-center text-xs font-bold text-slate-600 uppercase">Average</th>
                         </tr>
                       </thead>
@@ -14638,16 +14418,7 @@ const ResultsModule = ({
                               const cell = s.cells[type];
                               return (
                                 <td key={type} className="px-4 py-3 text-center border-r">
-                                  {cell ? (
-                                    <div className="flex flex-col items-center gap-1">
-                                      <span className="font-bold text-slate-800">{cell.marks}</span>
-                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${getGradePillClasses(cell.grade)}`}>
-                                        {cell.grade || '—'}
-                                      </span>
-                                    </div>
-                                  ) : (
-                                    <span className="text-slate-300">—</span>
-                                  )}
+                                  {cell ? <div className="flex flex-col items-center gap-1"><span className="font-bold text-slate-800">{cell.marks}</span><span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${getGradePillClasses(cell.grade)}`}>{cell.grade || '—'}</span></div> : <span className="text-slate-300">—</span>}
                                 </td>
                               );
                             })}
@@ -14655,67 +14426,39 @@ const ResultsModule = ({
                           </tr>
                         ))}
                       </tbody>
-                      <tfoot>
-                        <tr className="bg-slate-100 border-t-2 border-slate-300">
-                          <td colSpan={card.examTypeColumns.length + 1} className="px-4 py-3 font-bold text-right text-slate-700 border-r">Term Average</td>
-                          <td className="px-4 py-3 text-center font-bold text-indigo-700">{card.termAverage.toFixed(1)}</td>
-                        </tr>
-                      </tfoot>
+                      <tfoot><tr className="bg-slate-100 border-t-2 border-slate-300"><td colSpan={card.examTypeColumns.length + 1} className="px-4 py-3 font-bold text-right text-slate-700 border-r">Term Average</td><td className="px-4 py-3 text-center font-bold text-indigo-700">{card.termAverage.toFixed(1)}</td></tr></tfoot>
                     </table>
                   </div>
                 ))
               )}
-
               {reportData.knec.length > 0 && (
                 <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-                  <div className="bg-gradient-to-r from-purple-500 to-indigo-500 px-6 py-3 text-white">
-                    <h3 className="font-bold text-lg flex items-center gap-2">
-                      <i className="fas fa-brain"></i>KNEC Aptitude Analysis
-                    </h3>
-                    <p className="text-xs text-purple-100 mt-1">
-                      Based on the student's average performance across subject streams
-                    </p>
-                  </div>
+                  <div className="bg-gradient-to-r from-purple-500 to-indigo-500 px-6 py-3 text-white"><h3 className="font-bold text-lg flex items-center gap-2"><i className="fas fa-brain"></i>KNEC Aptitude Analysis</h3><p className="text-xs text-purple-100 mt-1">Based on the student's average performance across subject streams</p></div>
                   <div className="p-6">
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                       {reportData.knec.map((s, i) => {
                         const isTop = i < 2;
                         return (
-                          <div key={s.stream} className={`p-3 rounded-lg border-2 text-center ${
-                            isTop ? 'border-purple-400 bg-purple-50' : 'border-gray-200 bg-gray-50'
-                          }`}>
+                          <div key={s.stream} className={`p-3 rounded-lg border-2 text-center ${isTop ? 'border-purple-400 bg-purple-50' : 'border-gray-200 bg-gray-50'}`}>
                             <p className="text-xs font-medium text-gray-600 uppercase">{s.stream}</p>
-                            <p className={`text-2xl font-bold mt-1 ${isTop ? 'text-purple-700' : 'text-gray-700'}`}>
-                              {s.average.toFixed(0)}%
-                            </p>
+                            <p className={`text-2xl font-bold mt-1 ${isTop ? 'text-purple-700' : 'text-gray-700'}`}>{s.average.toFixed(0)}%</p>
                             <p className="text-[10px] text-gray-500 mt-1">{s.count} subject{s.count !== 1 ? 's' : ''}</p>
                             {isTop && <p className="text-xs text-purple-600 mt-1 font-medium">⭐ Likely to thrive</p>}
                           </div>
                         );
                       })}
                     </div>
-                    {reportData.knec.length >= 2 && (
-                      <div className="mt-4 p-3 bg-purple-50 rounded-lg">
-                        <p className="text-sm text-purple-800">
-                          <strong>Recommendation:</strong> This student shows strongest potential in{' '}
-                          <strong>{reportData.knec.slice(0, 2).map(s => s.stream).join(' and ')}</strong>.
-                          Consider encouraging further development in these areas.
-                        </p>
-                      </div>
-                    )}
+                    {reportData.knec.length >= 2 && <div className="mt-4 p-3 bg-purple-50 rounded-lg"><p className="text-sm text-purple-800"><strong>Recommendation:</strong> This student shows strongest potential in <strong>{reportData.knec.slice(0, 2).map(s => s.stream).join(' and ')}</strong>. Consider encouraging further development in these areas.</p></div>}
                   </div>
                 </div>
               )}
-
               <div className="print-only pt-12 border-t border-slate-300">
                 <div className="grid grid-cols-3 gap-8 text-center text-xs text-slate-600">
                   <div><div className="border-t border-slate-400 mt-10 pt-2">Class Teacher</div></div>
                   <div><div className="border-t border-slate-400 mt-10 pt-2">Head Teacher / Principal</div></div>
                   <div><div className="border-t border-slate-400 mt-10 pt-2">School Stamp</div></div>
                 </div>
-                <p className="text-center text-xs text-slate-400 mt-6">
-                  Generated on {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}
-                </p>
+                <p className="text-center text-xs text-slate-400 mt-6">Generated on {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
               </div>
             </div>
           )}
@@ -14726,31 +14469,19 @@ const ResultsModule = ({
       {viewMode === 'term-matrix' && canViewAllResults && (
         <>
           <div className="bg-white p-6 rounded-xl shadow-sm border no-print">
-            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <i className="fas fa-th text-indigo-600"></i>Termly Matrix
-            </h3>
+            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><i className="fas fa-th text-indigo-600"></i>Termly Matrix</h3>
 
             <div className="mb-4">
               <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">View</label>
               <div className="flex flex-wrap gap-2">
                 {[
                   { key: 'student', label: 'By Student',  desc: 'One student · all subjects × all exams', icon: 'fa-user' },
-                  { key: 'subject', label: 'By Subject',  desc: 'One subject · all students',  icon: 'fa-book' },
+                  { key: 'subject', label: `By ${subjectColumnLabel}`,  desc: `One ${subjectColumnLabel.toLowerCase()} · all students`,  icon: 'fa-book' },
                   { key: 'exam',    label: 'By Exam',     desc: 'One exam · all subjects',     icon: 'fa-file-alt' },
-                  { key: 'class',   label: 'By Class',    desc: 'One subject · all students', icon: 'fa-users' }
+                  { key: 'class',   label: isTVET ? 'By Program' : isUniversity ? 'By Course' : 'By Class',    desc: `All ${subjectColumnLabel.toLowerCase()}s · all students`, icon: 'fa-users' }
                 ].map(v => (
-                  <button
-                    key={v.key}
-                    onClick={() => setTermMatrixView(v.key)}
-                    className={`px-4 py-2 rounded-lg border-2 text-left transition ${
-                      termMatrixView === v.key
-                        ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
-                        : 'border-gray-200 hover:border-indigo-300 text-gray-700'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 font-semibold text-sm">
-                      <i className={`fas ${v.icon}`}></i>{v.label}
-                    </div>
+                  <button key={v.key} onClick={() => setTermMatrixView(v.key)} className={`px-4 py-2 rounded-lg border-2 text-left transition ${termMatrixView === v.key ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 hover:border-indigo-300 text-gray-700'}`}>
+                    <div className="flex items-center gap-2 font-semibold text-sm"><i className={`fas ${v.icon}`}></i>{v.label}</div>
                     <div className="text-[10px] text-gray-500 mt-0.5">{v.desc}</div>
                   </button>
                 ))}
@@ -14758,60 +14489,34 @@ const ResultsModule = ({
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <SearchableSelect
-                label="Class *"
-                value={termMatrixClassId}
-                onChange={(e) => {
-                  setTermMatrixClassId(e.target.value);
-                  setTermMatrixSubjectId('');
-                  setTermMatrixStudentId('');
-                }}
-                options={getClassOptions()}
-                placeholder="Select class..." />
-              <SearchableSelect
-                label="Term *"
-                value={termMatrixTerm}
-                onChange={(e) => setTermMatrixTerm(e.target.value)}
-                options={termOptions.filter(t => t.value !== '')}
-                placeholder="Select term..." />
-
+              {isTVET && (<>
+                <SearchableSelect label="Program *" value={selectedProgram} onChange={(e) => { setSelectedProgram(e.target.value); setSelectedModule(''); setSelectedYear(''); setTermMatrixStudentId(''); setTermMatrixSubjectId(''); }} options={getProgramOptions()} placeholder="Select program..." />
+                <SearchableSelect label="Module" value={selectedModule} onChange={(e) => { setSelectedModule(e.target.value); setSelectedYear(''); setTermMatrixStudentId(''); setTermMatrixSubjectId(''); }} options={buildModuleOptions(selectedProgram)} placeholder="All modules..." />
+                <SearchableSelect label="Year" value={selectedYear} onChange={(e) => { setSelectedYear(e.target.value); setTermMatrixStudentId(''); setTermMatrixSubjectId(''); }} options={buildYearOptionsForProgram(selectedProgram, selectedModule)} placeholder="All years..." />
+                <SearchableSelect label="Unit *" value={termMatrixSubjectId} onChange={(e) => setTermMatrixSubjectId(e.target.value)} options={getUnitOptions()} placeholder="Select unit..." />
+              </>)}
+              {isUniversity && (<>
+                <SearchableSelect label="Course *" value={selectedCourse} onChange={(e) => { setSelectedCourse(e.target.value); setSelectedSemester(''); setSelectedYear(''); setTermMatrixStudentId(''); setTermMatrixSubjectId(''); }} options={getCourseOptions()} placeholder="Select course..." />
+                <SearchableSelect label="Semester" value={selectedSemester} onChange={(e) => { setSelectedSemester(e.target.value); setSelectedYear(''); setTermMatrixStudentId(''); setTermMatrixSubjectId(''); }} options={buildSemesterOptionsForCourse(selectedCourse)} placeholder="All semesters..." />
+                <SearchableSelect label="Year" value={selectedYear} onChange={(e) => { setSelectedYear(e.target.value); setTermMatrixStudentId(''); setTermMatrixSubjectId(''); }} options={buildYearOptionsForCourse(selectedCourse, selectedSemester)} placeholder="All years..." />
+                <SearchableSelect label="Unit *" value={termMatrixSubjectId} onChange={(e) => setTermMatrixSubjectId(e.target.value)} options={getUnitOptions()} placeholder="Select unit..." />
+              </>)}
+              {isSchoolMode && (<>
+                <SearchableSelect label="Class *" value={selectedClass} onChange={(e) => { setSelectedClass(e.target.value); setTermMatrixSubjectId(''); setTermMatrixStudentId(''); }} options={getClassOptions()} placeholder="Select class..." />
+                <SearchableSelect label="Subject *" value={termMatrixSubjectId} onChange={(e) => setTermMatrixSubjectId(e.target.value)} options={getSubjectOptions()} placeholder="Select subject..." disabled={!selectedClass} />
+              </>)}
+              <SearchableSelect label="Exam Term *" value={termMatrixTerm} onChange={(e) => setTermMatrixTerm(e.target.value)} options={termOptions.filter(t => t.value !== '')} placeholder="Select term..." />
               {termMatrixView === 'student' && (
-                <SearchableSelect
-                  label="Student *"
-                  value={termMatrixStudentId}
-                  onChange={(e) => setTermMatrixStudentId(e.target.value)}
-                  options={getTermMatrixStudents()}
-                  placeholder="Select student..."
-                  disabled={!termMatrixClassId} />
+                <SearchableSelect label="Student *" value={termMatrixStudentId} onChange={(e) => setTermMatrixStudentId(e.target.value)} options={getTermMatrixStudents()} placeholder="Select student..." disabled={isTVET ? !selectedProgram : isUniversity ? !selectedCourse : !selectedClass} />
               )}
-
-              {(termMatrixView === 'subject' || termMatrixView === 'class') && (
-                <SearchableSelect
-                  label="Subject *"
-                  value={termMatrixSubjectId}
-                  onChange={(e) => setTermMatrixSubjectId(e.target.value)}
-                  options={getTermMatrixClassSubjects()}
-                  placeholder="Select subject..."
-                  disabled={!termMatrixClassId} />
-              )}
-
               {termMatrixView === 'exam' && (
-                <SearchableSelect
-                  label="Exam Type *"
-                  value={termMatrixExamType}
-                  onChange={(e) => setTermMatrixExamType(e.target.value)}
-                  options={examTypeOptions.filter(t => t.value !== '')}
-                  placeholder="Select exam type..." />
+                <SearchableSelect label="Exam Type *" value={termMatrixExamType} onChange={(e) => setTermMatrixExamType(e.target.value)} options={examTypeOptions.filter(t => t.value !== '')} placeholder="Select exam type..." />
               )}
             </div>
 
             <div className="mt-4 flex flex-wrap items-center gap-6">
-              <button onClick={buildTermMatrix}
-                disabled={!termMatrixClassId || !termMatrixTerm || loadingTermMatrix}
-                className="ml-auto bg-indigo-600 text-white px-5 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium flex items-center gap-2">
-                {loadingTermMatrix
-                  ? <><i className="fas fa-spinner fa-spin"></i>Building...</>
-                  : <><i className="fas fa-sync-alt"></i>Build Matrix</>}
+              <button onClick={buildTermMatrix} disabled={(isTVET ? !selectedProgram : isUniversity ? !selectedCourse : !selectedClass) || !termMatrixTerm || loadingTermMatrix} className="ml-auto bg-indigo-600 text-white px-5 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium flex items-center gap-2">
+                {loadingTermMatrix ? <><i className="fas fa-spinner fa-spin"></i>Building...</> : <><i className="fas fa-sync-alt"></i>Build Matrix</>}
               </button>
             </div>
           </div>
@@ -14820,100 +14525,36 @@ const ResultsModule = ({
           {termMatrixData && termMatrixData.view === 'student' && (
             <div id="term-matrix-print" className="bg-white rounded-xl shadow-sm border overflow-hidden">
               <div className="p-6">
-                <PrintHeader
-                  title={`Termly Matrix — ${termMatrixData.term}`}
-                  subtitle={`${termMatrixData.className}`}
-                />
-
+                <PrintHeader title={`Termly Matrix — ${termMatrixData.term}`} subtitle={`${termMatrixData.className}`} />
                 <div className="bg-slate-800 text-white rounded-lg p-4 mb-4 flex justify-between items-center flex-wrap gap-3">
-                  <div>
-                    <p className="text-xs uppercase tracking-widest text-slate-300">Student</p>
-                    <h3 className="text-2xl font-bold">
-                      {termMatrixData.student.firstName} {termMatrixData.student.lastName}
-                    </h3>
-                    <p className="text-slate-300 text-sm font-mono">{termMatrixData.student.admissionNumber}</p>
-                  </div>
-                  <div className="flex gap-3">
-                    <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
-                      <p className="text-[10px] uppercase text-slate-300">Overall Avg</p>
-                      <p className="text-xl font-bold">{termMatrixData.overallAverage.toFixed(1)}%</p>
-                    </div>
-                    <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
-                      <p className="text-[10px] uppercase text-slate-300">Mean Grade</p>
-                      <p className="text-xl font-bold">{termMatrixData.overallGrade}</p>
-                    </div>
-                  </div>
+                  <div><p className="text-xs uppercase tracking-widest text-slate-300">Student</p><h3 className="text-2xl font-bold">{termMatrixData.student.firstName} {termMatrixData.student.lastName}</h3><p className="text-slate-300 text-sm font-mono">{termMatrixData.student.admissionNumber}</p></div>
+                  <div className="flex gap-3"><div className="text-center px-4 py-2 bg-white/10 rounded-lg"><p className="text-[10px] uppercase text-slate-300">Overall Avg</p><p className="text-xl font-bold">{termMatrixData.overallAverage.toFixed(1)}%</p></div><div className="text-center px-4 py-2 bg-white/10 rounded-lg"><p className="text-[10px] uppercase text-slate-300">Mean Grade</p><p className="text-xl font-bold">{termMatrixData.overallGrade}</p></div></div>
                 </div>
-
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse text-sm">
-                    <thead>
-                      <tr className="bg-slate-100 border-b-2 border-slate-300">
-                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">{subjectColumnLabel}</th>
-                        {termMatrixData.examTypes.map(type => (
-                          <th key={type} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">
-                            {examTypeLabel(type)}
-                          </th>
-                        ))}
-                        <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Avg</th>
-                      </tr>
-                    </thead>
+                    <thead><tr className="bg-slate-100 border-b-2 border-slate-300"><th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">{subjectColumnLabel}</th>{termMatrixData.examTypes.map(type => <th key={type} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">{examTypeLabel(type)}</th>)}<th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Avg</th></tr></thead>
                     <tbody className="divide-y">
                       {termMatrixData.rows.map((r, ri) => (
-                        <tr key={r.subjectId} className={ri % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
-                          <td className="px-3 py-2 font-medium border-r">{r.subjectName}</td>
+                        <tr key={r.itemId} className={ri % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
+                          <td className="px-3 py-2 font-medium border-r">{r.itemName}</td>
                           {termMatrixData.examTypes.map(type => {
                             const cell = r.cells[type];
                             return (
                               <td key={type} className="px-3 py-2 text-center border-r">
                                 {cell ? (
-                                  <div className="flex items-center justify-center gap-1.5">
-                                    <span className="font-bold text-slate-800">{cell.marks}</span>
-                                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${getGradePillClasses(cell.grade)}`}>
-                                      {cell.grade}
-                                    </span>
-                                    {cell.delta != null && cell.delta !== 0 && (
-                                      <span className={`ml-0.5 inline-flex items-center font-bold text-sm ${
-                                        cell.delta > 0 ? 'text-emerald-600' : 'text-red-600'
-                                      }`}>
-                                        {cell.delta > 0 ? '▲' : '▼'}
-                                      </span>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <span className="text-slate-300">—</span>
-                                )}
+                                  <div className="flex items-center justify-center gap-1.5"><span className="font-bold text-slate-800">{cell.marks}</span><span className={`text-[10px] px-1.5 py-0.5 rounded ${getGradePillClasses(cell.grade)}`}>{cell.grade}</span>{cell.delta != null && cell.delta !== 0 && <span className={`ml-0.5 inline-flex items-center font-bold text-sm ${cell.delta > 0 ? 'text-emerald-600' : 'text-red-600'}`}>{cell.delta > 0 ? '▲' : '▼'}</span>}</div>
+                                ) : <span className="text-slate-300">—</span>}
                               </td>
                             );
                           })}
-                          <td className="px-3 py-2 text-center font-bold text-indigo-700 bg-slate-50">
-                            {r.hasData ? r.average.toFixed(1) : '—'}
-                          </td>
+                          <td className="px-3 py-2 text-center font-bold text-indigo-700 bg-slate-50">{r.hasData ? r.average.toFixed(1) : '—'}</td>
                         </tr>
                       ))}
                     </tbody>
-                    <tfoot>
-                      <tr className="bg-slate-200 border-t-2 border-slate-400">
-                        <td className="px-3 py-3 font-bold text-right text-slate-700 border-r">Class Mean:</td>
-                        {termMatrixData.examTypes.map(type => (
-                          <td key={type} className="px-3 py-3 text-center font-bold text-slate-700 border-r">
-                            {termMatrixData.columnMeans[type]?.toFixed(1) || '—'}
-                          </td>
-                        ))}
-                        <td className="px-3 py-3 text-center font-bold text-slate-800 bg-slate-300">
-                          {termMatrixData.overallAverage.toFixed(1)}
-                        </td>
-                      </tr>
-                    </tfoot>
+                    <tfoot><tr className="bg-slate-200 border-t-2 border-slate-400"><td className="px-3 py-3 font-bold text-right text-slate-700 border-r">Class Mean:</td>{termMatrixData.examTypes.map(type => <td key={type} className="px-3 py-3 text-center font-bold text-slate-700 border-r">{termMatrixData.columnMeans[type]?.toFixed(1) || '—'}</td>)}<td className="px-3 py-3 text-center font-bold text-slate-800 bg-slate-300">{termMatrixData.overallAverage.toFixed(1)}</td></tr></tfoot>
                   </table>
                 </div>
-
-                <div className="mt-4 flex justify-end no-print">
-                  <button onClick={() => handlePrintArea('term-matrix-print')}
-                    className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
-                    <i className="fas fa-print"></i>Print Matrix
-                  </button>
-                </div>
+                <div className="mt-4 flex justify-end no-print"><button onClick={() => handlePrintArea('term-matrix-print')} className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium"><i className="fas fa-print"></i>Print Matrix</button></div>
               </div>
             </div>
           )}
@@ -14922,122 +14563,33 @@ const ResultsModule = ({
           {termMatrixData && termMatrixData.view === 'subject' && (
             <div id="term-matrix-print" className="bg-white rounded-xl shadow-sm border overflow-hidden">
               <div className="p-6">
-                <PrintHeader
-                  title={`Termly Matrix — ${termMatrixData.term}`}
-                  subtitle={`${termMatrixData.className} · ${termMatrixData.subjectName}`}
-                />
-
+                <PrintHeader title={`Termly Matrix — ${termMatrixData.term}`} subtitle={`${termMatrixData.className} · ${termMatrixData.subjectName}`} />
                 <div className="bg-slate-800 text-white rounded-lg p-4 mb-4 flex justify-between items-center flex-wrap gap-3">
-                  <div>
-                    <p className="text-xs uppercase tracking-widest text-slate-300">Class Mean per Exam</p>
-                    <p className="text-sm font-mono mt-1">
-                      {termMatrixData.examTypes.map(t =>
-                        `${examTypeLabel(t)}: ${termMatrixData.columnMeans[t]?.toFixed(1) || '—'}`
-                      ).join(' · ')}
-                    </p>
-                  </div>
-                  <div className="flex gap-3">
-                    <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
-                      <p className="text-[10px] uppercase text-slate-300">Class Avg</p>
-                      <p className="text-xl font-bold">{termMatrixData.classAverage.toFixed(1)}%</p>
-                    </div>
-                    <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
-                      <p className="text-[10px] uppercase text-slate-300">Pass Rate</p>
-                      <p className="text-xl font-bold">{termMatrixData.passRate.toFixed(0)}%</p>
-                    </div>
-                    <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
-                      <p className="text-[10px] uppercase text-slate-300">Students</p>
-                      <p className="text-xl font-bold">{termMatrixData.rows.length}</p>
-                    </div>
-                  </div>
+                  <div><p className="text-xs uppercase tracking-widest text-slate-300">Class Mean per Exam</p><p className="text-sm font-mono mt-1">{termMatrixData.examTypes.map(t => `${examTypeLabel(t)}: ${termMatrixData.columnMeans[t]?.toFixed(1) || '—'}`).join(' · ')}</p></div>
+                  <div className="flex gap-3"><div className="text-center px-4 py-2 bg-white/10 rounded-lg"><p className="text-[10px] uppercase text-slate-300">Class Avg</p><p className="text-xl font-bold">{termMatrixData.classAverage.toFixed(1)}%</p></div><div className="text-center px-4 py-2 bg-white/10 rounded-lg"><p className="text-[10px] uppercase text-slate-300">Pass Rate</p><p className="text-xl font-bold">{termMatrixData.passRate.toFixed(0)}%</p></div><div className="text-center px-4 py-2 bg-white/10 rounded-lg"><p className="text-[10px] uppercase text-slate-300">Students</p><p className="text-xl font-bold">{termMatrixData.rows.length}</p></div></div>
                 </div>
-
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse text-sm">
-                    <thead>
-                      <tr className="bg-slate-100 border-b-2 border-slate-300">
-                        <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r w-16">Pos</th>
-                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Student</th>
-                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Adm</th>
-                        {termMatrixData.examTypes.map(type => (
-                          <th key={type} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">
-                            {examTypeLabel(type)}
-                          </th>
-                        ))}
-                        <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Avg</th>
-                        <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Grade</th>
-                      </tr>
-                    </thead>
+                    <thead><tr className="bg-slate-100 border-b-2 border-slate-300"><th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r w-16">Pos</th><th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Student</th><th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Adm</th>{termMatrixData.examTypes.map(type => <th key={type} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">{examTypeLabel(type)}</th>)}<th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Avg</th><th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Grade</th></tr></thead>
                     <tbody className="divide-y">
                       {termMatrixData.rows.map((r, i) => (
                         <tr key={r.studentId} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
-                          <td className="px-3 py-2 text-center border-r">
-                            {r.position ? (
-                              <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
-                                r.position === 1 ? 'bg-amber-100 text-amber-700 ring-2 ring-amber-300' :
-                                r.position === 2 ? 'bg-slate-200 text-slate-700' :
-                                r.position === 3 ? 'bg-orange-100 text-orange-700' :
-                                'bg-slate-100 text-slate-600'
-                              }`}>
-                                {r.position}
-                              </span>
-                            ) : (
-                              <span className="text-slate-300">—</span>
-                            )}
-                          </td>
+                          <td className="px-3 py-2 text-center border-r">{r.position ? <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${r.position === 1 ? 'bg-amber-100 text-amber-700 ring-2 ring-amber-300' : r.position === 2 ? 'bg-slate-200 text-slate-700' : r.position === 3 ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-600'}`}>{r.position}</span> : <span className="text-slate-300">—</span>}</td>
                           <td className="px-3 py-2 font-medium border-r whitespace-nowrap">{r.studentName}</td>
                           <td className="px-3 py-2 font-mono text-xs text-slate-600 border-r whitespace-nowrap">{r.admissionNumber}</td>
                           {termMatrixData.examTypes.map(type => {
                             const cell = r.cells[type];
-                            return (
-                              <td key={type} className="px-3 py-2 text-center border-r">
-                                {cell ? (
-                                  <div className="flex flex-col items-center gap-0.5">
-                                    <span className="font-bold text-slate-800">{cell.marks}</span>
-                                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${getGradePillClasses(cell.grade)}`}>
-                                      {cell.grade}
-                                    </span>
-                                  </div>
-                                ) : (
-                                  <span className="text-slate-300">—</span>
-                                )}
-                              </td>
-                            );
+                            return <td key={type} className="px-3 py-2 text-center border-r">{cell ? <div className="flex flex-col items-center gap-0.5"><span className="font-bold text-slate-800">{cell.marks}</span><span className={`text-[10px] px-1.5 py-0.5 rounded ${getGradePillClasses(cell.grade)}`}>{cell.grade}</span></div> : <span className="text-slate-300">—</span>}</td>;
                           })}
-                          <td className="px-3 py-2 text-center font-bold text-indigo-700 border-r bg-slate-50">
-                            {r.hasData ? r.average.toFixed(1) : '—'}
-                          </td>
-                          <td className="px-3 py-2 text-center bg-slate-50">
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getGradePillClasses(r.meanGrade)}`}>
-                              {r.meanGrade}
-                            </span>
-                          </td>
+                          <td className="px-3 py-2 text-center font-bold text-indigo-700 border-r bg-slate-50">{r.hasData ? r.average.toFixed(1) : '—'}</td>
+                          <td className="px-3 py-2 text-center bg-slate-50"><span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getGradePillClasses(r.meanGrade)}`}>{r.meanGrade}</span></td>
                         </tr>
                       ))}
                     </tbody>
-                    <tfoot>
-                      <tr className="bg-slate-200 border-t-2 border-slate-400">
-                        <td colSpan={3} className="px-3 py-3 font-bold text-right text-slate-700 border-r">Class Mean:</td>
-                        {termMatrixData.examTypes.map(type => (
-                          <td key={type} className="px-3 py-3 text-center font-bold text-slate-700 border-r">
-                            {termMatrixData.columnMeans[type]?.toFixed(1) || '—'}
-                          </td>
-                        ))}
-                        <td className="px-3 py-3 text-center font-bold text-slate-800 border-r bg-slate-300">
-                          {termMatrixData.classAverage.toFixed(1)}
-                        </td>
-                        <td className="px-3 py-3 bg-slate-300"></td>
-                      </tr>
-                    </tfoot>
+                    <tfoot><tr className="bg-slate-200 border-t-2 border-slate-400"><td colSpan={3} className="px-3 py-3 font-bold text-right text-slate-700 border-r">Class Mean:</td>{termMatrixData.examTypes.map(type => <td key={type} className="px-3 py-3 text-center font-bold text-slate-700 border-r">{termMatrixData.columnMeans[type]?.toFixed(1) || '—'}</td>)}<td className="px-3 py-3 text-center font-bold text-slate-800 border-r bg-slate-300">{termMatrixData.classAverage.toFixed(1)}</td><td className="px-3 py-3 bg-slate-300"></td></tr></tfoot>
                   </table>
                 </div>
-
-                <div className="mt-4 flex justify-end no-print">
-                  <button onClick={() => handlePrintArea('term-matrix-print')}
-                    className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
-                    <i className="fas fa-print"></i>Print Matrix
-                  </button>
-                </div>
+                <div className="mt-4 flex justify-end no-print"><button onClick={() => handlePrintArea('term-matrix-print')} className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium"><i className="fas fa-print"></i>Print Matrix</button></div>
               </div>
             </div>
           )}
@@ -15046,104 +14598,30 @@ const ResultsModule = ({
           {termMatrixData && termMatrixData.view === 'exam' && (
             <div id="term-matrix-print" className="bg-white rounded-xl shadow-sm border overflow-hidden">
               <div className="p-6">
-                <PrintHeader
-                  title={`Termly Matrix — ${termMatrixData.term}`}
-                  subtitle={`${termMatrixData.className} · ${examTypeLabel(termMatrixData.examType)}`}
-                />
-
-                <div className="bg-slate-800 text-white rounded-lg p-4 mb-4 flex justify-end">
-                  <div className="text-center px-4 py-2 bg-white/10 rounded-lg">
-                    <p className="text-[10px] uppercase text-slate-300">Class Avg</p>
-                    <p className="text-xl font-bold">{termMatrixData.classAverage.toFixed(1)}%</p>
-                  </div>
-                </div>
-
+                <PrintHeader title={`Termly Matrix — ${termMatrixData.term}`} subtitle={`${termMatrixData.className} · ${examTypeLabel(termMatrixData.examType)}`} />
+                <div className="bg-slate-800 text-white rounded-lg p-4 mb-4 flex justify-end"><div className="text-center px-4 py-2 bg-white/10 rounded-lg"><p className="text-[10px] uppercase text-slate-300">Class Avg</p><p className="text-xl font-bold">{termMatrixData.classAverage.toFixed(1)}%</p></div></div>
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse text-sm">
-                    <thead>
-                      <tr className="bg-slate-100 border-b-2 border-slate-300">
-                        <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r w-16">Pos</th>
-                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Student</th>
-                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Adm</th>
-                        {termMatrixData.subjects.map(subj => (
-                          <th key={subj.id} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r whitespace-nowrap">
-                            {subj.name}
-                          </th>
-                        ))}
-                        <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Avg</th>
-                        <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Grade</th>
-                      </tr>
-                    </thead>
+                    <thead><tr className="bg-slate-100 border-b-2 border-slate-300"><th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r w-16">Pos</th><th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Student</th><th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Adm</th>{termMatrixData.subjects.map(subj => <th key={subj.id} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r whitespace-nowrap">{subj.name}</th>)}<th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Avg</th><th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Grade</th></tr></thead>
                     <tbody className="divide-y">
                       {termMatrixData.rows.map((r, i) => (
                         <tr key={r.studentId} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
-                          <td className="px-3 py-2 text-center border-r">
-                            {r.position ? (
-                              <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
-                                r.position === 1 ? 'bg-amber-100 text-amber-700 ring-2 ring-amber-300' :
-                                r.position === 2 ? 'bg-slate-200 text-slate-700' :
-                                r.position === 3 ? 'bg-orange-100 text-orange-700' :
-                                'bg-slate-100 text-slate-600'
-                              }`}>
-                                {r.position}
-                              </span>
-                            ) : (
-                              <span className="text-slate-300">—</span>
-                            )}
-                          </td>
+                          <td className="px-3 py-2 text-center border-r">{r.position ? <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${r.position === 1 ? 'bg-amber-100 text-amber-700 ring-2 ring-amber-300' : r.position === 2 ? 'bg-slate-200 text-slate-700' : r.position === 3 ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-600'}`}>{r.position}</span> : <span className="text-slate-300">—</span>}</td>
                           <td className="px-3 py-2 font-medium border-r whitespace-nowrap">{r.studentName}</td>
                           <td className="px-3 py-2 font-mono text-xs text-slate-600 border-r whitespace-nowrap">{r.admissionNumber}</td>
                           {termMatrixData.subjects.map(subj => {
                             const cell = r.cells[subj.id];
-                            return (
-                              <td key={subj.id} className="px-3 py-2 text-center border-r">
-                                {cell ? (
-                                  <div className="flex flex-col items-center gap-0.5">
-                                    <span className="font-bold text-slate-800">{cell.marks}</span>
-                                    <span className={`text-[9px] px-1.5 py-0.5 rounded ${getGradePillClasses(cell.grade)}`}>
-                                      {cell.grade}
-                                    </span>
-                                  </div>
-                                ) : (
-                                  <span className="text-slate-300">—</span>
-                                )}
-                              </td>
-                            );
+                            return <td key={subj.id} className="px-3 py-2 text-center border-r">{cell ? <div className="flex flex-col items-center gap-0.5"><span className="font-bold text-slate-800">{cell.marks}</span><span className={`text-[9px] px-1.5 py-0.5 rounded ${getGradePillClasses(cell.grade)}`}>{cell.grade}</span></div> : <span className="text-slate-300">—</span>}</td>;
                           })}
-                          <td className="px-3 py-2 text-center font-bold text-indigo-700 border-r bg-slate-50">
-                            {r.hasData ? r.average.toFixed(1) : '—'}
-                          </td>
-                          <td className="px-3 py-2 text-center bg-slate-50">
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getGradePillClasses(r.meanGrade)}`}>
-                              {r.meanGrade}
-                            </span>
-                          </td>
+                          <td className="px-3 py-2 text-center font-bold text-indigo-700 border-r bg-slate-50">{r.hasData ? r.average.toFixed(1) : '—'}</td>
+                          <td className="px-3 py-2 text-center bg-slate-50"><span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getGradePillClasses(r.meanGrade)}`}>{r.meanGrade}</span></td>
                         </tr>
                       ))}
                     </tbody>
-                    <tfoot>
-                      <tr className="bg-slate-200 border-t-2 border-slate-400">
-                        <td colSpan={3} className="px-3 py-3 font-bold text-right text-slate-700 border-r">Class Mean:</td>
-                        {termMatrixData.subjects.map(subj => (
-                          <td key={subj.id} className="px-3 py-3 text-center font-bold text-slate-700 border-r">
-                            {termMatrixData.columnMeans[subj.id]?.toFixed(1) || '—'}
-                          </td>
-                        ))}
-                        <td className="px-3 py-3 text-center font-bold text-slate-800 border-r bg-slate-300">
-                          {termMatrixData.classAverage.toFixed(1)}
-                        </td>
-                        <td className="px-3 py-3 bg-slate-300"></td>
-                      </tr>
-                    </tfoot>
+                    <tfoot><tr className="bg-slate-200 border-t-2 border-slate-400"><td colSpan={3} className="px-3 py-3 font-bold text-right text-slate-700 border-r">Class Mean:</td>{termMatrixData.subjects.map(subj => <td key={subj.id} className="px-3 py-3 text-center font-bold text-slate-700 border-r">{termMatrixData.columnMeans[subj.id]?.toFixed(1) || '—'}</td>)}<td className="px-3 py-3 text-center font-bold text-slate-800 border-r bg-slate-300">{termMatrixData.classAverage.toFixed(1)}</td><td className="px-3 py-3 bg-slate-300"></td></tr></tfoot>
                   </table>
                 </div>
-
-                <div className="mt-4 flex justify-end no-print">
-                  <button onClick={() => handlePrintArea('term-matrix-print')}
-                    className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
-                    <i className="fas fa-print"></i>Print Matrix
-                  </button>
-                </div>
+                <div className="mt-4 flex justify-end no-print"><button onClick={() => handlePrintArea('term-matrix-print')} className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium"><i className="fas fa-print"></i>Print Matrix</button></div>
               </div>
             </div>
           )}
@@ -15152,81 +14630,27 @@ const ResultsModule = ({
           {termMatrixData && termMatrixData.view === 'class' && (
             <div id="term-matrix-print" className="bg-white rounded-xl shadow-sm border overflow-hidden">
               <div className="p-6">
-                <PrintHeader
-                  title={`Termly Matrix — ${termMatrixData.term}`}
-                  subtitle={`${termMatrixData.className} · ${termMatrixData.subjectName}`}
-                />
-
+                <PrintHeader title={`Termly Matrix — ${termMatrixData.term}`} subtitle={`${termMatrixData.className} · ${termMatrixData.subjectName}`} />
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse text-sm">
-                    <thead>
-                      <tr className="bg-slate-100 border-b-2 border-slate-300">
-                        <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r w-16">Pos</th>
-                        <th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Student</th>
-                        {termMatrixData.examTypes.map(type => (
-                          <th key={type} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">
-                            {examTypeLabel(type)}
-                          </th>
-                        ))}
-                        <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Avg</th>
-                        <th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Grade</th>
-                      </tr>
-                    </thead>
+                    <thead><tr className="bg-slate-100 border-b-2 border-slate-300"><th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r w-16">Pos</th><th className="px-3 py-3 text-left text-xs font-bold text-slate-700 uppercase border-r">Student</th>{termMatrixData.examTypes.map(type => <th key={type} className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r">{examTypeLabel(type)}</th>)}<th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase border-r bg-slate-200">Avg</th><th className="px-3 py-3 text-center text-xs font-bold text-slate-700 uppercase bg-slate-200">Grade</th></tr></thead>
                     <tbody className="divide-y">
                       {termMatrixData.rows.map((r, i) => (
                         <tr key={r.studentId} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
-                          <td className="px-3 py-2 text-center border-r">
-                            {r.position ? (
-                              <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${
-                                r.position === 1 ? 'bg-amber-100 text-amber-700 ring-2 ring-amber-300' :
-                                r.position === 2 ? 'bg-slate-200 text-slate-700' :
-                                r.position === 3 ? 'bg-orange-100 text-orange-700' :
-                                'bg-slate-100 text-slate-600'
-                              }`}>
-                                {r.position}
-                              </span>
-                            ) : (
-                              <span className="text-slate-300">—</span>
-                            )}
-                          </td>
+                          <td className="px-3 py-2 text-center border-r">{r.position ? <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold ${r.position === 1 ? 'bg-amber-100 text-amber-700 ring-2 ring-amber-300' : r.position === 2 ? 'bg-slate-200 text-slate-700' : r.position === 3 ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-600'}`}>{r.position}</span> : <span className="text-slate-300">—</span>}</td>
                           <td className="px-3 py-2 font-medium border-r whitespace-nowrap">{r.studentName}</td>
                           {termMatrixData.examTypes.map(type => {
                             const cell = r.cells[type];
-                            return (
-                              <td key={type} className="px-3 py-2 text-center border-r">
-                                {cell ? (
-                                  <div className="flex items-center justify-center gap-1.5">
-                                    <span className="font-bold text-slate-800">{cell.marks}</span>
-                                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${getGradePillClasses(cell.grade)}`}>
-                                      {cell.grade}
-                                    </span>
-                                  </div>
-                                ) : (
-                                  <span className="text-slate-300">—</span>
-                                )}
-                              </td>
-                            );
+                            return <td key={type} className="px-3 py-2 text-center border-r">{cell ? <div className="flex items-center justify-center gap-1.5"><span className="font-bold text-slate-800">{cell.marks}</span><span className={`text-[10px] px-1.5 py-0.5 rounded ${getGradePillClasses(cell.grade)}`}>{cell.grade}</span></div> : <span className="text-slate-300">—</span>}</td>;
                           })}
-                          <td className="px-3 py-2 text-center font-bold text-indigo-700 border-r bg-slate-50">
-                            {r.hasData ? r.average.toFixed(1) : '—'}
-                          </td>
-                          <td className="px-3 py-2 text-center bg-slate-50">
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getGradePillClasses(r.meanGrade)}`}>
-                              {r.meanGrade}
-                            </span>
-                          </td>
+                          <td className="px-3 py-2 text-center font-bold text-indigo-700 border-r bg-slate-50">{r.hasData ? r.average.toFixed(1) : '—'}</td>
+                          <td className="px-3 py-2 text-center bg-slate-50"><span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getGradePillClasses(r.meanGrade)}`}>{r.meanGrade}</span></td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-
-                <div className="mt-4 flex justify-end no-print">
-                  <button onClick={() => handlePrintArea('term-matrix-print')}
-                    className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium">
-                    <i className="fas fa-print"></i>Print Matrix
-                  </button>
-                </div>
+                <div className="mt-4 flex justify-end no-print"><button onClick={() => handlePrintArea('term-matrix-print')} className="bg-slate-800 text-white px-6 py-2 rounded-lg hover:bg-slate-900 flex items-center gap-2 font-medium"><i className="fas fa-print"></i>Print Matrix</button></div>
               </div>
             </div>
           )}
@@ -15237,60 +14661,28 @@ const ResultsModule = ({
       {viewMode === 'marks' && canViewAllResults && (
         <>
           <div className="bg-white p-6 rounded-xl shadow-sm border no-print">
-            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <i className="fas fa-search text-indigo-600"></i>Filter Results
-            </h3>
+            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><i className="fas fa-search text-indigo-600"></i>Filter Results</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {isUniversity && (<>
-                <SearchableSelect label="Course" value={selectedCourse}
-                  onChange={(e) => { setSelectedCourse(e.target.value); setSelectedUnit(''); setSelectedSemester(''); }}
-                  options={getCourseOptions()} placeholder="Search course..." />
-                <SearchableSelect label="Year" value={selectedYear}
-                  onChange={(e) => setSelectedYear(e.target.value)}
-                  options={[{value:'1',label:'Year 1'},{value:'2',label:'Year 2'},{value:'3',label:'Year 3'},{value:'4',label:'Year 4'}]}
-                  placeholder="All Years" />
-                <SearchableSelect label="Semester" value={selectedSemester}
-                  onChange={(e) => setSelectedSemester(e.target.value)}
-                  options={[{value:'1',label:'Semester 1'},{value:'2',label:'Semester 2'}]}
-                  placeholder="All Semesters" />
+                <SearchableSelect label="Course" value={selectedCourse} onChange={(e) => { setSelectedCourse(e.target.value); setSelectedUnit(''); setSelectedSemester(''); setSelectedYear(''); }} options={getCourseOptions()} placeholder="Search course..." />
+                <SearchableSelect label="Semester" value={selectedSemester} onChange={(e) => { setSelectedSemester(e.target.value); setSelectedUnit(''); setSelectedYear(''); }} options={buildSemesterOptionsForCourse(selectedCourse)} disabled={!selectedCourse} placeholder="All semesters" />
+                <SearchableSelect label="Year" value={selectedYear} onChange={(e) => { setSelectedYear(e.target.value); setSelectedUnit(''); }} options={buildYearOptionsForCourse(selectedCourse, selectedSemester)} disabled={!selectedCourse} placeholder="All years" />
               </>)}
               {isTVET && (<>
-                <SearchableSelect label="Program" value={selectedProgram}
-                  onChange={(e) => { setSelectedProgram(e.target.value); setSelectedUnit(''); setSelectedModule(''); }}
-                  options={getProgramOptions()} placeholder="Search program..." />
-                <SearchableSelect label="Year" value={selectedYear}
-                  onChange={(e) => setSelectedYear(e.target.value)}
-                  options={[{value:'1',label:'Year 1'},{value:'2',label:'Year 2'},{value:'3',label:'Year 3'}]}
-                  placeholder="All Years" />
-                <SearchableSelect label="Module" value={selectedModule}
-                  onChange={(e) => setSelectedModule(e.target.value)}
-                  options={[{value:'1',label:'Module 1'},{value:'2',label:'Module 2'},{value:'3',label:'Module 3'},{value:'4',label:'Module 4'}]}
-                  placeholder="All Modules" />
+                <SearchableSelect label="Program" value={selectedProgram} onChange={(e) => { setSelectedProgram(e.target.value); setSelectedUnit(''); setSelectedModule(''); setSelectedYear(''); }} options={getProgramOptions()} placeholder="Search program..." />
+                <SearchableSelect label="Module" value={selectedModule} onChange={(e) => { setSelectedModule(e.target.value); setSelectedUnit(''); setSelectedYear(''); }} options={buildModuleOptions(selectedProgram)} disabled={!selectedProgram} placeholder="All modules" />
+                <SearchableSelect label="Year" value={selectedYear} onChange={(e) => { setSelectedYear(e.target.value); setSelectedUnit(''); }} options={buildYearOptionsForProgram(selectedProgram, selectedModule)} disabled={!selectedProgram} placeholder="All years" />
               </>)}
-              {isRegularSchool && (<>
-                <SearchableSelect label="Class" value={selectedClass}
-                  onChange={(e) => { setSelectedClass(e.target.value); setSelectedSubject(''); }}
-                  options={getClassOptions()} placeholder="Search class..." />
-                <SearchableSelect label="Subject" value={selectedSubject}
-                  onChange={(e) => setSelectedSubject(e.target.value)}
-                  options={getSubjectOptions()} placeholder="Search subject..."
-                  disabled={!selectedClass} />
+              {isSchoolMode && (<>
+                <SearchableSelect label="Class" value={selectedClass} onChange={(e) => { setSelectedClass(e.target.value); setSelectedSubject(''); }} options={getClassOptions()} placeholder="Search class..." />
+                <SearchableSelect label="Subject" value={selectedSubject} onChange={(e) => setSelectedSubject(e.target.value)} options={getSubjectOptions()} placeholder="Search subject..." disabled={!selectedClass} />
               </>)}
-              {(isUniversity || isTVET) && (
-                <SearchableSelect label={isTVET ? 'Module' : 'Unit'} value={selectedUnit}
-                  onChange={(e) => setSelectedUnit(e.target.value)}
-                  options={getUnitOptions()}
-                  placeholder={`Search ${isTVET ? 'module' : 'unit'}...`} />
+              {isTertiary && (
+                <SearchableSelect label={isTVET ? 'Module' : 'Unit'} value={selectedUnit} onChange={(e) => setSelectedUnit(e.target.value)} options={getUnitOptions()} placeholder={`Search ${isTVET ? 'module' : 'unit'}...`} disabled={isTVET ? !selectedProgram : !selectedCourse} />
               )}
-
-              <SearchableSelect label="Exam Session" value={selectedSession}
-                onChange={(e) => setSelectedSession(e.target.value)}
-                options={getExamOptions()}
-                placeholder={loadingSessions ? 'Loading sessions...' : 'Search session...'} />
-
+              <SearchableSelect label="Exam Session" value={selectedSession} onChange={(e) => setSelectedSession(e.target.value)} options={getExamOptions()} placeholder={loadingSessions ? 'Loading sessions...' : 'Search session...'} />
               <div className="flex items-end">
-                <button onClick={loadExamResults} disabled={!selectedSession || loading}
-                  className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium">
+                <button onClick={loadExamResults} disabled={!selectedSession || loading} className="w-full bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium">
                   {loading ? 'Loading...' : 'Load Results'}
                 </button>
               </div>
@@ -15303,8 +14695,7 @@ const ResultsModule = ({
                 <div className="flex items-center gap-3">
                   {canSendMessages && (
                     <label className="flex items-center gap-2 text-sm">
-                      <input type="checkbox" checked={selectAllForMessage}
-                        onChange={(e) => handleSelectAllForMessage(e.target.checked)} />
+                      <input type="checkbox" checked={selectAllForMessage} onChange={(e) => handleSelectAllForMessage(e.target.checked)} />
                       <span className="font-medium">Select All</span>
                     </label>
                   )}
@@ -15313,12 +14704,9 @@ const ResultsModule = ({
                   </span>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <input type="text" placeholder="Search students..."
-                    className="px-3 py-2 border rounded-lg w-56 text-sm"
-                    value={studentSearch} onChange={(e) => setStudentSearch(e.target.value)} />
+                  <input type="text" placeholder="Search students..." className="px-3 py-2 border rounded-lg w-56 text-sm" value={studentSearch} onChange={(e) => setStudentSearch(e.target.value)} />
                   {uniqueGrades.length > 0 && (
-                    <select value={filterGrade} onChange={(e) => setFilterGrade(e.target.value)}
-                      className="px-3 py-2 border rounded-lg text-sm">
+                    <select value={filterGrade} onChange={(e) => setFilterGrade(e.target.value)} className="px-3 py-2 border rounded-lg text-sm">
                       <option value="">All Grades</option>
                       {uniqueGrades.map(g => <option key={g} value={g}>{g}</option>)}
                     </select>
@@ -15345,41 +14733,19 @@ const ResultsModule = ({
                       <tr key={`${entry.studentId}-${entry.examId}`} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
                         {canSendMessages && (
                           <td className="px-4 py-3 text-center border-r">
-                            <input type="checkbox"
-                              checked={selectedStudentsForMessage.includes(entry.studentId)}
-                              onChange={(e) => handleSelectForMessage(entry.studentId, e.target.checked)} />
+                            <input type="checkbox" checked={selectedStudentsForMessage.includes(entry.studentId)} onChange={(e) => handleSelectForMessage(entry.studentId, e.target.checked)} />
                           </td>
                         )}
                         <td className="px-4 py-3 font-mono text-xs border-r">{entry.admissionNumber}</td>
                         <td className="px-4 py-3 font-medium border-r">{entry.studentName}</td>
                         <td className="px-4 py-3 border-r">{entry.unitName}</td>
                         <td className="px-4 py-3 text-center border-r">
-                          <input type="number" value={entry.marks}
-                            onChange={(e) => handleMarkChange(entry.studentId, entry.examId, e.target.value)}
-                            onBlur={(e) => {
-                              if (e.target.value !== '') {
-                                const gi = calculateGrade(e.target.value, 100, schoolCategory);
-                                setResultEntries(prev => prev.map(x =>
-                                  (x.studentId === entry.studentId && x.examId === entry.examId)
-                                    ? { ...x, grade: gi.grade, points: gi.points }
-                                    : x
-                                ));
-                              }
-                            }}
-                            className={`w-20 px-2 py-1 border rounded text-center ${!canAddResults ? 'bg-gray-100' : ''}`}
-                            disabled={entry.isAbsent || !canAddResults} />
+                          <input type="number" value={entry.marks} onChange={(e) => handleMarkChange(entry.studentId, entry.examId, e.target.value)} onBlur={(e) => { if (e.target.value !== '') { const gi = calculateGrade(e.target.value, 100, schoolCategory); setResultEntries(prev => prev.map(x => (x.studentId === entry.studentId && x.examId === entry.examId) ? { ...x, grade: gi.grade, points: gi.points } : x)); } }} className={`w-20 px-2 py-1 border rounded text-center ${!canAddResults ? 'bg-gray-100' : ''}`} disabled={entry.isAbsent || !canAddResults} />
                         </td>
-                        <td className="px-4 py-3 text-center border-r">
-                          <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradePillClasses(entry.grade)}`}>
-                            {entry.grade || '—'}
-                          </span>
-                        </td>
+                        <td className="px-4 py-3 text-center border-r"><span className={`px-2 py-1 rounded-full text-xs font-semibold ${getGradePillClasses(entry.grade)}`}>{entry.grade || '—'}</span></td>
                         <td className="px-4 py-3 text-center border-r">{(entry.points || 0).toFixed(1)}</td>
                         {canAddResults && (
-                          <td className="px-4 py-3 text-center">
-                            <input type="checkbox" checked={entry.isAbsent}
-                              onChange={(e) => handleAbsentChange(entry.studentId, entry.examId, e.target.checked)} />
-                          </td>
+                          <td className="px-4 py-3 text-center"><input type="checkbox" checked={entry.isAbsent} onChange={(e) => handleAbsentChange(entry.studentId, entry.examId, e.target.checked)} /></td>
                         )}
                       </tr>
                     ))}
@@ -15390,33 +14756,18 @@ const ResultsModule = ({
               {(canAddResults || canSendMessages) && (
                 <div className="p-4 bg-slate-50 border-t flex flex-wrap gap-2 no-print">
                   {canAddResults && (
-                    <button onClick={saveAllResults} disabled={loading}
-                      className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 flex items-center gap-2 font-medium">
+                    <button onClick={saveAllResults} disabled={loading} className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 flex items-center gap-2 font-medium">
                       <i className="fas fa-save"></i>Save All
                     </button>
                   )}
                   {canPublishResults && (
-                    <button onClick={async () => {
-                      if (!selectedSession) return;
-                      try {
-                        const session = examSessions.find(s => s.id === selectedSession);
-                        if (!session) return;
-                        for (const paper of (session.papers || [])) {
-                          await api.put(`/exams/${paper.id}`, { ...paper, isPublished: true, resultsPublished: true, publishedAt: new Date().toISOString() });
-                        }
-                        alert('✅ Results published!');
-                      } catch (err) { alert('❌ Failed'); }
-                    }}
-                      className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 font-medium">
+                    <button onClick={async () => { if (!selectedSession) return; try { const session = examSessions.find(s => s.id === selectedSession); if (!session) return; for (const paper of (session.papers || [])) { await api.put(`/exams/${paper.id}`, { ...paper, isPublished: true, resultsPublished: true, publishedAt: new Date().toISOString() }); } alert('✅ Results published!'); } catch (err) { alert('❌ Failed'); } }} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 font-medium">
                       <i className="fas fa-globe"></i>Publish
                     </button>
                   )}
                   {canSendMessages && (
-                    <button onClick={() => setShowMessageModal(true)}
-                      disabled={selectedStudentsForMessage.length === 0}
-                      className="bg-violet-600 text-white px-4 py-2 rounded-lg hover:bg-violet-700 flex items-center gap-2 font-medium disabled:opacity-50">
-                      <i className="fas fa-paper-plane"></i>
-                      Send to Parents ({selectedStudentsForMessage.length})
+                    <button onClick={() => setShowMessageModal(true)} disabled={selectedStudentsForMessage.length === 0} className="bg-violet-600 text-white px-4 py-2 rounded-lg hover:bg-violet-700 flex items-center gap-2 font-medium disabled:opacity-50">
+                      <i className="fas fa-paper-plane"></i>Send to Parents ({selectedStudentsForMessage.length})
                     </button>
                   )}
                 </div>
@@ -15430,22 +14781,12 @@ const ResultsModule = ({
       {showMessageModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 no-print">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold">Send Results to Parents</h3>
-              <button onClick={() => setShowMessageModal(false)} className="text-gray-500 hover:text-gray-700">
-                <i className="fas fa-times"></i>
-              </button>
-            </div>
+            <div className="flex justify-between items-center mb-4"><h3 className="text-xl font-bold">Send Results to Parents</h3><button onClick={() => setShowMessageModal(false)} className="text-gray-500 hover:text-gray-700"><i className="fas fa-times"></i></button></div>
             <div className="space-y-4">
-              <select value={messageType} onChange={(e) => setMessageType(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg">
-                <option value="SMS">SMS Only</option>
-                <option value="EMAIL">Email Only</option>
-                <option value="BOTH">Both</option>
+              <select value={messageType} onChange={(e) => setMessageType(e.target.value)} className="w-full px-3 py-2 border rounded-lg">
+                <option value="SMS">SMS Only</option><option value="EMAIL">Email Only</option><option value="BOTH">Both</option>
               </select>
-              <textarea className="w-full border rounded-lg p-3 h-40 font-mono text-sm"
-                value={messageTemplate} onChange={(e) => setMessageTemplate(e.target.value)}
-                placeholder="Dear Parent, {student_name} scored {marks} ({grade}) in {subject} for {exam_name}." />
+              <textarea className="w-full border rounded-lg p-3 h-40 font-mono text-sm" value={messageTemplate} onChange={(e) => setMessageTemplate(e.target.value)} placeholder="Dear Parent, {student_name} scored {marks} ({grade}) in {subject} for {exam_name}." />
               <div className="flex gap-2 pt-4">
                 <button onClick={async () => {
                   setSendingMessages(true);
@@ -15467,13 +14808,10 @@ const ResultsModule = ({
                             .replace(/{grade}/g, first.grade || '')
                             .replace(/{school_name}/g, schoolName);
                           if ((messageType === 'SMS' || messageType === 'BOTH') && parent.User?.phone) {
-                            await api.post('/messages', { type: 'SMS', content: msg, recipientType: 'PARENT',
-                              recipients: [{ type: 'user', id: parent.userId }], sendNow: true, schoolId: currentSchool?.id });
+                            await api.post('/messages', { type: 'SMS', content: msg, recipientType: 'PARENT', recipients: [{ type: 'user', id: parent.userId }], sendNow: true, schoolId: currentSchool?.id });
                           }
                           if ((messageType === 'EMAIL' || messageType === 'BOTH') && parent.User?.email) {
-                            await api.post('/messages', { type: 'EMAIL', subject: `Results ${first.studentName}`,
-                              content: msg, recipientType: 'PARENT', recipients: [{ type: 'user', id: parent.userId }],
-                              sendNow: true, schoolId: currentSchool?.id });
+                            await api.post('/messages', { type: 'EMAIL', subject: `Results ${first.studentName}`, content: msg, recipientType: 'PARENT', recipients: [{ type: 'user', id: parent.userId }], sendNow: true, schoolId: currentSchool?.id });
                           }
                         }
                       } catch (_) {}
@@ -15481,13 +14819,10 @@ const ResultsModule = ({
                     alert('✅ Sent');
                     setShowMessageModal(false);
                   } finally { setSendingMessages(false); }
-                }}
-                  disabled={sendingMessages}
-                  className="bg-violet-600 text-white px-6 py-2 rounded-lg hover:bg-violet-700 flex-1 disabled:opacity-50">
+                }} disabled={sendingMessages} className="bg-violet-600 text-white px-6 py-2 rounded-lg hover:bg-violet-700 flex-1 disabled:opacity-50">
                   {sendingMessages ? 'Sending...' : 'Send'}
                 </button>
-                <button onClick={() => setShowMessageModal(false)}
-                  className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">Cancel</button>
+                <button onClick={() => setShowMessageModal(false)} className="bg-gray-500 text-white px-6 py-2 rounded-lg hover:bg-gray-600">Cancel</button>
               </div>
             </div>
           </div>
@@ -15496,8 +14831,6 @@ const ResultsModule = ({
     </div>
   );
 };
-
-// ==================== TIMETABLE MODULE — MULTI-TYPE (Class / Tuition / Extra / Remedial) ====================
 const TimetableModule = ({
   timetable, setTimetable,
   classes, subjects, staff, courses, programs, units,
@@ -15519,6 +14852,28 @@ const TimetableModule = ({
 
   const [timetableType, setTimetableType] = useState('CLASS');
   const currentTypeMeta = getTypeMeta(timetableType);
+
+  // ==================== 🔑 CATEGORY DETECTION (matches app.jsx) ====================
+  const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
+  const isUniversity  = schoolCategory === 'UNIVERSITY';
+  const isTVET        = schoolCategory === 'COLLEGE_TVET';
+  const isSecondary   = schoolCategory === 'SENIOR_SECONDARY';
+  const isPrimaryJSS  = schoolCategory === 'ECDE_PRIMARY_JSS';
+
+  // Derived capability flags — these are NOT categories, they group the 4
+  // real categories by shared behaviour.
+  const isSchoolMode  = isPrimaryJSS || isSecondary;   // ECDE + Primary + JSS + Secondary
+  const isTertiary    = isUniversity || isTVET;
+
+  const supportsBreaks = isSchoolMode;                 // breaks only in school mode
+  const usesClasses    = isSchoolMode;                 // Class dropdown only
+  const usesSubjects   = isSchoolMode;                 // Subject dropdown only
+  const usesPrograms   = isTVET;                       // Program dropdown only (TVET)
+  const usesCourses    = isUniversity;                 // Course dropdown only (Uni)
+  const usesUnits      = isTertiary;                   // Units only for tertiary
+  const usesSemester   = isUniversity;                 // Semester only for Uni
+  const usesModule     = isTVET;                       // Module only for TVET
+  const usesYear       = isTertiary;                   // Year only for tertiary
 
   // ==================== STATE ====================
   const [selectedProgram, setSelectedProgram] = useState('');
@@ -15568,14 +14923,9 @@ const TimetableModule = ({
   const canAdd = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SENIOR_TEACHER', 'DEAN', 'HOD'].includes(user?.role);
   const canDelete = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'DEAN', 'HOD'].includes(user?.role);
 
-  const schoolCategory = currentSchool?.category || 'ECDE_PRIMARY_JSS';
-  const isUniversity = schoolCategory === 'UNIVERSITY';
-  const isTVET = schoolCategory === 'COLLEGE_TVET';
-  const supportsBreaks = !isUniversity;
-
   const days = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
 
-  // ==================== PERIODS — 20 by default ====================
+  // ==================== PERIODS ====================
   const MAX_PERIODS = Number(currentSchool?.maxPeriodsPerDay) || 20;
   const periods = Array.from({ length: MAX_PERIODS }, (_, i) => i + 1);
 
@@ -15594,15 +14944,8 @@ const TimetableModule = ({
     rose:    'bg-rose-50 text-rose-700 border-rose-200',
     violet:  'bg-violet-50 text-violet-700 border-violet-200'
   };
-  const ACCENT_RING = {
-    indigo:  'ring-indigo-500',
-    emerald: 'ring-emerald-500',
-    amber:   'ring-amber-500',
-    rose:    'ring-rose-500',
-    violet:  'ring-violet-500'
-  };
 
-  // ==================== SEARCHABLE SELECT ====================
+  // ==================== SEARCHABLE SELECT (stable identity) ====================
   const SearchableSelect = useMemo(() => {
     return function SearchableSelectInner({
       label, value, onChange, options, placeholder, disabled, required, className
@@ -15728,32 +15071,147 @@ const TimetableModule = ({
     };
   }, []);
 
-  // ==================== OPTIONS ====================
-  const programOptions = useMemo(() => (programs || []).map(p => ({
-    value: p.id, label: p.name, subLabel: p.code || 'Program'
-  })), [programs]);
+  // ============================================================
+  // 🔑 OPTION BUILDERS — ALL derived from `units`
+  // ============================================================
+  // Every `unit` record saved by CourseUnitsModule carries:
+  //   programId | courseId | module | semester | year | name | code | credits
+  // so we can build every dropdown from the SAVED data — no hardcoding.
 
-  const courseOptions = useMemo(() => (courses || []).map(c => ({
-    value: c.id, label: c.name, subLabel: c.code || 'Course'
-  })), [courses]);
+  // ---- Programs that actually have at least one unit ----
+  const programsWithUnits = useMemo(() => {
+    if (!usesPrograms) return [];
+    const ids = new Set((units || []).filter(u => u.programId).map(u => u.programId));
+    return (programs || []).filter(p => ids.has(p.id));
+  }, [programs, units, usesPrograms]);
 
+  const programOptions = useMemo(() => programsWithUnits.map(p => ({
+    value: p.id,
+    label: p.name,
+    subLabel: `${(units || []).filter(u => u.programId === p.id).length} module(s)`
+  })), [programsWithUnits, units]);
+
+  // ---- Courses that actually have at least one unit ----
+  const coursesWithUnits = useMemo(() => {
+    if (!usesCourses) return [];
+    const ids = new Set((units || []).filter(u => u.courseId).map(u => u.courseId));
+    return (courses || []).filter(c => ids.has(c.id));
+  }, [courses, units, usesCourses]);
+
+  const courseOptions = useMemo(() => coursesWithUnits.map(c => ({
+    value: c.id,
+    label: c.name,
+    subLabel: `${(units || []).filter(u => u.courseId === c.id).length} unit(s)`
+  })), [coursesWithUnits, units]);
+
+  // ---- Classes ----
   const classOptions = useMemo(() => (classes || []).map(c => ({
-    value: c.id, label: c.name, subLabel: c.capacity ? `Capacity: ${c.capacity}` : ''
+    value: c.id,
+    label: c.name,
+    subLabel: c.capacity ? `Capacity: ${c.capacity}` : ''
   })), [classes]);
 
-  const unitOptions = useMemo(() => filteredUnits.map(u => {
-    const subLabels = [];
-    if (u.module) subLabels.push(`Module ${u.module}`);
-    if (u.semester) subLabels.push(`Sem ${u.semester}`);
-    if (u.year) subLabels.push(`Yr ${u.year}`);
-    if (u.credits) subLabels.push(`${u.credits} credits`);
-    return { value: u.id, label: u.name, subLabel: subLabels.join(' • ') || 'Unit' };
-  }), [filteredUnits]);
+  // ---- Modules that exist for a given program (derived from units) ----
+  // Returns [{ value: '1', label: 'Module 1', subLabel: '3 unit(s)' }, ...]
+  const buildModuleOptions = (programId) => {
+    if (!programId) return [];
+    const scoped = (units || []).filter(u => u.programId === programId && u.module != null);
+    const uniqueModules = Array.from(new Set(scoped.map(u => String(u.module))))
+      .sort((a, b) => Number(a) - Number(b));
+    return uniqueModules.map(m => ({
+      value: m,
+      label: `Module ${m}`,
+      subLabel: `${scoped.filter(u => String(u.module) === m).length} unit(s)`
+    }));
+  };
 
+  // ---- Years that exist for a given program (+ optional module) ----
+  const buildYearOptionsForProgram = (programId, module) => {
+    if (!programId) return [];
+    const scoped = (units || []).filter(u => u.programId === programId && u.year != null);
+    const narrowed = module
+      ? scoped.filter(u => String(u.module) === String(module))
+      : scoped;
+    const uniqueYears = Array.from(new Set(narrowed.map(u => String(u.year))))
+      .sort((a, b) => Number(a) - Number(b));
+    return uniqueYears.map(y => ({
+      value: y,
+      label: `Year ${y}`,
+      subLabel: `${narrowed.filter(u => String(u.year) === y).length} unit(s)`
+    }));
+  };
+
+  // ---- Semesters that exist for a given course ----
+  const buildSemesterOptionsForCourse = (courseId) => {
+    if (!courseId) return [];
+    const scoped = (units || []).filter(u => u.courseId === courseId && u.semester != null);
+    const uniqueSems = Array.from(new Set(scoped.map(u => String(u.semester))))
+      .sort((a, b) => Number(a) - Number(b));
+    return uniqueSems.map(s => ({
+      value: s,
+      label: `Semester ${s}`,
+      subLabel: `${scoped.filter(u => String(u.semester) === s).length} unit(s)`
+    }));
+  };
+
+  // ---- Years that exist for a given course (+ optional semester) ----
+  const buildYearOptionsForCourse = (courseId, semester) => {
+    if (!courseId) return [];
+    const scoped = (units || []).filter(u => u.courseId === courseId && u.year != null);
+    const narrowed = semester
+      ? scoped.filter(u => String(u.semester) === String(semester))
+      : scoped;
+    const uniqueYears = Array.from(new Set(narrowed.map(u => String(u.year))))
+      .sort((a, b) => Number(a) - Number(b));
+    return uniqueYears.map(y => ({
+      value: y,
+      label: `Year ${y}`,
+      subLabel: `${narrowed.filter(u => String(u.year) === y).length} unit(s)`
+    }));
+  };
+
+  // ---- Units available to pick in the entry form ----
+  // Narrows by program/course → module/semester → year.
+  const unitOptions = useMemo(() => {
+    let scoped = [];
+
+    if (isTVET) {
+      if (!formData.programId) return [];
+      scoped = (units || []).filter(u => u.programId === formData.programId);
+      if (formData.module)   scoped = scoped.filter(u => String(u.module) === String(formData.module));
+      if (formData.year)     scoped = scoped.filter(u => String(u.year) === String(formData.year));
+    } else if (isUniversity) {
+      if (!formData.courseId) return [];
+      scoped = (units || []).filter(u => u.courseId === formData.courseId);
+      if (formData.semester) scoped = scoped.filter(u => String(u.semester) === String(formData.semester));
+      if (formData.year)     scoped = scoped.filter(u => String(u.year) === String(formData.year));
+    } else {
+      return [];
+    }
+
+    return scoped.map(u => {
+      const bits = [];
+      if (u.code) bits.push(u.code);
+      if (isTVET && u.module != null)        bits.push(`Module ${u.module}`);
+      if (isUniversity && u.semester != null) bits.push(`Sem ${u.semester}`);
+      if (u.year != null)                     bits.push(`Yr ${u.year}`);
+      if (u.credits)                          bits.push(`${u.credits} cr`);
+      return {
+        value: u.id,
+        label: u.name,
+        subLabel: bits.join(' • ') || 'Unit'
+      };
+    });
+  }, [units, formData.programId, formData.courseId, formData.module, formData.semester, formData.year, isTVET, isUniversity]);
+
+  // ---- Subject options (school mode only) ----
   const subjectOptions = useMemo(() => filteredSubjects.map(s => ({
-    value: s.id, label: s.name, subLabel: s.code || 'Subject'
+    value: s.id,
+    label: s.name,
+    subLabel: s.code || 'Subject'
   })), [filteredSubjects]);
 
+  // ---- Teacher options ----
   const teacherOptions = useMemo(() => {
     const options = [];
     (staff || []).filter(s => s.staffType === 'TEACHING' || s.staffType === 'ACADEMIC').forEach(s => {
@@ -15773,25 +15231,6 @@ const TimetableModule = ({
     return options;
   }, [staff]);
 
-  const yearOptions = [
-    { value: '1', label: 'Year 1' },
-    { value: '2', label: 'Year 2' },
-    { value: '3', label: 'Year 3' },
-    { value: '4', label: 'Year 4' }
-  ];
-
-  const moduleOptions = [
-    { value: '1', label: 'Module 1' },
-    { value: '2', label: 'Module 2' },
-    { value: '3', label: 'Module 3' },
-    { value: '4', label: 'Module 4' }
-  ];
-
-  const semesterOptions = [
-    { value: '1', label: 'Semester 1' },
-    { value: '2', label: 'Semester 2' }
-  ];
-
   const dayOptions = days.map(d => ({ value: d, label: d }));
   const periodOptions = periods.map(p => ({ value: p, label: `Period ${p}` }));
 
@@ -15810,7 +15249,7 @@ const TimetableModule = ({
   const checkTeacherConflicts = (teacherId, day, startTime, endTime, excludeId = null) => {
     return timetable.filter(entry => {
       if (entry.isBreak) return false;
-      if (entry.timetableType !== timetableType) return false;   // only same type
+      if (entry.timetableType !== timetableType) return false;
       if (excludeId && entry.id === excludeId) return false;
       if (entry.teacherId !== teacherId) return false;
       if (entry.day !== day) return false;
@@ -15858,16 +15297,16 @@ const TimetableModule = ({
               !t.isBreak &&
               t.timetableType === timetableType &&
               t.programId === enrollment.programId &&
-              (!enrollment.year || t.year === enrollment.year) &&
-              (!enrollment.module || t.module === enrollment.module)
+              (!enrollment.year || String(t.year) === String(enrollment.year)) &&
+              (!enrollment.module || String(t.module) === String(enrollment.module))
             );
           } else if (isUniversity && enrollment.courseId) {
             studentTimetable = timetable.filter(t =>
               !t.isBreak &&
               t.timetableType === timetableType &&
               t.courseId === enrollment.courseId &&
-              (!enrollment.year || t.year === enrollment.year) &&
-              (!enrollment.semester || t.semester === enrollment.semester)
+              (!enrollment.year || String(t.year) === String(enrollment.year)) &&
+              (!enrollment.semester || String(t.semester) === String(enrollment.semester))
             );
           } else if (enrollment.classId) {
             studentTimetable = timetable.filter(t =>
@@ -15929,13 +15368,17 @@ const TimetableModule = ({
     try {
       setLoading(true);
       const params = { timetableType };
-      if (isTVET && selectedProgram) params.programId = selectedProgram;
-      if (isTVET && selectedYear) params.year = selectedYear;
-      if (isTVET && selectedModule) params.module = selectedModule;
-      if (isUniversity && selectedCourse) params.courseId = selectedCourse;
-      if (isUniversity && selectedYear) params.year = selectedYear;
-      if (isUniversity && selectedSemester) params.semester = selectedSemester;
-      if (!isUniversity && !isTVET && selectedClass) params.classId = selectedClass;
+      if (isTVET) {
+        if (selectedProgram) params.programId = selectedProgram;
+        if (selectedYear)    params.year = selectedYear;
+        if (selectedModule)  params.module = selectedModule;
+      } else if (isUniversity) {
+        if (selectedCourse)   params.courseId = selectedCourse;
+        if (selectedYear)     params.year = selectedYear;
+        if (selectedSemester) params.semester = selectedSemester;
+      } else if (selectedClass) {
+        params.classId = selectedClass;
+      }
 
       const res = await api.get('/timetable', { params });
       if (res.data.timetable) setTimetable(res.data.timetable);
@@ -15950,7 +15393,16 @@ const TimetableModule = ({
     [selectedProgram, selectedCourse, selectedClass, selectedYear,
      selectedModule, selectedSemester, timetableType]);
 
-  // ==================== FILTER UNITS / SUBJECTS ====================
+  // ==================== FILTER SUBJECTS (school mode) ====================
+  useEffect(() => {
+    if (isSchoolMode && formData.classId) {
+      setFilteredSubjects(subjects?.filter(s => s.classId === formData.classId) || []);
+    } else {
+      setFilteredSubjects([]);
+    }
+  }, [formData.classId, subjects, isSchoolMode]);
+
+  // Keep `filteredUnits` in sync (used only by helper functions — actual unit picking uses `unitOptions`)
   useEffect(() => {
     if (isTVET && formData.programId) {
       setFilteredUnits(units?.filter(u => u.programId === formData.programId) || []);
@@ -15960,14 +15412,6 @@ const TimetableModule = ({
       setFilteredUnits([]);
     }
   }, [formData.programId, formData.courseId, units, isTVET, isUniversity]);
-
-  useEffect(() => {
-    if (!isUniversity && !isTVET && formData.classId) {
-      setFilteredSubjects(subjects?.filter(s => s.classId === formData.classId) || []);
-    } else {
-      setFilteredSubjects([]);
-    }
-  }, [formData.classId, subjects, isUniversity, isTVET]);
 
   // ==================== HELPERS ====================
   const getUnitName = (entry) => {
@@ -16018,7 +15462,7 @@ const TimetableModule = ({
     return c ? c.name : 'All Classes';
   };
 
-  // ==================== SUBMIT — CLASS ====================
+  // ==================== SUBMIT — CLASS ENTRY ====================
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!canAdd) { alert('You do not have permission to add timetable entries'); return; }
@@ -16046,24 +15490,25 @@ const TimetableModule = ({
         label: `${currentTypeMeta.label} — ${getScopeLabel()}`
       };
 
+      // 🔑 Category-specific payload
       if (isTVET) {
         if (!formData.programId) { alert('Please select a program'); setLoading(false); return; }
-        if (!formData.unitId) { alert('Please select a module/unit'); setLoading(false); return; }
+        if (!formData.unitId)    { alert('Please select a module/unit'); setLoading(false); return; }
         submitData.programId = formData.programId;
-        submitData.unitId = formData.unitId;
-        submitData.year = formData.year ? parseInt(formData.year, 10) : null;
-        submitData.module = formData.module ? parseInt(formData.module, 10) : null;
+        submitData.unitId    = formData.unitId;
+        submitData.year      = formData.year   ? parseInt(formData.year, 10)   : null;
+        submitData.module    = formData.module ? parseInt(formData.module, 10) : null;
       } else if (isUniversity) {
         if (!formData.courseId) { alert('Please select a course'); setLoading(false); return; }
-        if (!formData.unitId) { alert('Please select a unit'); setLoading(false); return; }
+        if (!formData.unitId)   { alert('Please select a unit'); setLoading(false); return; }
         submitData.courseId = formData.courseId;
-        submitData.unitId = formData.unitId;
-        submitData.year = formData.year ? parseInt(formData.year, 10) : null;
+        submitData.unitId   = formData.unitId;
+        submitData.year     = formData.year     ? parseInt(formData.year, 10)     : null;
         submitData.semester = formData.semester ? parseInt(formData.semester, 10) : null;
       } else {
-        if (!formData.classId) { alert('Please select a class'); setLoading(false); return; }
+        if (!formData.classId)   { alert('Please select a class'); setLoading(false); return; }
         if (!formData.subjectId) { alert('Please select a subject'); setLoading(false); return; }
-        submitData.classId = formData.classId;
+        submitData.classId   = formData.classId;
         submitData.subjectId = formData.subjectId;
       }
 
@@ -16097,10 +15542,14 @@ const TimetableModule = ({
     }
   };
 
-  // ==================== SUBMIT — BREAK ====================
+  // ==================== SUBMIT — BREAK (SCHOOL MODE ONLY) ====================
   const handleBreakSubmit = async (e) => {
     e.preventDefault();
     if (!canAdd) { alert('You do not have permission'); return; }
+    if (!supportsBreaks) {
+      alert('Breaks are only available for ECDE / Primary / JSS / Secondary schools.');
+      return;
+    }
     setLoading(true);
     try {
       if (!breakForm.period) { alert('Please select a period'); setLoading(false); return; }
@@ -16150,14 +15599,7 @@ const TimetableModule = ({
         schoolId: currentSchool?.id,
         timetableType,
         label: `${currentTypeMeta.label} — ${getScopeLabel()}`,
-
-        ...(isTVET && selectedProgram ? { programId: selectedProgram } : {}),
-        ...(isTVET && selectedYear ? { year: parseInt(selectedYear, 10) } : {}),
-        ...(isTVET && selectedModule ? { module: parseInt(selectedModule, 10) } : {}),
-        ...(isUniversity && selectedCourse ? { courseId: selectedCourse } : {}),
-        ...(isUniversity && selectedYear ? { year: parseInt(selectedYear, 10) } : {}),
-        ...(isUniversity && selectedSemester ? { semester: parseInt(selectedSemester, 10) } : {}),
-        ...(!isUniversity && !isTVET ? { classId: selectedClass || classes?.[0]?.id || null } : {})
+        classId: selectedClass || classes?.[0]?.id || null
       };
 
       console.log('📤 POST /timetable (break):', submitData);
@@ -16226,14 +15668,15 @@ const TimetableModule = ({
   const filteredTimetable = useMemo(() => {
     if (!timetable || timetable.length === 0) return [];
     let filtered = timetable.filter(e => e.timetableType === timetableType);
+
     if (isTVET) {
       if (selectedProgram) filtered = filtered.filter(e => e.programId === selectedProgram);
-      if (selectedYear)    filtered = filtered.filter(e => e.year === parseInt(selectedYear, 10));
-      if (selectedModule)  filtered = filtered.filter(e => e.module === parseInt(selectedModule, 10));
+      if (selectedYear)    filtered = filtered.filter(e => String(e.year) === String(selectedYear));
+      if (selectedModule)  filtered = filtered.filter(e => String(e.module) === String(selectedModule));
     } else if (isUniversity) {
       if (selectedCourse)   filtered = filtered.filter(e => e.courseId === selectedCourse);
-      if (selectedYear)     filtered = filtered.filter(e => e.year === parseInt(selectedYear, 10));
-      if (selectedSemester) filtered = filtered.filter(e => e.semester === parseInt(selectedSemester, 10));
+      if (selectedYear)     filtered = filtered.filter(e => String(e.year) === String(selectedYear));
+      if (selectedSemester) filtered = filtered.filter(e => String(e.semester) === String(selectedSemester));
     } else {
       if (selectedClass) filtered = filtered.filter(e => e.classId === selectedClass);
     }
@@ -16262,14 +15705,18 @@ const TimetableModule = ({
     const schoolName = currentSchool?.name || 'School Timetable';
     const schoolLogo = resolveLogoUrl(currentSchool);
 
+    const escapeHtml = (s) => String(s ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
     const headerHtml = `
       <div class="print-header">
         ${schoolLogo ? `<img src="${schoolLogo}" alt="Logo" class="print-logo" />` : ''}
         <div class="print-title-block">
-          <h1 class="print-school-name">${schoolName}</h1>
-          <h2 class="print-doc-title">${currentTypeMeta.label}</h2>
+          <h1 class="print-school-name">${escapeHtml(schoolName)}</h1>
+          <h2 class="print-doc-title">${escapeHtml(currentTypeMeta.label)}</h2>
           <p class="print-generated">
-            ${getScopeLabel()} • Generated on ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}
+            ${escapeHtml(getScopeLabel())} • Generated on ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}
           </p>
         </div>
       </div>
@@ -16284,13 +15731,14 @@ const TimetableModule = ({
       const c = courses?.find(x => x.id === selectedCourse);
       if (c) filterBits.push(`Course: ${c.name}`);
     }
-    if (!isUniversity && !isTVET && selectedClass) {
+    if (isSchoolMode && selectedClass) {
       const c = classes?.find(x => x.id === selectedClass);
       if (c) filterBits.push(`Class: ${c.name}`);
     }
-    if (selectedYear)     filterBits.push(`Year ${selectedYear}`);
-    if (selectedModule)   filterBits.push(`Module ${selectedModule}`);
-    if (selectedSemester) filterBits.push(`Semester ${selectedSemester}`);
+    if (isTVET && selectedYear)     filterBits.push(`Year ${selectedYear}`);
+    if (isTVET && selectedModule)   filterBits.push(`Module ${selectedModule}`);
+    if (isUniversity && selectedYear)     filterBits.push(`Year ${selectedYear}`);
+    if (isUniversity && selectedSemester) filterBits.push(`Semester ${selectedSemester}`);
 
     const filterHtml = filterBits.length
       ? `<p class="print-filters">${filterBits.join(' &nbsp;•&nbsp; ')}</p>`
@@ -16304,9 +15752,9 @@ const TimetableModule = ({
         if (entry && entry.isBreak) {
           rowsHtml += `
             <td class="break-cell">
-              <div class="break-name">${entry.breakName || 'Break'}</div>
+              <div class="break-name">${escapeHtml(entry.breakName || 'Break')}</div>
               ${entry.startTime && entry.endTime
-                ? `<div class="break-time">${entry.startTime.substring(0, 5)}–${entry.endTime.substring(0, 5)}</div>`
+                ? `<div class="break-time">${escapeHtml(entry.startTime.substring(0, 5))}–${escapeHtml(entry.endTime.substring(0, 5))}</div>`
                 : ''}
             </td>`;
         } else if (entry) {
@@ -16317,13 +15765,13 @@ const TimetableModule = ({
             : '';
           rowsHtml += `
             <td class="entry-cell">
-              <div class="entry-unit">${unitName || '—'}</div>
-              ${teacherName && teacherName !== 'Unknown' ? `<div class="entry-teacher">${teacherName}</div>` : ''}
-              ${entry.room ? `<div class="entry-room">Room: ${entry.room}</div>` : ''}
-              ${times ? `<div class="entry-time">${times}</div>` : ''}
-              ${isTVET && entry.module ? `<div class="entry-badge">Module ${entry.module}</div>` : ''}
-              ${isUniversity && entry.semester ? `<div class="entry-badge">Sem ${entry.semester}</div>` : ''}
-              ${entry.year ? `<div class="entry-year">Year ${entry.year}</div>` : ''}
+              <div class="entry-unit">${escapeHtml(unitName || '—')}</div>
+              ${teacherName && teacherName !== 'Unknown' ? `<div class="entry-teacher">${escapeHtml(teacherName)}</div>` : ''}
+              ${entry.room ? `<div class="entry-room">Room: ${escapeHtml(entry.room)}</div>` : ''}
+              ${times ? `<div class="entry-time">${escapeHtml(times)}</div>` : ''}
+              ${isTVET && entry.module ? `<div class="entry-badge">Module ${escapeHtml(String(entry.module))}</div>` : ''}
+              ${isUniversity && entry.semester ? `<div class="entry-badge">Sem ${escapeHtml(String(entry.semester))}</div>` : ''}
+              ${entry.year ? `<div class="entry-year">Year ${escapeHtml(String(entry.year))}</div>` : ''}
             </td>`;
         } else {
           rowsHtml += `<td class="empty-cell">—</td>`;
@@ -16355,21 +15803,18 @@ const TimetableModule = ({
       <!DOCTYPE html>
       <html>
         <head>
-          <title>${schoolName} — ${currentTypeMeta.label}</title>
+          <title>${escapeHtml(schoolName)} — ${escapeHtml(currentTypeMeta.label)}</title>
           <meta charset="UTF-8" />
           <style>
             @page { size: A4 landscape; margin: 12mm; }
             * { box-sizing: border-box; }
             body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; color: #1f2937; margin: 0; padding: 12px; background: #fff; }
-            
-            /* Logo positioned left, good size */
             .print-header { display: flex; align-items: center; gap: 20px; border-bottom: 3px double #4f46e5; padding-bottom: 12px; margin-bottom: 16px; }
             .print-logo { width: 80px; height: 80px; object-fit: contain; border-radius: 8px; border: 1px solid #e5e7eb; padding: 4px; background: #fff; flex-shrink: 0; }
             .print-title-block { flex: 1; text-align: left; }
             .print-school-name { font-size: 22px; font-weight: 800; color: #4f46e5; text-transform: uppercase; letter-spacing: 1.2px; margin: 0 0 4px 0; }
             .print-doc-title { font-size: 15px; font-weight: 600; color: #374151; margin: 0 0 4px 0; text-transform: uppercase; letter-spacing: 0.8px; }
             .print-generated { font-size: 11px; color: #6b7280; margin: 0; }
-            
             .print-filters { text-align: center; font-size: 12px; color: #4b5563; background: #eef2ff; padding: 6px 10px; border-radius: 6px; margin: 0 0 14px 0; }
             .print-table { width: 100%; border-collapse: collapse; font-size: 11px; }
             .print-table th { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; padding: 6px 4px; text-align: center; font-weight: 700; text-transform: uppercase; font-size: 10px; }
@@ -16383,10 +15828,7 @@ const TimetableModule = ({
             .entry-badge { display: inline-block; background: #e0e7ff; color: #4338ca; font-size: 9px; padding: 1px 5px; border-radius: 4px; margin-top: 3px; }
             .entry-year { font-size: 9.5px; color: #6b7280; margin-top: 2px; }
             .empty-cell { text-align: center; color: #d1d5db; background: #fbfbfd; }
-            .break-cell {
-              background: repeating-linear-gradient(45deg, #fef3c7, #fef3c7 6px, #fde68a 6px, #fde68a 12px);
-              text-align: center; vertical-align: middle;
-            }
+            .break-cell { background: repeating-linear-gradient(45deg, #fef3c7, #fef3c7 6px, #fde68a 6px, #fde68a 12px); text-align: center; vertical-align: middle; }
             .break-name { font-weight: 800; color: #92400e; font-size: 11px; text-transform: uppercase; }
             .break-time { color: #78350f; font-size: 10px; margin-top: 3px; font-weight: 600; }
             .print-footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; gap: 32px; font-size: 11px; color: #4b5563; }
@@ -16442,6 +15884,24 @@ const TimetableModule = ({
             </button>
           );
         })}
+      </div>
+
+      {/* ==================== CATEGORY BADGE ==================== */}
+      <div className="no-print">
+        <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold ${
+          isUniversity ? 'bg-blue-100 text-blue-800' :
+          isTVET       ? 'bg-purple-100 text-purple-800' :
+                         'bg-green-100 text-green-800'
+        }`}>
+          <i className={`fas ${
+            isUniversity ? 'fa-university' :
+            isTVET       ? 'fa-tools' :
+                           'fa-school'
+          }`} />
+          {isUniversity ? 'University Mode' :
+           isTVET       ? 'TVET / College Mode' :
+                          'School Mode (ECDE / Primary / JSS / Secondary)'}
+        </span>
       </div>
 
       {/* Header */}
@@ -16500,65 +15960,276 @@ const TimetableModule = ({
         </div>
       )}
 
-      {/* Filters */}
+      {/* ==================== FILTERS (CATEGORY-DRIVEN, UNIT-DERIVED) ==================== */}
       <div className="bg-white p-4 rounded-xl shadow-sm no-print">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {/* ===== TVET: Program → Module → Year ===== */}
           {isTVET && (<>
-            <SearchableSelect label="Program" value={selectedProgram} onChange={(e) => setSelectedProgram(e.target.value)} options={programOptions} placeholder="" />
-            <SearchableSelect label="Year" value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} options={yearOptions} placeholder="" />
-            <SearchableSelect label="Module" value={selectedModule} onChange={(e) => setSelectedModule(e.target.value)} options={moduleOptions} placeholder="" />
+            <SearchableSelect
+              label="Program"
+              value={selectedProgram}
+              onChange={(e) => {
+                setSelectedProgram(e.target.value);
+                setSelectedModule('');
+                setSelectedYear('');
+              }}
+              options={programOptions}
+              placeholder={programOptions.length === 0 ? 'No programs with modules yet' : ''}
+            />
+            <SearchableSelect
+              label="Module"
+              value={selectedModule}
+              onChange={(e) => {
+                setSelectedModule(e.target.value);
+                setSelectedYear('');
+              }}
+              options={buildModuleOptions(selectedProgram)}
+              disabled={!selectedProgram}
+              placeholder={
+                !selectedProgram
+                  ? 'Pick a program first'
+                  : buildModuleOptions(selectedProgram).length === 0
+                    ? 'No modules in this program'
+                    : ''
+              }
+            />
+            <SearchableSelect
+              label="Year"
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(e.target.value)}
+              options={buildYearOptionsForProgram(selectedProgram, selectedModule)}
+              disabled={!selectedProgram}
+              placeholder={
+                !selectedProgram
+                  ? 'Pick a program first'
+                  : buildYearOptionsForProgram(selectedProgram, selectedModule).length === 0
+                    ? 'No years in this scope'
+                    : ''
+              }
+            />
           </>)}
+
+          {/* ===== University: Course → Semester → Year ===== */}
           {isUniversity && (<>
-            <SearchableSelect label="Course" value={selectedCourse} onChange={(e) => setSelectedCourse(e.target.value)} options={courseOptions} placeholder="" />
-            <SearchableSelect label="Year" value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} options={yearOptions} placeholder="" />
-            <SearchableSelect label="Semester" value={selectedSemester} onChange={(e) => setSelectedSemester(e.target.value)} options={semesterOptions} placeholder="" />
+            <SearchableSelect
+              label="Course"
+              value={selectedCourse}
+              onChange={(e) => {
+                setSelectedCourse(e.target.value);
+                setSelectedSemester('');
+                setSelectedYear('');
+              }}
+              options={courseOptions}
+              placeholder={courseOptions.length === 0 ? 'No courses with units yet' : ''}
+            />
+            <SearchableSelect
+              label="Semester"
+              value={selectedSemester}
+              onChange={(e) => {
+                setSelectedSemester(e.target.value);
+                setSelectedYear('');
+              }}
+              options={buildSemesterOptionsForCourse(selectedCourse)}
+              disabled={!selectedCourse}
+              placeholder={
+                !selectedCourse
+                  ? 'Pick a course first'
+                  : buildSemesterOptionsForCourse(selectedCourse).length === 0
+                    ? 'No semesters in this course'
+                    : ''
+              }
+            />
+            <SearchableSelect
+              label="Year"
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(e.target.value)}
+              options={buildYearOptionsForCourse(selectedCourse, selectedSemester)}
+              disabled={!selectedCourse}
+              placeholder={
+                !selectedCourse
+                  ? 'Pick a course first'
+                  : buildYearOptionsForCourse(selectedCourse, selectedSemester).length === 0
+                    ? 'No years in this scope'
+                    : ''
+              }
+            />
           </>)}
-          {!isUniversity && !isTVET && (
-            <SearchableSelect label="Class" value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)} options={classOptions} placeholder="" />
+
+          {/* ===== School mode: Class only ===== */}
+          {isSchoolMode && (
+            <SearchableSelect
+              label="Class"
+              value={selectedClass}
+              onChange={(e) => setSelectedClass(e.target.value)}
+              options={classOptions}
+              placeholder=""
+            />
           )}
         </div>
         <div className="mt-2 text-sm text-gray-500">
           Showing {filteredTimetable.length} entries for <strong>{currentTypeMeta.label}</strong>
-          {selectedYear && ` • Year ${selectedYear}`}
-          {selectedModule && ` • Module ${selectedModule}`}
-          {selectedSemester && ` • Semester ${selectedSemester}`}
+          {isTVET && selectedYear     && ` • Year ${selectedYear}`}
+          {isTVET && selectedModule   && ` • Module ${selectedModule}`}
+          {isUniversity && selectedYear     && ` • Year ${selectedYear}`}
+          {isUniversity && selectedSemester && ` • Semester ${selectedSemester}`}
         </div>
       </div>
 
-      {/* Add Class Entry Form */}
+      {/* ==================== ADD ENTRY FORM ==================== */}
       {showForm && canAdd && (
         <div className={`bg-white p-6 rounded-xl shadow-sm border-2 no-print ${ACCENT_SOFT[currentTypeMeta.accent]}`}>
           <h3 className="text-lg font-semibold mb-4">Add {currentTypeMeta.short} Entry</h3>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              {/* ===== TVET entry: Program → Module → Year → Unit ===== */}
               {isTVET && (<>
-                <SearchableSelect label="Program *" value={formData.programId} onChange={(e) => setFormData({...formData, programId: e.target.value, unitId: ''})} options={programOptions} required placeholder="" />
-                <SearchableSelect label="Year" value={formData.year} onChange={(e) => setFormData({...formData, year: e.target.value})} options={yearOptions} placeholder="" />
-                <SearchableSelect label="Module" value={formData.module} onChange={(e) => setFormData({...formData, module: e.target.value})} options={moduleOptions} placeholder="" />
+                <SearchableSelect
+                  label="Program *"
+                  value={formData.programId}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setFormData({ ...formData, programId: v, module: '', year: '', unitId: '' });
+                    setSelectedProgram(v);
+                    setSelectedModule('');
+                    setSelectedYear('');
+                  }}
+                  options={programOptions}
+                  required
+                  placeholder={programOptions.length === 0 ? 'No programs with modules yet' : ''}
+                />
+                <SearchableSelect
+                  label="Module"
+                  value={formData.module}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setFormData({ ...formData, module: v, year: '', unitId: '' });
+                  }}
+                  options={buildModuleOptions(formData.programId)}
+                  disabled={!formData.programId}
+                  placeholder={
+                    !formData.programId
+                      ? 'Pick a program first'
+                      : buildModuleOptions(formData.programId).length === 0
+                        ? 'No modules in this program'
+                        : ''
+                  }
+                />
+                <SearchableSelect
+                  label="Year"
+                  value={formData.year}
+                  onChange={(e) => setFormData({ ...formData, year: e.target.value, unitId: '' })}
+                  options={buildYearOptionsForProgram(formData.programId, formData.module)}
+                  disabled={!formData.programId}
+                  placeholder={
+                    !formData.programId
+                      ? 'Pick a program first'
+                      : buildYearOptionsForProgram(formData.programId, formData.module).length === 0
+                        ? 'No years in this scope'
+                        : ''
+                  }
+                />
               </>)}
+
+              {/* ===== University entry: Course → Semester → Year → Unit ===== */}
               {isUniversity && (<>
-                <SearchableSelect label="Course *" value={formData.courseId} onChange={(e) => setFormData({...formData, courseId: e.target.value, unitId: ''})} options={courseOptions} required placeholder="" />
-                <SearchableSelect label="Year" value={formData.year} onChange={(e) => setFormData({...formData, year: e.target.value})} options={yearOptions} placeholder="" />
-                <SearchableSelect label="Semester" value={formData.semester} onChange={(e) => setFormData({...formData, semester: e.target.value})} options={semesterOptions} placeholder="" />
+                <SearchableSelect
+                  label="Course *"
+                  value={formData.courseId}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setFormData({ ...formData, courseId: v, semester: '', year: '', unitId: '' });
+                    setSelectedCourse(v);
+                    setSelectedSemester('');
+                    setSelectedYear('');
+                  }}
+                  options={courseOptions}
+                  required
+                  placeholder={courseOptions.length === 0 ? 'No courses with units yet' : ''}
+                />
+                <SearchableSelect
+                  label="Semester"
+                  value={formData.semester}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setFormData({ ...formData, semester: v, year: '', unitId: '' });
+                  }}
+                  options={buildSemesterOptionsForCourse(formData.courseId)}
+                  disabled={!formData.courseId}
+                  placeholder={
+                    !formData.courseId
+                      ? 'Pick a course first'
+                      : buildSemesterOptionsForCourse(formData.courseId).length === 0
+                        ? 'No semesters in this course'
+                        : ''
+                  }
+                />
+                <SearchableSelect
+                  label="Year"
+                  value={formData.year}
+                  onChange={(e) => setFormData({ ...formData, year: e.target.value, unitId: '' })}
+                  options={buildYearOptionsForCourse(formData.courseId, formData.semester)}
+                  disabled={!formData.courseId}
+                  placeholder={
+                    !formData.courseId
+                      ? 'Pick a course first'
+                      : buildYearOptionsForCourse(formData.courseId, formData.semester).length === 0
+                        ? 'No years in this scope'
+                        : ''
+                  }
+                />
               </>)}
-              {!isUniversity && !isTVET && (
-                <SearchableSelect label="Class *" value={formData.classId} onChange={(e) => setFormData({...formData, classId: e.target.value})} options={classOptions} required placeholder="" />
+
+              {/* ===== School entry: Class ===== */}
+              {isSchoolMode && (
+                <SearchableSelect
+                  label="Class *"
+                  value={formData.classId}
+                  onChange={(e) => setFormData({ ...formData, classId: e.target.value, subjectId: '' })}
+                  options={classOptions}
+                  required
+                  placeholder=""
+                />
               )}
 
-              {(isTVET || isUniversity) && (
-                <SearchableSelect label={isTVET ? 'Module *' : 'Unit *'} value={formData.unitId} onChange={(e) => setFormData({...formData, unitId: e.target.value})} options={unitOptions} required disabled={!formData.programId && !formData.courseId} placeholder="" />
+              {/* ===== Unit (tertiary) / Subject (school) ===== */}
+              {usesUnits && (
+                <SearchableSelect
+                  label={isTVET ? 'Module / Unit *' : 'Unit *'}
+                  value={formData.unitId}
+                  onChange={(e) => setFormData({ ...formData, unitId: e.target.value })}
+                  options={unitOptions}
+                  required
+                  disabled={
+                    isTVET ? !formData.programId :
+                    isUniversity ? !formData.courseId :
+                    true
+                  }
+                  placeholder={
+                    unitOptions.length === 0 && (formData.programId || formData.courseId)
+                      ? 'No units match this scope'
+                      : ''
+                  }
+                />
               )}
-              {!isUniversity && !isTVET && (
-                <SearchableSelect label="Subject *" value={formData.subjectId} onChange={(e) => setFormData({...formData, subjectId: e.target.value})} options={subjectOptions} required disabled={!formData.classId} placeholder="" />
+              {usesSubjects && (
+                <SearchableSelect
+                  label="Subject *"
+                  value={formData.subjectId}
+                  onChange={(e) => setFormData({ ...formData, subjectId: e.target.value })}
+                  options={subjectOptions}
+                  required
+                  disabled={!formData.classId}
+                  placeholder=""
+                />
               )}
 
               <SearchableSelect label="Teacher *" value={formData.teacherId} onChange={(e) => setFormData({...formData, teacherId: e.target.value})} options={teacherOptions} required placeholder="" />
-              <SearchableSelect label="Day *" value={formData.day} onChange={(e) => setFormData({...formData, day: e.target.value})} options={dayOptions} required placeholder="" />
-              <SearchableSelect label="Period *" value={formData.period} onChange={(e) => setFormData({...formData, period: e.target.value})} options={periodOptions} required placeholder="" />
+              <SearchableSelect label="Day *"     value={formData.day}       onChange={(e) => setFormData({...formData, day: e.target.value})}       options={dayOptions}    required placeholder="" />
+              <SearchableSelect label="Period *"  value={formData.period}    onChange={(e) => setFormData({...formData, period: e.target.value})}    options={periodOptions} required placeholder="" />
 
               <input type="text" placeholder="Room (e.g., Hall A, Lab 1)" value={formData.room} onChange={(e) => setFormData({...formData, room: e.target.value})} className="px-3 py-2 border rounded-lg" />
               <input type="time" value={formData.startTime} onChange={(e) => setFormData({...formData, startTime: e.target.value})} className="px-3 py-2 border rounded-lg" required />
-              <input type="time" value={formData.endTime} onChange={(e) => setFormData({...formData, endTime: e.target.value})} className="px-3 py-2 border rounded-lg" required />
+              <input type="time" value={formData.endTime}   onChange={(e) => setFormData({...formData, endTime: e.target.value})}   className="px-3 py-2 border rounded-lg" required />
             </div>
             <div className="flex gap-2">
               <button type="submit" className={`${ACCENT_BG[currentTypeMeta.accent]} text-white px-6 py-2 rounded-lg hover:opacity-90 disabled:opacity-50`} disabled={loading}>
@@ -16572,7 +16243,7 @@ const TimetableModule = ({
         </div>
       )}
 
-      {/* Add Break Form */}
+      {/* ==================== ADD BREAK FORM (SCHOOL MODE ONLY) ==================== */}
       {showBreakForm && canAdd && supportsBreaks && (
         <div className="bg-white p-6 rounded-xl shadow-sm border-2 border-amber-200 no-print">
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -16584,43 +16255,15 @@ const TimetableModule = ({
           </p>
           <form onSubmit={handleBreakSubmit} className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <SearchableSelect
-                label="Break Type *"
-                value={breakForm.name}
-                onChange={(e) => setBreakForm({ ...breakForm, name: e.target.value })}
-                options={breakNameOptions}
-                required
-                placeholder=""
-              />
+              <SearchableSelect label="Break Type *" value={breakForm.name} onChange={(e) => setBreakForm({ ...breakForm, name: e.target.value })} options={breakNameOptions} required placeholder="" />
               {breakForm.name === 'Other' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Custom Name *</label>
-                  <input
-                    type="text"
-                    value={breakForm.customName}
-                    onChange={(e) => setBreakForm({ ...breakForm, customName: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg"
-                    placeholder="e.g., Morning Devotion"
-                    required
-                  />
+                  <input type="text" value={breakForm.customName} onChange={(e) => setBreakForm({ ...breakForm, customName: e.target.value })} className="w-full px-3 py-2 border rounded-lg" placeholder="e.g., Morning Devotion" required />
                 </div>
               )}
-              <SearchableSelect
-                label="Day *"
-                value={breakForm.day}
-                onChange={(e) => setBreakForm({ ...breakForm, day: e.target.value })}
-                options={dayOptions}
-                required
-                placeholder=""
-              />
-              <SearchableSelect
-                label="Period *"
-                value={breakForm.period}
-                onChange={(e) => setBreakForm({ ...breakForm, period: e.target.value })}
-                options={periodOptions}
-                required
-                placeholder=""
-              />
+              <SearchableSelect label="Day *"    value={breakForm.day}    onChange={(e) => setBreakForm({ ...breakForm, day: e.target.value })}    options={dayOptions}    required placeholder="" />
+              <SearchableSelect label="Period *" value={breakForm.period} onChange={(e) => setBreakForm({ ...breakForm, period: e.target.value })} options={periodOptions} required placeholder="" />
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Start</label>
@@ -16644,7 +16287,7 @@ const TimetableModule = ({
         </div>
       )}
 
-      {/* Timetable Grid */}
+      {/* ==================== TIMETABLE GRID ==================== */}
       <div className="bg-white rounded-xl shadow-sm overflow-x-auto">
         {filteredTimetable.length === 0 ? (
           <div className="text-center py-12 text-gray-500">
@@ -16695,13 +16338,15 @@ const TimetableModule = ({
                         ) : entry ? (
                           <div className={`${ACCENT_SOFT[currentTypeMeta.accent]} p-3 rounded-lg relative group border`}>
                             <div className="font-bold text-base">{getUnitName(entry)}</div>
+
                             {isTVET && entry.module && (
                               <div className="text-xs font-medium mt-1 bg-white/60 px-2 py-1 rounded inline-block">Module {entry.module}</div>
                             )}
                             {isUniversity && entry.semester && (
                               <div className="text-xs font-medium mt-1 bg-white/60 px-2 py-1 rounded inline-block">Sem {entry.semester}</div>
                             )}
-                            {entry.year && <div className="text-xs text-gray-500 mt-1">Year {entry.year}</div>}
+                            {usesYear && entry.year && <div className="text-xs text-gray-500 mt-1">Year {entry.year}</div>}
+
                             <div className="text-sm text-gray-700 mt-2 font-medium">
                               <i className="fas fa-user mr-1 text-gray-400"></i>{getTeacherName(entry)}
                             </div>
@@ -21188,10 +20833,10 @@ const StaffMoneyInput = ({
     </div>
   );
 };
+// ============================================================
+//  STAFF MODULE — v5 (Table View & UI Fixes)
+// ============================================================
 
-// ============================================================
-//  STAFF MODULE
-// ============================================================
 const StaffModule = ({
   staff = [],
   setStaff,
@@ -21208,7 +20853,6 @@ const StaffModule = ({
   departments = [],
   roles = [],
 }) => {
-  // ---- Aliases for the module-scope sub-components ----
   const SearchableSelect = StaffSearchableSelect;
   const TextInput = StaffTextInput;
   const MoneyInput = StaffMoneyInput;
@@ -21217,16 +20861,20 @@ const StaffModule = ({
   const [editingId, setEditingId] = useState(null);
   const [showPayrollForm, setShowPayrollForm] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [staffTypeFilter, setStaffTypeFilter] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+
+  // Photo States
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState('');
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+
   const [payrollForm, setPayrollForm] = useState({
     month: new Date().getMonth() + 1,
     year: new Date().getFullYear(),
   });
-  const [searchTerm, setSearchTerm] = useState('');
-  const [departmentFilter, setDepartmentFilter] = useState('');
-  const [staffTypeFilter, setStaffTypeFilter] = useState('');
-  const [showFilters, setShowFilters] = useState(false);
-  const [successMessage, setSuccessMessage] = useState('');
-  const [errorMessage, setErrorMessage] = useState('');
 
   // ==================== PERMISSIONS ====================
   const canEdit = ['SUPER_ADMIN', 'SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
@@ -21248,43 +20896,32 @@ const StaffModule = ({
   const getUserDisplayName = (member) => {
     if (!member) return 'Unknown Staff';
     const userData = member.User || {};
-    return (
-      `${userData.firstName || ''} ${userData.lastName || ''}`.trim() ||
-      member.employeeId ||
-      'Unknown Staff'
-    );
+    // Fallback to Employee ID if User data is missing
+    return `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || member.employeeId || 'Unnamed Staff';
   };
 
   const getUserInitials = (member) => {
     if (!member) return '?';
     const userData = member.User || {};
-    const f = userData.firstName || '';
-    const l = userData.lastName || '';
-    return `${f.charAt(0)}${l.charAt(0)}`.toUpperCase() || '?';
+    return `${(userData.firstName || '?').charAt(0)}${(userData.lastName || '?').charAt(0)}`.toUpperCase();
+  };
+
+  const resolveStaffPhotoUrl = (member) => {
+    if (!member) return null;
+    const p = member.passportPhoto;
+    if (!p) return member.id ? `/api/staff/${member.id}/photo` : null;
+    if (typeof p === 'string' && p.startsWith('data:image/')) return p;
+    if (typeof p === 'string' && p.startsWith('http')) return p;
+    if (typeof p === 'string' && p.startsWith('/')) return p;
+    return member.id ? `/api/staff/${member.id}/photo` : null;
   };
 
   const getTotalSalary = (member) => {
     if (!member || !member.salary) return 0;
-    return (
-      (parseFloat(member.salary.basic) || 0) +
-      (parseFloat(member.salary.house) || 0) +
-      (parseFloat(member.salary.transport) || 0)
-    );
+    return (parseFloat(member.salary.basic) || 0) + (parseFloat(member.salary.house) || 0) + (parseFloat(member.salary.transport) || 0);
   };
 
-  const getDepartmentName = (departmentId) => {
-    if (!departmentId) return 'N/A';
-    const dept = departments?.find((d) => d.id === departmentId);
-    return dept?.name || 'N/A';
-  };
-
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-KE', {
-      style: 'currency',
-      currency: 'KES',
-      minimumFractionDigits: 0,
-    }).format(amount || 0);
-  };
+  const formatCurrency = (amount) => new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 }).format(amount || 0);
 
   const parseMoney = (v) => {
     if (v === '' || v === null || v === undefined) return 0;
@@ -21292,196 +20929,102 @@ const StaffModule = ({
     return Number.isFinite(n) ? n : 0;
   };
 
-const staffRoleOptions = useMemo(() => {
-  const category = currentSchool?.category || 'ECDE_PRIMARY_JSS';
+  // ==================== ROLE OPTIONS ====================
+  const staffRoleOptions = useMemo(() => {
+    let builtIn = [];
+    if (isUniversity) builtIn = ['Vice Chancellor', 'Registrar', 'Dean', 'HOD', 'Professor', 'Senior Lecturer', 'Lecturer', 'Tutor'].map(r => ({ value: r.toUpperCase().replace(/\s+/g, '_'), label: r }));
+    else if (isTVET) builtIn = ['Principal', 'Deputy Principal', 'HOD', 'Senior Lecturer', 'Lecturer', 'Instructor', 'Trainer'].map(r => ({ value: r.toUpperCase().replace(/\s+/g, '_'), label: r }));
+    else if (isSecondary) builtIn = ['Principal', 'Deputy Principal', 'Senior Teacher', 'HOD', 'Class Teacher', 'Subject Teacher'].map(r => ({ value: r.toUpperCase().replace(/\s+/g, '_'), label: r }));
+    else builtIn = ['Head Teacher', 'Deputy Head Teacher', 'Senior Teacher', 'Class Teacher', 'Subject Teacher'].map(r => ({ value: r.toUpperCase().replace(/\s+/g, '_'), label: r }));
 
-  // -------- 1. Built-in role options (school-type aware) --------
-  let builtIn = [];
+    const existingValues = new Set(builtIn.map((o) => o.value));
+    const roleTableOptions = (Array.isArray(roles) ? roles : [])
+      .filter((r) => r && r.name && r.isActive !== false && (!r.category || r.category === 'ALL' || r.category === schoolCategory))
+      .map((r) => ({ value: String(r.name).trim().replace(/\s+/g, '_').toUpperCase(), label: r.name, subLabel: r.isSystemRole ? 'System' : 'Custom' }))
+      .filter((o) => !existingValues.has(o.value));
 
-  if (isUniversity) {
-    // ... university roles
-  } else if (isTVET) {
-    // ... TVET roles
-  } else if (isSecondary) {
-    // ... secondary roles
-  } else {
-    // Primary/JSS roles
-    builtIn = [
-      { value: 'HEAD_TEACHER', label: 'Head Teacher' },
-      { value: 'DEPUTY_HEAD_TEACHER', label: 'Deputy Head Teacher' },
-      { value: 'SENIOR_TEACHER', label: 'Senior Teacher' },
-      { value: 'CLASS_TEACHER', label: 'Class Teacher' },
-      { value: 'SUBJECT_TEACHER', label: 'Subject Teacher' },
-      { value: 'SUPPORT_STAFF', label: 'Support Staff' },
-      { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
-      { value: 'LIBRARIAN', label: 'Librarian' },
-      { value: 'ADMINISTRATOR', label: 'Administrator' },
-      { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
-      { value: 'IT_OFFICER', label: 'IT Officer' },
-      { value: 'COUNSELOR', label: 'Counselor' },
-      { value: 'NURSE', label: 'Nurse' },
-    ];
-  }
+    return [...builtIn, ...roleTableOptions];
+  }, [isUniversity, isTVET, isSecondary, roles, schoolCategory]);
 
-  // -------- 2. Custom + system roles from Roles Management --------
-  const existingValues = new Set(builtIn.map((o) => o.value));
-
-  const roleTableOptions = (Array.isArray(roles) ? roles : [])
-    .filter((r) => r && r.name && r.isActive !== false)
-    // ✅ KEY FIX: Only keep roles that match this school's category
-    .filter(
-      (r) =>
-        !r.category ||           // No category = universal (backward compat)
-        r.category === 'ALL' ||  // Explicitly universal
-        r.category === category  // Matches this school's category
-    )
-    .map((r) => ({
-      value: String(r.name).trim().replace(/\s+/g, '_').toUpperCase(),
-      label: r.name,
-      subLabel: r.isSystemRole ? 'System role' : 'Custom role',
-      isSystemRole: !!r.isSystemRole,
-    }))
-    .filter((o) => !existingValues.has(o.value));
-
-  // -------- 3. Merge --------
-  return [...builtIn, ...roleTableOptions];
-}, [isUniversity, isTVET, isSecondary, roles, currentSchool?.category]);
-
-
-  // ==================== OPTIONS ====================
-  const departmentOptions = useMemo(() => {
-    if (!departments || departments.length === 0) return [];
-    return departments.map((d) => ({
-      value: d.id,
-      label: d.name,
-      subLabel: d.faculty?.name || '',
-    }));
-  }, [departments]);
+  const departmentOptions = useMemo(() => (departments || []).map((d) => ({ value: d.id, label: d.name, subLabel: d.faculty?.name || '' })), [departments]);
 
   const userOptions = useMemo(() => {
-    if (!users || users.length === 0) return [];
     const existingUserIds = new Set(staff.map((s) => s.userId).filter(Boolean));
-    return users
-      .filter((u) => !existingUserIds.has(u.id) || u.id === form.userId)
-      .map((u) => ({
-        value: u.id,
-        label: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email,
-        subLabel: `${u.role || 'User'} • ${u.email}`,
-      }));
+    return (users || []).filter((u) => !existingUserIds.has(u.id) || u.id === form.userId).map((u) => ({
+      value: u.id, label: `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email, subLabel: `${u.role || 'User'} • ${u.email}`
+    }));
   }, [users, staff, form.userId]);
 
-  const staffTypeOptions = [
-    { value: 'TEACHING', label: 'Teaching Staff' },
-    { value: 'NON_TEACHING', label: 'Non-Teaching Staff' },
-  ];
-
-  const monthOptions = [
-    { value: 1, label: 'January' },
-    { value: 2, label: 'February' },
-    { value: 3, label: 'March' },
-    { value: 4, label: 'April' },
-    { value: 5, label: 'May' },
-    { value: 6, label: 'June' },
-    { value: 7, label: 'July' },
-    { value: 8, label: 'August' },
-    { value: 9, label: 'September' },
-    { value: 10, label: 'October' },
-    { value: 11, label: 'November' },
-    { value: 12, label: 'December' },
-  ];
-
-  const uniqueDepartments = useMemo(() => {
-    const deptMap = new Map();
-    staff.forEach((member) => {
-      if (member.departmentId) {
-        const dept = departments?.find((d) => d.id === member.departmentId);
-        if (dept && !deptMap.has(member.departmentId)) {
-          deptMap.set(member.departmentId, dept);
-        }
-      }
-      if (member.department && !deptMap.has(member.department)) {
-        deptMap.set(member.department, {
-          id: member.department,
-          name: member.department,
-        });
-      }
-    });
-    return Array.from(deptMap.values());
-  }, [staff, departments]);
-
-  const departmentFilterOptions = useMemo(() => {
-    if (!uniqueDepartments || uniqueDepartments.length === 0) return [];
-    return uniqueDepartments.map((dept) => ({
-      value: dept.id,
-      label: dept.name,
-    }));
-  }, [uniqueDepartments]);
+  const staffTypeOptions = [{ value: 'TEACHING', label: 'Teaching Staff' }, { value: 'NON_TEACHING', label: 'Non-Teaching Staff' }];
+  const monthOptions = [{ value: 1, label: 'January' }, { value: 2, label: 'February' }, { value: 3, label: 'March' }, { value: 4, label: 'April' }, { value: 5, label: 'May' }, { value: 6, label: 'June' }, { value: 7, label: 'July' }, { value: 8, label: 'August' }, { value: 9, label: 'September' }, { value: 10, label: 'October' }, { value: 11, label: 'November' }, { value: 12, label: 'December' }];
 
   // ==================== FILTERED STAFF ====================
   const filteredStaff = useMemo(() => {
     let filtered = [...staff];
-
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       filtered = filtered.filter((member) => {
         const u = member.User || {};
-        return (
-          `${u.firstName || ''} ${u.lastName || ''}`.toLowerCase().includes(term) ||
-          (member.employeeId || '').toLowerCase().includes(term) ||
-          (member.jobTitle || '').toLowerCase().includes(term) ||
-          (member.department || '').toLowerCase().includes(term) ||
-          (u.email || '').toLowerCase().includes(term) ||
-          (member.staffRole || '').replace(/_/g, ' ').toLowerCase().includes(term)
-        );
+        return `${u.firstName || ''} ${u.lastName || ''}`.toLowerCase().includes(term) || (member.employeeId || '').toLowerCase().includes(term) || (member.jobTitle || '').toLowerCase().includes(term);
       });
     }
-
-    if (departmentFilter) {
-      filtered = filtered.filter(
-        (m) => m.departmentId === departmentFilter || m.department === departmentFilter
-      );
-    }
-
-    if (staffTypeFilter) {
-      filtered = filtered.filter((m) => m.staffType === staffTypeFilter);
-    }
-
+    if (staffTypeFilter) filtered = filtered.filter((m) => m.staffType === staffTypeFilter);
     return filtered;
-  }, [staff, searchTerm, departmentFilter, staffTypeFilter]);
+  }, [staff, searchTerm, staffTypeFilter]);
 
+  // ==================== PHOTO HANDLERS ====================
+  const handlePhotoSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setErrorMessage('Photo must be less than 5 MB');
+      setTimeout(() => setErrorMessage(''), 3000);
+      return;
+    }
+    setPhotoFile(file);
+    const reader = new FileReader();
+    reader.onloadend = () => setPhotoPreview(reader.result);
+    reader.readAsDataURL(file);
+  };
+const uploadStaffPhoto = async () => {
+  if (!photoFile) return form.passportPhoto || null;
+
+  setUploadingPhoto(true);
+  try {
+    const fd = new FormData();
+    fd.append('photo', photoFile);
+
+    const res = await api.post('/staff/upload-photo', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+
+    // ✅ Only accept real base64 from the server
+    if (res.data?.base64 && res.data.base64.startsWith('data:image/')) {
+      return res.data.base64;
+    }
+
+    throw new Error(
+      res.data?.message || 'Server did not return base64 for the uploaded photo'
+    );
+  } catch (err) {
+    console.error('❌ Staff photo upload failed:', err);
+    setErrorMessage(
+      'Photo upload failed: ' +
+        (err.response?.data?.message || err.message) +
+        ' — please retry with a smaller JPG/PNG (max 5 MB).'
+    );
+    // ✅ Return null so the caller can abort instead of saving without a photo
+    return null;
+  } finally {
+    setUploadingPhoto(false);
+  }
+};
   // ==================== SUBMIT ====================
   const handleSubmit = async (e) => {
     e.preventDefault();
-
-    if (!canEdit) {
-      setErrorMessage('You do not have permission to add/edit staff');
-      setTimeout(() => setErrorMessage(''), 3000);
-      return;
-    }
-    if (!form.userId) {
-      setErrorMessage('Please select a user account');
-      setTimeout(() => setErrorMessage(''), 3000);
-      return;
-    }
-    if (!form.staffRole) {
-      setErrorMessage('Please select a staff role');
-      setTimeout(() => setErrorMessage(''), 3000);
-      return;
-    }
-    if (!form.employmentDate) {
-      setErrorMessage('Please select employment date');
-      setTimeout(() => setErrorMessage(''), 3000);
-      return;
-    }
-    if (!form.jobTitle || !String(form.jobTitle).trim()) {
-      setErrorMessage('Please enter a job title');
-      setTimeout(() => setErrorMessage(''), 3000);
-      return;
-    }
-
-    const employmentDate = new Date(form.employmentDate);
-    if (isNaN(employmentDate.getTime())) {
-      setErrorMessage('Invalid employment date');
+    if (!canEdit) { setErrorMessage('Permission denied'); return; }
+    if (!form.userId || !form.staffRole || !form.jobTitle) {
+      setErrorMessage('Please fill in all required fields');
       setTimeout(() => setErrorMessage(''), 3000);
       return;
     }
@@ -21491,44 +21034,63 @@ const staffRoleOptions = useMemo(() => {
     setSuccessMessage('');
 
     try {
-      const formattedDate = employmentDate.toISOString().split('T')[0];
+  const photoUrl = await uploadStaffPhoto();
 
-      const formData = {
-        ...form,
-        employmentDate: formattedDate,
-        schoolId: currentSchool?.id || user?.schoolId,
-        salary: {
-          basic: parseMoney(form.salary?.basic),
-          house: parseMoney(form.salary?.house),
-          transport: parseMoney(form.salary?.transport),
-        },
-      };
+  // ✅ If the user picked a photo but the upload failed, abort
+  if (photoFile && !photoUrl) {
+    setErrorMessage('Could not upload photo — please retry with a different image.');
+    setLoading(false);
+    return;
+  }
 
+  const formData = {
+    ...form,
+    passportPhoto: photoUrl || form.passportPhoto || null,
+    schoolId: currentSchool?.id || user?.schoolId,
+    salary: {
+      basic: parseMoney(form.salary?.basic),
+      house: parseMoney(form.salary?.house),
+      transport: parseMoney(form.salary?.transport),
+    },
+  };
       if (!showSubjects) delete formData.subjects;
-      if (!showDepartment) {
-        delete formData.departmentId;
-        delete formData.department;
-      }
+      if (!showDepartment) { delete formData.departmentId; delete formData.department; }
+      ['employeeId', 'tscNumber', 'specialization'].forEach((field) => { if (formData[field] === '') formData[field] = null; });
 
-      ['employeeId', 'tscNumber', 'specialization'].forEach((field) => {
-        if (formData[field] === '') formData[field] = null;
-      });
-
-      console.log('📤 Submitting staff data:', formData);
-
+      // 3. Save to Backend
+      let savedStaff;
       if (editingId) {
-        await onUpdate(editingId, formData);
+        savedStaff = await onUpdate(editingId, formData);
         setSuccessMessage('✅ Staff member updated successfully!');
       } else {
-        await onCreate(formData);
+        savedStaff = await onCreate(formData);
         setSuccessMessage('✅ Staff member added successfully!');
+      }
+
+      // ✅ 4. INSTANT UI UPDATE & PHOTO MERGE
+      if (savedStaff) {
+        savedStaff.passportPhoto = photoUrl; // Ensure photo stays
+        
+        // Also merge User data locally if backend didn't return it
+        if (!savedStaff.User) {
+          const linkedUser = users.find(u => u.id === form.userId);
+          if (linkedUser) savedStaff.User = linkedUser;
+        }
+        // Also merge staffRole locally if backend ignored it
+        if (!savedStaff.staffRole) savedStaff.staffRole = form.staffRole;
+
+        if (editingId) {
+          setStaff(prev => prev.map(s => s.id === editingId ? savedStaff : s));
+        } else {
+          setStaff(prev => [savedStaff, ...prev]);
+        }
       }
 
       setEditingId(null);
       resetForm();
       setTimeout(() => setSuccessMessage(''), 5000);
     } catch (error) {
-      console.error('❌ Staff submit error:', error);
+      console.error('Submit error:', error);
       setErrorMessage(error.response?.data?.message || 'Failed to save staff member');
       setTimeout(() => setErrorMessage(''), 5000);
     } finally {
@@ -21538,117 +21100,49 @@ const staffRoleOptions = useMemo(() => {
 
   const resetForm = () => {
     setForm({
-      userId: '',
-      employeeId: '',
-      tscNumber: '',
-      departmentId: '',
-      department: '',
-      jobTitle: '',
-      employmentDate: new Date().toISOString().split('T')[0],
-      qualifications: [],
-      specialization: '',
-      subjects: [],
-      staffType: 'TEACHING',
-      staffRole: '',
+      userId: '', employeeId: '', tscNumber: '', departmentId: '',
+      department: '', jobTitle: '', employmentDate: new Date().toISOString().split('T')[0],
+      qualifications: [], specialization: '', subjects: [],
+      staffType: 'TEACHING', staffRole: '',
       bankDetails: { bank: '', branch: '', account: '' },
-      salary: { basic: '', house: '', transport: '' },
+      salary: { basic: '', house: '', transport: '' }, passportPhoto: '',
     });
+    setPhotoFile(null);
+    setPhotoPreview('');
   };
 
-  // ==================== PAYROLL ====================
-  const processPayroll = async () => {
-    if (!canProcessPayroll) {
-      setErrorMessage('You do not have permission to process payroll');
-      setTimeout(() => setErrorMessage(''), 3000);
-      return;
-    }
-    if (staff.length === 0) {
-      setErrorMessage('No staff members to process payroll for');
-      setTimeout(() => setErrorMessage(''), 3000);
-      return;
-    }
-    setLoading(true);
-    setErrorMessage('');
-    setSuccessMessage('');
-    try {
-      const res = await api.post('/payroll/process', {
-        month: payrollForm.month,
-        year: payrollForm.year,
-        schoolId: currentSchool?.id,
-      });
-      setPayroll(res.data.payrolls || []);
-      setShowPayrollForm(false);
-      setSuccessMessage(
-        `✅ Payroll processed for ${res.data.payrolls?.length || 0} staff members!`
-      );
-      setTimeout(() => setSuccessMessage(''), 5000);
-    } catch (error) {
-      console.error('❌ Payroll error:', error);
-      setErrorMessage(error.response?.data?.message || 'Failed to process payroll');
-      setTimeout(() => setErrorMessage(''), 5000);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ==================== DELETE ====================
   const handleDelete = async (memberId, memberName) => {
-    if (!canDelete) {
-      setErrorMessage('You do not have permission to delete staff');
-      setTimeout(() => setErrorMessage(''), 3000);
-      return;
-    }
-    if (!window.confirm(`Delete ${memberName}? This cannot be undone.`)) return;
+    if (!canDelete) return;
+    if (!window.confirm(`Delete ${memberName}?`)) return;
     setLoading(true);
     try {
       await onDelete(memberId);
-      setSuccessMessage(`✅ ${memberName} deleted successfully!`);
+      setStaff(prev => prev.filter(s => s.id !== memberId));
+      setSuccessMessage(`✅ Deleted successfully!`);
       setTimeout(() => setSuccessMessage(''), 5000);
     } catch (error) {
-      setErrorMessage(error.response?.data?.message || 'Failed to delete staff member');
+      setErrorMessage('Failed to delete staff member');
       setTimeout(() => setErrorMessage(''), 5000);
     } finally {
       setLoading(false);
     }
   };
 
-  // ==================== EDIT ====================
   const handleEdit = (member) => {
-    if (!canEdit) {
-      setErrorMessage('You do not have permission to edit staff');
-      setTimeout(() => setErrorMessage(''), 3000);
-      return;
-    }
+    if (!canEdit) return;
     const salary = member.salary || {};
     setForm({
       ...member,
-      employmentDate: member.employmentDate
-        ? new Date(member.employmentDate).toISOString().split('T')[0]
-        : new Date().toISOString().split('T')[0],
+      employmentDate: member.employmentDate ? new Date(member.employmentDate).toISOString().split('T')[0] : '',
       salary: {
-        basic:
-          salary.basic !== undefined && salary.basic !== null
-            ? String(salary.basic)
-            : '',
-        house:
-          salary.house !== undefined && salary.house !== null
-            ? String(salary.house)
-            : '',
-        transport:
-          salary.transport !== undefined && salary.transport !== null
-            ? String(salary.transport)
-            : '',
+        basic: salary.basic ? String(salary.basic) : '',
+        house: salary.house ? String(salary.house) : '',
+        transport: salary.transport ? String(salary.transport) : '',
       },
-      departmentId: member.departmentId || '',
-      department: member.department || '',
-      staffRole: member.staffRole || '',
     });
+    setPhotoPreview(resolveStaffPhotoUrl(member) || '');
     setEditingId(member.id);
-    setTimeout(() => {
-      document
-        .getElementById('staff-form')
-        ?.scrollIntoView({ behavior: 'smooth' });
-    }, 100);
+    setTimeout(() => document.getElementById('staff-form')?.scrollIntoView({ behavior: 'smooth' }), 100);
   };
 
   const handleCancel = () => {
@@ -21656,39 +21150,50 @@ const staffRoleOptions = useMemo(() => {
     resetForm();
   };
 
+  // ==================== PHOTO AVATAR ====================
+  const StaffAvatar = ({ member, size = 'md' }) => {
+    const sizeClasses = {
+      sm: 'w-8 h-8 text-xs',
+      md: 'w-10 h-10 text-sm',
+      lg: 'w-16 h-16 text-xl',
+    }[size] || 'w-10 h-10 text-sm';
+
+    const url = resolveStaffPhotoUrl(member);
+    const initials = getUserInitials(member);
+    const [imgError, setImgError] = useState(false);
+
+    if (url && !imgError) {
+      return (
+        <img
+          src={url}
+          alt="Staff"
+          className={`${sizeClasses} rounded-full object-cover border border-gray-200 flex-shrink-0 bg-gray-50`}
+          onError={() => setImgError(true)}
+        />
+      );
+    }
+    return (
+      <div className={`${sizeClasses} bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0 border border-indigo-200`}>
+        <span className="font-bold text-indigo-600">{initials}</span>
+      </div>
+    );
+  };
+
   // ==================== RENDER ====================
   return (
     <div className="space-y-6">
-      {loading && (
-        <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50" />
-      )}
+      {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50" />}
 
       {successMessage && (
-        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex items-center justify-between">
-          <span>
-            <i className="fas fa-check-circle mr-2" />
-            {successMessage}
-          </span>
-          <button
-            onClick={() => setSuccessMessage('')}
-            className="text-green-500 hover:text-green-700"
-          >
-            <i className="fas fa-times" />
-          </button>
+        <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg flex justify-between items-center">
+          <span><i className="fas fa-check-circle mr-2" />{successMessage}</span>
+          <button onClick={() => setSuccessMessage('')} className="text-green-500 hover:text-green-700"><i className="fas fa-times" /></button>
         </div>
       )}
       {errorMessage && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center justify-between">
-          <span>
-            <i className="fas fa-exclamation-circle mr-2" />
-            {errorMessage}
-          </span>
-          <button
-            onClick={() => setErrorMessage('')}
-            className="text-red-500 hover:text-red-700"
-          >
-            <i className="fas fa-times" />
-          </button>
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex justify-between items-center">
+          <span><i className="fas fa-exclamation-circle mr-2" />{errorMessage}</span>
+          <button onClick={() => setErrorMessage('')} className="text-red-500 hover:text-red-700"><i className="fas fa-times" /></button>
         </div>
       )}
 
@@ -21696,670 +21201,205 @@ const staffRoleOptions = useMemo(() => {
       <div className="flex flex-wrap justify-between items-center gap-4">
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Staff Management</h2>
-          <p className="text-sm text-gray-500 mt-1">
-            {staff.length} staff members •{' '}
-            {staff.filter((s) => s.staffType === 'TEACHING').length} teaching •{' '}
-            {staff.filter((s) => s.staffType === 'NON_TEACHING').length} non-teaching
-          </p>
+          <p className="text-sm text-gray-500 mt-1">{staff.length} staff members</p>
         </div>
         <div className="flex flex-wrap gap-2">
           {canProcessPayroll && (
-            <button
-              onClick={() => setShowPayrollForm(true)}
-              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center gap-2"
-            >
-              <i className="fas fa-money-bill-wave" />
-              Process Payroll
+            <button onClick={() => setShowPayrollForm(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center gap-2">
+              <i className="fas fa-money-bill-wave" />Payroll
             </button>
           )}
           {canEdit && (
-            <button
-              onClick={() => {
-                handleCancel();
-                setTimeout(() => {
-                  document
-                    .getElementById('staff-form')
-                    ?.scrollIntoView({ behavior: 'smooth' });
-                }, 100);
-              }}
-              className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2"
-            >
-              <i className="fas fa-plus" />
-              {editingId ? 'Cancel Edit' : 'Add Staff'}
+            <button onClick={handleCancel} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2">
+              <i className="fas fa-plus" />{editingId ? 'Cancel Edit' : 'Add Staff'}
             </button>
           )}
-          <button
-            onClick={() => setShowFilters(!showFilters)}
-            className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 flex items-center gap-2"
-          >
-            <i className="fas fa-filter" />
-            Filters
-          </button>
         </div>
       </div>
 
-      {currentSchool && (
-        <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
-          <p className="text-sm text-blue-700">
-            <i className="fas fa-school mr-2" />
-            Managing staff for: <strong>{currentSchool.name}</strong>
-            <span className="ml-2 text-xs text-blue-500">
-              (
-              {schoolCategory === 'UNIVERSITY'
-                ? 'University'
-                : schoolCategory === 'COLLEGE_TVET'
-                ? 'TVET'
-                : schoolCategory === 'SENIOR_SECONDARY'
-                ? 'Secondary'
-                : 'Primary/JSS'}
-              )
-            </span>
-          </p>
-        </div>
-      )}
-
-      {/* Filters */}
-      {showFilters && (
-        <div className="bg-white p-4 rounded-xl shadow-sm border">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <TextInput
-              label="Search"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Name, ID, or job title..."
-            />
-            <SearchableSelect
-              label="Department"
-              value={departmentFilter}
-              onChange={(e) => setDepartmentFilter(e.target.value)}
-              options={departmentFilterOptions}
-              placeholder="All Departments"
-              emptyMessage="No departments available"
-            />
-            <SearchableSelect
-              label="Staff Type"
-              value={staffTypeFilter}
-              onChange={(e) => setStaffTypeFilter(e.target.value)}
-              options={staffTypeOptions}
-              placeholder="All Staff Types"
-              emptyMessage="No staff types available"
-            />
-          </div>
-          <div className="mt-4 flex justify-between items-center">
-            <span className="text-sm text-gray-500">
-              Showing {filteredStaff.length} of {staff.length} staff members
-            </span>
-            <button
-              onClick={() => {
-                setSearchTerm('');
-                setDepartmentFilter('');
-                setStaffTypeFilter('');
-              }}
-              className="text-sm text-indigo-600 hover:text-indigo-800"
-            >
-              Clear Filters
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Staff Form */}
+      {/* Form */}
       {canEdit && (
-        <div
-          id="staff-form"
-          className="bg-white p-6 rounded-xl shadow-sm border-2 border-indigo-100"
-        >
+        <div id="staff-form" className="bg-white p-6 rounded-xl shadow-sm border-2 border-indigo-100">
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            {editingId ? (
-              <>
-                <i className="fas fa-edit text-indigo-600" />
-                Edit Staff Member
-              </>
-            ) : (
-              <>
-                <i className="fas fa-user-plus text-indigo-600" />
-                Add New Staff
-              </>
-            )}
+            {editingId ? <><i className="fas fa-edit text-indigo-600" />Edit Staff</> : <><i className="fas fa-user-plus text-indigo-600" />Add New Staff</>}
           </h3>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            <SearchableSelect
-              label="User Account"
-              value={form.userId || ''}
-              onChange={(e) => setForm({ ...form, userId: e.target.value })}
-              options={userOptions}
-              placeholder="Search users..."
-              emptyMessage="No users available"
-              required
-              disabled={loading || !!editingId}
-            />
-            {editingId && (
-              <p className="text-xs text-gray-500 mt-1">
-                <i className="fas fa-info-circle mr-1" />
-                User account cannot be changed after creation
-              </p>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <TextInput
-                label="Employee ID"
-                value={form.employeeId || ''}
-                onChange={(e) =>
-                  setForm({ ...form, employeeId: e.target.value })
-                }
-                placeholder="e.g., EMP001"
-                disabled={loading}
-              />
-              <TextInput
-                label="TSC Number"
-                value={form.tscNumber || ''}
-                onChange={(e) =>
-                  setForm({ ...form, tscNumber: e.target.value })
-                }
-                placeholder="e.g., TSC-12345"
-                disabled={loading}
-              />
-            </div>
-
-            <SearchableSelect
-              label="Staff Role"
-              value={form.staffRole || ''}
-              onChange={(e) => setForm({ ...form, staffRole: e.target.value })}
-              options={staffRoleOptions}
-              placeholder="Select staff role..."
-              emptyMessage="No staff roles available"
-              required
-              disabled={loading}
-            />
-
-            {showDepartment ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <SearchableSelect
-                  label={isUniversity ? 'Faculty/Department' : 'Department'}
-                  value={form.departmentId || ''}
-                  onChange={(e) => {
-                    const deptId = e.target.value;
-                    const dept = departments?.find((d) => d.id === deptId);
-                    setForm({
-                      ...form,
-                      departmentId: deptId,
-                      department: dept?.name || '',
-                    });
-                  }}
-                  options={departmentOptions}
-                  placeholder="Search departments..."
-                  emptyMessage={
-                    departments?.length > 0
-                      ? 'No departments available'
-                      : 'No departments configured for this school'
-                  }
-                  required
-                  disabled={loading}
-                />
-                <TextInput
-                  label="Job Title"
-                  value={form.jobTitle || ''}
-                  onChange={(e) =>
-                    setForm({ ...form, jobTitle: e.target.value })
-                  }
-                  placeholder={
-                    isUniversity ? 'e.g., Senior Lecturer' : 'e.g., Workshop Supervisor'
-                  }
-                  required
-                  disabled={loading}
-                />
-              </div>
-            ) : (
-              <TextInput
-                label="Job Title"
-                value={form.jobTitle || ''}
-                onChange={(e) => setForm({ ...form, jobTitle: e.target.value })}
-                placeholder="e.g., Class Teacher"
-                required
-                disabled={loading}
-              />
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <TextInput
-                label="Employment Date"
-                type="date"
-                value={form.employmentDate || new Date().toISOString().split('T')[0]}
-                onChange={(e) =>
-                  setForm({ ...form, employmentDate: e.target.value })
-                }
-                required
-                disabled={loading}
-              />
-              <SearchableSelect
-                label="Staff Type"
-                value={form.staffType || ''}
-                onChange={(e) =>
-                  setForm({ ...form, staffType: e.target.value })
-                }
-                options={staffTypeOptions}
-                placeholder="Select staff type..."
-                emptyMessage="No staff types available"
-                disabled={loading}
-              />
-            </div>
-
-            {showSubjects && (
-              <div>
-                <TextInput
-                  label="Subjects (comma separated)"
-                  value={form.subjects?.join(', ') || ''}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      subjects: e.target.value
-                        .split(',')
-                        .map((s) => s.trim())
-                        .filter(Boolean),
-                    })
-                  }
-                  placeholder="Mathematics, Physics, Chemistry"
-                  disabled={loading}
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  <i className="fas fa-info-circle mr-1" />
-                  Enter subjects separated by commas
-                </p>
-              </div>
-            )}
-
-            {(isUniversity || isTVET) && (
-              <TextInput
-                label="Specialization"
-                value={form.specialization || ''}
-                onChange={(e) =>
-                  setForm({ ...form, specialization: e.target.value })
-                }
-                placeholder="e.g., Electrical Engineering, Computer Science"
-                disabled={loading}
-              />
-            )}
-
-            {/* Salary Details */}
-            <div className="border-t pt-4">
-              <h4 className="font-medium text-gray-700 mb-3 flex items-center gap-2">
-                <i className="fas fa-money-bill text-green-600" />
-                Salary Details
-              </h4>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <MoneyInput
-                  label="Basic Salary"
-                  value={form.salary?.basic ?? ''}
-                  onChange={(raw) =>
-                    setForm({
-                      ...form,
-                      salary: { ...form.salary, basic: raw },
-                    })
-                  }
-                  placeholder="e.g., 50000"
-                  disabled={loading}
-                />
-                <MoneyInput
-                  label="House Allowance"
-                  value={form.salary?.house ?? ''}
-                  onChange={(raw) =>
-                    setForm({
-                      ...form,
-                      salary: { ...form.salary, house: raw },
-                    })
-                  }
-                  placeholder="e.g., 15000"
-                  disabled={loading}
-                />
-                <MoneyInput
-                  label="Transport Allowance"
-                  value={form.salary?.transport ?? ''}
-                  onChange={(raw) =>
-                    setForm({
-                      ...form,
-                      salary: { ...form.salary, transport: raw },
-                    })
-                  }
-                  placeholder="e.g., 5000"
-                  disabled={loading}
-                />
-              </div>
-              <div className="mt-2 p-3 bg-gray-50 rounded-lg">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium text-gray-600">
-                    Total Monthly Salary:
-                  </span>
-                  <span className="text-lg font-bold text-green-600">
-                    {formatCurrency(
-                      parseMoney(form.salary?.basic) +
-                        parseMoney(form.salary?.house) +
-                        parseMoney(form.salary?.transport)
-                    )}
-                  </span>
+            {/* Photo Upload */}
+            <div className="bg-gray-50 p-4 rounded-lg mb-4">
+              <h4 className="font-medium text-indigo-600 mb-3">Staff Photo</h4>
+              <div className="flex items-center gap-4">
+                <div className="w-24 h-24 rounded-full bg-white border-2 border-gray-200 flex items-center justify-center overflow-hidden">
+                  {photoPreview ? <img src={photoPreview} alt="Preview" className="w-full h-full object-cover" /> : <i className="fas fa-user text-3xl text-gray-300" />}
+                </div>
+                <div>
+                  <input type="file" accept="image/*" id="staff-photo-input" className="hidden" onChange={handlePhotoSelect} />
+                  <label htmlFor="staff-photo-input" className="cursor-pointer bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 inline-flex items-center gap-2">
+                    <i className="fas fa-camera" />Choose Photo
+                  </label>
+                  {photoPreview && <button type="button" onClick={() => { setPhotoFile(null); setPhotoPreview(''); }} className="ml-2 text-red-600 hover:text-red-800 text-sm">Remove</button>}
                 </div>
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-3 pt-2 border-t">
-              <button
-                type="submit"
-                disabled={loading}
-                className="flex-1 bg-indigo-600 text-white py-2.5 px-4 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {loading ? (
-                  <>
-                    <i className="fas fa-spinner fa-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <i
-                      className={`fas fa-${editingId ? 'save' : 'plus-circle'}`}
-                    />
-                    {editingId ? 'Update Staff' : 'Add Staff'}
-                  </>
-                )}
+            <SearchableSelect label="User Account" value={form.userId || ''} onChange={(e) => setForm({ ...form, userId: e.target.value })} options={userOptions} placeholder="Search users..." required disabled={loading || !!editingId} />
+            {editingId && <p className="text-xs text-gray-500 mt-1"><i className="fas fa-info-circle mr-1" />User account cannot be changed after creation</p>}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <TextInput label="Employee ID" value={form.employeeId || ''} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} placeholder="e.g., EMP001" disabled={loading} />
+              <TextInput label="TSC Number" value={form.tscNumber || ''} onChange={(e) => setForm({ ...form, tscNumber: e.target.value })} placeholder="e.g., TSC-12345" disabled={loading} />
+            </div>
+
+            <SearchableSelect label="Staff Role" value={form.staffRole || ''} onChange={(e) => setForm({ ...form, staffRole: e.target.value })} options={staffRoleOptions} placeholder="Select role..." required disabled={loading} />
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <TextInput label="Job Title" value={form.jobTitle || ''} onChange={(e) => setForm({ ...form, jobTitle: e.target.value })} placeholder="e.g., Class Teacher" required disabled={loading} />
+              <SearchableSelect label="Staff Type" value={form.staffType || ''} onChange={(e) => setForm({ ...form, staffType: e.target.value })} options={staffTypeOptions} placeholder="Select type..." disabled={loading} />
+            </div>
+
+            <div className="border-t pt-4">
+              <h4 className="font-medium text-gray-700 mb-3"><i className="fas fa-money-bill text-green-600 mr-2" />Salary Details</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <MoneyInput label="Basic" value={form.salary?.basic ?? ''} onChange={(raw) => setForm({ ...form, salary: { ...form.salary, basic: raw } })} placeholder="50,000" disabled={loading} />
+                <MoneyInput label="House" value={form.salary?.house ?? ''} onChange={(raw) => setForm({ ...form, salary: { ...form.salary, house: raw } })} placeholder="15,000" disabled={loading} />
+                <MoneyInput label="Transport" value={form.salary?.transport ?? ''} onChange={(raw) => setForm({ ...form, salary: { ...form.salary, transport: raw } })} placeholder="5,000" disabled={loading} />
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2 border-t">
+              <button type="submit" disabled={loading || uploadingPhoto} className="flex-1 bg-indigo-600 text-white py-2.5 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                {loading || uploadingPhoto ? <><i className="fas fa-spinner fa-spin" />{uploadingPhoto ? 'Uploading...' : 'Saving...'}</> : <><i className={`fas fa-${editingId ? 'save' : 'plus-circle'}`} />{editingId ? 'Update' : 'Add Staff'}</>}
               </button>
-              {editingId && (
-                <button
-                  type="button"
-                  onClick={handleCancel}
-                  disabled={loading}
-                  className="bg-gray-500 text-white py-2.5 px-6 rounded-lg hover:bg-gray-600"
-                >
-                  Cancel
-                </button>
-              )}
+              {editingId && <button type="button" onClick={handleCancel} disabled={loading} className="bg-gray-500 text-white py-2.5 px-6 rounded-lg hover:bg-gray-600">Cancel</button>}
             </div>
           </form>
         </div>
       )}
 
-      {/* Staff List */}
+      {/* ✅ TABLE VIEW */}
       <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-200">
-        <div className="px-6 py-4 bg-gray-50 border-b flex justify-between items-center flex-wrap gap-2">
-          <h3 className="font-semibold text-lg flex items-center gap-2">
-            <i className="fas fa-users text-indigo-600" />
-            Staff List
-            <span className="text-sm font-normal text-gray-500">
-              ({filteredStaff.length}{' '}
-              {filteredStaff.length === 1 ? 'member' : 'members'})
-            </span>
-          </h3>
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full">
-              {staff.filter((s) => s.staffType === 'TEACHING').length} Teaching
-            </span>
-            <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full">
-              {staff.filter((s) => s.staffType === 'NON_TEACHING').length}{' '}
-              Non-Teaching
-            </span>
+        <div className="px-6 py-4 bg-gray-50 border-b flex flex-wrap justify-between items-center gap-4">
+          <h3 className="font-semibold text-lg flex items-center gap-2"><i className="fas fa-users text-indigo-600" />Staff Directory</h3>
+          
+          <div className="flex flex-wrap items-center gap-2">
+            <input 
+              type="text" 
+              placeholder="Search staff..." 
+              className="px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+            <select 
+              className="px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+              value={staffTypeFilter}
+              onChange={(e) => setStaffTypeFilter(e.target.value)}
+            >
+              <option value="">All Types</option>
+              <option value="TEACHING">Teaching</option>
+              <option value="NON_TEACHING">Non-Teaching</option>
+            </select>
           </div>
         </div>
 
-        <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto">
-          {filteredStaff.length === 0 ? (
-            <div className="col-span-full text-center py-12 text-gray-500">
-              <i className="fas fa-users text-5xl text-gray-300 mb-3 block" />
-              <p className="text-lg font-medium">No staff members found</p>
-              <p className="text-sm text-gray-400 mt-1">
-                {searchTerm || departmentFilter || staffTypeFilter
-                  ? 'Try adjusting your filters'
-                  : 'Click "Add Staff" to get started'}
-              </p>
-            </div>
-          ) : (
-            filteredStaff.map((member) => {
-              const u = member.User || {};
-              const totalSalary = getTotalSalary(member);
-              const departmentName =
-                getDepartmentName(member.departmentId) ||
-                member.department ||
-                'N/A';
-              const staffRoleDisplay = member.staffRole
-                ? member.staffRole
-                    .replace(/_/g, ' ')
-                    .toLowerCase()
-                    .replace(/\b\w/g, (l) => l.toUpperCase())
-                : 'N/A';
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm text-left">
+            <thead className="bg-gray-50 text-gray-600 uppercase text-xs font-semibold">
+              <tr>
+                <th className="px-6 py-3 border-b">Staff Member</th>
+                <th className="px-6 py-3 border-b">Role & Title</th>
+                <th className="px-6 py-3 border-b">Contact</th>
+                <th className="px-6 py-3 border-b">ID / TSC</th>
+                <th className="px-6 py-3 border-b text-right">Salary</th>
+                <th className="px-6 py-3 border-b text-center">Type</th>
+                <th className="px-6 py-3 border-b text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {filteredStaff.length === 0 ? (
+                <tr>
+                  <td colSpan="7" className="px-6 py-12 text-center text-gray-500">
+                    <i className="fas fa-users text-4xl text-gray-300 mb-3 block" />
+                    <p className="text-lg font-medium">No staff members found</p>
+                  </td>
+                </tr>
+              ) : (
+                filteredStaff.map((member) => {
+                  const u = member.User || {};
+                  const staffRoleDisplay = member.staffRole ? member.staffRole.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (l) => l.toUpperCase()) : 'N/A';
 
-              return (
-                <div
-                  key={member.id}
-                  className="border rounded-lg p-4 hover:shadow-md transition-shadow bg-white hover:bg-gray-50"
-                >
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center space-x-3">
-                        <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0">
-                          <span className="text-indigo-600 font-bold text-lg">
-                            {getUserInitials(member)}
-                          </span>
-                        </div>
-                        <div className="min-w-0">
-                          <h4 className="font-semibold text-gray-800 truncate">
-                            {getUserDisplayName(member)}
-                          </h4>
-                          <p className="text-sm text-gray-600 truncate">
-                            {member.jobTitle || 'No Job Title'}
-                          </p>
-                          <p className="text-xs text-gray-400 truncate">
-                            {u.email || 'No email'}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                        <div>
-                          <span className="text-gray-500">Staff Type:</span>
-                          <span
-                            className={`ml-1 font-medium ${
-                              member.staffType === 'TEACHING'
-                                ? 'text-green-600'
-                                : 'text-blue-600'
-                            }`}
-                          >
-                            {member.staffType === 'TEACHING'
-                              ? 'Teaching'
-                              : 'Non-Teaching'}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-gray-500">Role:</span>
-                          <span className="ml-1 font-medium text-indigo-600">
-                            {staffRoleDisplay}
-                          </span>
-                        </div>
-                        {showDepartment && (
-                          <div className="col-span-2">
-                            <span className="text-gray-500">Department:</span>
-                            <span className="ml-1 font-medium truncate block">
-                              {departmentName}
-                            </span>
+                  return (
+                    <tr key={member.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <StaffAvatar member={member} size="md" />
+                          <div>
+                            <div className="font-semibold text-gray-800">{getUserDisplayName(member)}</div>
+                            <div className="text-xs text-gray-500">Hired: {member.employmentDate ? new Date(member.employmentDate).toLocaleDateString() : 'N/A'}</div>
                           </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="font-medium text-indigo-700">{staffRoleDisplay}</div>
+                        <div className="text-xs text-gray-500">{member.jobTitle || 'No Job Title'}</div>
+                        {showDepartment && member.departmentId && (
+                          <div className="text-xs text-gray-400 mt-1">{getDepartmentName(member.departmentId)}</div>
                         )}
-                        <div>
-                          <span className="text-gray-500">Employee ID:</span>
-                          <span className="ml-1 font-mono text-sm">
-                            {member.employeeId || 'N/A'}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-gray-500">Hired:</span>
-                          <span className="ml-1 font-medium">
-                            {member.employmentDate
-                              ? new Date(
-                                  member.employmentDate
-                                ).toLocaleDateString()
-                              : 'N/A'}
-                          </span>
-                        </div>
-                      </div>
-
-                      {showSubjects && member.subjects?.length > 0 && (
-                        <div className="mt-2">
-                          <span className="text-xs text-gray-500">
-                            Subjects:
-                          </span>
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {member.subjects.slice(0, 3).map((subject, idx) => (
-                              <span
-                                key={`${member.id}-sub-${idx}`}
-                                className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-xs"
-                              >
-                                {subject}
-                              </span>
-                            ))}
-                            {member.subjects.length > 3 && (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
-                                +{member.subjects.length - 3} more
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="mt-2 pt-2 border-t text-sm">
-                        <span className="text-gray-500">Salary:</span>
-                        <span className="ml-2 font-medium text-green-600">
-                          {formatCurrency(totalSalary)}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-gray-800">{u.email || <span className="text-red-400 italic">No email linked</span>}</div>
+                        <div className="text-xs text-gray-500">{u.phone || 'No phone'}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="font-mono text-xs text-gray-700">{member.employeeId || 'N/A'}</div>
+                        <div className="font-mono text-xs text-gray-400">{member.tscNumber || 'No TSC'}</div>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <div className="font-semibold text-green-600">{formatCurrency(getTotalSalary(member))}</div>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${member.staffType === 'TEACHING' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
+                          {member.staffType === 'TEACHING' ? 'Teaching' : 'Non-Teach'}
                         </span>
-                      </div>
-                    </div>
-
-                    {(canEdit || canDelete) && (
-                      <div className="flex flex-col space-y-1 ml-2">
-                        {canEdit && (
-                          <button
-                            onClick={() => handleEdit(member)}
-                            className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg"
-                            title="Edit"
-                          >
-                            <i className="fas fa-edit" />
-                          </button>
-                        )}
-                        {canDelete && (
-                          <button
-                            onClick={() =>
-                              handleDelete(
-                                member.id,
-                                getUserDisplayName(member)
-                              )
-                            }
-                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
-                            title="Delete"
-                          >
-                            <i className="fas fa-trash" />
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })
-          )}
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex justify-end gap-1">
+                          {canEdit && (
+                            <button onClick={() => handleEdit(member)} className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded" title="Edit">
+                              <i className="fas fa-edit" />
+                            </button>
+                          )}
+                          {canDelete && (
+                            <button onClick={() => handleDelete(member.id, getUserDisplayName(member))} className="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Delete">
+                              <i className="fas fa-trash" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
-      {/* Payroll modal */}
+      {/* Payroll Modal */}
       {showPayrollForm && canProcessPayroll && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold flex items-center gap-2">
-                <i className="fas fa-calculator text-green-600" />
-                Process Monthly Payroll
-              </h3>
-              <button
-                onClick={() => setShowPayrollForm(false)}
-                className="text-gray-500 hover:text-gray-700"
-                disabled={loading}
-              >
-                <i className="fas fa-times" />
-              </button>
+              <h3 className="text-xl font-bold flex items-center gap-2"><i className="fas fa-calculator text-green-600" />Process Payroll</h3>
+              <button onClick={() => setShowPayrollForm(false)} className="text-gray-500"><i className="fas fa-times" /></button>
             </div>
-
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                <SearchableSelect
-                  label="Month"
-                  value={payrollForm.month}
-                  onChange={(e) =>
-                    setPayrollForm({
-                      ...payrollForm,
-                      month: parseInt(e.target.value, 10),
-                    })
-                  }
-                  options={monthOptions}
-                  placeholder="Select month..."
-                  emptyMessage="No months available"
-                  disabled={loading}
-                />
-                <TextInput
-                  label="Year"
-                  type="number"
-                  value={payrollForm.year}
-                  onChange={(e) =>
-                    setPayrollForm({
-                      ...payrollForm,
-                      year: parseInt(e.target.value, 10) || '',
-                    })
-                  }
-                  disabled={loading}
-                />
+                <SearchableSelect label="Month" value={payrollForm.month} onChange={(e) => setPayrollForm({ ...payrollForm, month: parseInt(e.target.value) })} options={monthOptions} placeholder="Select..." />
+                <TextInput label="Year" type="number" value={payrollForm.year} onChange={(e) => setPayrollForm({ ...payrollForm, year: parseInt(e.target.value) })} />
               </div>
-
-              <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-                <div className="flex items-start">
-                  <i className="fas fa-info-circle text-yellow-600 mt-0.5 mr-2" />
-                  <div>
-                    <p className="text-sm text-yellow-800 font-medium">
-                      Payroll Summary
-                    </p>
-                    <p className="text-sm text-yellow-700 mt-1">
-                      Processing payroll for <strong>{staff.length}</strong>{' '}
-                      staff members for{' '}
-                      <strong>
-                        {new Date(
-                          payrollForm.year,
-                          payrollForm.month - 1
-                        ).toLocaleString('default', { month: 'long' })}{' '}
-                        {payrollForm.year}
-                      </strong>
-                      .
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex space-x-3 pt-2">
-                <button
-                  onClick={processPayroll}
-                  disabled={loading || staff.length === 0}
-                  className="flex-1 bg-green-600 text-white py-2.5 px-4 rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {loading ? (
-                    <>
-                      <i className="fas fa-spinner fa-spin" />
-                      Processing...
-                    </>
-                  ) : (
-                    <>
-                      <i className="fas fa-calculator" />
-                      Process Payroll
-                    </>
-                  )}
-                </button>
-                <button
-                  onClick={() => setShowPayrollForm(false)}
-                  disabled={loading}
-                  className="bg-gray-500 text-white py-2.5 px-6 rounded-lg hover:bg-gray-600"
-                >
-                  Cancel
-                </button>
-              </div>
+              <button onClick={processPayroll} disabled={loading || staff.length === 0} className="w-full bg-green-600 text-white py-2.5 rounded-lg hover:bg-green-700 disabled:opacity-50">
+                {loading ? 'Processing...' : 'Process Payroll'}
+              </button>
             </div>
           </div>
         </div>
@@ -29096,18 +28136,18 @@ const MessageModule = ({
     </div>
   );
 };
-// ==================== FACULTIES MODULE WITH SEARCHABLE SELECT ====================
-const FacultiesModule = ({ 
-  faculties, 
-  setFaculties, 
-  form, 
-  setForm, 
-  handleCreate, 
-  handleUpdate, 
-  handleDelete, 
+// ==================== FACULTIES MODULE ====================
+const FacultiesModule = ({
+  faculties,
+  setFaculties,
+  form,
+  setForm,
+  handleCreate,
+  handleUpdate,
+  handleDelete,
   user,
-  staff = [], // Add staff prop
-  users = [] // Add users prop
+  staff = [],
+  users = []
 }) => {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -29122,180 +28162,160 @@ const FacultiesModule = ({
     departments: []
   });
 
-  // ==================== SEARCHABLE SELECT COMPONENT ====================
-  const SearchableSelect = ({ label, value, onChange, options, placeholder, disabled, required, className }) => {
-    const [search, setSearch] = useState('');
-    const [isOpen, setIsOpen] = useState(false);
-    const dropdownRef = useRef(null);
-    const inputRef = useRef(null);
-
-    const filteredOptions = useMemo(() => {
-      if (!search.trim()) return options;
-      const searchLower = search.toLowerCase();
-      return options.filter(opt => 
-        opt.label?.toLowerCase().includes(searchLower) ||
-        opt.subLabel?.toLowerCase().includes(searchLower) ||
-        opt.value?.toString().toLowerCase().includes(searchLower)
-      );
-    }, [options, search]);
-
-    const selectedOption = options.find(opt => opt.value === value);
-
-    useEffect(() => {
-      const handleClickOutside = (event) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-          setIsOpen(false);
-          if (selectedOption) {
-            setSearch(selectedOption.label);
-          } else {
-            setSearch('');
-          }
-        }
-      };
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [selectedOption]);
-
-    const handleSelect = (selectedValue) => {
-      onChange({ target: { value: selectedValue } });
-      const selected = options.find(opt => opt.value === selectedValue);
-      setSearch(selected ? selected.label : '');
-      setIsOpen(false);
-      setTimeout(() => {
-        if (inputRef.current) {
-          inputRef.current.focus();
-        }
-      }, 0);
-    };
-
-    const handleInputChange = (e) => {
-      const newValue = e.target.value;
-      setSearch(newValue);
-      setIsOpen(true);
-      if (newValue === '') {
-        onChange({ target: { value: '' } });
-      }
-    };
-
-    const handleFocus = () => {
-      setIsOpen(true);
-      if (selectedOption && !search) {
-        setSearch(selectedOption.label);
-      }
-    };
-
-    const handleBlur = (e) => {
-      const relatedTarget = e.relatedTarget;
-      if (dropdownRef.current && dropdownRef.current.contains(relatedTarget)) {
-        return;
-      }
-      setTimeout(() => {
-        if (document.activeElement !== inputRef.current) {
-          setIsOpen(false);
-          if (selectedOption) {
-            setSearch(selectedOption.label);
-          } else {
-            setSearch('');
-          }
-        }
-      }, 150);
-    };
-
-    const handleClear = (e) => {
-      e.stopPropagation();
-      onChange({ target: { value: '' } });
-      setSearch('');
-      setIsOpen(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
-    };
-
-    return (
-      <div className="relative" ref={dropdownRef}>
-        {label && (
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-        )}
-        <div className="relative">
-          <input
-            ref={inputRef}
-            type="text"
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
-              disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
-            } ${className || ''}`}
-            value={search}
-            onChange={handleInputChange}
-            onFocus={handleFocus}
-            onBlur={handleBlur}
-            placeholder={placeholder || `Search ${label || 'options'}...`}
-            disabled={disabled}
-            autoComplete="off"
-          />
-          {value && !disabled && (
-            <button
-              type="button"
-              onClick={handleClear}
-              className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-          <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-            <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-        </div>
-        {isOpen && !disabled && (
-          <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
-            {filteredOptions.length > 0 ? (
-              filteredOptions.map((opt) => (
-                <div
-                  key={opt.value || Math.random().toString()}
-                  className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
-                    opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
-                  }`}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => handleSelect(opt.value)}
-                >
-                  <div className="font-medium">{opt.label}</div>
-                  {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
-                </div>
-              ))
-            ) : (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
-                {search.trim() ? 'No results found' : 'Type to search...'}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-
   // ==================== PERMISSIONS ====================
   const canEdit = ['SCHOOL_ADMIN', 'PRINCIPAL', 'DEPUTY_PRINCIPAL'].includes(user?.role);
   const canDelete = ['SCHOOL_ADMIN', 'PRINCIPAL'].includes(user?.role);
 
+  // ==================== SEARCHABLE SELECT (defined ONCE inside module) ====================
+  // useMemo keeps the component identity stable so React does NOT remount
+  // the input on every parent re-render → cursor stays where you type.
+  const SearchableSelect = useMemo(() => {
+    const Component = ({ label, value, onChange, options, placeholder, disabled, required, className }) => {
+      const [search, setSearch] = useState('');
+      const [isOpen, setIsOpen] = useState(false);
+      const dropdownRef = useRef(null);
+      const inputRef = useRef(null);
+
+      const filteredOptions = useMemo(() => {
+        if (!search.trim()) return options;
+        const q = search.toLowerCase();
+        return options.filter(opt =>
+          opt.label?.toLowerCase().includes(q) ||
+          opt.subLabel?.toLowerCase().includes(q) ||
+          opt.value?.toString().toLowerCase().includes(q)
+        );
+      }, [options, search]);
+
+      const selectedOption = useMemo(
+        () => options.find(opt => opt.value === value),
+        [options, value]
+      );
+
+      useEffect(() => {
+        if (selectedOption) {
+          setSearch(selectedOption.label);
+        } else if (value === '' || value === null || value === undefined) {
+          setSearch('');
+        }
+      }, [selectedOption, value]);
+
+      useEffect(() => {
+        const handleClickOutside = (event) => {
+          if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+            setIsOpen(false);
+          }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+      }, []);
+
+      const handleSelect = (selectedValue) => {
+        onChange({ target: { value: selectedValue } });
+        const selected = options.find(opt => opt.value === selectedValue);
+        setSearch(selected ? selected.label : '');
+        setIsOpen(false);
+        setTimeout(() => inputRef.current?.focus(), 0);
+      };
+
+      const handleInputChange = (e) => {
+        const newValue = e.target.value;
+        setSearch(newValue);
+        setIsOpen(true);
+        if (newValue === '') {
+          onChange({ target: { value: '' } });
+        }
+      };
+
+      const handleFocus = () => setIsOpen(true);
+
+      const handleClear = (e) => {
+        e.stopPropagation();
+        onChange({ target: { value: '' } });
+        setSearch('');
+        setIsOpen(false);
+        inputRef.current?.focus();
+      };
+
+      return (
+        <div className="relative" ref={dropdownRef}>
+          {label && (
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              {label}
+              {required && <span className="text-red-500 ml-1">*</span>}
+            </label>
+          )}
+          <div className="relative">
+            <input
+              ref={inputRef}
+              type="text"
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all ${
+                disabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white cursor-text'
+              } ${className || ''}`}
+              value={search}
+              onChange={handleInputChange}
+              onFocus={handleFocus}
+              placeholder={placeholder || `Search ${label || 'options'}...`}
+              disabled={disabled}
+              autoComplete="off"
+            />
+            {value && !disabled && (
+              <button
+                type="button"
+                onClick={handleClear}
+                className="absolute right-8 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 z-10"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+            <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
+              <svg
+                className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+          </div>
+          {isOpen && !disabled && (
+            <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
+              {filteredOptions.length > 0 ? (
+                filteredOptions.map((opt) => (
+                  <div
+                    key={opt.value || Math.random().toString()}
+                    className={`px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors ${
+                      opt.value === value ? 'bg-indigo-50 text-indigo-700' : 'text-gray-900'
+                    }`}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleSelect(opt.value)}
+                  >
+                    <div className="font-medium">{opt.label}</div>
+                    {opt.subLabel && <div className="text-xs text-gray-500">{opt.subLabel}</div>}
+                  </div>
+                ))
+              ) : (
+                <div className="px-3 py-4 text-center text-gray-500 text-sm">
+                  {search.trim() ? 'No results found' : 'Type to search...'}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    };
+    return Component;
+  }, []); // ← empty deps: component identity is stable forever
+
   // ==================== GET STAFF OPTIONS ====================
   const staffOptions = useMemo(() => {
-    const options = [
-      { value: '', label: 'Select Dean' }
-    ];
+    const options = [];
 
-    // Get staff from staff array
     (staff || []).forEach(s => {
       const userData = s.User || {};
       const name = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || 'Unknown Staff';
       const role = s.jobTitle || s.staffType || 'Staff';
       const department = s.department || 'No Department';
-      
       options.push({
         value: s.userId || s.id,
         label: name,
@@ -29303,12 +28323,11 @@ const FacultiesModule = ({
       });
     });
 
-    // If no staff in staff array, get from users
-    if (options.length <= 1 && users) {
-      const staffRoles = ['TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER', 'SENIOR_TEACHER', 
-                          'ACCOUNTANT', 'LIBRARIAN', 'NURSE', 'MATRON', 'TRANSPORT_MANAGER', 
-                          'HR_MANAGER', 'HR', 'LECTURER', 'SENIOR_LECTURER', 'PROFESSOR',
-                          'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SCHOOL_ADMIN'];
+    if (options.length === 0 && users && users.length > 0) {
+      const staffRoles = ['TEACHER', 'CLASS_TEACHER', 'SUBJECT_TEACHER', 'SENIOR_TEACHER',
+        'ACCOUNTANT', 'LIBRARIAN', 'NURSE', 'MATRON', 'TRANSPORT_MANAGER',
+        'HR_MANAGER', 'HR', 'LECTURER', 'SENIOR_LECTURER', 'PROFESSOR',
+        'PRINCIPAL', 'DEPUTY_PRINCIPAL', 'SCHOOL_ADMIN'];
       (users || []).filter(u => staffRoles.includes(u.role)).forEach(u => {
         options.push({
           value: u.id,
@@ -29343,7 +28362,6 @@ const FacultiesModule = ({
     }
     setLoading(true);
     try {
-      // Get the dean name from the selected staff
       const selectedStaff = staffOptions.find(opt => opt.value === facultyForm.deanId);
       const deanName = selectedStaff ? selectedStaff.label : facultyForm.dean;
 
@@ -29360,14 +28378,14 @@ const FacultiesModule = ({
       }
       setShowForm(false);
       setEditingId(null);
-      setFacultyForm({ 
-        name: '', 
-        dean: '', 
+      setFacultyForm({
+        name: '',
+        dean: '',
         deanId: '',
-        email: '', 
-        phone: '', 
-        established: '', 
-        departments: [] 
+        email: '',
+        phone: '',
+        established: '',
+        departments: []
       });
       await refreshFaculties();
     } catch (error) {
@@ -29404,45 +28422,49 @@ const FacultiesModule = ({
     }
   };
 
-  // ==================== INPUT FIELD ====================
-  const InputField = ({ label, type, value, onChange, placeholder, required, disabled, min, step, textarea, rows }) => {
-    if (textarea) {
+  // ==================== INPUT FIELD (also stabilized) ====================
+  const InputField = useMemo(() => {
+    const Component = ({ label, type, value, onChange, placeholder, required, disabled, min, max, step, textarea, rows }) => {
+      if (textarea) {
+        return (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              {label}
+              {required && <span className="text-red-500 ml-1">*</span>}
+            </label>
+            <textarea
+              rows={rows || 3}
+              value={value || ''}
+              onChange={onChange}
+              placeholder={placeholder}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+              disabled={disabled}
+            />
+          </div>
+        );
+      }
       return (
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
             {label}
             {required && <span className="text-red-500 ml-1">*</span>}
           </label>
-          <textarea
-            rows={rows || 3}
-            value={value || ''}
+          <input
+            type={type || 'text'}
+            value={value !== undefined && value !== null ? value : ''}
             onChange={onChange}
             placeholder={placeholder}
             className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
             disabled={disabled}
+            min={min}
+            max={max}
+            step={step}
           />
         </div>
       );
-    }
-    return (
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
-        </label>
-        <input
-          type={type || 'text'}
-          value={value !== undefined && value !== null ? value : ''}
-          onChange={onChange}
-          placeholder={placeholder}
-          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-          disabled={disabled}
-          min={min}
-          step={step}
-        />
-      </div>
-    );
-  };
+    };
+    return Component;
+  }, []);
 
   // ==================== FORMAT DATE ====================
   const formatDate = (dateString) => {
@@ -29459,27 +28481,34 @@ const FacultiesModule = ({
   return (
     <div className="space-y-6">
       {loading && <div className="fixed top-0 left-0 w-full h-1 bg-indigo-600 animate-pulse z-50"></div>}
-      
+
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">Faculties Management</h2>
         <div className="flex space-x-2">
-          <button onClick={refreshFaculties} className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center" disabled={loading}>
+          <button
+            onClick={refreshFaculties}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center"
+            disabled={loading}
+          >
             <i className={`fas fa-sync-alt mr-2 ${loading ? 'animate-spin' : ''}`}></i>Refresh
           </button>
           {canEdit && (
-            <button onClick={() => { 
-              setFacultyForm({ 
-                name: '', 
-                dean: '', 
-                deanId: '',
-                email: '', 
-                phone: '', 
-                established: '', 
-                departments: [] 
-              }); 
-              setEditingId(null); 
-              setShowForm(true); 
-            }} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center">
+            <button
+              onClick={() => {
+                setFacultyForm({
+                  name: '',
+                  dean: '',
+                  deanId: '',
+                  email: '',
+                  phone: '',
+                  established: '',
+                  departments: []
+                });
+                setEditingId(null);
+                setShowForm(true);
+              }}
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center"
+            >
               <i className="fas fa-plus mr-2"></i>Add Faculty
             </button>
           )}
@@ -29491,15 +28520,14 @@ const FacultiesModule = ({
           <h3 className="text-lg font-semibold mb-4">{editingId ? 'Edit' : 'Add New'} Faculty</h3>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-              <InputField 
-                label="Faculty Name" 
-                value={facultyForm.name} 
-                onChange={(e) => setFacultyForm({...facultyForm, name: e.target.value})} 
-                required 
-                disabled={loading} 
+              <InputField
+                label="Faculty Name"
+                value={facultyForm.name}
+                onChange={(e) => setFacultyForm({ ...facultyForm, name: e.target.value })}
+                required
+                disabled={loading}
               />
-              
-              {/* Searchable Select for Dean - Only shows staff */}
+
               <SearchableSelect
                 label="Dean"
                 value={facultyForm.deanId}
@@ -29517,36 +28545,35 @@ const FacultiesModule = ({
                 disabled={loading}
               />
 
-              <InputField 
-                label="Email" 
-                type="email" 
-                value={facultyForm.email} 
-                onChange={(e) => setFacultyForm({...facultyForm, email: e.target.value})} 
-                disabled={loading} 
+              <InputField
+                label="Email"
+                type="email"
+                value={facultyForm.email}
+                onChange={(e) => setFacultyForm({ ...facultyForm, email: e.target.value })}
+                disabled={loading}
                 placeholder="faculty@school.com"
               />
-              
-              <InputField 
-                label="Phone" 
-                value={facultyForm.phone} 
-                onChange={(e) => setFacultyForm({...facultyForm, phone: e.target.value})} 
-                disabled={loading} 
+
+              <InputField
+                label="Phone"
+                value={facultyForm.phone}
+                onChange={(e) => setFacultyForm({ ...facultyForm, phone: e.target.value })}
+                disabled={loading}
                 placeholder="+254 700 000 000"
               />
-              
-              <InputField 
-                label="Established Year" 
-                type="number" 
-                value={facultyForm.established} 
-                onChange={(e) => setFacultyForm({...facultyForm, established: e.target.value})} 
-                disabled={loading} 
+
+              <InputField
+                label="Established Year"
+                type="number"
+                value={facultyForm.established}
+                onChange={(e) => setFacultyForm({ ...facultyForm, established: e.target.value })}
+                disabled={loading}
                 placeholder="2020"
                 min="1900"
                 max={new Date().getFullYear()}
               />
             </div>
-            
-            {/* Show selected dean info */}
+
             {facultyForm.deanId && (
               <div className="bg-green-50 p-3 rounded-lg border border-green-200">
                 <p className="text-sm text-green-700">
@@ -29557,10 +28584,19 @@ const FacultiesModule = ({
             )}
 
             <div className="flex space-x-2">
-              <button type="submit" className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50" disabled={loading}>
+              <button
+                type="submit"
+                className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                disabled={loading}
+              >
                 {loading ? 'Saving...' : (editingId ? 'Update' : 'Save')}
               </button>
-              <button type="button" onClick={() => setShowForm(false)} className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600" disabled={loading}>
+              <button
+                type="button"
+                onClick={() => setShowForm(false)}
+                className="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600"
+                disabled={loading}
+              >
                 Cancel
               </button>
             </div>
@@ -29578,12 +28614,18 @@ const FacultiesModule = ({
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Established</th>
-                {(canEdit || canDelete) && <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>}
+                {(canEdit || canDelete) && (
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
               {(!faculties || faculties.length === 0) ? (
-                <tr><td colSpan="6" className="px-6 py-8 text-center text-gray-500">No faculties yet. Click "Add Faculty" to create your first faculty.</td></tr>
+                <tr>
+                  <td colSpan="6" className="px-6 py-8 text-center text-gray-500">
+                    No faculties yet. Click "Add Faculty" to create your first faculty.
+                  </td>
+                </tr>
               ) : (
                 faculties.map((faculty) => (
                   <tr key={faculty.id} className="hover:bg-gray-50">
@@ -29603,12 +28645,20 @@ const FacultiesModule = ({
                     {(canEdit || canDelete) && (
                       <td className="px-6 py-4 whitespace-nowrap text-right space-x-2">
                         {canEdit && (
-                          <button onClick={() => handleEdit(faculty)} className="text-indigo-600 hover:text-indigo-900 p-2 hover:bg-indigo-50 rounded-lg transition-colors" title="Edit">
+                          <button
+                            onClick={() => handleEdit(faculty)}
+                            className="text-indigo-600 hover:text-indigo-900 p-2 hover:bg-indigo-50 rounded-lg transition-colors"
+                            title="Edit"
+                          >
                             <i className="fas fa-edit"></i>
                           </button>
                         )}
                         {canDelete && (
-                          <button onClick={() => handleDeleteFaculty(faculty.id)} className="text-red-600 hover:text-red-900 p-2 hover:bg-red-50 rounded-lg transition-colors" title="Delete">
+                          <button
+                            onClick={() => handleDeleteFaculty(faculty.id)}
+                            className="text-red-600 hover:text-red-900 p-2 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Delete"
+                          >
                             <i className="fas fa-trash"></i>
                           </button>
                         )}
@@ -29620,8 +28670,7 @@ const FacultiesModule = ({
             </tbody>
           </table>
         </div>
-        
-        {/* Footer Stats */}
+
         {faculties && faculties.length > 0 && (
           <div className="px-6 py-3 bg-gray-50 border-t flex justify-between items-center text-sm text-gray-500">
             <div>
@@ -29639,6 +28688,7 @@ const FacultiesModule = ({
     </div>
   );
 };
+
 // ==================== FIXED DEPARTMENTS MODULE ====================
 const DepartmentsModule = ({ 
   departments, 
